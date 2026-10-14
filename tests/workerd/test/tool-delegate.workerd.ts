@@ -1,5 +1,5 @@
 /**
- * tool-delegate on Cloudflare: a conversation object's App with storage-do, platform-cloudflare (its
+ * tool-delegate on Cloudflare: a conversation object's App with storage-do, actors-do (its
  * `actor.inbox` and `wakeups`), runtime-pi driving its runs in wakeups, and the scripted model. The
  * assistant delegates to the helper: the task is a child conversation in the same object's storage
  * (pi-durable's subagents), driven by the same alarm. Waited for, its answer is the call's; not waited
@@ -12,7 +12,7 @@ import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { holdTool, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { afterEach, expect, it } from "vitest";
 import { vi } from "vitest";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import toolDelegate from "../../../registry/components/tool-delegate/files/src/pikit/tool-delegate/index.ts";
@@ -65,7 +65,7 @@ async function workerApp() {
       return { start: () => void (mailbox = handle.get()) };
     },
   });
-  const worker = await defineApp({ components: [platformCloudflare, channel], config: { "platform-cloudflare": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
+  const worker = await defineApp({ components: [actorsDo, channel], config: { "actors-do": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
   await worker.start(withContextValue(WORKERS_HOST, { env: workerEnv }, BACKGROUND_CONTEXT));
   return {
     send: (key: string, message: { id: string; text: string }) => mailbox?.send(key, "test.message", message, worker.context()),
@@ -74,7 +74,7 @@ async function workerApp() {
 }
 
 function compose(results: { requestId: string; text: string | undefined }[], held: { released: Promise<void> }) {
-  composeObjects([storageDo, platformCloudflare, ...agents(held), toolDelegate, runtimePi, channelActor(results)], {
+  composeObjects([storageDo, actorsDo, ...agents(held), toolDelegate, runtimePi, channelActor(results)], {
     "tool-delegate": { agents: [{ name: "helper", description: "Helps." }] },
   });
 }

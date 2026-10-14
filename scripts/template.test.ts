@@ -95,10 +95,10 @@ test("the dashboard's build runs the installer's Bun through npx, the rest of wr
 test("the button asks for every secret the components need, and nothing else", () => {
   const registry = openRegistry(DEFAULT_REGISTRY);
   const components = [...registry.preset(TEMPLATE.preset, TEMPLATE.with), ...(TEMPLATE.ui ? UI_COMPONENTS : [])];
-  // Self-improvement comes in, dormant, with github-app: GitHub is connected from the dashboard, no token is in the form.
+  // Self-improvement comes in, dormant, with repo-github-app: GitHub is connected from the dashboard, no token is in the form.
   expect(components).toContain("admin-proposals");
   expect(components).toContain("proposals-github");
-  expect(components).toContain("github-app");
+  expect(components).toContain("repo-github-app");
   const { order } = withOffers(registry, components, [TEMPLATE.target]);
   const declared = order.flatMap((component) => registry.manifest(component).environment ?? []);
   const asked = TEMPLATE.secrets.map((secret) => secret.name);
@@ -413,13 +413,13 @@ test.skipIf(!E2E)(
       }
       expect(listed).toContain(`telegram:${OWNER.id}`);
 
-      // GitHub is not connected yet: github-app's status (the Worker asks the github-app object) says so.
-      const github = await fetch(`${base}/admin/api/github-app/status`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
+      // GitHub is not connected yet: repo-github-app's status (the Worker asks the repo-github-app object) says so.
+      const github = await fetch(`${base}/admin/api/repo-github-app/status`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
       expect([github.status, await github.json()]).toEqual([200, { connected: false }]);
       // Self-improvement is there, dormant: the Proposals view says what to connect, and the status what is missing.
       const proposals = await fetch(`${base}/admin/api/admin-proposals`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
       expect([proposals.status, ((await proposals.json()) as { error?: string }).error]).toEqual([503, "not_connected"]);
-      // Through github (github-app, not connected yet): the status says where to connect it.
+      // Through github (repo-github-app, not connected yet): the status says where to connect it.
       const status = (await (await fetch(`${base}/admin/api/admin-proposals/status`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } })).json()) as {
         connected: boolean;
         checks: { id: string; state: string; message: string }[];

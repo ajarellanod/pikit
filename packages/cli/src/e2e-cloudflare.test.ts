@@ -2,8 +2,8 @@
  * A project on Cloudflare, end to end on this machine (SPEC §4.1): `pikit new --target durable
  * --preset cloudflare-minimal`, `pikit doctor`, the project's own tests (with its `wrangler deploy
  * --dry-run`) and typecheck, then `pikit dev` (wrangler dev, workerd) answering `/health` from the
- * object's App. Then a Telegram agent on Cloudflare: `pikit add` of secrets-cloudflare and
- * platform-cloudflare (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
+ * object's App. Then a Telegram agent on Cloudflare: `pikit add` of secrets-workers and
+ * actors-do (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
  * is already OpenRouter's: the Anthropic provider takes only API keys there), runtime-pi, conversations-kv and channel-telegram-webhook (with what they offer)
  * put each half in its App (C1), every add is green, the project installs, typechecks and passes its
  * tests. Then the agent answers, in workerd: with provider-faux (a fake model for tests only) for its
@@ -138,11 +138,11 @@ test.skipIf(!E2E)(
     const agentBefore = readFileSync(agentPath, "utf8");
     const preset = lists();
 
-    // secrets-cloudflare and platform-cloudflare work in both Apps: each goes in both.
-    await add("secrets-cloudflare");
-    expect(lists()).toEqual({ object: [...preset.object, "secretsCloudflare"], worker: ["secretsCloudflare"] });
-    await add("platform-cloudflare");
-    expect(lists()).toEqual({ object: [...preset.object, "secretsCloudflare", "platformCloudflare"], worker: ["secretsCloudflare", "platformCloudflare"] });
+    // secrets-workers and actors-do work in both Apps: each goes in both.
+    await add("secrets-workers");
+    expect(lists()).toEqual({ object: [...preset.object, "secretsWorkers"], worker: ["secretsWorkers"] });
+    await add("actors-do");
+    expect(lists()).toEqual({ object: [...preset.object, "secretsWorkers", "actorsDo"], worker: ["secretsWorkers", "actorsDo"] });
 
     // The provider of the starter's model, which on Cloudflare is one that runs there.
     expect(agentBefore).toContain('model: "openrouter/z-ai/glm-5.3-flash"');
@@ -160,8 +160,8 @@ test.skipIf(!E2E)(
     expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components)).toContain("router-basic");
     writeFileSync(configPath, setConfigEntry(readFileSync(configPath, "utf8"), "router-basic", `{ defaultAgent: "assistant" }`));
 
-    // The channel: its object half needs actor.inbox and wakeups (platform-cloudflare), the runtime and
-    // the rest in the object's App; its Worker half, actor.mailbox (platform-cloudflare) in the Worker's.
+    // The channel: its object half needs actor.inbox and wakeups (actors-do), the runtime and
+    // the rest in the object's App; its Worker half, actor.mailbox (actors-do) in the Worker's.
     const channel = await add("channel-telegram-webhook");
     expect(channel.out).toContain("outbound-durable, for channel-telegram-webhook (outbound.queue)");
     const text = readFileSync(configPath, "utf8");
@@ -169,8 +169,8 @@ test.skipIf(!E2E)(
     expect(lists()).toEqual({
       object: [
         ...preset.object,
-        "secretsCloudflare",
-        "platformCloudflare",
+        "secretsWorkers",
+        "actorsDo",
         "providerOpenrouter",
         "runtimePi",
         "conversationsKv",
@@ -178,7 +178,7 @@ test.skipIf(!E2E)(
         "channelTelegramWebhook",
         "outboundDurable",
       ],
-      worker: ["secretsCloudflare", "platformCloudflare", "channelTelegramWebhookWorker"],
+      worker: ["secretsWorkers", "actorsDo", "channelTelegramWebhookWorker"],
     });
     const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
     expect(manifest.components["channel-telegram-webhook"].hooks).toEqual({ afterDeploy: "src/pikit/channel-telegram-webhook/deploy.ts" });
@@ -192,7 +192,7 @@ test.skipIf(!E2E)(
     const tests = await run([process.execPath, "test"]);
     expect(tests.err).toContain(" 0 fail");
     expect(tests.err).toContain("channel-telegram-webhook.test.ts");
-    expect(tests.err).toContain("platform-cloudflare.test.ts");
+    expect(tests.err).toContain("actors-do.test.ts");
     expect(tests.err).toContain("runtime-pi.test.ts");
     expect(tests.code).toBe(0);
 
@@ -230,7 +230,7 @@ test.skipIf(!E2E)(
     }
     // remove undoes both Apps, and what came for each; the project is the preset's again, and green.
     // The router goes after the channel: remove refuses to leave a channel that no router answers.
-    for (const name of ["provider-faux", "channel-telegram-webhook", "router-basic", "conversations-kv", "runtime-pi", "provider-openrouter", "platform-cloudflare", "secrets-cloudflare"]) {
+    for (const name of ["provider-faux", "channel-telegram-webhook", "router-basic", "conversations-kv", "runtime-pi", "provider-openrouter", "actors-do", "secrets-workers"]) {
       const removed = await run([process.execPath, MAIN, "remove", name]);
       expect(removed.err).not.toContain("\u2717");
       expect(removed.code).toBe(0);

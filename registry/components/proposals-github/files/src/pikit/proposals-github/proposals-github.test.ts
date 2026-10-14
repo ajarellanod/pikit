@@ -21,14 +21,14 @@ afterEach(async () => {
 });
 
 /**
- * A `github` connected to `state.repository` (none: not connected), whose token is `state.token`,
+ * A `repo.github` connected to `state.repository` (none: not connected), whose token is `state.token`,
  * read at each call; `state.asked` counts the tokens asked.
  */
 function githubOf(state: { repository: string | undefined; token: string; asked?: number; failing?: string }) {
   return defineComponent({
     name: "github-test",
     setup: (pikit) =>
-      pikit.provide("github", {
+      pikit.provide("repo.github", {
         repository: async () => state.repository,
         async token() {
           state.asked = (state.asked ?? 0) + 1;
@@ -76,7 +76,7 @@ for (const c of createProposalsConformance(() => {
   test(`proposals-github ${c.group}: ${c.name}`, () => c.run());
 }
 
-/** A started App with proposals-github over a fake GitHub, connected through `github` (`access`, which a test may change). */
+/** A started App with proposals-github over a fake GitHub, connected through `repo.github` (`access`, which a test may change). */
 async function started(options: { github?: FakeGitHub; repository?: string | null; token?: string } = {}) {
   const github = options.github ?? startFakeGitHub();
   fakes.push(github);
@@ -113,7 +113,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   // It requires github: alone it does not compose, and says what is missing.
   expect(String(alone)).toContain("github");
   const { app } = await started();
-  expect(app.describe().components.find((component) => component.name === "proposals-github")).toEqual({ name: "proposals-github", provides: ["proposals"], requires: ["github"], optional: [] });
+  expect(app.describe().components.find((component) => component.name === "proposals-github")).toEqual({ name: "proposals-github", provides: ["proposals"], requires: ["repo.github"], optional: [] });
   await app.stop();
 });
 

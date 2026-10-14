@@ -26,8 +26,8 @@ not whose machine it is. Providers are `deployment-*` components on a target:
 
 `server` guarantees a persistent disk: a provider without one supplies it (a volume), and its
 `deployment-*` checks it in `pikit doctor`; otherwise it is not `server`. The pieces specific to the
-only `durable` provider keep its name (`deployment-cloudflare`, `platform-cloudflare`,
-`secrets-cloudflare`, `@pikit/contracts/cloudflare`, `WORKERS_HOST`, the presets `telegram-cloudflare`
+only `durable` provider keep its name (`deployment-cloudflare`, `actors-do`,
+`secrets-workers`, `@pikit/contracts/cloudflare`, `WORKERS_HOST`, the presets `telegram-cloudflare`
 and `cloudflare-minimal`); only the target is `durable`, the runtime model.
 
 Facts about each provider (persistence, limits, pricing) are checked when its component is built;
@@ -91,7 +91,7 @@ sandboxes can be an `execution` provider for any target ([sandboxed execution](s
   ([storage-postgres](storage-postgres.md)); D1 does not fit (no interactive transactions).
 - **One writer per conversation**: a per-conversation lease (upstream proposals 4 and 5,
   [upstream](../docs/upstream/README.md)), or one storage per conversation.
-- **`platform-vercel`**: provides `wakeups` on Vercel's cron/queue offering and `actor.mailbox`, and
+- **`actors-vercel`**: provides `wakeups` on Vercel's cron/queue offering and `actor.mailbox`, and
   drives runs with `driveSlice`, as a Durable Object's alarm does.
 - **`deployment-vercel`**: the project's configuration, environment and secrets, deploy, logs.
 - **The dashboard unchanged**: it is `http.route` handlers and server-sent events.

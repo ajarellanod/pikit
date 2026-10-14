@@ -39,8 +39,8 @@ export const KINDS: readonly string[] = [
   "conversations", "credentials", "provider", "runtime", "secrets", "server",
   // SPEC C2 and C3: `mailbox-local`, `wakeups-timers`.
   "mailbox", "wakeups",
-  // SPEC C2 to C5: a target's platform providers (`platform-cloudflare`).
-  "platform",
+  // SPEC C2 to C5: each conversation an actor, its mailbox and its alarm, on the Durable Objects API (`actors-do`).
+  "actors",
   // Agent behaviour as a Pi extension (`agent.extension`): `extension-house-rules`.
   "extension",
   // What is up, degraded or down (`health`): `health-registry`.
@@ -49,8 +49,8 @@ export const KINDS: readonly string[] = [
   "settings",
   // Agents as data (`agent.directory`): `agents-live`.
   "agents",
-  // The project's repository and its tokens (`github`): `github-app`.
-  "github",
+  // The project's own repository and its tokens (`repo.github`): `repo-github-app`, `repo-github-token`.
+  "repo",
   // The agent's changes to itself, waiting for an operator (`proposals`): `proposals-local`, `proposals-github`.
   "proposals",
   // A public URL for a server project, `pikit expose` (features/completed/expose.md): `expose-cloudflare-tunnel`.
@@ -88,7 +88,7 @@ export const BUILT_IN_COMMANDS: readonly string[] = [
 
 /**
  * `apps.worker` naming the default export: the component goes in both Apps as it is (SPEC §4.1, C1),
- * under its own name and config key in each (`secrets-cloudflare`, which works in both).
+ * under its own name and config key in each (`secrets-workers`, which works in both).
  */
 export const BOTH_APPS = "default";
 

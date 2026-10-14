@@ -1,6 +1,14 @@
 {
   "version": 1,
   "components": {
+    "actors-do": {
+      "version": "0.0.0",
+      "description": "Reaches each conversation's Durable Object from the Worker, and wakes components in it on its one alarm: actor.mailbox, actor.inbox and wakeups on Cloudflare.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/actors-do"
+    },
     "admin-api": {
       "version": "0.0.0",
       "description": "The operator's HTTP API: the composition, conversations, transcripts, live events, messages, abort and reset; serves the dashboard's built files. On Cloudflare the Worker serves it, reaching each conversation's Durable Object and listing them from an index.",
@@ -153,23 +161,6 @@
       ],
       "path": "components/extension-pikit-self"
     },
-    "github-app": {
-      "version": "0.0.0",
-      "description": "Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`github`), its credentials sealed at rest. No token is pasted anywhere.",
-      "targets": [
-        "durable"
-      ],
-      "path": "components/github-app"
-    },
-    "github-token": {
-      "version": "0.0.0",
-      "description": "The project's GitHub access (`github`) from a fine-grained token you made, the GITHUB_TOKEN secret, and the repository, a setting changed in the dashboard's Settings → GitHub: for a project run from the CLI or on a server.",
-      "targets": [
-        "server",
-        "durable"
-      ],
-      "path": "components/github-token"
-    },
     "health-registry": {
       "version": "0.0.0",
       "description": "What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process.",
@@ -205,17 +196,9 @@
       ],
       "path": "components/outbound-durable"
     },
-    "platform-cloudflare": {
-      "version": "0.0.0",
-      "description": "Reaches each conversation's Durable Object from the Worker, and wakes components in it on its one alarm: actor.mailbox, actor.inbox and wakeups on Cloudflare.",
-      "targets": [
-        "durable"
-      ],
-      "path": "components/platform-cloudflare"
-    },
     "proposals-github": {
       "version": "0.0.0",
-      "description": "proposals as GitHub pull requests (Cloudflare): a pikit/self/* branch the steward pushes gets its pull request, which an operator merges or closes from the dashboard; GitHub reached through the github contract (github-app, github-token); and the project's CI workflow. Dormant until GitHub is connected, after deploying.",
+      "description": "proposals as GitHub pull requests (Cloudflare): a pikit/self/* branch the steward pushes gets its pull request, which an operator merges or closes from the dashboard; GitHub reached through the github contract (repo-github-app, repo-github-token); and the project's CI workflow. Dormant until GitHub is connected, after deploying.",
       "targets": [
         "durable"
       ],
@@ -283,6 +266,23 @@
       ],
       "path": "components/provider-openrouter"
     },
+    "repo-github-app": {
+      "version": "0.0.0",
+      "description": "Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`repo.github`), its credentials sealed at rest. No token is pasted anywhere.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/repo-github-app"
+    },
+    "repo-github-token": {
+      "version": "0.0.0",
+      "description": "The project's GitHub access (`repo.github`) from a fine-grained token you made, the GITHUB_TOKEN secret, and the repository, a setting changed in the dashboard's Settings → GitHub: for a project run from the CLI or on a server.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/repo-github-token"
+    },
     "router-basic": {
       "version": "0.0.0",
       "description": "Every message goes to one agent: `defaultAgent`.",
@@ -310,14 +310,6 @@
       ],
       "path": "components/runtime-pi"
     },
-    "secrets-cloudflare": {
-      "version": "0.0.0",
-      "description": "Secrets from the Worker's env on Cloudflare: its secrets and variables, never its bindings.",
-      "targets": [
-        "durable"
-      ],
-      "path": "components/secrets-cloudflare"
-    },
     "secrets-env": {
       "version": "0.0.0",
       "description": "Secrets from the process environment.",
@@ -325,6 +317,14 @@
         "server"
       ],
       "path": "components/secrets-env"
+    },
+    "secrets-workers": {
+      "version": "0.0.0",
+      "description": "Secrets from the Worker's env on Cloudflare: its secrets and variables, never its bindings.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/secrets-workers"
     },
     "server-bun": {
       "version": "0.0.0",

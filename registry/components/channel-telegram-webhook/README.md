@@ -46,14 +46,14 @@ export default defineApp({ components: [/* … */ channelTelegramWebhook], confi
 `pikit add channel-telegram-webhook` writes both lines, and the import, in a project on Cloudflare
 (`component.json`'s `apps.worker` names the export); `pikit remove` takes both out, with their config
 keys. Both halves take the same `apiBase` and `accounts` in their own config. Each App needs what its
-half requires: `secrets` in both (`secrets-cloudflare` goes in both), `actor.mailbox` in the Worker's;
+half requires: `secrets` in both (`secrets-workers` goes in both), `actor.mailbox` in the Worker's;
 `pikit add` warns per App about what is missing, and `pikit doctor` composes both. The Worker's routes
 are served by `deployment-cloudflare`'s entrypoint.
 
 The object's half registers its `actor.inbox` handler in `actor-inbox.ts` only (`registerInbox`): it
 uses `actor.inbox` and calls `handle("telegram.update", handler)` in its `start`. The mailbox's
 provider depends on no handler, so the half uses `wakeups` and the runtime (which drives its runs with
-the same `wakeups`) in one App with `platform-cloudflare`, which provides `actor.inbox` and `wakeups`
+the same `wakeups`) in one App with `actors-do`, which provides `actor.inbox` and `wakeups`
 there, with no dependency cycle.
 
 It also runs with both halves in one App on a server (with `mailbox-local`, `wakeups-timers`, and
@@ -316,7 +316,7 @@ per bot that failed (empty when done), and throws only when Telegram cannot be r
 holds are kept, not dropped. Setting the same webhook again is harmless, so every deploy calls it.
 
 The secrets reach the Worker as Worker secrets (`deployment-cloudflare` puts the `.env` ones there):
-`secrets-cloudflare` reads them in both Apps.
+`secrets-workers` reads them in both Apps.
 
 ## Config
 

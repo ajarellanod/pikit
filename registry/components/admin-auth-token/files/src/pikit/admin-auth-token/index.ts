@@ -5,7 +5,7 @@
  * operator `operator`, any other is not.
  *
  * - **The token is a secret**, read through `secrets` at start: an environment variable on a server
- *   (secrets-env), a Worker secret on Cloudflare (secrets-cloudflare). Without it, or shorter than 32
+ *   (secrets-env), a Worker secret on Cloudflare (secrets-workers). Without it, or shorter than 32
  *   characters, the app does not start: a dashboard nobody can open, or anybody can, is a broken
  *   deployment. `pikit configure --generate PIKIT_ADMIN_TOKEN` writes one.
  * - **Compared in constant time**, as SHA-256 digests, so a wrong token's timing says nothing of the

@@ -1,6 +1,6 @@
 /**
  * provider-openai on Cloudflare: composed in a real SQLite-backed object's App with `storage-do`,
- * `runtime-pi` and `secrets-cloudflare`, an agent on `openai/gpt-5.5` answers. The key is a Worker
+ * `runtime-pi` and `secrets-workers`, an agent on `openai/gpt-5.5` answers. The key is a Worker
  * secret (`OPENAI_API_KEY` in the host's env, as `wrangler secret put` leaves it), read through
  * `secrets`; OpenAI's Responses API is a fake behind `globalThis.fetch` (the test and the object share
  * one isolate), so pi-ai's OpenAI SDK, loaded by its lazy API in workerd, really streams. Nothing
@@ -13,7 +13,7 @@ import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { afterEach, expect, it } from "vitest";
 import providerOpenai from "../../../registry/components/provider-openai/files/src/pikit/provider-openai/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
-import secretsCloudflare from "../../../registry/components/secrets-cloudflare/files/src/pikit/secrets-cloudflare/index.ts";
+import secretsWorkers from "../../../registry/components/secrets-workers/files/src/pikit/secrets-workers/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import { inObject, workerEnv } from "./host.ts";
 
@@ -78,7 +78,7 @@ it("provider-openai in a real object: an agent answers with the key from the Wor
         };
       },
     });
-    const app = await defineApp({ components: [secretsCloudflare, storageDo, providerOpenai, agents, runtimePi, channel], target: "durable", logger: silentLogger }).create();
+    const app = await defineApp({ components: [secretsWorkers, storageDo, providerOpenai, agents, runtimePi, channel], target: "durable", logger: silentLogger }).create();
     // The object's host, its env holding the key as a Worker secret.
     const withKey = { ...host, env: { ...workerEnv, OPENAI_API_KEY: "sk-workerd" } };
     await app.start(withContextValue(WORKERS_HOST, withKey, BACKGROUND_CONTEXT));

@@ -1,5 +1,5 @@
 /**
- * `github` conformance: what every provider guarantees to the components that ask it for the project's
+ * `repo.github` conformance: what every provider guarantees to the components that ask it for the project's
  * repository and a token (`../github.ts`). Runner-independent:
  *
  *   for (const c of createGitHubConformance(() => myProviderFixture()))
@@ -7,7 +7,7 @@
  *
  * The fixture connects and disconnects a repository its own way (a fake GitHub behind the provider's
  * own path), and says whether its GitHub accepts a token for a repository. A case starts an App of the
- * fixture's components and a consumer that reads `github`, as admin-proposals does.
+ * fixture's components and a consumer that reads `repo.github`, as admin-proposals does.
  */
 
 import { type AppContext, type ComponentDefinition, defineApp, defineComponent, type Handle, type Logger, type Target } from "@pikit/core";
@@ -33,7 +33,7 @@ export interface GitHubFixture {
   dispose?(): Promise<void>;
 }
 
-const GROUP = "github";
+const GROUP = "repo.github";
 const expect = expecter(GROUP);
 const check = checker(GROUP);
 
@@ -54,7 +54,7 @@ async function boot(fixture: GitHubFixture): Promise<Running> {
   const record = (level: string) => (message: string, fields?: Record<string, unknown>) => void lines.push({ level, message, ...(fields !== undefined && { fields }) });
   const logger: Logger = { debug: record("debug"), info: record("info"), warn: record("warn"), error: record("error") };
   let handle: Handle<GitHubAccess> | undefined;
-  const consumer = defineComponent({ name: "github-conformance", setup: (pikit) => void (handle = pikit.use("github")) });
+  const consumer = defineComponent({ name: "github-conformance", setup: (pikit) => void (handle = pikit.use("repo.github")) });
   const app = await defineApp({
     components: [...fixture.components(logger), consumer],
     logger,

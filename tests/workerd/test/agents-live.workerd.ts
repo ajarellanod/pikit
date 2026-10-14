@@ -19,7 +19,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import agentsLive from "../../../registry/components/agents-live/files/src/pikit/agents-live/index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerServer } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import routerBasic from "../../../registry/components/router-basic/files/src/pikit/router-basic/index.ts";
 import routerRules from "../../../registry/components/router-rules/files/src/pikit/router-rules/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
@@ -119,8 +119,8 @@ async function workerApp() {
     },
   });
   const app = await defineApp({
-    components: [platformCloudflare, auth, settingsStoreWorker, channel, server.component],
-    config: { "platform-cloudflare": { binding: PLATFORM_BINDING } },
+    components: [actorsDo, auth, settingsStoreWorker, channel, server.component],
+    config: { "actors-do": { binding: PLATFORM_BINDING } },
     target: "durable",
     logger: silentLogger,
   }).create();
@@ -138,7 +138,7 @@ it("an operator's live agent and rule, set through the Worker, route a sender's 
   const outcomes: string[] = [];
   const told: string[] = [];
   composeObjects(
-    [storageDo, storageKvSql, platformCloudflare, ...model(told), runtimePi, conversationsKv, auth, settingsStore, agentsLive, routerRules, routerBasic, channelActor(answers, outcomes)],
+    [storageDo, storageKvSql, actorsDo, ...model(told), runtimePi, conversationsKv, auth, settingsStore, agentsLive, routerRules, routerBasic, channelActor(answers, outcomes)],
     { "router-basic": { defaultAgent: "scripted" } },
   );
   const worker = await workerApp();

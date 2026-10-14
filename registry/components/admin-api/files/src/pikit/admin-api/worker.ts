@@ -3,7 +3,7 @@
  * served by the Worker's App, over the remote backend (`remote.ts`): every read and action is an
  * `actor.mailbox.call` to the conversation's Durable Object, where the default export answers it
  * (`calls.ts`), and the list comes from the index (`conversation-index.ts`). It needs only `admin.auth`
- * (admin-auth-token, in both Apps) and `actor.mailbox` (platform-cloudflare); the dashboard's files are
+ * (admin-auth-token, in both Apps) and `actor.mailbox` (actors-do); the dashboard's files are
  * bundled in (`dashboard-files.ts`).
  *
  * - **Ids** are qualified: `<conversation key>~<the object's id>` (`backend.ts`).

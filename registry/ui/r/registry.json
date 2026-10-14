@@ -88,22 +88,22 @@
       "description": "agents-live's section of the Settings dialog: Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live. Its settings come with the component (pikit add agents-live), stored by settings-store."
     },
     {
-      "name": "github-app-settings",
-      "type": "registry:file",
-      "title": "github-app-settings",
-      "description": "github-app's section of the Settings dialog: Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`github`), its credentials sealed at rest. No token is pasted anywhere. Its settings come with the component (pikit add github-app), stored by settings-store."
-    },
-    {
-      "name": "github-token-settings",
-      "type": "registry:file",
-      "title": "github-token-settings",
-      "description": "github-token's section of the Settings dialog: The project's GitHub access (`github`) from a fine-grained token you made, the GITHUB_TOKEN secret, and the repository, a setting changed in the dashboard's Settings → GitHub: for a project run from the CLI or on a server. Its settings come with the component (pikit add github-token), stored by settings-store."
-    },
-    {
       "name": "health-registry",
       "type": "registry:file",
       "title": "health-registry",
       "description": "health-registry's view: What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process. Its admin API routes come with the component (pikit add health-registry)."
+    },
+    {
+      "name": "repo-github-app-settings",
+      "type": "registry:file",
+      "title": "repo-github-app-settings",
+      "description": "repo-github-app's section of the Settings dialog: Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`repo.github`), its credentials sealed at rest. No token is pasted anywhere. Its settings come with the component (pikit add repo-github-app), stored by settings-store."
+    },
+    {
+      "name": "repo-github-token-settings",
+      "type": "registry:file",
+      "title": "repo-github-token-settings",
+      "description": "repo-github-token's section of the Settings dialog: The project's GitHub access (`repo.github`) from a fine-grained token you made, the GITHUB_TOKEN secret, and the repository, a setting changed in the dashboard's Settings → GitHub: for a project run from the CLI or on a server. Its settings come with the component (pikit add repo-github-token), stored by settings-store."
     },
     {
       "name": "router-basic-settings",

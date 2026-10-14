@@ -1,6 +1,6 @@
 /**
  * outbound-durable in deployment-cloudflare's real `Conversation` class (`PlatformConversation`), over
- * storage-do and platform-cloudflare's `wakeups`: its retries are the object's alarm, so a piece whose
+ * storage-do and actors-do's `wakeups`: its retries are the object's alarm, so a piece whose
  * send failed, or was cut by the slice's deadline, is sent again after the object was evicted, with
  * no new message.
  *
@@ -15,7 +15,7 @@ import { type ChannelTransport, DeliveryError, type OutboundPiece, type Outbound
 import { afterEach, expect, it, vi } from "vitest";
 import outboundDurable from "../../../registry/components/outbound-durable/files/src/pikit/outbound-durable/index.ts";
 import { BACKOFF_MS } from "../../../registry/components/outbound-durable/files/src/pikit/outbound-durable/queue.ts";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import { composeObjects } from "../src/platform.ts";
 import { resetObjects } from "./host.ts";
@@ -78,7 +78,7 @@ it("a send that failed is retried by the object's alarm, after the object was ev
       return { platformMessageId: `p${sends.length}` };
     },
   });
-  composeObjects([storageDo, platformCloudflare, outboundDurable, component]);
+  composeObjects([storageDo, actorsDo, outboundDurable, component]);
   const stub = await enqueueInNewObject(seen);
 
   // The first alarm sends, and the platform fails: the retry is the object's next alarm.
@@ -117,7 +117,7 @@ it("a send cut by the slice's deadline is sent again by the next alarm, after an
       return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
     },
   });
-  composeObjects([storageDo, platformCloudflare, outboundDurable, component], { "platform-cloudflare": { sliceMs: 200 } });
+  composeObjects([storageDo, actorsDo, outboundDurable, component], { "actors-do": { sliceMs: 200 } });
   const stub = await enqueueInNewObject(seen);
 
   await runDurableObjectAlarm(stub);

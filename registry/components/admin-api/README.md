@@ -12,7 +12,7 @@ installed; it also stands on its own, for a script or an agent that reads the se
   after them), `agent.command` (the commands it lists and runs: its own,
   runtime-pi's `/compact`, yours) and `model.complete` (runtime-pi's: the model that titles
   conversations; without it, none is titled). A server (such as `server-bun`) serves the routes. On Cloudflare, also `actor.inbox` and `actor.mailbox`
-  (platform-cloudflare).
+  (actors-do).
 - **Targets:** `server` and `durable` (Cloudflare): below, how it works on each. It never reads the
   target: in its start, `actor.inbox`'s `scope` says whether the App is every key's actor (`"all"`, a
   server; or no `actor.inbox`: the index is its own) or one key's (`"one"`, a Durable Object: the
@@ -198,7 +198,7 @@ by `actor.mailbox.call` (JSON in, JSON out). So admin-api has two halves, which 
   (`actor.mailbox.stream`, one RPC): its conversation's events as they happen, the answer as it is
   written, as on a server. The object stays in memory while the stream is open, which is while the
   dashboard follows the conversation with its tab active; one whose reader left closes within
-  platform-cloudflare's `streamBeatMs` (5 s). A stream cut by an eviction or a deploy ends, and the
+  actors-do's `streamBeatMs` (5 s). A stream cut by an eviction or a deploy ends, and the
   dashboard connects again.
 - **The composition** (`/admin/api/app`), **the agents** (`/admin/api/agents`) and **the commands**
   (`/admin/api/commands`) are the objects' App's, where the agents run (the index's). A command runs
@@ -234,7 +234,7 @@ still answers.
   only from the dashboard's own files (no inline script, no `eval`), styles from its files and inline
   (the dialogs set some), fonts from its files, images from its files, `data:` and `blob:` URLs (an
   image in a transcript, one attached before it is sent), no framing, forms posted only to itself and
-  to `https://github.com` (github-app's Connect posts its manifest there). Vite's build, its fonts and
+  to `https://github.com` (repo-github-app's Connect posts its manifest there). Vite's build, its fonts and
   styles work under it.
 - **Every deploy builds it.** On Cloudflare, deployment-cloudflare's `wrangler.jsonc` has a
   `build.command` that, in a project with `src/dashboard/`, runs `bun install --frozen-lockfile` and

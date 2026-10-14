@@ -63,7 +63,7 @@ export const TEMPLATES: Record<string, Template> = {
     preset: "telegram-cloudflare",
     target: "durable",
     ui: true,
-    // Self-improvement, dormant (the group admin-proposals and github-app): connected after deploying,
+    // Self-improvement, dormant (the group admin-proposals and repo-github-app): connected after deploying,
     // from the dashboard's Settings → GitHub, never in the form.
     with: ["admin-proposals"],
     bun: "1.4.2",

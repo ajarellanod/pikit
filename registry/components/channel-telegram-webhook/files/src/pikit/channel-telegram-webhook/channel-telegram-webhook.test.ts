@@ -666,7 +666,7 @@ test("the halves in two Apps, as on Cloudflare: the Worker's App checks and send
   apps.push(objectApp);
   await objectApp.start();
 
-  // The Worker's App: its mailbox is an RPC to the object, as platform-cloudflare's is.
+  // The Worker's App: its mailbox is an RPC to the object, as actors-do's is.
   const rpc = defineComponent({
     name: "rpc-test",
     setup: (pikit) =>

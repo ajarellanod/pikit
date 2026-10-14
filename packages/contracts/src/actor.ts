@@ -42,7 +42,7 @@
  * a keyed capability makes its user depend on every provider, so the mailbox would start after every
  * handler's component and depend on everything that component uses. An actor's handler admits the
  * message to the runtime, and the runtime drives its runs with `wakeups`, which on Cloudflare the
- * same component as the mailbox provides (`platform-cloudflare`): a keyed `actor.inbox` made that a
+ * same component as the mailbox provides (`actors-do`): a keyed `actor.inbox` made that a
  * dependency cycle. Registered by method, the provider depends on no handler: a handler's component
  * uses `actor.inbox` like any capability, and may also use `wakeups`, `actor.mailbox` or the runtime.
  *
@@ -113,7 +113,7 @@ export interface ActorInbox {
   /**
    * Whose actor this App is: every key's (`"all"`: one App, so its storage holds every conversation;
    * `mailbox-local`), or one key's (`"one"`: an App per key, each with storage of its own; a Durable
-   * Object, `platform-cloudflare`). A component whose state is shared by every key reads it, never
+   * Object, `actors-do`). A component whose state is shared by every key reads it, never
    * the target: with `"one"` that state lives in another actor, reached through `actor.mailbox`.
    */
   readonly scope: ActorScope;

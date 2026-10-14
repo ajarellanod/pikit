@@ -28,7 +28,7 @@ it into the app.
     pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read only their
     environment variables (`ANTHROPIC_API_KEY`);
   - `secrets`, if installed: where those variables are read first, then the environment. On
-    Cloudflare, `secrets-cloudflare` reads them from the Worker's secrets, with no `process.env`;
+    Cloudflare, `secrets-workers` reads them from the Worker's secrets, with no `process.env`;
   - `wakeups`, if installed: runs are driven inside wakeups, in slices, instead of by promises left
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes;
   - `settings`, if installed (`settings-store`): the agents' live overrides, an operator's system
@@ -46,7 +46,7 @@ it into the app.
   last check makes no network call and refreshes nothing: it only asks whether a credential is stored
   or an environment variable set.
 - **Target:** `server` and `durable`. On Cloudflare it goes in the conversation object's App, with
-  `platform-cloudflare` for `wakeups` ("Cloudflare" below).
+  `actors-do` for `wakeups` ("Cloudflare" below).
 - **Installs to:** `src/pikit/runtime-pi/`.
 - **npm dependencies:** `@pikit/pi-adapter`, pinned with Pi.
 
@@ -129,7 +129,7 @@ A Durable Object keeps running only while an event is in progress (a request, an
 promise left running after its event is killed when the object is evicted, 70 to 140 s after it went
 idle, and waiting on an outbound `fetch` (a model call) does not keep it alive: measured, a 180 s run
 was lost. So on Cloudflare (SPEC §4.1, C4) a run is driven inside an event: install a `wakeups`
-provider (`platform-cloudflare`: the object's alarm, multiplexed), and runtime-pi does the rest.
+provider (`actors-do`: the object's alarm, multiplexed), and runtime-pi does the rest.
 
 In an object's App (`WORKERS_HOST` has an `object`), the object is one chat: its first conversation is
 pi-durable's root (later ones, after a reset, are ownerless), and pi-durable's clock is the app's

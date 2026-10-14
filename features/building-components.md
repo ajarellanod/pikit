@@ -19,7 +19,7 @@ A component is the smallest unit whose removal takes away something an agent's o
 variable, a config block, a table or timer, a target constraint, or a risk class (replay safe or
 unsafe, needs a shell, reaches the network).
 - **Merge** only parts identical on all of these that must share one resource (one alarm:
-  `platform-cloudflare`).
+  `actors-do`).
 - **Split** when a target, a risk class or a heavy dependency differs: `tool-read` (safe) apart from
   `tool-write` and `tool-edit` (unsafe), and `tool-bash` (a shell); one `provider-*` per model
   provider, since targets and variables differ and the manifest must say so.

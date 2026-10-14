@@ -142,7 +142,7 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Which runtime conversation each conversation key (channel:conversationId) is in now, and the channel it belongs to; resolve and reset.",
   },
-  github: {
+  "repo.github": {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",

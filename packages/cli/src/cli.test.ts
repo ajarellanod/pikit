@@ -197,8 +197,8 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
   const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
   expect(manifest.targets).toEqual(["durable"]);
   expect(Object.keys(manifest.components).sort()).toEqual([
-    "secrets-cloudflare",
-    "platform-cloudflare",
+    "secrets-workers",
+    "actors-do",
     "storage-do",
     "storage-kv-sql",
     "conversations-kv",
@@ -223,11 +223,11 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
   const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
   // The Worker checks and routes: secrets, the mailbox, the channel's ingress half (C1).
   expect(config).toContain(
-    "export const worker = defineApp({\n  components: [\n    secretsCloudflare,\n    platformCloudflare,\n    channelTelegramWebhookWorker,\n  ],\n  config: workerConfig,\n});",
+    "export const worker = defineApp({\n  components: [\n    secretsWorkers,\n    actorsDo,\n    channelTelegramWebhookWorker,\n  ],\n  config: workerConfig,\n});",
   );
   // The object owns the conversation: everything else, and the router sends every message to the agent.
   expect(config).toContain(
-    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n    extensionPikitSelf,\n  ],",
+    "export default defineApp({\n  components: [\n    agents,\n    secretsWorkers,\n    actorsDo,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n    extensionPikitSelf,\n  ],",
   );
   expect(config).toContain('"router-basic": { defaultAgent: "assistant" },');
   expect(config).not.toContain("deploymentCloudflare");

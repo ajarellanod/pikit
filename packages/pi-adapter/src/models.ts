@@ -9,7 +9,7 @@
  *   memory and providers read their environment variables.
  * - With a `SecretStore` (`secrets`), a provider's variable (`ANTHROPIC_API_KEY`) is read there first,
  *   then where it would be read without one (`authContext`, by default pi-ai's: `process.env`); files
- *   (Vertex's credentials) as before. On Cloudflare, `secrets-cloudflare` reads the Worker's bindings,
+ *   (Vertex's credentials) as before. On Cloudflare, `secrets-workers` reads the Worker's bindings,
  *   so a key needs no `process.env`.
  * - An agent names a model `<provider>/<modelId>`: the provider is what comes before the first
  *   slash, so OpenRouter's `openrouter/<vendor>/<model>` is provider `openrouter`, model

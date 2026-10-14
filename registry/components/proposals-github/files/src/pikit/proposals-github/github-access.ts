@@ -1,14 +1,14 @@
 /**
- * How proposals-github reaches GitHub, in one place: the `github` contract (@pikit/contracts'
- * github.ts), whichever provider connects it (`github-app`: a GitHub App the operator creates from the
- * dashboard; `github-token`: a token and a repository setting). The rest of the component asks this
+ * How proposals-github reaches GitHub, in one place: the `repo.github` contract (@pikit/contracts'
+ * github.ts), whichever provider connects it (`repo-github-app`: a GitHub App the operator creates from the
+ * dashboard; `repo-github-token`: a token and a repository setting). The rest of the component asks this
  * module, never a secret or a setting of its own.
  *
  * - **The repository** is `github.repository(ctx)`, asked at each call: `undefined` while GitHub is not
  *   connected, which is `not_connected` here, pointing to the dashboard's Settings → GitHub.
  * - **The token** is `github.token(ctx)`, asked for every call to GitHub and never kept: the provider
  *   answers one that lasts long enough, and caches it if it wants to. One token reads, opens, merges and
- *   closes: what the agent may not do is kept from it by the tools, which never read `github` for it.
+ *   closes: what the agent may not do is kept from it by the tools, which never read `repo.github` for it.
  */
 
 import type { AppContext, Pikit } from "@pikit/core";
@@ -24,9 +24,9 @@ export interface GitHubAccess {
   token(ctx: AppContext): Promise<string>;
 }
 
-/** Called in `setup`: it declares what it uses (`github`). */
+/** Called in `setup`: it declares what it uses (`repo.github`). */
 export function createGitHubAccess(pikit: Pikit): GitHubAccess {
-  const github = pikit.use("github");
+  const github = pikit.use("repo.github");
   return {
     repository: (ctx) => github.get().repository(ctx),
     async token(ctx) {

@@ -6,7 +6,7 @@
  *   object leaves).
  * - A conversation object's App as a Cloudflare project composes it, in a real object of
  *   deployment-cloudflare's `Conversation` class (`PlatformConversation`, `src/platform.ts`):
- *   `storage-do` (pi-durable's tables), `platform-cloudflare` for `actor.inbox` and `wakeups`,
+ *   `storage-do` (pi-durable's tables), `actors-do` for `actor.inbox` and `wakeups`,
  *   `runtime-pi` driving its runs in wakeups, the scripted model, and a channel's object half that
  *   creates its conversation through `agent.conversations` and uses `wakeups` itself. The Worker's App
  *   sends a message by RPC; the run is driven in the object's real alarm, and answers. Then a run the
@@ -27,7 +27,7 @@ import { createRuntimeFixture } from "@pikit/pi-adapter/testing/neutral";
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import runtimePi, { createRuntimePi, DRIVE } from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import { composeObjects, PLATFORM_BINDING } from "../src/platform.ts";
@@ -107,9 +107,9 @@ function channelActor(answers: (string | undefined)[], drives: string[]) {
             // One conversation per object: its id is the root's, the same at every message.
             const conversation: ConversationRef = { key, agent: "scripted", conversationId: await conversations.get().create(ctx) };
             await runtime.get().dispatch({ requestId: id, conversation, prompt: text }, ctx);
-            // What runtime-pi asked for, read back from platform-cloudflare's table in the object.
+            // What runtime-pi asked for, read back from actors-do's table in the object.
             const storage = ctx.value(WORKERS_HOST)?.object?.storage as DurableObjectStorage;
-            for (const row of storage.sql.exec("SELECT name FROM platform_cloudflare_wakeups").toArray()) drives.push(String(row.name));
+            for (const row of storage.sql.exec("SELECT name FROM actors_do_wakeups").toArray()) drives.push(String(row.name));
           });
           wakeups.get().handle("test-channel-actor.tidy", async () => {});
         },
@@ -128,7 +128,7 @@ async function workerApp() {
       return { start: () => void (mailbox = handle.get()) };
     },
   });
-  const worker = await defineApp({ components: [platformCloudflare, channel], config: { "platform-cloudflare": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
+  const worker = await defineApp({ components: [actorsDo, channel], config: { "actors-do": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
   await worker.start(withContextValue(WORKERS_HOST, { env: workerEnv }, BACKGROUND_CONTEXT));
   return {
     send: (key: string, message: { id: string; text: string }) => mailbox?.send(key, "test.message", message, worker.context()),
@@ -143,14 +143,14 @@ const objectOf = (key: string) => env.PLATFORM_CONVERSATION.get(env.PLATFORM_CON
 /** The drive's request row and the object's alarm, read in the object. */
 const driveState = (key: string) =>
   runInDurableObject(objectOf(key), async (_instance, state) => ({
-    drive: state.storage.sql.exec("SELECT time FROM platform_cloudflare_wakeups WHERE name = ?", DRIVE).toArray()[0]?.time as number | undefined,
+    drive: state.storage.sql.exec("SELECT time FROM actors_do_wakeups WHERE name = ?", DRIVE).toArray()[0]?.time as number | undefined,
     alarm: await state.storage.getAlarm(),
   }));
 
-it("runtime-pi runs on platform-cloudflare's wakeups in a real object: a message sent from the Worker is answered in the object's alarm", async () => {
+it("runtime-pi runs on actors-do's wakeups in a real object: a message sent from the Worker is answered in the object's alarm", async () => {
   const answers: (string | undefined)[] = [];
   const drives: string[] = [];
-  composeObjects([storageDo, platformCloudflare, ...model(), runtimePi, channelActor(answers, drives)]);
+  composeObjects([storageDo, actorsDo, ...model(), runtimePi, channelActor(answers, drives)]);
   const worker = await workerApp();
   try {
     const key = `test:${crypto.randomUUID()}`;
@@ -178,7 +178,7 @@ it("a run the object is evicted in the middle of is answered by the next instanc
     return new Promise<string>(() => {});
   };
   // Short slices: the alarm that drives the run ends soon, and asks again, as on Cloudflare at its deadline.
-  composeObjects([storageDo, platformCloudflare, ...model(), runtimePi, channelActor(answers, [])], { "platform-cloudflare": { sliceMs: 200 } });
+  composeObjects([storageDo, actorsDo, ...model(), runtimePi, channelActor(answers, [])], { "actors-do": { sliceMs: 200 } });
   // A day ahead: the alarms runtime-pi asks for are a day after the real clock, so the runtime does not
   // fire them by itself, and the test fires each one.
   vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + DAY, shouldAdvanceTime: true });
@@ -214,7 +214,7 @@ it("a model error's backoff is the object's alarm: the object goes meanwhile, an
   const answers: (string | undefined)[] = [];
   failFirst = "503 Service Unavailable";
   const retryMs = 60_000;
-  composeObjects([storageDo, platformCloudflare, ...model(), createRuntimePi({ settings: { retry: { baseDelayMs: retryMs } } }), channelActor(answers, [])]);
+  composeObjects([storageDo, actorsDo, ...model(), createRuntimePi({ settings: { retry: { baseDelayMs: retryMs } } }), channelActor(answers, [])]);
   const worker = await workerApp();
   const key = `test:${crypto.randomUUID()}`;
   try {

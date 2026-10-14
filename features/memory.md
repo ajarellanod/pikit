@@ -72,7 +72,7 @@ through runtime-pi in a real App, the shape of your project test); `src/pikit/ma
 
 ### 0. Prepare the project
 ```sh
-pikit add mailbox-local --yes    # server only: actor.mailbox and actor.inbox (on Cloudflare, platform-cloudflare has them)
+pikit add mailbox-local --yes    # server only: actor.mailbox and actor.inbox (on Cloudflare, actors-do has them)
 pikit add provider-faux --yes    # tests and trials only: the model faux/scripted (below)
 mkdir -p registry/components
 ```

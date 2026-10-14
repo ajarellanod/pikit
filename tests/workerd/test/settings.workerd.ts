@@ -19,7 +19,7 @@ import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/tes
 import { afterEach, expect, it, vi } from "vitest";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerServer } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import routerBasic from "../../../registry/components/router-basic/files/src/pikit/router-basic/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import { SETTINGS_KEY } from "../../../registry/components/settings-store/files/src/pikit/settings-store/calls.ts";
@@ -99,8 +99,8 @@ async function workerApp() {
     },
   });
   const app = await defineApp({
-    components: [platformCloudflare, auth, settingsStoreWorker, channel, server.component],
-    config: { "platform-cloudflare": { binding: PLATFORM_BINDING } },
+    components: [actorsDo, auth, settingsStoreWorker, channel, server.component],
+    config: { "actors-do": { binding: PLATFORM_BINDING } },
     target: "durable",
     logger: silentLogger,
   }).create();
@@ -121,7 +121,7 @@ it("the Worker reads and sets the objects' settings in the settings object; a co
   const answers: string[] = [];
   const told: string[] = [];
   composeObjects(
-    [storageDo, storageKvSql, platformCloudflare, ...model(told), runtimePi, conversationsKv, auth, settingsStore, routerBasic, channelActor(answers)],
+    [storageDo, storageKvSql, actorsDo, ...model(told), runtimePi, conversationsKv, auth, settingsStore, routerBasic, channelActor(answers)],
     { "router-basic": { defaultAgent: "scripted" } },
   );
   const worker = await workerApp();

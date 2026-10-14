@@ -170,7 +170,7 @@ export const worker = defineApp({ components: [...], config: workerConfig }); //
 - A component with a half for each App declares `"apps": { "worker": "<export>" }` in
   `component.json`. The default export goes in the object's App; the named export (a component named
   `<name>-worker`, configured under that key in `workerConfig`) goes in the Worker's. `"worker":
-  "default"` puts the same component in both (`platform-cloudflare`, `secrets-cloudflare`,
+  "default"` puts the same component in both (`actors-do`, `secrets-workers`,
   `admin-auth-token`). `pikit add` and `pikit remove` edit both Apps.
 - The halves talk only through `actor.mailbox` (Worker → object) and `actor.inbox` (object).
 
@@ -183,7 +183,7 @@ On a server, a project has one App, and only default exports are listed.
   (`pikit doctor`, the dashboard). Config holds values, never strategies: two strategies are two
   components.
 - **Secrets** are read only through the `secrets` capability (`secrets-env` on a server,
-  `secrets-cloudflare` on Cloudflare). They live in `.env` (mode 0600, written by `pikit configure`,
+  `secrets-workers` on Cloudflare). They live in `.env` (mode 0600, written by `pikit configure`,
   never committed) and are declared in a component's `environment`. Config may name a secret
   (`tokenSecret: "GITHUB_TOKEN"`), never hold one. `secretLikePaths` and `redactSecrets`
   ([secrets.ts](../packages/contracts/src/secrets.ts)) catch a secret put in config by mistake:

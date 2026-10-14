@@ -12,9 +12,9 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | Apps in `pikit.config.ts` | one (default export) | two: the object's (default) and the Worker's (`worker`) |
 | Requests arrive at | `server-bun` (Hono on `Bun.serve`, port 3000) | the Worker (deployment-cloudflare's host), then RPC to an object |
 | `storage.sql` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
-| `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `platform-cloudflare`: RPC to `idFromName(key)` (`scope` `"one"`) |
-| `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `platform-cloudflare`: rows over the object's one alarm, in slices |
-| `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-cloudflare`: the Worker's `env` |
+| `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `actors-do`: RPC to `idFromName(key)` (`scope` `"one"`) |
+| `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `actors-do`: rows over the object's one alarm, in slices |
+| `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-workers`: the Worker's `env` |
 | `execution` | `execution-local`: the machine's files and shell | `execution-do`: files in the object's SQL, a simulated shell |
 | Telegram | `channel-telegram` (long polling) | `channel-telegram-webhook` (two halves) |
 | HTTP API channel | `channel-http` | none yet |
@@ -72,15 +72,15 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
   `deliver(type, key, message)`, `call(type, key, message)`, `stream(type, key, message)` and `alarm()`.
 - **Halves.** A component that must be in both Apps has a Worker half (`apps.worker` in
   `component.json`). channel-telegram-webhook (route in the Worker, handler in the object) and admin-api
-  (routes in the Worker, answers in the objects) have two; platform-cloudflare, secrets-cloudflare and
+  (routes in the Worker, answers in the objects) have two; actors-do, secrets-workers and
   admin-auth-token go in both as they are. See [concepts.md](concepts.md#the-two-apps-on-cloudflare).
 - **actor.mailbox / actor.inbox.** In the Worker, `send` and `call` are RPCs to the object
   `idFromName(key)`; in an object, its own key is a local call. A handler resolves once the message is
   durable; the RPC resolves with it.
 - **Wakeups and alarms (C3, C4).** An object keeps running only during an event (a request, an RPC,
   an alarm); a promise left after it dies within minutes, and an outbound `fetch` does not keep it
-  alive. So all background work is a `wakeups` handler. platform-cloudflare keeps requests as rows in
-  `platform_cloudflare_wakeups` and sets the object's single alarm to the earliest. An alarm runs one
+  alive. So all background work is a `wakeups` handler. actors-do keeps requests as rows in
+  `actors_do_wakeups` and sets the object's single alarm to the earliest. An alarm runs one
   slice (`sliceMs`, 60 s): due handlers start together, one run per name; at the deadline their
   contexts are cancelled, each asks again, and the next alarm continues. A row is deleted only when
   its handler resolved. A handler that rejects backs off (1 s, 5 s, 30 s, then 60 s). Nothing else may
@@ -95,7 +95,7 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
   and tool calls, "typing" renewals (up to 15 a minute), answer pieces (at most 20 per run).
 - **Dev.** `pikit dev` is `wrangler dev`: the Worker and its objects in local workerd, state in
   `.wrangler/`.
-- **Self-improvement** (`proposals-github`): the steward clones the repository `github` connects
+- **Self-improvement** (`proposals-github`): the steward clones the repository `repo.github` connects
   (Settings → GitHub) and pushes `pikit/self/<topic>` with execution-do's `git`, the same steps as on
   a server (both executions pass `createWorkspaceGitConformance`); CI checks it, the operator's
   Approve merges it, Workers Builds deploys it. **The agent never holds the GitHub credential**, a

@@ -105,7 +105,7 @@ export function createRemoteSource(mailbox: () => ActorMailbox | undefined, cloc
 
   const fetchValues = async (ctx: AppContext): Promise<Record<string, SettingsValue>> => {
     const calls = mailbox();
-    if (calls === undefined) throw new Error("settings-store: in a Durable Object's App it reads the settings object, which needs actor.mailbox: install platform-cloudflare");
+    if (calls === undefined) throw new Error("settings-store: in a Durable Object's App it reads the settings object, which needs actor.mailbox: install actors-do");
     try {
       const answer = fieldsOf(await calls.call(SETTINGS_KEY, CALL.read, { version: held?.version ?? -1 }, ctx));
       const { version, values } = answer;
@@ -162,7 +162,7 @@ export function createRemoteSettings(declarations: Declarations, mailbox: () => 
 export function createRemoteAdmin(mailbox: () => ActorMailbox | undefined): SettingsStore {
   const call = async (type: string, message: JsonValue, ctx: AppContext): Promise<Fields> => {
     const calls = mailbox();
-    if (calls === undefined) throw new Error("settings-store: the settings object is reached through actor.mailbox: install platform-cloudflare");
+    if (calls === undefined) throw new Error("settings-store: the settings object is reached through actor.mailbox: install actors-do");
     try {
       return fieldsOf(await calls.call(SETTINGS_KEY, type, message, ctx));
     } catch (error) {

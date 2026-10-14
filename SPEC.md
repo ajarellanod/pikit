@@ -216,7 +216,7 @@ principle 11).
 few that touch how code lives come one per runtime model and say so in their `targets`:
 `channel-telegram` (long polling) and `channel-telegram-webhook` (C6), `channel-http` and
 `execution-local` (a process) and `execution-do` (C7), `storage-sqlite` and `storage-do`,
-`wakeups-timers` and `platform-cloudflare`. The required set (below) has a provider on each target
+`wakeups-timers` and `actors-do`. The required set (below) has a provider on each target
 for every capability it needs; a component outside it may exist for one target only (`channel-http`
 has no Cloudflare twin yet). Moving a project to the other target is swapping those components,
 never changing an agent, a route or a contract.
@@ -231,9 +231,12 @@ machine it is. There are two first-class targets:
   `server`.
 - **`durable`: an actor per conversation.** One actor (a Durable Object) per conversation, with its
   own SQLite and one alarm, evicted between events, its work driven in slices (`driveSlice`, C4).
-  Cloudflare is its only provider today, so the pieces specific to it keep Cloudflare's name
-  (`deployment-cloudflare`, `platform-cloudflare`, `secrets-cloudflare`, `@pikit/contracts/cloudflare`,
-  `WORKERS_HOST`); only the target is `durable`.
+  Its pieces are named by the API they use, not by a provider: what runs on the Durable Objects
+  API is `-do` (`storage-do`, `execution-do`, `actors-do`: each conversation an actor, its mailbox
+  and its alarm), what reads a Worker's environment is `-workers` (`secrets-workers`), and they run
+  unchanged on any implementation of that API (Cloudflare, workerd, celld: features/deployment-celld.md).
+  Only what is Cloudflare's own keeps its name (`deployment-cloudflare`, `@pikit/contracts/cloudflare`,
+  `WORKERS_HOST`); the target is `durable`.
 
 A third value is a core change (`Target` in `@pikit/core`, the schema's enum, the CLI), made only when
 a host of another runtime model is built: stateless functions would be `functions`
@@ -276,7 +279,7 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   platform retries. The actor handles it with the handler it registered for `type` on `actor.inbox`
   (`handle(type, (key, message, ctx) => …)`, in its `start`). A message is JSON. On a server the
   mailbox calls the inbox in the same App (`mailbox-local`); on Cloudflare it is an RPC to the object
-  `idFromName(key)` (`platform-cloudflare`). The inbox's `scope` says which: the App is every key's
+  `idFromName(key)` (`actors-do`). The inbox's `scope` says which: the App is every key's
   actor (`"all"`) or one key's (`"one"`). A component may also **ask** an actor:
   `call(key, type, message, ctx)` resolves with the JSON its `answer(type, handler)` handler (on
   `actor.inbox`, registered in `start`) resolved with, or rejects with an `ActorCallError` whose
@@ -287,7 +290,7 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   actor key need not be a conversation's). *Why:* one channel component serves both targets, and no
   channel names a Durable Object. Handlers are registered by method, not provided as a keyed
   capability, because a keyed capability makes the mailbox depend on every handler's component: a
-  handler admits to the runtime, which on Cloudflare wakes through `platform-cloudflare`, the
+  handler admits to the runtime, which on Cloudflare wakes through `actors-do`, the
   mailbox's own component, so that was a dependency cycle.
 - **C3. `wakeups`: durable timers, one alarm underneath.** A contract in `@pikit/contracts`:
   `at(name, time, ctx)` asks for the handler registered as `name` (`handle(name, handler)`, in the
@@ -295,7 +298,7 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   `time`, replacing an earlier request for that name; `cancel(name, ctx)` drops it. Delivery is
   at-least-once and may be late; a handler that fails runs again with backoff. On a server they are
   timers (`wakeups-timers`: a process that restarts reschedules at start, per K6); on Cloudflare they
-  are rows in the object's SQL multiplexed onto its one alarm (`platform-cloudflare`). *Why:* the
+  are rows in the object's SQL multiplexed onto its one alarm (`actors-do`). *Why:* the
   runtime, delivery and outbox all need to wake, and an object has a single alarm.
 - **C4. Work happens inside an event, in slices.** On Cloudflare an object keeps running only while
   an event (a request, an RPC, an alarm) is in progress: a promise left running after it is killed
@@ -556,7 +559,7 @@ shell runs in the app's container (`features/sandboxed-execution.md` for a lock)
   another `execution` provider (`features/sandboxed-execution.md`): it would run real git and tests,
   in a Worker of its own (a Worker with containers gets no Previews).
 - **Credentials** never reach the agent (C7): `execution-do`'s `git` asks `proposals.remote()`
-  (proposals-github: the repository `github` connects, `github-app` a GitHub App the operator connects
+  (proposals-github: the repository `repo.github` connects, `repo-github-app` a GitHub App the operator connects
   from the dashboard, short-lived tokens for one repository) and pushes only branches under the
   remote's prefix (`pikit/self/*`) to it. A Sandbox would keep the
   rule through its outbound handler, which injects the credential per request.

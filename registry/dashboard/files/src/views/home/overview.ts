@@ -23,9 +23,9 @@ const KINDS: { title: string; capabilities: string[]; prefixes: string[] }[] = [
   { title: "Agents and models", capabilities: ["agent.runtime", "model.provider", "agent.extension"], prefixes: ["runtime-", "provider-", "router-", "extension-", "agents-"] },
   { title: "Tools", capabilities: ["agent.tool"], prefixes: ["tool-"] },
   { title: "Data", capabilities: ["storage.", "conversations.registry", "settings", "outbound.queue"], prefixes: ["storage-", "conversations-"] },
-  { title: "Integrations", capabilities: ["github", "proposals"], prefixes: [] },
+  { title: "Integrations", capabilities: ["repo.github", "proposals"], prefixes: [] },
   { title: "Dashboard and admin", capabilities: ["admin.auth"], prefixes: ["admin-"] },
-  { title: "Platform", capabilities: ["secrets", "wakeups", "execution"], prefixes: ["platform-", "deployment-", "secrets-", "execution-"] },
+  { title: "Platform", capabilities: ["secrets", "wakeups", "execution"], prefixes: ["actors-", "deployment-", "secrets-", "execution-"] },
 ];
 export const OTHER = "Other";
 

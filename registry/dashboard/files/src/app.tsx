@@ -139,7 +139,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   );
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  /** The Settings section to open at: `?settings=<id>` in the page's URL (github-app's setup comes back to `/admin/?settings=github-app`). */
+  /** The Settings section to open at: `?settings=<id>` in the page's URL (repo-github-app's setup comes back to `/admin/?settings=repo-github-app`). */
   const [settingsSection, setSettingsSection] = useState<string>();
   const [side, setSide] = useState<HTMLDivElement | null>(null);
   const [narrow] = useState(() => !window.matchMedia("(min-width: 1024px)").matches);

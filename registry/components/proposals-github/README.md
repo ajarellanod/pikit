@@ -10,8 +10,8 @@ which squash-merges it, or rejects it, which closes it. Workers Builds deploys t
 **dormant until GitHub is connected**, after deploying ("Connect it" below).
 
 - **Provides:** `proposals`.
-- **Requires:** `github`: the repository and a short-lived token, from `github-app` (a GitHub App
-  created and installed from the dashboard's Settings → GitHub) or `github-token` (a token you made).
+- **Requires:** `repo.github`: the repository and a short-lived token, from `repo-github-app` (a GitHub App
+  created and installed from the dashboard's Settings → GitHub) or `repo-github-token` (a token you made).
 - **Target:** `durable`. It goes in both Apps (`apps.worker: "default"`), with its config in both: the
   Worker's App answers the dashboard's routes, the objects' App the steward's guide (`remote`).
 - **Installs to:** `src/pikit/proposals-github/`, and `.github/workflows/pikit-checks.yml`, the
@@ -19,12 +19,12 @@ which squash-merges it, or rejects it, which closes it. Workers Builds deploys t
 - **npm dependencies:** `typebox`.
 
 ```sh
-pikit add admin-proposals proposals-github github-app   # or: pikit new --target durable --preset telegram-cloudflare --with admin-proposals
+pikit add admin-proposals proposals-github repo-github-app   # or: pikit new --target durable --preset telegram-cloudflare --with admin-proposals
 ```
 
 ## GitHub access, in one module
 
-`github-access.ts` is the only file that reaches GitHub's access: the `github` contract, whichever
+`github-access.ts` is the only file that reaches GitHub's access: the `repo.github` contract, whichever
 provider connects it. The repository is `github.repository(ctx)`, read at each call; the token is
 `github.token(ctx)`, asked for every call to GitHub and never kept (the provider caches it if it
 wants). Until GitHub is connected, everything but `status` is `not_connected`, pointing to the
@@ -32,16 +32,16 @@ dashboard's Settings → GitHub.
 
 ## Connect it
 
-On Cloudflare, with `github-app` (the template's): the dashboard's Settings → GitHub → Connect creates
+On Cloudflare, with `repo-github-app` (the template's): the dashboard's Settings → GitHub → Connect creates
 a GitHub App in your account from a manifest and installs it on the repository; the app mints its own
-tokens. With `github-token`: a fine-grained token for the repository (Contents and Pull requests read
+tokens. With `repo-github-token`: a fine-grained token for the repository (Contents and Pull requests read
 and write, Checks and Commit statuses read) as the `GITHUB_TOKEN` secret, and the repository as its
 setting. `status()` (Settings → Self-improvement) checks the repository is readable and the token
 accepted, and whether a ruleset protects the default branch.
 
 **A ruleset is advised** (Settings → Rules on GitHub): a pull request required, the `checks` status
 required, no force push. One token reads, opens and merges here: what keeps the agent from merging is
-that no tool reads `github` for it (execution-do's git only clones and pushes branches under the
+that no tool reads `repo.github` for it (execution-do's git only clones and pushes branches under the
 prefix); the ruleset holds even if a token leaks.
 
 ## Configure
@@ -78,7 +78,7 @@ The same entry goes in `config` and in `workerConfig`.
   past 400,000 in all.
 - **GitHub's errors:** its rate limit is `rate_limited` with `retryAfter`; a refused token is
   `unauthorized` or `forbidden`, a repository the token cannot see `missing_repository`, GitHub down
-  or slow (15 s), or `github` failing to make a token, `unavailable`. Never a token.
+  or slow (15 s), or `repo.github` failing to make a token, `unavailable`. Never a token.
 - **Preview:** best effort, a `https://….workers.dev` URL in the head's check runs (Workers Builds')
   or the pull request's comments.
 
@@ -94,9 +94,9 @@ dependency of the project nor on npm yet.
 ## Tests
 
 `proposals-github.test.ts` runs the `proposals` conformance suite, then the component against a fake
-GitHub on a local port (`fake-github.test-support.ts`) and a `github` in memory: dormant until GitHub
+GitHub on a local port (`fake-github.test-support.ts`) and a `repo.github` in memory: dormant until GitHub
 is connected, and the next call once it is; the token asked for every call, a rotated or refused one
-and `github`'s own failure said, never a token; `remote()` authorized by trusted code; the status of
+and `repo.github`'s own failure said, never a token; `remote()` authorized by trusted code; the status of
 each part; a pushed branch's pull request opened once, titled from its head commit, never reopened at a
 closed head; the list keeps only the prefix's branches of the repository itself; a page's patches
 bounded; approve refused for failing, pending or missing checks unless overridden, for a non-proposal,

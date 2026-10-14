@@ -1,7 +1,7 @@
 /**
  * Wake-ups for pi-durable (`@pikit/pi-adapter/wakeups`) on a real Durable Object:
  * deployment-cloudflare's `Conversation` class (`PlatformConversation`, `src/platform.ts`) over an App
- * of storage-do, platform-cloudflare (its `wakeups` on the object's one alarm) and a small driver
+ * of storage-do, actors-do (its `wakeups` on the object's one alarm) and a small driver
  * component, which is the integration recipe in miniature:
  *
  * - at start it opens the Harness over `storage.sql` on the app's clock, registers the `wakeups`
@@ -33,7 +33,7 @@ import {
   submitInput,
 } from "@pikit/pi-adapter/wakeups/testing";
 import { afterEach, expect, it, vi } from "vitest";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import { composeObjects } from "../src/platform.ts";
 import { resetObjects } from "./host.ts";
@@ -99,7 +99,7 @@ const inside = <R>(stub: DurableObjectStub, work: (app: (typeof apps)[number], s
 
 it("a run evicted during a model error's backoff is completed by the alarm nextWakeAt set", async () => {
   scripts = [[serviceUnavailable()], [fauxAssistantMessage("Paris.")]];
-  composeObjects([storageDo, platformCloudflare, driver]);
+  composeObjects([storageDo, actorsDo, driver]);
   const stub = env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.newUniqueId());
 
   // A message arrives; the object asks for a drive at once (as a channel's dispatch would).

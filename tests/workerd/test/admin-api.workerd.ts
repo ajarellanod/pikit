@@ -1,7 +1,7 @@
 /**
  * admin-api on Cloudflare, in real Durable Objects (deployment-cloudflare's `Conversation` class, as
  * `PlatformConversation`, `src/platform.ts`): each conversation's object runs its App (storage-do,
- * platform-cloudflare, runtime-pi with the scripted model, conversations-kv, a channel's object half,
+ * actors-do, runtime-pi with the scripted model, conversations-kv, a channel's object half,
  * and admin-api's default export), and the Worker's App serves admin-api's Worker half through
  * deployment-cloudflare's own server. Messages reach two chats; then the Worker lists them from the
  * index object (`admin-api:index`), reads one and its transcript, follows it live (the object's stream:
@@ -23,7 +23,7 @@ import adminApi, { worker as adminApiWorker } from "../../../registry/components
 import { INDEX_KEY } from "../../../registry/components/admin-api/files/src/pikit/admin-api/conversation-index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerServer } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
@@ -82,8 +82,8 @@ async function workerApp() {
     },
   });
   const app = await defineApp({
-    components: [platformCloudflare, auth, adminApiWorker, channel, server.component],
-    config: { "platform-cloudflare": { binding: PLATFORM_BINDING } },
+    components: [actorsDo, auth, adminApiWorker, channel, server.component],
+    config: { "actors-do": { binding: PLATFORM_BINDING } },
     target: "durable",
     logger: silentLogger,
   }).create();
@@ -102,7 +102,7 @@ const id = (value: string) => encodeURIComponent(value);
 
 it("the Worker lists the objects' conversations from the index, reads and follows one, resets one, and refuses the one left behind", async () => {
   const answers: string[] = [];
-  composeObjects([storageDo, storageKvSql, platformCloudflare, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
   const worker = await workerApp();
   const [a, b] = [`test:${crypto.randomUUID()}`, `test:${crypto.randomUUID()}`];
   try {
@@ -204,7 +204,7 @@ it("the Worker lists the objects' conversations from the index, reads and follow
 
 it("an operator's images, 1 MB in all, are stored in the object, reach the agent and come back in the transcript; the agents are the objects' App's", async () => {
   const answers: string[] = [];
-  composeObjects([storageDo, storageKvSql, platformCloudflare, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
   const worker = await workerApp();
   try {
     const agents = (await (await worker.fetch("/admin/api/agents")).json()) as { items: { name: string; tools: string[] }[] };
@@ -240,7 +240,7 @@ it("an operator's images, 1 MB in all, are stored in the object, reach the agent
 
 it("slash commands in real objects: listed from the index object's App, run in the conversation's object; its first answer gets a title from the model, which /name replaces", async () => {
   const answers: string[] = [];
-  composeObjects([storageDo, storageKvSql, platformCloudflare, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
   const worker = await workerApp();
   try {
     const commands = (await (await worker.fetch("/admin/api/commands")).json()) as { items: { name: string }[] };

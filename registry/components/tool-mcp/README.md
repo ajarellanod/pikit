@@ -8,7 +8,7 @@ you want from it; each becomes the agent tool `<server>_<tool>`. Pi's own MCP cl
   servers in config it provides nothing, so its `component.json` lists no `provides`: the keys come
   from your config.
 - **Uses, if installed:** `secrets`, for a server that needs a bearer token (`secrets-env`,
-  `secrets-cloudflare`). A server with a `secret` and no `secrets` provider stops the start.
+  `secrets-workers`). A server with a `secret` and no `secrets` provider stops the start.
   `storage.kv`, to keep each server's tool listing: a start then reaches no server (below).
 - **Hooks** (`component.json`): `doctor` (`doctor.ts`), its step of `pikit doctor`; `beforeDeploy`
   (`deploy.ts`), which `pikit up` runs before it builds and which writes `seed.ts` (below).
@@ -43,7 +43,7 @@ Each server:
 - `secret` (optional): the **name** of a secret holding a bearer token, sent as
   `Authorization: Bearer …`. Read through `secrets` before each request, so a rotated token is used at
   once. Set it like any secret: in `.env` with `secrets-env`, a Worker secret with
-  `secrets-cloudflare` (`pikit up` uploads `.env`'s).
+  `secrets-workers` (`pikit up` uploads `.env`'s).
 - `headers` (optional): extra request headers. Config is not secret: never a credential here.
 - `timeoutMs` (optional): how long one request may take, 60 000 ms by default.
 

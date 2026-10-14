@@ -5,7 +5,7 @@
  *
  * `deployment-cloudflare`'s entrypoints put a `WorkersHost` on each App's start context: the Worker's
  * `env` in both Apps, and in a Durable Object's App the object itself. The few components that must
- * touch the platform (`storage-do`, `secrets-cloudflare`, `platform-cloudflare`) read it in `start`:
+ * touch the platform (`storage-do`, `secrets-workers`, `actors-do`) read it in `start`:
  *
  *   start(ctx) {
  *     const object = ctx.value(WORKERS_HOST)?.object;
@@ -43,7 +43,7 @@ export interface WorkersHost {
     id: string;
     /** The object's DurableObjectStorage; its users type it structurally. */
     storage: unknown;
-    /** The entrypoint calls it when the object's alarm fires (platform components register it). */
+    /** The entrypoint calls it when the object's alarm fires (actors-do registers it). */
     onAlarm(handler: () => Promise<void>): void;
     /** The entrypoint calls it when a message is delivered to this object by RPC. */
     onDeliver(handler: (type: string, key: string, message: JsonValue) => Promise<void>): void;

@@ -24,7 +24,7 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "c
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
 import { createAnswerLog } from "../../../packages/pi-adapter/src/answers.ts";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import { composeObjects, PLATFORM_BINDING } from "../src/platform.ts";
@@ -144,7 +144,7 @@ async function workerApp() {
       return { start: () => void (mailbox = handle.get()) };
     },
   });
-  const worker = await defineApp({ components: [platformCloudflare, channel], config: { "platform-cloudflare": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
+  const worker = await defineApp({ components: [actorsDo, channel], config: { "actors-do": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
   await worker.start(withContextValue(WORKERS_HOST, { env: workerEnv }, BACKGROUND_CONTEXT));
   return {
     send: (key: string, message: { id: string; text: string }) => mailbox?.send(key, "test.message", message, worker.context()),
@@ -171,7 +171,7 @@ const alarmsUntil = (key: string, probe: () => Promise<void> | void) =>
 
 it("a run that settled while its log could not be written, then the object evicted: the next instance logs and announces it once", async () => {
   const answers: (string | undefined)[] = [];
-  composeObjects([storageDo, platformCloudflare, ...model(), runtimePi, channelActor(answers)]);
+  composeObjects([storageDo, actorsDo, ...model(), runtimePi, channelActor(answers)]);
   vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + DAY, shouldAdvanceTime: true });
   const worker = await workerApp();
   const key = `test:${crypto.randomUUID()}`;

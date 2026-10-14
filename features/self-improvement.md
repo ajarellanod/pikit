@@ -48,7 +48,7 @@ Three pieces, each a component or a file of the kit, each removable (P3):
    token appears nowhere the agent can read (SPEC C7).
    - **Cloudflare:** `execution-do`'s `git` is real git's subset (`clone` over HTTPS, `checkout -b`,
      `status`, `diff`, `add`, `commit`, `log`, `push origin <branch>`), pushes only to
-     `proposals.remote()` (the repository `github` connects, below) on branches under its prefix
+     `proposals.remote()` (the repository `repo.github` connects, below) on branches under its prefix
      (`pikit/self/`), with its `authorization()`, and keeps the credential out of the shell. It cannot
      run `bun test` (no processes): checks run in CI (below).
    - **Server: real git, no fences.** `execution-local` with `bash`, in a checkout under the app's
@@ -68,7 +68,7 @@ Three pieces, each a component or a file of the kit, each removable (P3):
    - **`proposals-github`** (Cloudflare): a pushed `pikit/self/*` branch gets its pull request,
      opened by the provider the first time it lists or reads it (the head commit's first line the
      title, the rest the description); Approve squash-merges through GitHub's API, Reject comments and
-     closes. GitHub through the `github` contract (below), in one module (`github-access.ts`): the
+     closes. GitHub through the `repo.github` contract (below), in one module (`github-access.ts`): the
      repository and a token asked for every call. Its checks are CI's: a GitHub Actions workflow it
      installs (`.github/workflows/pikit-checks.yml`: install by the lockfile, `typecheck`, `bun test`,
      `wrangler deploy --dry-run`); Approve is refused while they fail, run or never ran, unless the
@@ -97,7 +97,7 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      waits for `/health` and rolls back. A real lock needs the agent's commands elsewhere
      (features/sandboxed-execution.md). Chosen for less friction on servers.
 
-**GitHub on Cloudflare: a GitHub App, one credential. Built:** `github-app` and the `github`
+**GitHub on Cloudflare: a GitHub App, one credential. Built:** `repo-github-app` and the `repo.github`
 contract (the connected repository, a short-lived token for it). Workers Builds exposes no GitHub
 token (its GitHub App is Cloudflare's), so the bot needs its own access, and pasting tokens into
 Cloudflare is the step operators get wrong. The dashboard's Settings → GitHub → Connect creates a
@@ -105,15 +105,15 @@ GitHub App in the operator's own account from a manifest (private, no webhook; c
 requests write, checks and statuses read) and installs it on the bot's repository: two clicks. The
 app stores its private key sealed (a key derived from `PIKIT_ADMIN_TOKEN`) in one object, and mints
 installation tokens for that repository alone. **One credential, not two**: on Cloudflare the agent
-never sees a token (only trusted code asks `github`; its shell has no processes; its pushes are fenced
+never sees a token (only trusted code asks `repo.github`; its shell has no processes; its pushes are fenced
 to `pikit/self/*`; merging is only the operator-authenticated admin route's), so one
 repository-scoped credential is enough, and a ruleset on the default branch is an extra layer, not a
-requirement. Providers are interchangeable: `github-token` gives the same `github` from a
+requirement. Providers are interchangeable: `repo-github-token` gives the same `repo.github` from a
 `GITHUB_TOKEN` secret and a repository setting, for CLI users and servers; no consumer branches on
-which is installed. The one user of `github` is proposals-github, which also gives its `remote()`
+which is installed. The one user of `repo.github` is proposals-github, which also gives its `remote()`
 the credential. execution-do's `git` (real git's subset: `clone`, `checkout -b`, `add`, `commit`,
 `push origin pikit/self/<topic>`; no `git pr`: the pushed branch is the proposal) and
-extension-pikit-self read `proposals.remote()`, never `github`: the workspace pushes where proposals
+extension-pikit-self read `proposals.remote()`, never `repo.github`: the workspace pushes where proposals
 go, under their prefix, whichever provider that is.
 `proposals-github` reads GitHub only through it (built).
 
@@ -150,7 +150,7 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 ## Order
 
 1. `pikit-self`, with the docs (`docs/`): cheap, and everything else uses them. Built.
-2. Proposals on Cloudflare (**built**): `admin-proposals` with `proposals-github` and `github-app`
+2. Proposals on Cloudflare (**built**): `admin-proposals` with `proposals-github` and `repo-github-app`
    (the `telegram-cloudflare` preset's feature group, `--with admin-proposals`), dormant: the
    button's form asks no GitHub token, and GitHub is connected from Settings → GitHub. Left: the
    ruleset, advised, which the operator creates on GitHub (the status says whether one applies).

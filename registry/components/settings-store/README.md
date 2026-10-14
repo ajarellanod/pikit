@@ -8,7 +8,7 @@ component declares its own; a change applies to the next run, with no deploy and
   `http.route`: the routes below, one set for every component's section, its operator surface.
 - **Requires:** `storage.sql` (where the values are kept). **Uses, if installed:** `admin.auth`
   (without it, its routes answer nobody). On Cloudflare, also `actor.inbox` and `actor.mailbox`
-  (platform-cloudflare).
+  (actors-do).
 - **Targets:** `server` and `durable` (Cloudflare): below, how it works on each.
 - **Installs to:** `src/pikit/settings-store/`.
 - **npm dependencies:** `typebox`.

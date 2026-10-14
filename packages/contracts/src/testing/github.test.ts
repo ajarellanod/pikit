@@ -1,6 +1,6 @@
 /**
- * The `github` suite run against an in-memory double: proof that the suite asks nothing specific to
- * one provider. A real project connects GitHub through a component such as `github-app`.
+ * The `repo.github` suite run against an in-memory double: proof that the suite asks nothing specific to
+ * one provider. A real project connects GitHub through a component such as `repo-github-app`.
  */
 
 import { test } from "bun:test";
@@ -17,7 +17,7 @@ for (const c of createGitHubConformance(() => {
       defineComponent({
         name: "github-memory",
         setup(pikit) {
-          pikit.provide("github", {
+          pikit.provide("repo.github", {
             repository: async () => connected,
             async token() {
               if (connected === undefined) throw new GitHubNotConnectedError("connect GitHub from the dashboard's Settings → GitHub");

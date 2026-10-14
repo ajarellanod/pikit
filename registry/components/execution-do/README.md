@@ -64,7 +64,7 @@ They are code, not instructions to the model:
   not connected), a push says so. execution-do never knows which provider it is. Those branches are
   the agent's own, so a push replaces what is there.
 - **The credential never reaches the shell.** It is the remote's `authorization()` (proposals-github:
-  `github`'s token, github-app's short-lived installation token or github-token's secret), asked for
+  `repo.github`'s token, repo-github-app's short-lived installation token or repo-github-token's secret), asked for
   when `git` needs it and sent only to that remote: other repositories are cloned without one (public
   GitHub repositories only). The shell has no process that could read one, and a push reaches only
   the prefix's branches: one repository-scoped credential is enough, and a ruleset on `main` an extra

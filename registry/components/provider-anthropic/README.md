@@ -47,7 +47,7 @@ On `durable`, API keys only: a Claude subscription login stays a server's. A log
 one), and pi-ai reaches its OAuth flow only for a stored OAuth credential; that flow loads with an
 import no bundler follows, so a Worker could not refresh a subscription's tokens anyway. The
 component is the same on both targets. An API key needs nothing of it: set `ANTHROPIC_API_KEY` as a Worker secret (`wrangler secret put
-ANTHROPIC_API_KEY`), which `secrets-cloudflare` reads. Workload identity federation reads a token
+ANTHROPIC_API_KEY`), which `secrets-workers` reads. Workload identity federation reads a token
 file, so it is a server's too.
 
 ## Tests

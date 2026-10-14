@@ -111,10 +111,10 @@ test("a component with a Worker half goes in both lists; remove takes it out of 
   expect(back).toBe(CLOUDFLARE_CONFIG);
 
   // A component that works in both Apps is the same entry in each.
-  const both = addComponent(CLOUDFLARE_CONFIG, { name: "secrets-cloudflare", worker: "secretsCloudflare" });
-  expect(both).toContain("    agents,\n    secretsCloudflare,\n  ],");
-  expect(both).toContain("  components: [\n    secretsCloudflare,\n  ],\n  config: workerConfig,");
-  expect(removeComponent(both, "secrets-cloudflare")).toBe(CLOUDFLARE_CONFIG);
+  const both = addComponent(CLOUDFLARE_CONFIG, { name: "secrets-workers", worker: "secretsWorkers" });
+  expect(both).toContain("    agents,\n    secretsWorkers,\n  ],");
+  expect(both).toContain("  components: [\n    secretsWorkers,\n  ],\n  config: workerConfig,");
+  expect(removeComponent(both, "secrets-workers")).toBe(CLOUDFLARE_CONFIG);
 
   // Listed in the Worker by hand, it is taken out of it too: remove undoes both Apps.
   const byHand = addComponent(CLOUDFLARE_CONFIG, { name: "storage-do" }).replace("  components: [\n  ],\n  config: workerConfig", "  components: [\n    storageDo,\n  ],\n  config: workerConfig");
@@ -122,9 +122,9 @@ test("a component with a Worker half goes in both lists; remove takes it out of 
 });
 
 test("a Worker half needs the Worker's App: a file without one, or with two lists in it, is refused", () => {
-  expect(() => addComponent(BASE, { name: "secrets-cloudflare", worker: "secretsCloudflare" })).toThrow(/no `export const worker = defineApp/);
+  expect(() => addComponent(BASE, { name: "secrets-workers", worker: "secretsWorkers" })).toThrow(/no `export const worker = defineApp/);
   const twoLists = CLOUDFLARE_CONFIG.replace("  config: workerConfig,\n", "  config: workerConfig,\n  extra: { components: [\n  ] },\n");
-  expect(() => addComponent(twoLists, { name: "secrets-cloudflare", worker: "secretsCloudflare" })).toThrow(/exactly one `components: \[` list in `export const worker`, found 2/);
+  expect(() => addComponent(twoLists, { name: "secrets-workers", worker: "secretsWorkers" })).toThrow(/exactly one `components: \[` list in `export const worker`, found 2/);
   // No workerConfig (a server project): nothing to remove there.
   expect(removeConfigEntry(BASE, "channel-telegram-webhook-worker", "workerConfig")).toBe(BASE);
 });

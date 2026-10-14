@@ -21,8 +21,8 @@ epoch written conditionally in the bucket, as `idFromName` gives one owner on Cl
 ## How it fits pikit
 - `deployment-celld` is a `deployment-*` component of the `durable` target, a second provider beside
   `deployment-cloudflare` (a new provider of an existing runtime model changes no core, SPEC §4).
-  Both Apps stay as they are: `storage-do`, `execution-do`, `platform-cloudflare`,
-  `secrets-cloudflare` and `channel-telegram-webhook` ran unchanged in the spike.
+  Both Apps stay as they are: `storage-do`, `execution-do`, `actors-do`,
+  `secrets-workers` and `channel-telegram-webhook` ran unchanged in the spike.
 - It writes the wrangler config celld accepts (the differences are below), runs `celld deploy` for
   `pikit up` (the nodes adopt a deployment from the bucket within 30 s, no SSH) and waits for
   `/health`.

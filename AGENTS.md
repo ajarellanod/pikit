@@ -36,7 +36,7 @@ or a registry's own contract:
    (`WORKERS_HOST`) live behind their own subpath.
 3. Depend on the narrowest contract that states the intent. Never reach for a lower-level capability
    or duplicate config that a contract already carries (execution-do pushes to `proposals.remote()`,
-   with its `branchPrefix`, never to `github` with a prefix of its own).
+   with its `branchPrefix`, never to `repo.github` with a prefix of its own).
 4. Guarantees, not policy. Contracts state observable guarantees; components choose policy. Shared
    helpers implement protocol, with policy passed in.
 5. Every stated invariant is enforced in one shared place (the helper, the provider entrypoint) and

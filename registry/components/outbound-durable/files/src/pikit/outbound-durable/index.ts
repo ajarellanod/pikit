@@ -23,7 +23,7 @@
  *
  * Targets: `server` and `durable`: it imports nothing platform-specific; its storage is
  * `storage.sql`, its time the app's clock, and its retries are `wakeups` (`wakeups-timers` on a
- * server, `platform-cloudflare`'s alarm in a Durable Object, where nothing runs between events).
+ * server, `actors-do`'s alarm in a Durable Object, where nothing runs between events).
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";

@@ -6,16 +6,16 @@
 # deployment-cloudflare's README, "Your Telegram bot on Cloudflare", walks through it.
 #
 # A base, not an alias of cloudflare-minimal: an alias only answers its base's questions (`choose`),
-# and cloudflare-minimal asks none. `pikit add` puts each half in its App (C1): secrets-cloudflare and
-# platform-cloudflare in both, channel-telegram-webhook's Worker half in the Worker's, everything else
+# and cloudflare-minimal asks none. `pikit add` puts each half in its App (C1): secrets-workers and
+# actors-do in both, channel-telegram-webhook's Worker half in the Worker's, everything else
 # in each conversation's Durable Object. Offered along the way (`pikit add` offers a provider for what is missing): outbound-durable, for the
-# channel's answers, its retries woken by the object's alarm (platform-cloudflare's `wakeups`). The starter agent's model is OpenRouter's (provider-anthropic takes only API keys on Cloudflare),
+# channel's answers, its retries woken by the object's alarm (actors-do's `wakeups`). The starter agent's model is OpenRouter's (provider-anthropic takes only API keys on Cloudflare),
 # and it names every tool below, and pikit-self (extension-pikit-self: what it is made of, and how
 # each part is changed).
 title: "Telegram on Cloudflare: a Worker, and a Durable Object per chat"
 components:
-  - secrets-cloudflare
-  - platform-cloudflare
+  - secrets-workers
+  - actors-do
   - storage-do
   - storage-kv-sql
   - provider-openrouter
@@ -41,7 +41,7 @@ choose:
     multiple: true
 # What `pikit new` offers to add, several at once, with the dashboard (`--ui`): each by its `title`,
 # `--with <component>` in a script. tool-fetch and tool-websearch-brave are installed above already.
-# Self-improvement (admin-proposals, with proposals-github and github-app, its group) starts dormant:
+# Self-improvement (admin-proposals, with proposals-github and repo-github-app, its group) starts dormant:
 # it is connected after deploying: the dashboard's Settings → GitHub → Connect creates a GitHub App in
 # the operator's account and installs it on the repository, and the app mints its own tokens.
 features:
@@ -53,6 +53,6 @@ features:
   - tool-mcp
   - health-registry
   # Self-improvement, a group: the agent's pushed branches become pull requests on the project's GitHub
-  # repository (proposals-github, through github-app's access), which you approve in the dashboard
+  # repository (proposals-github, through repo-github-app's access), which you approve in the dashboard
   # (admin-proposals).
-  - [admin-proposals, proposals-github, github-app]
+  - [admin-proposals, proposals-github, repo-github-app]

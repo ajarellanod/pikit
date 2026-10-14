@@ -182,7 +182,7 @@ export const CLOUDFLARE_CONFIG = `/**
  *   channel, the mailbox, secrets. The Worker checks and routes; the object owns the conversation.
  *   \`pikit add\` lists here a component's Worker half (\`channelTelegramWebhookWorker\`, configured
  *   under \`"channel-telegram-webhook-worker"\` in \`workerConfig\`), or a component that works in both
- *   Apps (\`secrets-cloudflare\`).
+ *   Apps (\`secrets-workers\`).
  *
  * \`pikit add\` and \`pikit remove\` edit this file: one import line per component, one entry per line
  * in \`components\`, and one key per component in \`config\`. Edit it yourself too; keep that shape.

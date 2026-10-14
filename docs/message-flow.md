@@ -95,7 +95,7 @@ repeated `messageId` answers from `agent.submissions.get`, and `GET
 
 ## On Cloudflare (`channel-telegram-webhook`)
 
-Two Apps (C1). The Worker's App has `secrets-cloudflare`, `platform-cloudflare` and
+Two Apps (C1). The Worker's App has `secrets-workers`, `actors-do` and
 `channel-telegram-webhook-worker`; each conversation's Durable Object runs the rest
 (`storage-do`, `storage-kv-sql`, `conversations-kv`, `router-basic`, `runtime-pi`,
 `channel-telegram-webhook`, `execution-do`, tools, and outbound-durable if offered).
@@ -106,37 +106,37 @@ Two Apps (C1). The Worker's App has `secrets-cloudflare`, `platform-cloudflare` 
    `X-Telegram-Bot-Api-Secret-Token` header (`401` otherwise), keeps private text messages, checks the
    allowed users (a stranger is told, or sent as `telegram.stranger` when the bot takes logins).
 2. **Hand to the actor.** `actor.mailbox.send("telegram:<chat>", "telegram.update", update, ctx)`.
-   platform-cloudflare (`platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts`) makes it
+   actors-do (`actors-do/files/src/pikit/actors-do/index.ts`) makes it
    an RPC: `env.CONVERSATION.get(env.CONVERSATION.idFromName(key)).deliver(type, key, message)`.
 3. **The object starts.** The `Conversation` class (`deployment-cloudflare/.../entrypoint.ts`, logic in
    `host.ts`) composes `pikit.config.ts`'s default export on its first event, inside
    `blockConcurrencyWhile` (20 s start deadline), with `WORKERS_HOST.object` on the start context. Its
-   `deliver` calls the handler platform-cloudflare registered with `onDeliver`, which calls the
+   `deliver` calls the handler actors-do registered with `onDeliver`, which calls the
    `actor.inbox` handler for `telegram.update`.
 4. **Admit (object).** channel-telegram-webhook's handler (`index.ts`, `inbox.ts`) checks the update
    is for this chat, answers `/start`, `/help`, `/new`, `/login` itself, and otherwise calls
    `admitInbound` exactly as on a server (same request id and key, so a redelivery is `duplicate`).
    `conversations-kv` keeps its pointer in `storage-kv-sql` over `storage-do` (the object's SQLite).
-5. **Dispatch.** runtime-pi, with `wakeups` from platform-cloudflare, asks for the wakeup
+5. **Dispatch.** runtime-pi, with `wakeups` from actors-do, asks for the wakeup
    `runtime-pi.drive` before `dispatch` resolves, so a run is never left without something to drive it.
    The handler then kicks "typing…" (`channel-telegram-webhook.typing`) and wakes delivery.
 6. **Ack.** The handler resolves, the RPC resolves, the Worker answers Telegram `200`. If anything
    rejected, the Worker answers `500` and Telegram delivers again.
-7. **Run, in slices.** The object's alarm fires. platform-cloudflare runs one slice (`sliceMs`, 60 s):
+7. **Run, in slices.** The object's alarm fires. actors-do runs one slice (`sliceMs`, 60 s):
    every due wakeup starts, one run per name. `runtime-pi.drive` opens pi-durable if this instance has
    not (after an eviction), resumes what is pending, and waits for the run until it ends or the slice
    deadline cancels its context; then it asks again. A wait for a time only (a model retry) suspends
    pi-durable so the object can be evicted until then. Each model call or fetch is a subrequest.
 8. **Settle.** As on a server: the answers row in the object's SQL, then `agent.settled`.
 9. **Deliver.** channel-telegram-webhook's listener calls `delivery.wake`, which asks for the wakeup
-   `channel-telegram-webhook.answers` now; platform-cloudflare starts it in the same slice.
+   `channel-telegram-webhook.answers` now; actors-do starts it in the same slice.
    `startAnswerDelivery` (given `wakeups`) runs the same pass as on a server, at most `piecesPerRun`
    (20) sends per run, stopping at the slice deadline and asking again. The cursor and marks live in
    the object's `storage.kv`: each object delivers its own conversation.
 10. **Platform.** The transport sends to Telegram (a subrequest per piece).
 
 What survives an eviction at any point: the message (committed in step 5), the run (checkpointed), the
-wakeup rows (`platform_cloudflare_wakeups`), the answers row, the cursor and marks. The next alarm or
+wakeup rows (`actors_do_wakeups`), the answers row, the cursor and marks. The next alarm or
 message starts a new App and continues.
 
 ## What a crash costs

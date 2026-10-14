@@ -19,7 +19,7 @@
  *   App, `GUARD_FIRST_MS` ahead, doubling at each failed start in a row up to `GUARD_MAX_MS`. An alarm
  *   set during a handler that throws replaces the platform's retry (workerd's `alarm-scheduler.c++`:
  *   "If an alarm is queued, there's no point in retrying the current one"), so the guard is the retry,
- *   and it never ends. Once the App runs, its alarm's owner (platform-cloudflare's `wakeups`) sets the
+ *   and it never ends. Once the App runs, its alarm's owner (actors-do's `wakeups`) sets the
  *   alarm as its rows say, which replaces the guard.
  * - **The Worker** (`createWorkerHost`) composes `export const worker` once per isolate, on its first
  *   request, with `WORKERS_HOST` `{ env, origin }` on its start context (`origin`: that request's, where
@@ -132,7 +132,7 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
       id: state.id.toString(),
       storage: state.storage,
       // One of each: the object has one alarm and one RPC entry, and one component multiplexes each
-      // (platform-cloudflare's wakeups and mailbox). A second one is a composition mistake, said loudly.
+      // (actors-do's wakeups and mailbox). A second one is a composition mistake, said loudly.
       onAlarm(handler) {
         if (onAlarm !== undefined) throw new Error("deployment-cloudflare: the object's alarm already has a handler; one component multiplexes the alarm (wakeups)");
         onAlarm = handler;

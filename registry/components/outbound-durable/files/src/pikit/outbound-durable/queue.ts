@@ -7,7 +7,7 @@
  * again whenever a send ends or something changes (an enqueue, an attach), and ends once nothing is
  * in flight and nothing is due. Before it ends it asks for the next run, at the time the next piece is
  * due. So a retry is a wakeup: on a server `wakeups-timers` runs it, and on Cloudflare
- * `platform-cloudflare` runs it in the object's alarm, with no new event (C4). What is due is in the
+ * `actors-do` runs it in the object's alarm, with no new event (C4). What is due is in the
  * table, and when, in the request: nothing waits in memory.
  *
  * - **A run's context is cut** (its slice's deadline, the app's stop): its sends are aborted, go back

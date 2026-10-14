@@ -1,6 +1,6 @@
 /**
  * provider-failover on Cloudflare: composed in a real SQLite-backed object's App with `storage-do`,
- * `runtime-pi`, `secrets-cloudflare`, `provider-openai` and `provider-anthropic`, an agent on
+ * `runtime-pi`, `secrets-workers`, `provider-openai` and `provider-anthropic`, an agent on
  * `failover/main` (OpenAI's gpt-5.5, then Anthropic's claude-sonnet-4-6) answers while OpenAI refuses
  * with a 429: through pi-ai's real SDKs, loaded by their lazy APIs in workerd, each with its own key
  * from the Worker's secrets. Both APIs are fakes behind `globalThis.fetch` (the test and the object
@@ -15,7 +15,7 @@ import providerAnthropic from "../../../registry/components/provider-anthropic/f
 import providerFailover from "../../../registry/components/provider-failover/files/src/pikit/provider-failover/index.ts";
 import providerOpenai from "../../../registry/components/provider-openai/files/src/pikit/provider-openai/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
-import secretsCloudflare from "../../../registry/components/secrets-cloudflare/files/src/pikit/secrets-cloudflare/index.ts";
+import secretsWorkers from "../../../registry/components/secrets-workers/files/src/pikit/secrets-workers/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import { inObject, workerEnv } from "./host.ts";
 
@@ -85,7 +85,7 @@ it("provider-failover in a real object: OpenAI's rate limit moves the request to
       },
     });
     const app = await defineApp({
-      components: [secretsCloudflare, storageDo, providerOpenai, providerAnthropic, providerFailover, agents, runtimePi, channel],
+      components: [secretsWorkers, storageDo, providerOpenai, providerAnthropic, providerFailover, agents, runtimePi, channel],
       config: { "provider-failover": { chains: { main: ["openai/gpt-5.5", "anthropic/claude-sonnet-4-6"] } } },
       target: "durable",
       logger: silentLogger,

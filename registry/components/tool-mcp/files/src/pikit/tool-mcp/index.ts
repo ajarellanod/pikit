@@ -148,7 +148,7 @@ export default defineComponent({
       async start(ctx) {
         const missing = servers.find((server) => server.secret !== undefined && secrets.get() === undefined);
         if (missing !== undefined) {
-          throw new Error(`tool-mcp: the MCP server "${missing.name}" needs the secret ${missing.secret}, but no component provides secrets (install one: secrets-env, secrets-cloudflare)`);
+          throw new Error(`tool-mcp: the MCP server "${missing.name}" needs the secret ${missing.secret}, but no component provides secrets (install one: secrets-env, secrets-workers)`);
         }
         cache = storage.get()?.namespace(NAMESPACE);
         await Promise.all(servers.map((server) => describe(server, cache, ctx)));

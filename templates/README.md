@@ -89,12 +89,12 @@ first HTTPS request (`channel-telegram-webhook`'s README, "Registering the webho
 template's README tells its user to open `/telegram/setup` if the build did not.
 
 **Self-improvement, connected after deploying.** The template has `admin-proposals`, `proposals-github` and
-`github-app` (the preset's feature group, `--with admin-proposals`), dormant: the button cannot know the repository
+`repo-github-app` (the preset's feature group, `--with admin-proposals`), dormant: the button cannot know the repository
 it is about to create, and a GitHub token is not something to ask of a person deploying a bot for the
 first time. So the form stays short (`notAsked` says why for each token) and the App starts without
 them. The operator connects GitHub from the dashboard's Settings → GitHub in two clicks: a GitHub App
 created in their account from a manifest, installed on the repository the button made; the app then
-mints its own short-lived tokens (github-app's README). Workers Builds exposes no GitHub token of its
+mints its own short-lived tokens (repo-github-app's README). Workers Builds exposes no GitHub token of its
 own (its GitHub App is Cloudflare's), so the bot needs its own access.
 
 ## Checking one

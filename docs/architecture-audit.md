@@ -66,7 +66,7 @@ Legend:
 |---|---|---|---|---|---|---|
 | 1 | outbound-durable declares `durable`, but sends and retries from a 1 s polling loop that no event holds. telegram-cloudflare installs it into the object, so retries and cut sends wait for the next event, or are abandoned after 24 h. | high | A, F | `component.json:6-9` targets server+durable. `queue.ts:185-203` is a `while(running)…clock.sleep`; there is no `wakeups`. `delivery.ts:147-154` marks an answer done once enqueued. `offers.test.ts:66-70` and `cli.test.ts:186-205` install it on durable. No workerd test covers it. | Set `targets: ["server"]`; channel-telegram-webhook then falls back to its wakeup-sliced direct delivery. Update the tests and the preset comment. Later, add a wakeups mode plus a workerd eviction test (M). | S |
 | 2 | The server Telegram poller drops an update after 3 failed admissions (about 3 s) and never tells the sender. The webhook twin answers 500 so Telegram redelivers. | medium | F | `poller.ts:18,63-77`: `offset = update_id + 1` after the third failure. No test covers it. | Use a capped, time-bounded backoff (minutes), and keep a cutoff for poison messages. Before skipping, tell the sender. Add a channel conformance case for transient admission failure. | S |
-| 3 | When an App start keeps failing, Cloudflare's 6 alarm retries (about 2 min) run out and no alarm remains. Pending runs and answers stall until that chat gets another message. | medium | F | `host.ts:113-139`: `alarm()` awaits `start()` and rethrows. `alarmInfo.retryCount` is unused. Nothing in the platform-cloudflare README or SPEC §4 mentions the retry limit. | Set a guard alarm before `start()`, with backoff from `retryCount`. Document the limit. Add a host test for repeated start failures. | M |
+| 3 | When an App start keeps failing, Cloudflare's 6 alarm retries (about 2 min) run out and no alarm remains. Pending runs and answers stall until that chat gets another message. | medium | F | `host.ts:113-139`: `alarm()` awaits `start()` and rethrows. `alarmInfo.retryCount` is unused. Nothing in the actors-do README or SPEC §4 mentions the retry limit. | Set a guard alarm before `start()`, with backoff from `retryCount`. Document the limit. Add a host test for repeated start failures. | M |
 | 4 | outbound-durable abandons an answer after about 12.6 min of transient failures and only logs a warning, while the direct path it replaces retries forever. The contract and README describe it as the stronger option. | medium | F | `queue.ts:20-23,139-155` (`MAX_FAILURES = 5`, `warn`); `delivery.ts:140,248-256`; `outbound.ts:12-15`; outbound-durable README:4,14. It is offered by default. | Stop counting transient failures; keep only `MAX_AGE_MS`. Log at error level. Correct the docs. State direct vs queued delivery in one place in the `delivery.ts` header. | S |
 | 5 | Only 3 of pi-ai's ~42 providers are reachable, and users cannot add another (direct OpenAI/Google, Bedrock/Vertex/Azure, Workers AI, OpenAI-compatible) without a kit release. GPT and Gemini are reachable today through OpenRouter. | medium | J | `pi-adapter/package.json:15-17` has 3 subpaths. `index.ts:27-28` exports types only (no `createProvider`, no API wrappers). Pi imports are refused by `checks.ts:208` and `doctor.ts:168-176`. SKILL.md:86 promises "a pi-ai provider". | Section 6, providers. | M |
 | 6 | Removal and doctor see only the capability graph. Removing the router or server-bun leaves a green project that answers nobody. Removing outbound-durable orphans queued answers with only a README warning. | medium | E | `router-basic` has `provides: []`. `checkNoDependents` (`remove.ts:212-235`) ignores pipelines. `admitInbound` returns `no_route` (`inbound.ts:112-115`). `unusedProviders` is only a note, and `remove`/`add` run doctor quietly. | `remove` refuses to leave `route.resolve` empty while a channel exists, and refuses to drop `http.route` with no server (the Worker App is exempt), unless `--force`. Doctor reports both. Print notes in add and remove. | S |
@@ -213,14 +213,14 @@ If the registry grows past about 10 providers, generate the components from a `{
 | log-events | keep | Observer; removable. |
 | mailbox-local | keep | Server half of C2. |
 | outbound-durable | keep, **server only** until it is driven by wakeups | #1, #4. |
-| platform-cloudflare | keep | One alarm and RPC force wakeups, inbox and mailbox together. |
+| actors-do | keep | One alarm and RPC force wakeups, inbox and mailbox together. |
 | provider-anthropic | keep; targets both | Own environment variables and OAuth. |
 | provider-faux | keep | Trials and tests without an account. |
 | provider-openrouter | keep | Own key; both targets. |
 | router-basic | keep | Fallback stage. |
 | router-rules | keep | Rule stage. |
 | runtime-pi | keep | Owned wiring of the runtime. |
-| secrets-cloudflare | keep | Target twin. |
+| secrets-workers | keep | Target twin. |
 | secrets-env | keep | Target twin. |
 | server-bun | keep | Own dependency; server host. |
 | storage-do | keep | Target twin. |

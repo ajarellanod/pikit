@@ -41,7 +41,7 @@ pikit new <dir> [--target server|durable] [--preset <name> [--with <component>].
   components or groups: on `http`, `router-rules`, `tool-mcp`, `health-registry` and
   Self-improvement (`--with admin-proposals`: with `proposals-local`); on
   `telegram-cloudflare`, `router-rules`, `tool-mcp`, `health-registry` and Self-improvement (with
-  `proposals-github` and `github-app`). Self-improvement brings the dashboard (as `--ui`), and on a
+  `proposals-github` and `repo-github-app`). Self-improvement brings the dashboard (as `--ui`), and on a
   server the starter agent names `bash` (the steward runs git and the tests in its shell).
   `registry validate` checks each one composes alone and all together.
 - Everything refusable is refused before the first write. A failure after it leaves the directory

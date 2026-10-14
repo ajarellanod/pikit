@@ -1,18 +1,18 @@
 /**
- * `github`: the project's own repository on GitHub, and a short-lived token for it (SPEC §6: the
+ * `repo.github`: the project's own repository on GitHub, and a short-lived token for it (SPEC §6: the
  * agent proposes its changes as pull requests there, the operator approves them from the dashboard).
- * A provider connects it its own way, and providers are interchangeable: `github-app` (a GitHub App the
+ * A provider connects it its own way, and providers are interchangeable: `repo-github-app` (a GitHub App the
  * operator creates and installs from the dashboard, whose installation tokens the app mints itself) or
- * `github-token` (a `GITHUB_TOKEN` secret and a configured repository). Its consumers only ask, and
+ * `repo-github-token` (a `GITHUB_TOKEN` secret and a configured repository). Its consumers only ask, and
  * never branch on which is installed:
  *
- *   const github = pikit.useOptional("github");
+ *   const github = pikit.useOptional("repo.github");
  *   // when used:
  *   const repository = await github.get()?.repository(ctx);   // "ana/my-bot", or undefined
  *   const token = await github.get().token(ctx);               // for that repository
  *
  * Consumer: the proposals' GitHub provider (reading, opening, merging, closing pull requests, and the
- * credential of its `remote()`, which the steward's `git` pushes to: execution-do never reads `github`).
+ * credential of its `remote()`, which the steward's `git` pushes to: execution-do never reads `repo.github`).
  * Without a provider, nothing is connected.
  *
  * What every provider guarantees:
@@ -60,6 +60,6 @@ export interface GitHubAccess {
 
 declare module "@pikit/core" {
   interface AppCapabilities {
-    github: GitHubAccess;
+    "repo.github": GitHubAccess;
   }
 }

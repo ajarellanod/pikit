@@ -63,7 +63,7 @@ function project(target: "server" | "durable"): string {
 const HALF = (provides: string[], requires: string[]) => ({ provides, requires, optional: [] });
 
 /**
- * - `secrets-fake`: provides `secrets`, in both Apps (`apps.worker: "default"`), as secrets-cloudflare.
+ * - `secrets-fake`: provides `secrets`, in both Apps (`apps.worker: "default"`), as secrets-workers.
  * - `channel-fake`: an object's half that requires `secrets`, and a Worker half, `channel-fake-worker`
  *   (the export `worker`), that requires `secrets` and serves a route; an after-deploy hook.
  */

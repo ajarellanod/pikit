@@ -14,8 +14,8 @@
       { "name": "OBJECTS", "class_name": "TestObject" },
       // deployment-cloudflare's class, under the binding its entrypoint reads (src/deployment.ts).
       { "name": "CONVERSATION", "class_name": "Conversation" },
-      // The same class, over the Apps platform-cloudflare's tests compose (src/platform.ts); they set
-      // platform-cloudflare's binding to this name.
+      // The same class, over the Apps actors-do's tests compose (src/platform.ts); they set
+      // actors-do's binding to this name.
       { "name": "PLATFORM_CONVERSATION", "class_name": "PlatformConversation" }
     ]
   },
@@ -27,6 +27,6 @@
   ],
   // The version deployment-cloudflare's /health reports.
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
-  // A variable secrets-cloudflare must read back from the real env.
+  // A variable secrets-workers must read back from the real env.
   "vars": { "PIKIT_WORKERD_VAR": "from wrangler vars" }
 }

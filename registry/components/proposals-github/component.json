@@ -3,7 +3,7 @@
   "name": "proposals-github",
   "version": "0.0.0",
   "title": "Self-improvement on GitHub: the agent's changes as pull requests",
-  "description": "proposals as GitHub pull requests (Cloudflare): a pikit/self/* branch the steward pushes gets its pull request, which an operator merges or closes from the dashboard; GitHub reached through the github contract (github-app, github-token); and the project's CI workflow. Dormant until GitHub is connected, after deploying.",
+  "description": "proposals as GitHub pull requests (Cloudflare): a pikit/self/* branch the steward pushes gets its pull request, which an operator merges or closes from the dashboard; GitHub reached through the github contract (repo-github-app, repo-github-token); and the project's CI workflow. Dormant until GitHub is connected, after deploying.",
   "targets": [
     "durable"
   ],
@@ -11,7 +11,7 @@
     "pikit": "0.0.0",
     "contracts": "0.0.0",
     "capabilities": [
-      "github"
+      "repo.github"
     ]
   },
   "optional": {

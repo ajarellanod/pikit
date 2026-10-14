@@ -2,7 +2,7 @@
  * Answer delivery without an outbox (`startAnswerDelivery` sending directly, its retries as wakeups),
  * in a real object of deployment-cloudflare's `Conversation` class (`PlatformConversation`), composed
  * as the telegram-cloudflare preset composes a conversation's object minus `outbound-durable`:
- * storage-do, storage-kv-sql, platform-cloudflare, runtime-pi, conversations-kv, router-basic and
+ * storage-do, storage-kv-sql, actors-do, runtime-pi, conversations-kv, router-basic and
  * channel-telegram-webhook's object half, with the scripted model and secrets of the test's own.
  *
  * Telegram is a fake behind `globalThis.fetch` (the tests and the objects share one isolate). Its
@@ -22,7 +22,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
 import channelTelegramWebhook, { UPDATE_TYPE } from "../../../registry/components/channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
-import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import routerBasic from "../../../registry/components/router-basic/files/src/pikit/router-basic/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
@@ -90,7 +90,7 @@ async function workerApp() {
       return { start: () => void (mailbox = handle.get()) };
     },
   });
-  const worker = await defineApp({ components: [platformCloudflare, channel], config: { "platform-cloudflare": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
+  const worker = await defineApp({ components: [actorsDo, channel], config: { "actors-do": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
   await worker.start(withContextValue(WORKERS_HOST, { env: workerEnv }, BACKGROUND_CONTEXT));
   return {
     write: (key: string, messageId: number, text: string) =>
@@ -109,7 +109,7 @@ const DAY = 24 * 60 * 60 * 1_000;
 it("an answer delivered directly (no outbox) waits for its retry across an eviction, and the next instance delivers it once", async () => {
   const telegram = fakeTelegram(1);
   globalThis.fetch = telegram.fetch;
-  composeObjects([storageDo, storageKvSql, platformCloudflare, secrets, ...model(), runtimePi, conversationsKv, routerBasic, channelTelegramWebhook], {
+  composeObjects([storageDo, storageKvSql, actorsDo, secrets, ...model(), runtimePi, conversationsKv, routerBasic, channelTelegramWebhook], {
     "router-basic": { defaultAgent: "scripted" },
     "channel-telegram-webhook": { apiBase: API },
   });
@@ -120,7 +120,7 @@ it("an answer delivered directly (no outbox) waits for its retry across an evict
   /** The delivery's retry row, read in the object. */
   const retryAt = () =>
     runInDurableObject(object(), (_instance, state) =>
-      state.storage.sql.exec("SELECT time FROM platform_cloudflare_wakeups WHERE name = ?", "channel-telegram-webhook.answers").toArray()[0]?.time as number | undefined,
+      state.storage.sql.exec("SELECT time FROM actors_do_wakeups WHERE name = ?", "channel-telegram-webhook.answers").toArray()[0]?.time as number | undefined,
     );
   try {
     await worker.write(key, 1, "hello");

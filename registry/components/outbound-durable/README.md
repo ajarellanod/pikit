@@ -6,7 +6,7 @@ provides `outbound.queue` (@pikit/contracts' `outbound.ts`) on `storage.sql` and
 
 ```sh
 pikit add storage-sqlite      # the database it keeps its records in
-pikit add wakeups-timers      # what wakes it for a retry (platform-cloudflare on Cloudflare)
+pikit add wakeups-timers      # what wakes it for a retry (actors-do on Cloudflare)
 pikit add outbound-durable
 ```
 
@@ -35,7 +35,7 @@ guarantees, and how they differ (receipts here; retries that never give up there
   An abandoned piece is logged as an error, emits `outbound.abandoned` and gets a receipt.
 - **Woken by `wakeups`.** Sends and retries run in the handler it registers with `wakeups`
   (`outbound-durable`): when an answer is enqueued, and at the time the next piece is due. On a
-  server `wakeups-timers` wakes it; on Cloudflare `platform-cloudflare` does, in the Durable Object's
+  server `wakeups-timers` wakes it; on Cloudflare `actors-do` does, in the Durable Object's
   alarm, so a retry runs on time with the object evicted and no new message. A run that reaches its
   slice's deadline stops its sends (they go again as possible duplicates) and asks for the next one.
 

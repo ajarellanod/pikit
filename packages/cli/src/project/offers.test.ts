@@ -66,7 +66,7 @@ test("only providers that run on the project's targets are offered: on Cloudflar
 });
 
 test("on Cloudflare the Telegram webhook's object half brings durable delivery (the runtime provides the record of submissions); its Worker half nothing of the object's", () => {
-  const preset = ["platform-cloudflare", "storage-do", "storage-kv-sql", "deployment-cloudflare", "runtime-pi", "conversations-kv"];
+  const preset = ["actors-do", "storage-do", "storage-kv-sql", "deployment-cloudflare", "runtime-pi", "conversations-kv"];
   expect(offeredProviders(registry, ["channel-telegram-webhook"], preset, ["durable"], composing(preset, ["durable"]))).toEqual([
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram-webhook", why: "recommended" },
   ]);
@@ -78,7 +78,7 @@ test("each half declares in its own App; a component in both Apps declares its w
   expect(objectHalf?.[0]).toBe("default");
   expect(objectHalf?.[1].requires).not.toContain("actor.mailbox");
   expect(workerHalf).toEqual(["worker", { provides: ["http.route"], requires: ["secrets", "actor.mailbox"], optional: [] }]);
-  expect(declaredByApp(registry.manifest("secrets-cloudflare"), ["durable"])).toEqual([
+  expect(declaredByApp(registry.manifest("secrets-workers"), ["durable"])).toEqual([
     ["default", { provides: ["secrets"], requires: [], optional: [] }],
     ["worker", { provides: ["secrets"], requires: [], optional: [] }],
   ]);
@@ -87,7 +87,7 @@ test("each half declares in its own App; a component in both Apps declares its w
   const admin = registry.manifest("admin-api");
   expect(declaredByApp(admin, ["server"])).toEqual([["default", admin.halves?.default as NonNullable<typeof admin.halves>["default"]]]);
   expect(declaredByApp(admin, ["server"])[0]?.[1].requires).not.toContain("actor.mailbox");
-  expect(declaredByApp(registry.manifest("secrets-cloudflare"), ["server"])).toEqual([["default", { provides: ["secrets"], requires: [], optional: [] }]]);
+  expect(declaredByApp(registry.manifest("secrets-workers"), ["server"])).toEqual([["default", { provides: ["secrets"], requires: [], optional: [] }]]);
 });
 
 /** A registry of these manifests only (targets durable), for what the repository's cannot show yet. */

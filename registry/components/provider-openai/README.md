@@ -48,7 +48,7 @@ On `durable`, API keys only: a ChatGPT login stays a server's. A login is kept b
 one), and pi-ai reaches its OAuth flow only for a stored OAuth credential; that flow loads with an
 import no bundler follows, so a Worker could not refresh a subscription's tokens anyway. The
 component is the same on both targets. Set `OPENAI_API_KEY` as a Worker secret (`wrangler secret
-put OPENAI_API_KEY`), which `secrets-cloudflare` reads.
+put OPENAI_API_KEY`), which `secrets-workers` reads.
 
 ## Tests
 

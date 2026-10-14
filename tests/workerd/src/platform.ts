@@ -1,6 +1,6 @@
 /**
  * deployment-cloudflare's real `Conversation` class, a second time, over the Apps that
- * platform-cloudflare's tests compose (`src/worker.ts` exports it as `PlatformConversation`, bound as
+ * actors-do's tests compose (`src/worker.ts` exports it as `PlatformConversation`, bound as
  * `PLATFORM_CONVERSATION`). Its object App is what the running test last passed to `composeObjects`
  * (the tests and the objects share one isolate): the entrypoint reads the definition's components and
  * config when an object starts its App, on its first event.
@@ -13,18 +13,18 @@
 import { type AppDefinition, type ComponentDefinition, defineApp, silentLogger } from "@pikit/core";
 import { createEntrypoint } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/entrypoint.ts";
 
-/** platform-cloudflare's `binding` in these Apps: the class below. */
+/** actors-do's `binding` in these Apps: the class below. */
 export const PLATFORM_BINDING = "PLATFORM_CONVERSATION";
 
 let composed: { components: ComponentDefinition[]; config: Record<string, unknown> } | undefined;
 
 /**
- * What the objects' Apps are made of from now on, with platform-cloudflare's `binding` set to this
+ * What the objects' Apps are made of from now on, with actors-do's `binding` set to this
  * class. An object whose App already started keeps it until `resetObjects`.
  */
 export function composeObjects(components: ComponentDefinition[], config: Record<string, unknown> = {}): void {
-  const platform = (config["platform-cloudflare"] ?? {}) as Record<string, unknown>;
-  composed = { components, config: { ...config, "platform-cloudflare": { binding: PLATFORM_BINDING, ...platform } } };
+  const platform = (config["actors-do"] ?? {}) as Record<string, unknown>;
+  composed = { components, config: { ...config, "actors-do": { binding: PLATFORM_BINDING, ...platform } } };
 }
 
 /** Forgets the composition: an object that starts before the next `composeObjects` fails to. */

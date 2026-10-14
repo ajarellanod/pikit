@@ -22,7 +22,7 @@ that are groups of components (agents from the dashboard: `agents-live` with `ro
    `telegram`): routing rules (`router-rules`), agents from the dashboard (`agents-live`, a group),
    MCP tools (`tool-mcp`), health (`health-registry`), self-improvement (`admin-proposals` with
    `proposals-local`); on Cloudflare (`telegram-cloudflare`): routing rules, agents from the
-   dashboard, MCP tools, health, self-improvement (with `proposals-github` and `github-app`). Both
+   dashboard, MCP tools, health, self-improvement (with `proposals-github` and `repo-github-app`). Both
    install web pages (`tool-fetch`) and web search (`tool-websearch-brave`) already.
 3. Then, as before, configure and start.
 

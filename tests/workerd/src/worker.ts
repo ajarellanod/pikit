@@ -5,7 +5,7 @@
  *   instances (`runInDurableObject`) and give its storage to the components under test, as
  *   `deployment-cloudflare`'s entrypoint does (`test/host.ts`).
  * - `Conversation`: that entrypoint's own class, over the small Apps of `src/deployment.ts`.
- * - `PlatformConversation`: the same class, over the Apps platform-cloudflare's tests compose
+ * - `PlatformConversation`: the same class, over the Apps actors-do's tests compose
  *   (`src/platform.ts`).
  */
 

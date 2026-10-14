@@ -4,7 +4,7 @@
  * `actor.inbox` is a single capability with registration by method, as `wakeups.handle`: the half
  * `use`s it in `setup` and calls `handle(type, handler)` in its `start`. The mailbox's provider then
  * depends on no handler, so this half may also use `wakeups` and the runtime, which drives its runs
- * with the same `wakeups` (platform-cloudflare provides both in the object): no dependency cycle.
+ * with the same `wakeups` (actors-do provides both in the object): no dependency cycle.
  */
 
 import type { Pikit } from "@pikit/core";

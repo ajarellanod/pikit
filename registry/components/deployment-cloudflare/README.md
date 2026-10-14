@@ -125,7 +125,7 @@ export on its first event, never in its constructor:
   `pikit:start-failures`) sets the alarm again before it starts the App: 30 s ahead, twice as far at
   each failed start in a row, up to an hour, unless a sooner alarm is set. An alarm set during a failed
   one replaces Cloudflare's retry, so the guard is the retry, and it never runs out. Once the App
-  starts, the count is deleted and `platform-cloudflare`'s `wakeups`, the alarm's one owner, sets the
+  starts, the count is deleted and `actors-do`'s `wakeups`, the alarm's one owner, sets the
   alarm as its rows say.
 - The start context carries `WORKERS_HOST` (`@pikit/contracts/cloudflare`): `env`, and `object` with the
   object's `id`, its `storage` (for `storage-do`), and its hooks:
@@ -145,7 +145,7 @@ export on its first event, never in its constructor:
 - Its RPC interface is `health()`, `deliver()`, `call()`, `stream()` and `alarm()`, nothing else.
 - With `runtime-pi`, the object is one chat: pi-durable keeps its conversations in the object's SQL
   (`storage-do`), the first one being pi-durable's root, on the App's clock. Its runs are driven inside
-  the alarm (`runtime-pi.drive`, through `platform-cloudflare`'s `wakeups`); when what is left only
+  the alarm (`runtime-pi.drive`, through `actors-do`'s `wakeups`); when what is left only
   waits for a time (a model retry's backoff), the handler closes pi-durable inside that event, so the
   object can be evicted until the alarm at that time opens it again.
 

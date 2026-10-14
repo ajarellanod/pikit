@@ -2,7 +2,7 @@
  * admin-api on Cloudflare, with a fake platform: every key is an "object", an App of its own running
  * admin-api's default export on the `durable` target (its runtime a double, its `storage.sql` SQLite),
  * reached through an `actor.mailbox` that calls its `actor.inbox` handlers with JSON copies, as
- * platform-cloudflare's RPC does. The Worker's half serves the routes over them; the index is the
+ * actors-do's RPC does. The Worker's half serves the routes over them; the index is the
  * object `admin-api:index`. The workerd lane runs the same on real Durable Objects.
  */
 

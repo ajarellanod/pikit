@@ -34,16 +34,16 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | admin-api?, channel-telegram?, channel-telegram-webhook? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, github-app, outbound-durable, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, repo-github-app, outbound-durable, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-telegram, channel-telegram-webhook, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | mailbox-local, platform-cloudflare | admin-api, channel-telegram-webhook, github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | mailbox-local, platform-cloudflare | channel-telegram-webhook, github-app, admin-api?, settings-store? | `createMailboxConformance` |
-| `wakeups` | single | platform-cloudflare, wakeups-timers | channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
-| `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, github-app?, health-registry?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-cloudflare, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, github-app, github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
-| `settings` | single | settings-store | agents-live, github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
-| `github` | single | github-app, github-token | proposals-github | `createGitHubConformance` |
+| `actor.mailbox` | single | mailbox-local, actors-do | admin-api, channel-telegram-webhook, repo-github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | mailbox-local, actors-do | channel-telegram-webhook, repo-github-app, admin-api?, settings-store? | `createMailboxConformance` |
+| `wakeups` | single | actors-do, wakeups-timers | channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
+| `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, repo-github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, repo-github-app?, health-registry?, settings-store? | `createAdminAuthConformance` |
+| `secrets` | single | secrets-workers, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `settings` | single | settings-store | agents-live, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
+| `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
@@ -398,7 +398,7 @@ interface ActorInbox {
   and `streamResult` a stream's (a byte stream of JSON frames, one per line, with beats while the
   actor waits when its provider asks for them: an RPC stream notices a caller gone only when it writes).
 
-Providers: mailbox-local (server: the App itself is every key's actor, `scope` `"all"`), platform-cloudflare
+Providers: mailbox-local (server: the App itself is every key's actor, `scope` `"all"`), actors-do
 (an RPC to the Durable Object `idFromName(key)`; the object's own key is a local call; `scope` `"one"`). Types in use:
 `telegram.update`, `telegram.stranger` (channel-telegram-webhook), and admin-api's `admin-api.*`
 messages, calls and its one stream (`admin-api.live`). Suite: `createMailboxConformance`; double: `createMemoryMailbox`.
@@ -420,7 +420,7 @@ The handler's `ctx` is cancelled at the provider's slice deadline or when the Ap
 consistent point, asks again, and resolves.
 
 Providers: wakeups-timers (in-process timers, server; requests do not survive a restart, so a
-component asks again at start), platform-cloudflare (rows in the object's SQL over its one alarm,
+component asks again at start), actors-do (rows in the object's SQL over its one alarm,
 run in slices of `sliceMs`, 60 s by default). Names in use: `runtime-pi.drive`, `outbound-durable`,
 `channel-telegram-webhook.answers`, `channel-telegram-webhook.typing`. Suite:
 `createWakeupsConformance`; double: `createMemoryWakeups`.
@@ -430,7 +430,7 @@ run in slices of `sliceMs`, 60 s by default). Names in use: `runtime-pi.drive`, 
 A context key in `@pikit/contracts/cloudflare`, not a capability. deployment-cloudflare's entrypoints
 put `{ env, origin?, object? }` on each App's start context; `object` has `id`, `storage`,
 `onAlarm(handler)`, `onDeliver(handler)`, `onCall(handler)` and `onStream(handler)`. Only Cloudflare components read it
-(storage-do, secrets-cloudflare, platform-cloudflare, runtime-pi, channel-telegram-webhook's Worker
+(storage-do, secrets-workers, actors-do, runtime-pi, channel-telegram-webhook's Worker
 half). Its types are structural: no `cloudflare:*` import. Its test helper, `withWorkersHost` (a
 component gets the host in its start context, as from the entrypoint), is in
 `@pikit/contracts/cloudflare/testing`, apart from the neutral suites.
@@ -454,7 +454,7 @@ channel-http (`POST /v1/messages`, `GET /v1/conversations/:id/messages/:messageI
 /v1/conversations/:id/reset`), channel-telegram-webhook's Worker half (`POST /telegram`, `POST
 /telegram/<name>`, `GET /telegram/setup`), admin-api (`/admin/api/*`, `GET /admin/*`),
 health-registry (`GET /admin/api/health-registry`), and the dashboard routes of admin-proposals,
-github-app and settings-store. Suite: `createHttpRouteConformance`, run by
+repo-github-app and settings-store. Suite: `createHttpRouteConformance`, run by
 server-bun and deployment-cloudflare.
 
 ### `admin.auth` ([admin.ts](../packages/contracts/src/admin.ts))
@@ -559,10 +559,10 @@ interface Settings {
 
 Provider: settings-store (on `storage.sql`; on Cloudflare the values are one object's,
 `settings-store:settings`, which every App reaches through `actor.mailbox`). Users: agents-live (its agents), router-basic, router-rules, runtime-pi (an agent's
-overrides), github-token (the repository). Suite: `createSettingsConformance`, whose fixture changes
+overrides), repo-github-token (the repository). Suite: `createSettingsConformance`, whose fixture changes
 values as an operator would (`operate`).
 
-### `github` ([github.ts](../packages/contracts/src/github.ts))
+### `repo.github` ([github.ts](../packages/contracts/src/github.ts))
 
 The project's own repository on GitHub and a token for it: what self-improvement needs (SPEC §6).
 
@@ -580,13 +580,13 @@ interface GitHubAccess {
   with `GitHubNotConnectedError` (`code: "not_connected"`, `isGitHubNotConnected`), saying how to
   connect. A token is never logged, stored or put in an error.
 
-Providers, interchangeable: github-app (Cloudflare: a GitHub App the operator creates and installs
+Providers, interchangeable: repo-github-app (Cloudflare: a GitHub App the operator creates and installs
 from the dashboard; installation tokens minted with the App's JWT, its key sealed with a key derived
-from the admin token) and github-token (both targets: a `GITHUB_TOKEN` secret and the repository, a
+from the admin token) and repo-github-token (both targets: a `GITHUB_TOKEN` secret and the repository, a
 setting). User, which never branches on the provider: proposals-github (its pull requests: read,
 opened, merged, closed, and the credential of its `remote()`). The steward's workspace never reads
-`github`: execution-do pushes to `proposals.remote()`. Without a provider nothing is connected. Suite: `createGitHubConformance` (github-app in
-Bun and in workerd, github-token).
+`repo.github`: execution-do pushes to `proposals.remote()`. Without a provider nothing is connected. Suite: `createGitHubConformance` (repo-github-app in
+Bun and in workerd, repo-github-token).
 
 ### `proposals` ([proposals.ts](../packages/contracts/src/proposals.ts))
 
@@ -619,7 +619,7 @@ interface Proposals {
 - Providers, interchangeable: proposals-local (server: branches of a bare repository in the state
   volume, approvals for deployment-docker's deployer, which merges, checks, deploys and rolls back)
   and proposals-github (Cloudflare: pull requests opened for pushed branches, merged through GitHub's
-  API, GitHub through `github`). Users: admin-proposals (the dashboard's routes, view and section),
+  API, GitHub through `repo.github`). Users: admin-proposals (the dashboard's routes, view and section),
   extension-pikit-self (`remote()`, for the steward's steps), execution-do (`remote()`: the only
   remote its `git` pushes to, under its `branchPrefix`). Suite: `createProposalsConformance`
   (both providers).

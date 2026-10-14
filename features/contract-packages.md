@@ -125,7 +125,7 @@ when one of these holds:
 - **The runtime seam needs it:** the `agent.*` contracts that the runtime provides.
 - **Components of several unrelated features use it:** `settings`, `health`, `admin.auth`.
 
-The others move to packages of their own. The first candidates are `proposals`, `github` and
+The others move to packages of their own. The first candidates are `proposals`, `repo.github` and
 `agent.directory`.
 
 ## Order of work, once it is built
@@ -140,7 +140,7 @@ The others move to packages of their own. The first candidates are `proposals`, 
    - a version conflict is refused before any write;
    - a name clash is refused;
    - the catalogue comes from the package.
-4. **The rest of the kit's.** Move `github` and `agent.directory`. Update their providers and
+4. **The rest of the kit's.** Move `repo.github` and `agent.directory`. Update their providers and
    consumers (`proposals-*`, `admin-proposals`, `extension-pikit-self`, `github-*`, `execution-do`,
    `agents-live`, `runtime-pi`).
 5. **Docs.** Update [docs/contracts.md](../docs/contracts.md) ("A registry's own contracts"),

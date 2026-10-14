@@ -4,7 +4,7 @@
  * them (`GET /admin/api/admin-proposals/status`), and the deploys that follow approvals when the
  * provider runs them (the deployer on a server: running or not, the last deploy, the last rollback).
  * What is set up where is the provider's: a component with settings of its own for it brings its own
- * section (GitHub's, github-app's or github-token's, on Cloudflare), which this one opens.
+ * section (GitHub's, repo-github-app's or repo-github-token's, on Cloudflare), which this one opens.
  */
 
 import { GitPullRequest, Refresh } from "iconoir-react";

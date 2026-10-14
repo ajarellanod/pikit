@@ -161,7 +161,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
 ### Tenant and `conversation.resolve`, on Cloudflare
 - **The owner is chosen before any pipeline runs.** The Worker half sends the update to the actor
   named by the channel's key (`channel-telegram-webhook/worker.ts:156`), which is the Durable Object
-  `idFromName(key)` (`platform-cloudflare/index.ts:361`, SPEC C2 at `SPEC.md:185`); `admitInbound` runs
+  `idFromName(key)` (`actors-do/index.ts:361`, SPEC C2 at `SPEC.md:185`); `admitInbound` runs
   in that object (`channel-telegram-webhook/inbox.ts:85`), and each object keeps its own pointers
   (`features/cloudflare-conversation-index.md:17`).
 - **Renaming keeps one owner, but not C2's address; merging keeps neither.** A stage that maps each
@@ -170,7 +170,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   is `idFromName` of the channel's key, not of the conversation's, so whatever reaches the
   conversation by its own key through `actor.mailbox` (a scheduler fanning out to Durable Objects,
   [scheduler](scheduler.md); an admin action on a key the [conversation index](cloudflare-conversation-index.md)
-  lists) gets `idFromName` of that key (`platform-cloudflare/index.ts:361`): another, empty object,
+  lists) gets `idFromName` of that key (`actors-do/index.ts:361`): another, empty object,
   against C2's "the actor owning `key`" (`SPEC.md:185-191`). A stage that maps two channel keys to one
   key (two chats, or two channels, into one conversation) would create that conversation in two
   objects, each with its own pointer and session: two owners, against C1 (`SPEC.md:164,176`).
@@ -178,7 +178,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   - **(F) Forward from the object** (recommended to try first). The object half resolves the key; when
     it is not the key it was delivered under (the handler gets that key,
     `channel-telegram-webhook/index.ts:88`), it forwards the message with `actor.mailbox` to the owner
-    (an object may send to another, `platform-cloudflare/index.ts:26-28`) and resolves when the owner
+    (an object may send to another, `actors-do/index.ts:26-28`) and resolves when the owner
     holds it, so the channel still acknowledges only once the conversation has the message
     (`packages/contracts/src/actor.ts:16-18`). The owner delivers the answer from its own feed, with its
     own half of the channel, to a chat whose key it never made: that is what the address makes
@@ -191,7 +191,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
     channel's Worker half changes at `worker.ts:156`.
 - **A tenant's namespace.** Separate Durable Object namespaces per tenant
   (`multi-tenant-isolation.md:22`) are chosen by the mailbox, which today has one `binding`
-  (`platform-cloudflare/index.ts:53`) and whose `send(key, type, message, ctx)` has no tenant. A
+  (`actors-do/index.ts:53`) and whose `send(key, type, message, ctx)` has no tenant. A
   context key would carry it without changing the interface (K5, `SPEC.md:70`; the kernel's own test
   uses a `TENANT` key, `packages/core/src/app.test.ts:856`). Whether that is still C2's "the object
   `idFromName(key)`" is an open question.

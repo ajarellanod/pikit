@@ -7,8 +7,8 @@
  * the merge: Workers Builds. A proposal's id is its branch's topic (`pikit/self/<topic>`), its `ref`
  * the pull request's number (`#42`), `mergeDetail` GitHub's mergeable state in plain words.
  *
- * - **GitHub access is the `github` contract's** (`github-access.ts`): the repository and a token,
- *   whichever provider connects them (github-app, github-token). Until GitHub is connected, `list`,
+ * - **GitHub access is the `repo.github` contract's** (`github-access.ts`): the repository and a token,
+ *   whichever provider connects them (repo-github-app, repo-github-token). Until GitHub is connected, `list`,
  *   `get` and the actions throw `ProposalsError("not_connected")`, pointing to the dashboard's
  *   Settings → GitHub; `status` checks each part live. The token is asked for each call, never kept.
  *   A ruleset on the default branch (a pull request required, no direct push) is advised: `status`
@@ -20,7 +20,7 @@
  * - **GitHub's REST API over `fetch`** (`github.ts`). Its rate limit is `rate_limited` with a
  *   `retryAfter`; a refused token, a missing repository or GitHub down are `unauthorized` (or
  *   `forbidden`), `missing_repository` and `unavailable`, saying which.
- * - **`remote`** is `https://github.com/<repository>.git`, authorized with `github`'s token by trusted
+ * - **`remote`** is `https://github.com/<repository>.git`, authorized with `repo.github`'s token by trusted
  *   code: where the steward clones from and pushes to.
  *
  * Targets: `durable`. On Cloudflare it goes in both Apps (`apps.worker: "default"`): the Worker's App
@@ -431,7 +431,7 @@ export default defineComponent({
           url: `https://github.com/${repository}.git`,
           mainBranch: "main",
           branchPrefix: prefix,
-          // `github`'s token, asked when git needs it; its refusal (not connected) says how to connect.
+          // `repo.github`'s token, asked when git needs it; its refusal (not connected) says how to connect.
           authorization: async () => `Basic ${btoa(`x-access-token:${await access.token(ctx)}`)}`,
         };
       },

@@ -38,7 +38,7 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
     provider is runtime-pi, for good (Pi is the only agent runtime, SPEC §3.3), so it gets one only
     if its guarantees grow.
 - **Not on this list, on purpose:** the feature contracts that would leave the package
-  (`proposals`, `github`, `agent.directory`: [contract packages](contract-packages.md)), the
+  (`proposals`, `repo.github`, `agent.directory`: [contract packages](contract-packages.md)), the
   runtime's Pi-shaped contracts (Pi is their only provider, by decision: SPEC §3.3), `storage.kv`
   (a contract only if a native KV provider is wanted), and the dashboard's
   request-id prefix in `delivery.ts` (a guarantee shared by every channel; revisit with a second
