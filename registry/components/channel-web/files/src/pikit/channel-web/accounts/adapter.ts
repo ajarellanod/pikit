@@ -13,8 +13,8 @@
  *   crash between two leaves a user who can sign in again or be removed.
  * - **The tables** (`migrate`): `channel_web_user`, `channel_web_session`, `channel_web_account`,
  *   `channel_web_verification`, made with `CREATE TABLE IF NOT EXISTS` at first use. `MODEL_NAMES`
- *   maps better-auth's models onto them. The user has two fields of ours: `banned` and `invitedAt`
- *   (`local.ts`).
+ *   maps better-auth's models onto them. The user has three fields of ours: `banned`, `invitedAt`
+ *   and `lastSeenAt` (`local.ts`).
  */
 
 import type { SqlDatabase, SqlRow, SqlValue } from "@pikit/contracts";
@@ -35,13 +35,13 @@ export const MODEL_NAMES = {
 
 /**
  * Makes the tables and their indexes, if they are not there. Idempotent: called at first use.
- * Columns are better-auth's fields (`get-tables.ts` at 1.7.7) and ours (`banned`, `invitedAt`).
+ * Columns are better-auth's fields (`get-tables.ts` at 1.7.7) and ours (`banned`, `invitedAt`, `lastSeenAt`).
  */
 export async function migrate(sql: Pick<SqlDatabase, "run">): Promise<void> {
   const statements = [
     `CREATE TABLE IF NOT EXISTS ${USER_TABLE} (
       "id" TEXT PRIMARY KEY, "name" TEXT NOT NULL, "email" TEXT NOT NULL, "emailVerified" INTEGER NOT NULL,
-      "image" TEXT, "createdAt" TEXT NOT NULL, "updatedAt" TEXT NOT NULL, "banned" INTEGER, "invitedAt" TEXT)`,
+      "image" TEXT, "createdAt" TEXT NOT NULL, "updatedAt" TEXT NOT NULL, "banned" INTEGER, "invitedAt" TEXT, "lastSeenAt" TEXT)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS channel_web_user_email ON ${USER_TABLE} ("email")`,
     `CREATE INDEX IF NOT EXISTS channel_web_user_created ON ${USER_TABLE} ("createdAt", "id")`,
     `CREATE TABLE IF NOT EXISTS ${SESSION_TABLE} (

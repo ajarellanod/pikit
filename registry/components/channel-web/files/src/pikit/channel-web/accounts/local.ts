@@ -40,6 +40,9 @@
  *   request with the cookies whose `Origin` (else `Referer`) is not the base URL's is refused (403).
  * - **Sessions**: `user` is better-auth's `getSession`; read from the database (the cookie cache
  *   expired), its renewed cookies come back with it, for the route to send.
+ * - **Last seen** is the user's own (`lastSeenAt`, a field no request can set), never read from
+ *   sessions, so a ban or "sign out everywhere" keeps it: written when a session is made, and by
+ *   `user` at most once per `sessionCacheSeconds` (at least a minute) for each user this process saw.
  */
 
 import type { ActorCallErrorCode, SqlDatabase } from "@pikit/contracts";
@@ -136,9 +139,11 @@ type Around = {
   contexts: Map<string, AppContext>;
   /** A token that sets `userId`'s password (`reset-password`), valid `ttlMs`. */
   resetToken: (userId: string, ttlMs: number) => Promise<{ token: string; expiresAt: number }>;
+  /** Writes `userId`'s `lastSeenAt` now (`always`), or when this process has not for a while. */
+  seen: (userId: string, always: boolean) => Promise<void>;
 };
 
-function build(options: LocalAccountsOptions, secure: boolean, { ready, contexts, resetToken }: Around) {
+function build(options: LocalAccountsOptions, secure: boolean, { ready, contexts, resetToken, seen }: Around) {
   const { email } = options;
   const appContext = (request: Request | undefined): AppContext | undefined => {
     const call = request?.headers.get(CALL_HEADER);
@@ -173,6 +178,7 @@ function build(options: LocalAccountsOptions, secure: boolean, { ready, contexts
       additionalFields: {
         banned: { type: "boolean", required: false, defaultValue: false, input: false },
         invitedAt: { type: "date", required: false, input: false, returned: false },
+        lastSeenAt: { type: "date", required: false, input: false, returned: false },
       },
     },
     // Never refreshCache: it would re-sign the cache without a database read, and a ban would never cut a
@@ -266,6 +272,7 @@ function build(options: LocalAccountsOptions, secure: boolean, { ready, contexts
             const [row] = await (await ready()).query<{ banned: number | null }>(`SELECT "banned" FROM ${USER_TABLE} WHERE "id" = ?`, [session.userId]);
             if (row?.banned === 1) throw new APIError("FORBIDDEN", BANNED);
           },
+          after: async (session) => seen(session.userId, true),
         },
       },
     },
@@ -294,7 +301,16 @@ const invitationMessage = (name: string, to: string, link: string): EmailMessage
   text: `You are invited to chat with ${name}. Open this link to set your password:\n\n${link}${signature(name)}`,
 });
 
-type UserRow = { id: string; name: string; email: string; emailVerified: number; image: string | null; createdAt: string; banned: number | null };
+type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: number;
+  image: string | null;
+  createdAt: string;
+  banned: number | null;
+  lastSeenAt: string | null;
+};
 
 /** A cursor of `list`: the last item's creation time and id. */
 const CURSOR = /^(\d{4}-\d\d-\d\dT[\d:.]+Z)\|(.{1,200})$/;
@@ -318,7 +334,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
   const instance = (secure: boolean): Instance => {
     let made = instances.get(secure);
     if (made === undefined) {
-      made = build(options, secure, { ready, contexts, resetToken });
+      made = build(options, secure, { ready, contexts, resetToken, seen });
       instances.set(secure, made);
     }
     return made;
@@ -329,6 +345,17 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
 
   const userRow = async (userId: string): Promise<UserRow | undefined> =>
     (await (await ready()).query<UserRow>(`SELECT * FROM ${USER_TABLE} WHERE "id" = ?`, [userId]))[0];
+
+  // When this process last wrote each user's lastSeenAt: `user` writes it again only past `seenEveryMs`.
+  const seenEveryMs = Math.max(options.sessionCacheSeconds ?? 300, 60) * 1000;
+  const written = new Map<string, number>();
+  async function seen(userId: string, always: boolean): Promise<void> {
+    const now = Date.now();
+    if (!always && now - (written.get(userId) ?? 0) < seenEveryMs) return;
+    if (written.size >= 10_000) for (const [id, at] of written) if (now - at >= seenEveryMs) written.delete(id);
+    written.set(userId, now);
+    await (await ready()).run(`UPDATE ${USER_TABLE} SET "lastSeenAt" = ? WHERE "id" = ?`, [new Date(now).toISOString(), userId]);
+  }
 
   async function resetToken(userId: string, ttlMs: number): Promise<{ token: string; expiresAt: number }> {
     const token = randomToken();
@@ -365,6 +392,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
       const { headers, response: found } = await instance(secureFor(request.url)).api.getSession({ headers: request.headers, returnHeaders: true });
       if (found === null || (found.user as { banned?: boolean | null }).banned === true) return undefined;
       const { id, name, email, emailVerified, image } = found.user;
+      await seen(id, false);
       const user: AccountUser = { id, name, email, emailVerified, ...(typeof image === "string" && image !== "" && { image }) };
       return { user, cookies: headers.getSetCookie() } satisfies AccountSession;
     },
@@ -386,7 +414,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
       }
       const db = await ready();
       const rows = await db.query<UserRow>(
-        `SELECT "id", "name", "email", "emailVerified", "image", "createdAt", "banned" FROM ${USER_TABLE}${after} ORDER BY "createdAt" DESC, "id" DESC LIMIT ?`,
+        `SELECT "id", "name", "email", "emailVerified", "image", "createdAt", "banned", "lastSeenAt" FROM ${USER_TABLE}${after} ORDER BY "createdAt" DESC, "id" DESC LIMIT ?`,
         [...params, limit + 1],
       );
       const shown = rows.slice(0, limit);
@@ -394,20 +422,15 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
       const marks = ids.map(() => "?").join(", ");
       const accounts =
         ids.length === 0 ? [] : await db.query<{ userId: string; providerId: string }>(`SELECT "userId", "providerId" FROM ${ACCOUNT_TABLE} WHERE "userId" IN (${marks})`, ids);
-      const seen =
-        ids.length === 0
-          ? []
-          : await db.query<{ userId: string; at: string }>(`SELECT "userId", MAX("updatedAt") AS "at" FROM ${SESSION_TABLE} WHERE "userId" IN (${marks}) GROUP BY "userId"`, ids);
-      const items = shown.map((row): AccountSummary => {
-        const at = seen.find((s) => s.userId === row.id)?.at;
-        return {
+      const items = shown.map(
+        (row): AccountSummary => ({
           ...summaryUser(row),
           methods: methodsOf(accounts.filter((a) => a.userId === row.id).map((a) => a.providerId)),
           createdAt: Date.parse(row.createdAt),
-          ...(at !== undefined && at !== null && { lastSeenAt: Date.parse(at) }),
+          ...(row.lastSeenAt !== null && { lastSeenAt: Date.parse(row.lastSeenAt) }),
           banned: row.banned === 1,
-        };
-      });
+        }),
+      );
       const last = shown.at(-1);
       return { items, ...(rows.length > limit && last !== undefined && { next: `${last.createdAt}|${last.id}` }) } satisfies AccountsPage;
     },
@@ -420,9 +443,8 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
       const found = await context.internalAdapter.findUserByEmail(address, { includeAccounts: true });
       let userId: string;
       if (found !== null) {
-        const db = await ready();
-        const [sessions] = await db.query<{ n: number }>(`SELECT COUNT(*) AS "n" FROM ${SESSION_TABLE} WHERE "userId" = ?`, [found.user.id]);
-        if (found.accounts.length > 0 || Number(sessions?.n ?? 0) > 0) throw refusal("exists", "that person already has an account");
+        // Seen once (a magic link's user has no account row), even with every session gone: theirs.
+        if (found.accounts.length > 0 || ((await userRow(found.user.id))?.lastSeenAt ?? null) !== null) throw refusal("exists", "that person already has an account");
         userId = found.user.id;
       } else {
         const name = person.name?.trim() ?? "";

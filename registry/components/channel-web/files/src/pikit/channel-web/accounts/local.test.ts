@@ -2,7 +2,7 @@
 // provider on a local Bun.serve), the sign-up policy for each, invitations, resets, bans, removal,
 // the operator's list, cookies and the session cache. No network.
 
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { ActorCallError } from "@pikit/contracts";
 import { hashPassword } from "better-auth/crypto";
 import { Browser, type Fixture, fakeOidc, fixture, linkIn, ORIGIN, type Profile } from "./accounts.test-support.ts";
@@ -445,6 +445,53 @@ test("list: newest first, paged by cursor, with methods, last seen and bans", as
   expect(second.items.map((u) => u.id)).toEqual([bb, a]);
   expect(second.next).toBeUndefined();
   expect(await refusedWith(f.accounts.list({ limit: 2, cursor: "garbage" }, f.ctx))).toBe("invalid_request");
+});
+
+test("last seen is the user's: kept through a ban and every session gone; a database read writes it at most once a while", async () => {
+  const f = make({ withEmail: false, mode: "open", sessionCacheSeconds: 0 });
+  const b = f.browser();
+  await signUp(b, "ana@example.com");
+  const id = (await b.user())?.id ?? "";
+  const seen = async () => (await f.accounts.list({ limit: 10 }, f.ctx)).items.find((u) => u.id === id)?.lastSeenAt;
+  const first = await seen();
+  expect(first).toBeGreaterThan(0);
+
+  await f.accounts.ban(id, true, f.ctx);
+  expect(await seen()).toBe(first);
+  await f.accounts.ban(id, false, f.ctx);
+  // "Sign out everywhere": every session gone.
+  await f.sql.run(`DELETE FROM channel_web_session WHERE "userId" = ?`, [id]);
+  expect(await seen()).toBe(first);
+
+  // A new session writes it at once.
+  const old = "2020-01-01T00:00:00.000Z";
+  await f.sql.run(`UPDATE channel_web_user SET "lastSeenAt" = ? WHERE "id" = ?`, [old, id]);
+  expect((await signIn(b, "ana@example.com")).status).toBe(200);
+  expect(await seen()).toBeGreaterThan(Date.parse(old));
+  // Each request reads the database here (no cache): within a minute nothing is written again; past it, once.
+  await f.sql.run(`UPDATE channel_web_user SET "lastSeenAt" = ? WHERE "id" = ?`, [old, id]);
+  expect((await b.user())?.id).toBe(id);
+  expect(await seen()).toBe(Date.parse(old));
+  try {
+    setSystemTime(new Date(Date.now() + 61_000));
+    expect((await b.user())?.id).toBe(id);
+    expect(await seen()).toBeGreaterThan(Date.now() - 1000);
+  } finally {
+    setSystemTime();
+  }
+});
+
+test("a magic link's user (no account row) signed out everywhere is not invited again: seen, theirs", async () => {
+  const f = make({ mode: "open" });
+  const b = f.browser();
+  await b.send("/chat/api/auth/sign-in/magic-link", { json: { email: "ana@example.com", callbackURL: "/chat/" } });
+  await b.send(linkIn(f.emails[0]?.message.text ?? ""));
+  const id = (await b.user())?.id ?? "";
+  await f.sql.run(`DELETE FROM channel_web_session WHERE "userId" = ?`, [id]);
+  const [listed] = (await f.accounts.list({ limit: 10 }, f.ctx)).items;
+  expect(listed).toMatchObject({ id, methods: [] });
+  expect(listed?.lastSeenAt).toBeGreaterThan(0);
+  expect(await refusedWith(f.accounts.invite({ email: "ana@example.com" }, ORIGIN, f.ctx))).toBe("exists");
 });
 
 test("rate limits: a fourth sign-in from one address within 10 s is refused", async () => {

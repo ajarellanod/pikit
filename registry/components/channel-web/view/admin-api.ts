@@ -27,7 +27,7 @@ export interface AdminChatUser {
   methods: string[];
   /** Epoch ms. */
   createdAt: number;
-  /** Epoch ms of their newest session's last use, when they have one. */
+  /** Epoch ms they were last seen: a sign-in, or a request at most `sessionCacheSeconds` (at least a minute) after it; kept through a ban or a sign-out. Absent: never. */
   lastSeenAt?: number;
   banned: boolean;
 }
