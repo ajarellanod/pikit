@@ -6,7 +6,7 @@
 §5)
 
 **Needed by:** nothing required. As the first webhook channel it would bring
-[inbound dedup](inbound-dedup.md) and `pikit expose` with it.
+[inbound dedup](inbound-dedup.md) and [`pikit expose`](completed/expose.md) with it.
 
 ## What it gives
 A Google Chat app: an agent per space, answering in the space's threads, with cards.
@@ -28,7 +28,7 @@ A Google Chat app: an agent per space, answering in the space's threads, with ca
 - An agent per space is `router-rules` matching the conversation.
 - Threads: [threads](threads.md); cards: [rich content](rich-content.md); message patch:
   [streaming replies](streaming-replies.md).
-- It needs a public URL: `pikit expose` on a server, a Worker route on Cloudflare.
+- It needs a public URL: [`pikit expose`](completed/expose.md) on a server, a Worker route on Cloudflare.
 
 ## Pi first
 Nothing in Pi: channels are pikit's (SPEC P1).

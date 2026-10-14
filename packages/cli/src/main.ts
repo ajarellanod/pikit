@@ -55,7 +55,6 @@ const LATER: Record<string, string> = {
   outdated: "SPEC.md, P6",
   diff: "SPEC.md, P6",
   config: "features/config-files.md",
-  expose: "",
 };
 
 const MINIMUM_BUN = "1.4.0";

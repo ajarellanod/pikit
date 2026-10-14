@@ -156,7 +156,13 @@ the app:
   bundles or builds; it may write files of its own directory (through `io.write`, never elsewhere),
   which the build then carries, and a problem deploys nothing. `up` runs it instead of the
   component's `doctor`, so it checks at least the same (one check per deploy). `afterDeploy`: `up`
-  runs it once the new version answers (C8).
+  runs it once the new version answers (C8), with its public URL; on a server, once the containers
+  are healthy and only when the project has one (`PIKIT_PUBLIC_URL`, written by an `expose-*`
+  component's `pikit expose`, features/completed/expose.md).
+- `component.json`'s `compose` names a Compose file of its own directory whose services run beside
+  the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in
+  `pikit.json`, and `deployment-docker` adds every recorded one after its own compose.yaml. Only a
+  component whose targets include `server` has one.
 - `component.json`'s `generated` names the files of its own directory a hook rewrites (tool-mcp's
   `seed.ts`): shipped as a starting point, they are the hooks', never the user's edits, so `pikit
   doctor` does not list them as modified and `pikit remove` deletes them without `--force`.

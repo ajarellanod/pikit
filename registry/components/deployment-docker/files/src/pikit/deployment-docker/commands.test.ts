@@ -7,7 +7,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeDeployHooks, down, exec, logs, parseContainers, restart, type Runner, spawnRunner, status, up } from "./commands.ts";
+import { beforeDeployHooks, down, exec, fileArgs, logs, parseContainers, restart, type Runner, spawnRunner, status, up } from "./commands.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -90,6 +90,87 @@ test("a beforeDeploy problem stops up before the build, naming the component", a
     "what runs before a deploy failed, so nothing was built:\n  tool-a: the MCP server is down\n",
   );
   expect(calls).toEqual([]);
+});
+
+test("a component's Compose file goes after compose.yaml in every command but exec, in pikit.json's order", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pikit-commands-"));
+  dirs.push(dir);
+  const components = {
+    "expose-a": { compose: "src/pikit/expose-a/compose.yaml" },
+    "proposals-local": {},
+    "tool-b": { compose: "src/pikit/tool-b/compose.yml" },
+  };
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify({ components }));
+  expect(fileArgs(dir)).toEqual(["-f", "compose.yaml", "-f", "src/pikit/expose-a/compose.yaml", "-f", "src/pikit/tool-b/compose.yml"]);
+  const { calls, run } = recorder("");
+  await up({ cwd: dir, run });
+  await down({ cwd: dir, run });
+  await restart({ cwd: dir, run });
+  await logs({ cwd: dir, run });
+  await status({ cwd: dir, run, fetch: (async () => new Response("")) as unknown as typeof fetch });
+  await exec({ cwd: dir, run, command: ["true"] });
+  const files = "-f compose.yaml -f src/pikit/expose-a/compose.yaml -f src/pikit/tool-b/compose.yml --profile self-improvement";
+  expect(calls.map((call) => call.command.join(" "))).toEqual([
+    `docker compose ${files} up --detach --build --wait`,
+    `docker compose ${files} down`,
+    `docker compose ${files} restart`,
+    `docker compose ${files} logs --no-log-prefix`,
+    `docker compose ${files} ps --all --format json`,
+    "docker compose --progress quiet run --rm --build --no-deps -T app true",
+  ]);
+});
+
+/** A project whose `channel-a` has an after-deploy hook that says the URL and its config, or reports `CHANNEL_A_PROBLEM`. */
+function projectWithAfterHook(env: string): string {
+  const cwd = mkdtempSync(join(tmpdir(), "pikit-docker-commands-"));
+  dirs.push(cwd);
+  writeFileSync(join(cwd, ".env"), env);
+  const components = { "channel-a": { hooks: { afterDeploy: "src/pikit/channel-a/deploy.ts" } }, "deployment-docker": {} };
+  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 1, targets: ["server"], registries: {}, components }));
+  writeFileSync(join(cwd, "pikit.config.ts"), `export default { config: { "channel-a": { path: "/a" } } };\n`);
+  mkdirSync(join(cwd, "src", "pikit", "channel-a"), { recursive: true });
+  writeFileSync(
+    join(cwd, "src", "pikit", "channel-a", "deploy.ts"),
+    `export async function afterDeploy(io) {
+  const problem = io.get("CHANNEL_A_PROBLEM");
+  if (problem !== undefined) return [problem];
+  io.say(\`\${io.url}\${io.config.path}\`);
+  return [];
+}
+`,
+  );
+  return cwd;
+}
+
+test("up runs each component's afterDeploy once the containers are healthy, with the public URL", async () => {
+  const cwd = projectWithAfterHook("PIKIT_PUBLIC_URL=https://bot.example.com\n");
+  const said: string[] = [];
+  const order: string[] = [];
+  const run: Runner = async (command) => {
+    order.push(command.join(" "));
+    return { code: 0, stdout: "" };
+  };
+  await up({ cwd, run, say: (line) => (said.push(line), order.push("hook")) });
+  expect(said).toEqual(["https://bot.example.com/a"]);
+  expect(order).toEqual(["docker compose up --detach --build --wait", "hook"]);
+});
+
+test("without a public URL, up runs no afterDeploy and says why", async () => {
+  const cwd = projectWithAfterHook("CHANNEL_A_PROBLEM=never called\n");
+  const said: string[] = [];
+  await up({ cwd, run: recorder().run, say: (line) => said.push(line) });
+  expect(said).toEqual([
+    "no public URL (PIKIT_PUBLIC_URL), so what runs after a deploy did not run (channel-a): install an expose-* component and run `pikit expose`, then `pikit up` again",
+  ]);
+});
+
+test("an afterDeploy problem fails up, naming the component; the containers stay up", async () => {
+  const cwd = projectWithAfterHook("PIKIT_PUBLIC_URL=https://bot.example.com\nCHANNEL_A_PROBLEM=the webhook was refused\n");
+  const { calls, run } = recorder();
+  await expect(up({ cwd, run, say: () => {} })).rejects.toThrow(
+    "the containers are up at https://bot.example.com, but what runs after a deploy failed:\n  channel-a: the webhook was refused\n",
+  );
+  expect(calls.map((call) => call.command.join(" "))).toEqual(["docker compose up --detach --build --wait"]);
 });
 
 test("down keeps the .pikit volume; restart restarts the same containers", async () => {

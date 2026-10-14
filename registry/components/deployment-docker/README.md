@@ -90,11 +90,14 @@ them, and the tests below keep checking what matters.
 
 The CLI delegates to these functions; you can call them from a script too. Each one runs
 `docker compose …` in the project's directory (`cwd`), without a shell, with `--profile
-self-improvement` when `proposals-local` is installed (so `up` starts the deployer too):
+self-improvement` when `proposals-local` is installed (so `up` starts the deployer too), and, when
+installed components run services beside the app (`compose` in their `component.json`, recorded in
+`pikit.json`: expose-cloudflare-tunnel's `cloudflared`), with `-f compose.yaml -f <each one>`, in
+`pikit.json`'s order (`fileArgs`; every command but `exec`):
 
 | Function | Runs |
 |---|---|
-| `up({ say })` | The components' `beforeDeploy` hooks, then `docker compose up --detach --build --wait`: fails if the app never becomes healthy |
+| `up({ say })` | The components' `beforeDeploy` hooks, then `docker compose up --detach --build --wait` (fails if the app never becomes healthy), then their `afterDeploy` hooks with the public URL |
 | `down()` | `docker compose down`: the `.pikit/` volume stays |
 | `restart()` | `docker compose restart`: a clean stop and a new process; rebuilding is `up()` |
 | `logs({ follow, tail })` | `docker compose logs --no-log-prefix [--follow] [--tail N]` |
@@ -109,6 +112,13 @@ config in `pikit.config.ts`, a reader of the environment and `.env`, `write(file
 its own `src/pikit/<name>/` (only when the text changes), and a line to print. It resolves with its
 problems; any problem, or a hook that throws, fails `up` before the build (`BeforeDeployIO` in
 `commands.ts`, the same shape as `deployment-cloudflare`'s). `pikit dev` runs none.
+
+**Once healthy: the components' `afterDeploy` hooks.** What registers a webhook needs the URL a
+platform reaches, which a server has only when something exposes it: `PIKIT_PUBLIC_URL` (in the
+environment or `.env`), written by an `expose-*` component's `pikit expose` ([features/completed/expose.md](https://github.com/ajarellanod/pikit/blob/main/features/completed/expose.md)). With
+it, once the containers are healthy, `up` calls each recorded `afterDeploy({ url, config, get, say })`,
+as `deployment-cloudflare` does; a problem fails `up`, and the containers stay up. Without it, `up`
+runs none and says which it skipped.
 
 `status()` returns the containers (name, state, health) and each probe's HTTP status, or
 `"unreachable"`, and the `lines` `pikit status` prints. The default URL is `http://127.0.0.1:3000`, the port `compose.yaml` publishes.
@@ -184,7 +194,9 @@ The tests are copied with the component and run in your project:
 - `logger.test.ts`: the shape of a line, levels, errors, redaction, and odd fields that never throw.
 - `commands.test.ts`: the exact `docker` argv of every command, `status`'s parsing and probes, the
   components' `beforeDeploy` hooks run before the build (their own files written once, a problem
-  building nothing), with a fake runner and a fake `fetch`. No Docker needed.
+  building nothing), the components' Compose files after compose.yaml in every command but `exec`,
+  and their `afterDeploy` hooks after a healthy `up` with `PIKIT_PUBLIC_URL` (none without it, a
+  problem failing `up`), with a fake runner and a fake `fetch`. No Docker needed.
 - `deployer.test.ts`: the deployer with real git (a project, the proposals repository, the agent's
   clone) and a fake Docker: the proposals repository made and kept at `main`; an approved branch
   merged, checked in sandboxes, built, recreated, healthy, deployed, `main` following; failing tests

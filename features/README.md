@@ -90,4 +90,5 @@ how it fits pikit, what Pi already does, where the code and its tests are, and w
 | [mcp](completed/mcp.md) | Tools of remote MCP servers for the agents that name them: `tool-mcp` over Pi's `pi-mcp` (Streamable HTTP, both targets); OAuth and stdio still open |
 | [storage-kv](completed/storage-kv.md) | `storage.kv`: small JSON values per component, by key; `storage-kv-sql` provides it, `channel-telegram` keeps its cursor there |
 | [skills-catalog](completed/skills-catalog.md) | Skills installed once (`agent.skill`, the project's catalog) and named by agents, live agents and overrides, as tools are |
+| [expose](completed/expose.md) | A public HTTPS URL for a server project: `pikit expose`, `expose-cloudflare-tunnel`'s command (a Cloudflare Tunnel run beside the app by `deployment-docker`); only the listed paths public, no Cloudflare credential in `.env` |
 | [tool-component](completed/tool-component.md) | A tool of your own: pi-durable's `defineTool` (from `@pikit/pi-adapter/tools`) in a component providing `agent.tool`, with its `replay`; `tool-fetch` and `tool-websearch-brave` are the references |

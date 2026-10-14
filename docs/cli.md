@@ -161,7 +161,18 @@ Delegated to the installed `deployment-*` component's exported functions
 only where the deployment exports it (Docker). With self-improvement on a server (`proposals-local`),
 deployment-docker's commands enable compose's `self-improvement` profile: `up` also builds and starts
 the deployer next to the app, which deploys what an operator approves (no other command, no host
-service).
+service). deployment-docker's commands also add the Compose file of every component that declares
+one (`compose`: expose-cloudflare-tunnel's `cloudflared`), and its `up` runs the components'
+`afterDeploy` hooks once the containers are healthy, with the project's public URL
+(`PIKIT_PUBLIC_URL`), or says it ran none without one.
+
+### pikit expose
+
+Not the CLI's: the command of the installed `expose-*` component, which gives a server project a public
+HTTPS URL ([features/completed/expose.md](../features/completed/expose.md)). `expose-cloudflare-tunnel`'s: `pikit expose`
+(the tunnel, its routes and its DNS record; writes `PIKIT_PUBLIC_URL`), `pikit expose status`,
+`pikit expose quick [port]` (a temporary tunnel while `pikit dev` runs) and `pikit expose delete`.
+Without one installed, `expose` is an unknown command.
 
 ## pikit registry
 
@@ -197,7 +208,7 @@ command (exit 2). No component's command takes a name of the CLI's own, nor one 
 
 ## Not built
 
-`init`, `create`, `outdated`, `diff`, `config` and `expose` answer "not built yet" (some
+`init`, `create`, `outdated`, `diff` and `config` answer "not built yet" (some
 with the design note that specifies them) and exit 1. [features/cli-features.md](../features/cli-features.md)
 is a design note.
 

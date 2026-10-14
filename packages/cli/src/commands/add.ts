@@ -475,6 +475,8 @@ export function recordInstall(
     ...(manifest.hooks !== undefined && { hooks: projectHooks(name, manifest.hooks) }),
     // What `pikit <command>` runs for it, by its project path.
     ...(manifest.commands !== undefined && { commands: projectCommands(name, manifest.commands) }),
+    // The services `deployment-docker` runs beside the app, by its project path.
+    ...(manifest.compose !== undefined && { compose: `${ownDir(name)}${manifest.compose}` }),
     // Files a hook rewrites: never reported as the user's edits.
     ...(manifest.generated !== undefined && { generated: manifest.generated.map((file) => `${ownDir(name)}${file}`) }),
     // Where it goes on Cloudflare: `pikit upgrade` rewires the Worker's App only when this changes.

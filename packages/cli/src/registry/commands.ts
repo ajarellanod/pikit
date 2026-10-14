@@ -184,6 +184,16 @@ async function checkCommandFiles(componentDir: string, name: string, manifest: M
   return problems;
 }
 
+/** `compose` names a Compose file of the component, and only a component that runs on a server has one. */
+function checkComposeFile(componentDir: string, name: string, manifest: Manifest): string[] {
+  const file = manifest.compose;
+  if (file === undefined) return [];
+  const problems: string[] = [];
+  if (!existsSync(join(componentDir, "files", "src", "pikit", name, file))) problems.push(`compose "${file}" is not a file of files/src/pikit/${name}/`);
+  if (!manifest.targets.includes("server")) problems.push(`compose "${file}" runs beside the app on a server (deployment-docker), but the component's targets do not include server`);
+  return problems;
+}
+
 /**
  * A `deployment-*` component's `index.ts` exports the functions the CLI calls (`DEPLOYMENT_EXPORTS`):
  * each required one, and each one it exports, as a function; and nothing one letter or a case away
@@ -334,6 +344,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     }
     (await checkHooks(dir, name, manifest)).forEach(report);
     (await checkCommandFiles(dir, name, manifest)).forEach(report);
+    checkComposeFile(dir, name, manifest).forEach(report);
     (await checkDeploymentExports(dir, name)).forEach(report);
     checkGeneratedFiles(dir, name, manifest).forEach(report);
   }

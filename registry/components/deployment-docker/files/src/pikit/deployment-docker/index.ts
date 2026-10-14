@@ -20,6 +20,8 @@ export { createJsonLogger, type JsonLoggerOptions, type LogLevel } from "./logge
 export {
   up,
   runBeforeDeployHooks,
+  runAfterDeployHooks,
+  fileArgs,
   profileArgs,
   SELF_IMPROVEMENT_PROFILE,
   down,
@@ -29,6 +31,7 @@ export {
   exec,
   parseContainers,
   spawnRunner,
+  type AfterDeployIO,
   type CommandOptions,
   type ContainerState,
   type ExecOptions,

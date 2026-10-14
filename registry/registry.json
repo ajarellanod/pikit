@@ -127,6 +127,14 @@
       ],
       "path": "components/execution-local"
     },
+    "expose-cloudflare-tunnel": {
+      "version": "0.0.0",
+      "description": "A public HTTPS URL for a server project by a Cloudflare Tunnel: `pikit expose` makes the tunnel, its routes and its DNS record on your Cloudflare domain, and `pikit up` runs cloudflared beside the app; only the paths you list are public.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/expose-cloudflare-tunnel"
+    },
     "extension-house-rules": {
       "version": "0.0.0",
       "description": "House rules for the agents that name them: the rules in config as a system prompt section, the tools in config refused before they run, and tools kept for some senders refused for the others.",

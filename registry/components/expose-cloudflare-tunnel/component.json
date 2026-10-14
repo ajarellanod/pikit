@@ -1,0 +1,49 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "expose-cloudflare-tunnel",
+  "version": "0.0.0",
+  "title": "Cloudflare Tunnel: a public HTTPS URL for a server project, only the paths you list",
+  "description": "A public HTTPS URL for a server project by a Cloudflare Tunnel: `pikit expose` makes the tunnel, its routes and its DNS record on your Cloudflare domain, and `pikit up` runs cloudflared beside the app; only the paths you list are public.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [],
+  "hooks": {
+    "doctor": "doctor.ts"
+  },
+  "commands": {
+    "expose": {
+      "file": "expose.ts",
+      "description": "Make or check the public URL (Cloudflare Tunnel): expose, expose status, expose quick [port], expose delete"
+    }
+  },
+  "compose": "compose.yaml",
+  "dependencies": {},
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "CLOUDFLARE_TUNNEL_HOSTNAME",
+      "secret": false,
+      "required": true,
+      "description": "The public hostname, on a domain of your Cloudflare account (bot.example.com): `pikit expose` points it at the tunnel."
+    },
+    {
+      "name": "PIKIT_EXPOSE_PATHS",
+      "secret": false,
+      "required": true,
+      "description": "The paths the internet may reach, separated by commas: your webhook channels' (/googlechat), a prefix as /hooks/*. /health is always public; anything else answers 404. /admin/* only if you accept that its token is then its only lock."
+    }
+  ]
+}

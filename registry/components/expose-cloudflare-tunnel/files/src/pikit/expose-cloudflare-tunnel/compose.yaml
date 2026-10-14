@@ -1,0 +1,24 @@
+# The tunnel's connector beside the app (expose-cloudflare-tunnel, features/completed/expose.md).
+# deployment-docker adds this file after compose.yaml (`compose` in the component's component.json), for
+# `pikit up`, `down`, `restart`, `logs` and `status`: paths here are the project's.
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.0
+    # A remotely managed tunnel: its routes live in Cloudflare (`pikit expose` sets them), so it needs
+    # only its token. It dials out; no port is published.
+    command: ["tunnel", "--no-autoupdate", "run"]
+    # TUNNEL_TOKEN, written by `pikit expose`. Only this service gets it: .env is the app's, and the agent
+    # runs there. Missing until `pikit expose` ran, so `pikit up` fails before it.
+    env_file:
+      - .env.cloudflared
+    # It reaches the app on compose's network, at http://app:3000, once the app is healthy.
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

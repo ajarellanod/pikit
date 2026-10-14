@@ -83,6 +83,11 @@ export const InstalledComponentSchema = Type.Object(
       Type.Record(Type.String(), Type.Object({ file: Type.String(), description: Type.String() }, { additionalProperties: false })),
     ),
     /**
+     * Its manifest's `compose`, by project path: the Compose file `deployment-docker` adds after
+     * compose.yaml, whose services run beside the app. Absent when it declared none.
+     */
+    compose: Type.Optional(Type.String()),
+    /**
      * Its manifest's `generated`, by project path: files a hook rewrites (tool-mcp's `seed.ts`), which are
      * never the user's edits. Absent when it declared none.
      */

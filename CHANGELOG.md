@@ -201,6 +201,14 @@ there.
   object's App cannot start, a guard alarm wakes it again, from 30 s doubling up to 1 h, past
   Cloudflare's 6 retries). Its `wrangler.jsonc`'s `build.command` builds a project's dashboard before
   every bundle, whoever runs wrangler: a failed build stops the deploy.
+  `deployment-docker` also adds the Compose file a component declares (`compose`) after its own, and
+  runs `afterDeploy` hooks once the containers are healthy, with `PIKIT_PUBLIC_URL`.
+- Expose: `expose-cloudflare-tunnel` gives a server project a public HTTPS URL (features/completed/expose.md):
+  `pikit expose` makes a remotely managed Cloudflare Tunnel, its routes (only the listed paths and
+  `/health`; anything else is Cloudflare's 404) and its DNS record on your domain, and `pikit up` runs
+  `cloudflared` beside the app; `status`, `quick` (a temporary tunnel for `pikit dev`) and `delete`.
+  The Cloudflare API token is never stored (`.env` reaches the app), the tunnel's token is for the
+  `cloudflared` service only, and a DNS record it did not make stops it.
 
 ### Dashboard (`registry/dashboard/`)
 - A project's choice, not a component (SPEC §5): `src/dashboard/`, a shadcn/ui project of its own
@@ -261,7 +269,11 @@ there.
   records them in `pikit.json` (one owner per name; never one of the CLI's own), and `pikit <name>
   [args…]` runs the component's `command(io)` in the project, its arguments as typed; `pikit help`
   lists them. `doctor` says a component is missing from `pikit.config.ts` only when it is an app
-  component (its `index.ts` has a default export), as `add` lists it.
+  component (its `index.ts` has a default export), as `add` lists it. `pikit expose` is no longer the
+  CLI's ("not built yet"): it is the installed `expose-*` component's command, and `expose` is a kind.
+- `compose` in `component.json`: a Compose file of the component's own, recorded in `pikit.json` and
+  run beside the app by `deployment-docker`; `registry validate` checks it is the component's and that
+  the component runs on a server.
 - `doctor` warns when a config value looks like a secret (pointing to `secrets`), and prints the
   config redacted.
 - `configure` and `up` check credentials only for the model providers the agents name, and reach

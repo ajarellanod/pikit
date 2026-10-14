@@ -5,7 +5,12 @@
  *
  * Before it builds, `up` runs the installed components' `beforeDeploy` hooks (tool-mcp writes the seed
  * the image then carries): each one is named in its `component.json`'s `hooks`, and `pikit add`
- * records its file in `pikit.json`.
+ * records its file in `pikit.json`. Once the containers are healthy, and the project has a public URL
+ * (`PIKIT_PUBLIC_URL`, which `pikit expose` writes), it runs their `afterDeploy` hooks with it.
+ *
+ * A component may run services beside the app (`compose` in its `component.json`, a Compose file of
+ * its own: expose-cloudflare-tunnel's `cloudflared`): every command but `exec` adds each one after
+ * compose.yaml (`-f compose.yaml -f <it>`), in `pikit.json`'s order.
  *
  * With self-improvement on a server (`proposals-local` installed), every command also enables
  * compose.yaml's `self-improvement` profile: the deployer next to the app (`deployer.ts`), which the
@@ -49,10 +54,88 @@ export interface UpOptions extends CommandOptions {
  * waits until their healthcheck passes. A hook's problem stops it before the build.
  */
 export async function up(options: UpOptions = {}): Promise<void> {
-  await runBeforeDeployHooks(options.cwd ?? process.cwd(), options.say ?? ((line) => console.log(line)));
+  const cwd = options.cwd ?? process.cwd();
+  const say = options.say ?? ((line) => console.log(line));
+  await runBeforeDeployHooks(cwd, say);
   // `--wait` makes `up` fail when the app never becomes healthy, instead of reporting success for
   // a container that is crash-looping.
   await compose(["up", "--detach", "--build", "--wait"], options);
+  await runAfterDeployHooks(cwd, say);
+}
+
+/**
+ * What a component's `afterDeploy` receives (`component.json`'s `hooks.afterDeploy` names its file), as
+ * on Cloudflare. It resolves with its problems, one line each: empty when done.
+ */
+export interface AfterDeployIO {
+  /** The project's public base URL (`PIKIT_PUBLIC_URL`), once the containers are healthy. */
+  url: string;
+  /** The component's config in `pikit.config.ts` (its default export's). */
+  config: Readonly<Record<string, unknown>>;
+  /** A variable exported in the environment, or else in `.env`. */
+  get(name: string): string | undefined;
+  say(line: string): void;
+}
+
+/** The installed components' `hook` hooks (project-relative files), in `pikit.json`'s order. */
+function deployHooks(cwd: string, hook: "beforeDeploy" | "afterDeploy"): { component: string; file: string }[] {
+  return Object.entries(installedComponents(cwd)).flatMap(([component, installed]) => {
+    const file = installed.hooks?.[hook];
+    return typeof file === "string" ? [{ component, file }] : [];
+  });
+}
+
+/** `pikit.json`'s components, as this file reads them; none without `pikit.json`. */
+function installedComponents(cwd: string): Record<string, { hooks?: Record<string, unknown>; compose?: unknown }> {
+  const path = join(cwd, "pikit.json");
+  if (!existsSync(path)) return {};
+  return (JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, { hooks?: Record<string, unknown>; compose?: unknown }> }).components ?? {};
+}
+
+/** The default App's config in `pikit.config.ts`, and a reader of the environment then `.env`. */
+async function hookContext(cwd: string): Promise<{ config: Record<string, unknown>; get(name: string): string | undefined }> {
+  const configPath = join(cwd, "pikit.config.ts");
+  const app = existsSync(configPath) ? ((await import(pathToFileURL(configPath).href)) as { default?: { config?: unknown } }).default : undefined;
+  const config = typeof app?.config === "object" && app.config !== null ? (app.config as Record<string, unknown>) : {};
+  const envPath = join(cwd, ".env");
+  const env = existsSync(envPath) ? parseEnv(readFileSync(envPath, "utf8")) : {};
+  return { config, get: (name) => process.env[name] || env[name] || undefined };
+}
+
+/**
+ * Runs every installed component's `afterDeploy` with the project's public URL, once the containers are
+ * healthy: what registers a webhook needs a URL the platform reaches. Without `PIKIT_PUBLIC_URL` it runs
+ * none and says why. Every hook runs, then `up` fails with all their problems (the containers stay up).
+ */
+export async function runAfterDeployHooks(cwd: string, say: (line: string) => void): Promise<void> {
+  const hooks = deployHooks(cwd, "afterDeploy");
+  if (hooks.length === 0) return;
+  const { config, get } = await hookContext(cwd);
+  const url = get("PIKIT_PUBLIC_URL");
+  if (url === undefined) {
+    say(`no public URL (PIKIT_PUBLIC_URL), so what runs after a deploy did not run (${hooks.map((hook) => hook.component).join(", ")}): install an expose-* component and run \`pikit expose\`, then \`pikit up\` again`);
+    return;
+  }
+  const problems: string[] = [];
+  for (const hook of hooks) {
+    try {
+      const module = (await import(pathToFileURL(join(cwd, hook.file)).href)) as { afterDeploy?: unknown };
+      if (typeof module.afterDeploy !== "function") {
+        problems.push(`${hook.component}: ${hook.file} does not export afterDeploy`);
+        continue;
+      }
+      const own = config[hook.component];
+      const io: AfterDeployIO = { url, config: typeof own === "object" && own !== null ? (own as Record<string, unknown>) : {}, get, say };
+      const found = (await (module.afterDeploy as (io: AfterDeployIO) => Promise<unknown>)(io)) ?? [];
+      if (!Array.isArray(found)) throw new Error("afterDeploy did not resolve with a list of problems");
+      for (const problem of found) problems.push(`${hook.component}: ${String(problem)}`);
+    } catch (error) {
+      problems.push(`${hook.component}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`the containers are up at ${url}, but what runs after a deploy failed:\n  ${problems.join("\n  ")}\nFix it, then \`pikit up\` again`);
+  }
 }
 
 /**
@@ -74,13 +157,7 @@ export interface BeforeDeployIO {
 
 /** The installed components' `beforeDeploy` hooks (project-relative files), in `pikit.json`'s order. */
 export function beforeDeployHooks(cwd: string): { component: string; file: string }[] {
-  const path = join(cwd, "pikit.json");
-  if (!existsSync(path)) return [];
-  const { components } = JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, { hooks?: { beforeDeploy?: unknown } }> };
-  return Object.entries(components ?? {}).flatMap(([component, installed]) => {
-    const file = installed.hooks?.beforeDeploy;
-    return typeof file === "string" ? [{ component, file }] : [];
-  });
+  return deployHooks(cwd, "beforeDeploy");
 }
 
 /**
@@ -90,12 +167,7 @@ export function beforeDeployHooks(cwd: string): { component: string; file: strin
 export async function runBeforeDeployHooks(cwd: string, say: (line: string) => void): Promise<void> {
   const hooks = beforeDeployHooks(cwd);
   if (hooks.length === 0) return;
-  const configPath = join(cwd, "pikit.config.ts");
-  const app = existsSync(configPath) ? ((await import(pathToFileURL(configPath).href)) as { default?: { config?: unknown } }).default : undefined;
-  const config = typeof app?.config === "object" && app.config !== null ? (app.config as Record<string, unknown>) : {};
-  const envPath = join(cwd, ".env");
-  const env = existsSync(envPath) ? parseEnv(readFileSync(envPath, "utf8")) : {};
-  const get = (name: string): string | undefined => process.env[name] || env[name] || undefined;
+  const { config, get } = await hookContext(cwd);
   const problems: string[] = [];
   for (const hook of hooks) {
     try {
@@ -288,8 +360,18 @@ export function profileArgs(cwd: string): string[] {
   return components?.[DEPLOYED_FOR] === undefined ? [] : ["--profile", SELF_IMPROVEMENT_PROFILE];
 }
 
+/**
+ * `-f compose.yaml -f <file>…` when installed components run services beside the app (`compose` in
+ * `pikit.json`, project-relative, in its order); nothing otherwise, so Compose reads compose.yaml alone.
+ */
+export function fileArgs(cwd: string): string[] {
+  const files = Object.values(installedComponents(cwd)).flatMap((installed) => (typeof installed.compose === "string" ? [installed.compose] : []));
+  return files.length === 0 ? [] : ["compose.yaml", ...files].flatMap((file) => ["-f", file]);
+}
+
 async function compose(args: string[], options: CommandOptions, capture = false): Promise<RunResult> {
-  const command = ["docker", "compose", ...profileArgs(options.cwd ?? process.cwd()), ...args];
+  const cwd = options.cwd ?? process.cwd();
+  const command = ["docker", "compose", ...fileArgs(cwd), ...profileArgs(cwd), ...args];
   const run = options.run ?? spawnRunner;
   const result = await run(command, { cwd: options.cwd ?? process.cwd(), capture });
   if (result.code !== 0) throw new Error(`\`${command.join(" ")}\` exited with code ${result.code}`);

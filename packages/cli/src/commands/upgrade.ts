@@ -361,6 +361,7 @@ function sameInstall(installed: InstalledComponent, next: InstalledComponent): b
       c.requires,
       c.hooks ?? {},
       c.commands ?? {},
+      c.compose ?? "",
       c.generated ?? [],
       c.apps ?? {},
     ]);

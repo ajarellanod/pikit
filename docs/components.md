@@ -69,6 +69,7 @@ target (K1).
 | `halves` | generated | when `apps.worker` names a half: what each App's half provides, requires and uses |
 | `hooks` | hand | `doctor`, `beforeDeploy`, `afterDeploy`: each a file of `src/pikit/<name>/` exporting a function of that name (below) |
 | `commands` | hand | `pikit <name>` commands it adds: name (kebab-case, never the CLI's own) → `{ file, description }`, the file of `src/pikit/<name>/` exporting `command` (below) |
+| `compose` | hand | a Compose file of `src/pikit/<name>/` whose services run beside the app on a server: `deployment-docker` adds it after its compose.yaml (below) |
 | `generated` | hand | files of `src/pikit/<name>/` a hook or build rewrites |
 | `view` | hand | a folder holding its dashboard view |
 | `replay.tools` | generated | each `agent.tool` it provides with the default config → `safe` or `unsafe` |
@@ -91,10 +92,11 @@ hook gets a plain `io` (its config from `pikit.config.ts`, `get(name)` reading t
 |---|---|---|---|
 | `doctor` | `pikit doctor` (so `pikit dev`), once the App composes | `config`, `get` | may reach the network, writes nothing; may also return notes |
 | `beforeDeploy` | the deployment's `up`, before it builds or bundles | `config`, `get`, `write`, `say` | `write(file, text)` writes only files of its own directory; a problem deploys nothing. `up` runs it instead of `doctor` |
-| `afterDeploy` | the deployment's `up`, once the new version answers (C8) | `url`, `config`, `get`, `say` | a problem fails `up` but the version stays deployed |
+| `afterDeploy` | the deployment's `up`, once the new version answers (C8); on Docker once the containers are healthy, with `PIKIT_PUBLIC_URL` (none without it) | `url`, `config`, `get`, `say` | a problem fails `up` but the version stays deployed |
 
 In the registry today: `tool-mcp` has `doctor` and `beforeDeploy` (`deploy.ts` writes `seed.ts`,
 listed in `generated`); `channel-telegram-webhook` has `afterDeploy` (sets the Telegram webhook);
+`expose-cloudflare-tunnel` has `doctor` (no Cloudflare API token in `.env`);
 `admin-api` lists `dashboard-files.ts` in `generated` (written by the dashboard's build, not a hook).
 
 A `generated` file is never reported as modified by `pikit doctor`, is kept as the project has it by
@@ -126,6 +128,15 @@ they are printed and the command exits 1, as is a file that does not export `com
 that throws. It runs on the machine, so, like `configure.ts`, it may import `node:*` whatever the
 component's targets, and may write the project's files.
 
+### Services beside the app
+
+`"compose": "compose.yaml"` names a Compose file of the component's own directory
+([features/completed/expose.md](../features/completed/expose.md)). `pikit add` records it in `pikit.json` by project path,
+and `deployment-docker` adds every recorded one after its own compose.yaml, in `pikit.json`'s order,
+for `up`, `down`, `restart`, `logs` and `status` (`docker compose -f compose.yaml -f <it>…`; not for
+`exec`'s one-off container). Its paths are relative to the project's directory. Only a component whose
+targets include `server` has one (`registry validate`). `expose-cloudflare-tunnel`'s runs `cloudflared`.
+
 ### Views
 
 `"view": "view"` names a folder whose `index.tsx` default-exports `defineView({ id: "<component
@@ -141,10 +152,13 @@ A name is `<kind>-<rest>`, and the kind must be one the kit knows (`KINDS` in
 `channel`, `router`, `storage`, `workspace`, `execution`, `scheduler`, `deployment`, `tool`, `policy`,
 `admin`, `inbound`, `outbound`, `log`, `conversations`, `credentials`, `provider`, `runtime`,
 `secrets`, `server`, `mailbox`, `wakeups`, `platform`, `extension`, `health`, `settings`, `agents`,
-`github`, `proposals`.
+`github`, `proposals`, `expose`.
 
 The kind carries rules: only `admin-*` may read `APP_DESCRIPTION`, only `deployment-*` is delegated
-`up`/`down`/`logs`/`status` and is never listed in `pikit.config.ts`.
+`up`/`down`/`logs`/`status` and is never listed in `pikit.config.ts`. An `expose-*` component gives a
+server project its public URL with its command `pikit expose`; like a deployment it is not an app
+component.
+
 
 ## Validation
 
@@ -155,7 +169,8 @@ catalogue ([capabilities.ts](../packages/cli/src/registry/capabilities.ts), plus
 declares), the imports of every file per target (only the adapter imports Pi, no `node:*`/`bun:*`/
 `cloudflare:*` for `durable` outside `configure.ts`, a deployment's commands and the files `commands`
 names, no sibling component's files), that each hook's and command's file exists and exports its
-function, that no command takes a name of the CLI's own, that `dependencies` are exactly what the
+function, that no command takes a name of the CLI's own, that a `compose` file is the component's own
+and its targets include `server`, that `dependencies` are exactly what the
 shipped files import, that a tool working on `api.env` uses `execution` or `execution.shell`, that only
 `admin-*` reads `APP_DESCRIPTION`, that `setup` declares the same on every declared target (K1), and
 the generated fields. It also checks presets and schemas.
@@ -185,7 +200,7 @@ and `doctor` reports it.
 [pikit-json.ts](../packages/cli/src/project/pikit-json.ts). Per installed component: the registry,
 version and commit (`-dirty` when uncommitted), the kit ranges it accepts, each file with its
 `sha256` hash, the npm packages it declared and those `add` put in `package.json` for it, its
-`environment`, `hooks`, `commands`, `generated`, `apps`, and `installedFor` when it came as an offer. Also the
+`environment`, `hooks`, `commands`, `compose`, `generated`, `apps`, and `installedFor` when it came as an offer. Also the
 project's `targets`, its `registries`, the vendored kit's commit, and the dashboard's files. Whether a
 file is modified is never stored: it is computed from the hash.
 

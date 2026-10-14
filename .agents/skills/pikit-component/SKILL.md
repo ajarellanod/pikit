@@ -103,6 +103,7 @@ preset (`{{PIKIT_ROOT}}/features/building-components.md`, "How big a component i
 | Admin route / auth | `admin-auth-token` | `admin.auth`, a secret read at start, constant-time compare |
 | Model provider | `provider-openrouter`, `provider-openai-compatible`, `provider-faux` | a pi-ai provider as `model.provider` by its id, `modelProviders`, the key's variable first in `environment` |
 | Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2) |
+| Not an app component: a command and a service beside the app | `expose-cloudflare-tunnel` | `commands`, `compose` (a Compose file `deployment-docker` runs), a `doctor` step, a fake of a platform's API |
 | A feature of your own kind | `{{PIKIT_ROOT}}/features/memory.md` | `declares`, a contract file, an actor per owner with `call` |
 
 Installed ones are in `src/pikit/`, each with its README; the rest are in the registry the CLI uses
@@ -175,8 +176,9 @@ as `pikit <name> [args...]` in the project: `"commands": { "<name>": { "file": "
 "description": "<one line>" } }`, the file exporting `command({ args, config, get, say })`, which
 resolves with its problems (`CommandIO` in `packages/cli/src/project/component-command.ts`;
 `config()` imports `pikit.config.ts` only when called). The name is kebab-case and never one of the
-CLI's own; those files may import `node:*` whatever the targets. See `docs/components.md`, Hooks and
-Commands.
+CLI's own; those files may import `node:*` whatever the targets. A component that runs services beside
+the app on a server names its Compose file in `"compose"`. See `docs/components.md`, Hooks, Commands
+and Services beside the app.
 
 A component only the project needs can be a single file in `src/extensions/` listed in
 `pikit.config.ts`, like `src/extensions/agents.ts`; make it a registry component when it should be

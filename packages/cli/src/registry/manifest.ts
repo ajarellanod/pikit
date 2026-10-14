@@ -53,6 +53,8 @@ export const KINDS: readonly string[] = [
   "github",
   // The agent's changes to itself, waiting for an operator (`proposals`): `proposals-local`, `proposals-github`.
   "proposals",
+  // A public URL for a server project, `pikit expose` (features/completed/expose.md): `expose-cloudflare-tunnel`.
+  "expose",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */
@@ -69,6 +71,8 @@ const IDENTIFIER = "^[A-Za-z_$][A-Za-z0-9_$]*$";
 const TEXT = "\\S";
 /** A file name of the component's own directory, `src/pikit/<name>/`. */
 const OWN_FILE = "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ts$";
+/** A Compose file of the component's own directory, `src/pikit/<name>/`. */
+const OWN_COMPOSE_FILE = "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ya?ml$";
 /** One line of text. */
 const ONE_LINE = "^[^\\n]*\\S[^\\n]*$";
 
@@ -79,7 +83,7 @@ const ONE_LINE = "^[^\\n]*\\S[^\\n]*$";
 export const BUILT_IN_COMMANDS: readonly string[] = [
   "new", "add", "remove", "upgrade", "ui", "doctor", "configure", "dev", "registry", "help",
   "up", "down", "restart", "logs", "status",
-  "init", "create", "outdated", "diff", "config", "expose",
+  "init", "create", "outdated", "diff", "config",
 ];
 
 /**
@@ -270,6 +274,13 @@ export const ManifestSchema = Type.Object(
             "Commands this component adds to the CLI: name (kebab-case, never one of the CLI's own: `pikit help` lists them) → its file and description. `pikit add` records them in pikit.json, by project path, and refuses a name another installed component declares; `pikit remove` takes them out.",
         },
       ),
+    ),
+    compose: Type.Optional(
+      Type.String({
+        pattern: OWN_COMPOSE_FILE,
+        description:
+          "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and `deployment-docker` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. Only for a component whose targets include server.",
+      }),
     ),
     generated: Type.Optional(
       Type.Array(Type.String({ pattern: OWN_FILE }), {
