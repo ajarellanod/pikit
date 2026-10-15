@@ -17,7 +17,7 @@ import { ValuePill } from "@/components/bui/Chip";
 import EmptyState from "@/components/bui/EmptyState";
 import { FilterChips, type PillTone, StatePill } from "@/components/bui/FilterTable";
 import { Page, PageLoading } from "@/components/bui/Page";
-import RecordsTable, { type RecordColumn, RecordMark, RecordName, RecordTag, TagList, tagHue } from "@/components/bui/RecordsTable";
+import RecordsTable, { type RecordColumn, RecordMark, RecordName, RecordTag, TagList } from "@/components/bui/RecordsTable";
 import SearchField from "@/components/bui/SearchField";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -157,7 +157,7 @@ export function UsersPage() {
       label: "Signs in with",
       icon: <LogIn />,
       width: 140,
-      cell: (row) => <TagList tags={row.methods} empty="nothing yet" render={(method) => <RecordTag base={tagHue(method)}>{method}</RecordTag>} />,
+      cell: (row) => <TagList tags={row.methods} empty="nothing yet" render={(method) => <RecordTag>{method}</RecordTag>} />,
     },
     { key: "state", label: "State", icon: <Prohibition />, width: 100, sort: (a, b) => stateOf(a).localeCompare(stateOf(b)), cell: (row) => <StatePill tone={TONE[stateOf(row)]}>{stateOf(row)}</StatePill> },
     {
@@ -240,6 +240,7 @@ export function UsersPage() {
           columns={columns}
           rows={rows}
           rowKey={(row) => row.id}
+          footer={false}
           empty={
             users.length === 0 ? (
               <EmptyState icon={<Group />} title="No users yet" hint="Invite someone to get started." />

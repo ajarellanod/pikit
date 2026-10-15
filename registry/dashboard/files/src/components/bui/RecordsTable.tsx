@@ -146,6 +146,7 @@ export default function RecordsTable<T>({
   initialSort,
   maxHeight = 520,
   className = "",
+  footer = true,
 }: {
   /** what the table holds, for assistive technology */
   label: string;
@@ -158,6 +159,8 @@ export default function RecordsTable<T>({
   /** px before the grid scrolls under its sticky header */
   maxHeight?: number;
   className?: string;
+  /** the footer with the count; off when the page says the count already */
+  footer?: boolean;
 }) {
   const [sort, setSort] = useState(initialSort);
 
@@ -233,7 +236,7 @@ export default function RecordsTable<T>({
               </tr>
             ))}
           </tbody>
-          {rows.length > 0 && (
+          {footer && rows.length > 0 && (
             <tfoot>
               <tr>
                 <td className="records-cell records-sticky-cell">

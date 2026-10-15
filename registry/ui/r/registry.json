@@ -46,6 +46,18 @@
       "description": "pikit's settings-dialog piece of the dashboard."
     },
     {
+      "name": "settings-rows",
+      "type": "registry:file",
+      "title": "settings-rows",
+      "description": "pikit's settings-rows piece of the dashboard."
+    },
+    {
+      "name": "settings-shell",
+      "type": "registry:file",
+      "title": "settings-shell",
+      "description": "pikit's settings-shell piece of the dashboard."
+    },
+    {
       "name": "settings",
       "type": "registry:file",
       "title": "settings",
