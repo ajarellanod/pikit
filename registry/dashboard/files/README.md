@@ -125,7 +125,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | Path | What |
 |---|---|
 | `src/views/<view>/index.tsx` | one view each: its pages and when it shows (below) |
-| `src/components/bui/` | Beautiful UI's primitives (the sidebar, the composer with its "+", "/" and assistant menus, thinking, tool chips, context cards, pills; an operator's page, records tables, filter chips, a code block), fed by real data |
+| `src/components/bui/` | Beautiful UI's primitives (the sidebar, a row's or a header's "…" menu `ActionsMenu`, the composer with its "+", "/" and assistant menus, thinking, tool chips, context cards, pills; an operator's page, records tables, filter chips, a code block), fed by real data |
 | `src/components/ui/` | shadcn/ui primitives, copied and yours (`shadcn add` puts more here), in the same tokens |
 | `src/components/pikit/` | pieces the views share: a transcript (`turnsOf`, `Reply`, `UserBubble`, `MessageView`), an error, the sign-in |
 | `src/index.css` | the one stylesheet: Beautiful UI's tokens (light and dark), shadcn's variables mapped onto them |
@@ -135,7 +135,8 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/lib/views.ts` | how views are found and when they show |
 | `src/settings/<component>/index.tsx` | a component's section of the Settings dialog (below) |
 | `src/lib/settings.ts` | how sections are found and when they show (`defineSettings`), a component's settings (`useSettings`) |
-| `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General; its rows and controls (`SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`), and `SchemaSettings` |
+| `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General, and `SchemaSettings`; `settings.tsx` re-exports the rows and controls |
+| `src/components/pikit/settings-shell.tsx`, `settings-rows.tsx` | a settings dialog's frame and navigation (`SettingsPanels`, `useSettingsChoice`), its rows and controls (`SettingsHeading`, `SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`): by props only, shared with channel-web's chat page |
 | `src/lib/router.tsx` | the pages under `/admin` |
 | `src/views/conversations/` | New chat (`new-chat.tsx`), a conversation (its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
 | `src/views/home/` | Home: where the App runs and talks, its agents, its components by what they are for (`overview.ts`), one at the side (`panel.tsx`: what it provides and needs, its config), and the wiring, folded (`wiring.tsx`) |

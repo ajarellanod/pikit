@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { MoreVert, NavArrowDown, Search, Settings, SidebarCollapse, Xmark } from "iconoir-react";
+import { NavArrowDown, Search, Settings, SidebarCollapse, Xmark } from "iconoir-react";
+import { ActionsMenu, type ActionsMenuItem, MenuPopover } from "./ActionsMenu";
 import GlideMenu from "./GlideMenu";
+
+export { MenuRow, MenuSeparator } from "./ActionsMenu";
 
 /* ---------------------------------------------------------
  * SIDEBAR NAV
  * Beautiful UI's harness sidebar, fed by the app: the workspace
  * (its mark and name), primary navigation, a searchable list of
- * chats (each with its actions, archived ones apart), a menu
+ * chats (each with its actions menu, `ActionsMenu`, archived ones apart), a menu
  * at the foot (Settings, or the caller's label and icon; none
  * without `menu`), and a collapse that keeps every icon in place.
  * Icons: iconoir.
@@ -25,8 +27,8 @@ export type SidebarItem = {
   onSelect: () => void;
 };
 
-/** What can be done to a chat from its row's menu. */
-export type SidebarChatAction = { key: string; label: string; icon: ReactNode; danger?: boolean; onSelect: () => void };
+/** What can be done to a chat from its row's menu (`ActionsMenu`'s items). */
+export type SidebarChatAction = ActionsMenuItem;
 
 export type SidebarChat = {
   id: string;
@@ -86,38 +88,6 @@ function RailButton({ item }: { item: SidebarItem }) {
   );
 }
 
-/** One row of the workspace menu. */
-export function MenuRow({ icon, children, trailing, onClick, height = "h-9", danger = false }: { icon?: ReactNode; children: ReactNode; trailing?: ReactNode; onClick?: () => void; height?: string; danger?: boolean }) {
-  return (
-    <button data-menu-row type="button" onClick={onClick} className={`relative z-10 flex ${height} w-full items-center gap-1.5 rounded-[8px] px-2 text-left`}>
-      {icon !== undefined && <span className={`flex size-5 shrink-0 items-center justify-center [&_svg]:size-4 ${danger ? "text-red" : "text-ink-2"}`}>{icon}</span>}
-      <span className={`min-w-0 flex-1 truncate text-[13.5px] ${danger ? "text-red" : "text-ink"}`}>{children}</span>
-      {trailing}
-    </button>
-  );
-}
-
-export function MenuSeparator() {
-  return <div className="my-1 h-px bg-line" />;
-}
-
-/** A menu over everything, anchored at `position`: below a point (`top`), or above one (`bottom`). */
-function WorkspaceMenu({ position, children, width = "w-64" }: { position: { top?: number; bottom?: number; left: number }; children: ReactNode; width?: string }) {
-  const above = position.bottom !== undefined;
-  return createPortal(
-    <div
-      data-workspace-menu
-      className={`fixed z-50 ${width} rounded-[14px] bg-surface p-1.5 shadow-overlay`}
-      style={{ top: position.top, bottom: position.bottom, left: position.left, animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: above ? "bottom left" : "top left" }}
-    >
-      <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
-        {children}
-      </GlideMenu>
-    </div>,
-    document.body,
-  );
-}
-
 export default function SidebarNav({
   workspace,
   menu,
@@ -155,8 +125,8 @@ export default function SidebarNav({
   const [workspacePosition, setWorkspacePosition] = useState<{ top?: number; bottom?: number; left: number }>({ left: 0 });
   const [chatsOpen, setChatsOpen] = useState(true);
   const [archivedOpen, setArchivedOpen] = useState(false);
-  /** The chat whose "…" menu is open, and where. */
-  const [rowMenu, setRowMenu] = useState<{ chat: SidebarChat; top: number; left: number }>();
+  /** The chat whose "…" menu is open: one at a time. */
+  const [rowMenu, setRowMenu] = useState<string>();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
@@ -183,21 +153,6 @@ export default function SidebarNav({
   useEffect(() => {
     if (searchOpen) searchRef.current?.focus();
   }, [searchOpen]);
-
-  useEffect(() => {
-    if (rowMenu === undefined) return;
-    const close = (event: PointerEvent) => {
-      const target = event.target as Element;
-      if (!target.closest("[data-workspace-menu]") && !target.closest("[data-row-menu-trigger]")) setRowMenu(undefined);
-    };
-    const escape = (event: KeyboardEvent) => event.key === "Escape" && setRowMenu(undefined);
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [rowMenu]);
 
   const collapse = () => {
     setCollapsed(true);
@@ -328,7 +283,7 @@ export default function SidebarNav({
           {chatsOpen && (
             <GlideGroup>
               {visibleChats.map((chat) => (
-                <ChatRow key={chat.id} chat={chat} menuOpen={rowMenu?.chat.id === chat.id} onPick={onPickChat} onMenu={(at) => setRowMenu(rowMenu?.chat.id === chat.id ? undefined : { chat, ...at })} />
+                <ChatRow key={chat.id} chat={chat} menuOpen={rowMenu === chat.id} onPick={onPickChat} onMenu={(open) => setRowMenu(open ? chat.id : undefined)} />
               ))}
               {visibleChats.length === 0 && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">{needle === "" ? chatsEmpty : "No chats found"}</div>}
               {chatsFooter}
@@ -352,7 +307,7 @@ export default function SidebarNav({
               {archivedOpen && (
                 <GlideGroup>
                   {(archived.chats ?? []).map((chat) => (
-                    <ChatRow key={chat.id} chat={chat} menuOpen={rowMenu?.chat.id === chat.id} onPick={onPickChat} onMenu={(at) => setRowMenu(rowMenu?.chat.id === chat.id ? undefined : { chat, ...at })} />
+                    <ChatRow key={chat.id} chat={chat} menuOpen={rowMenu === chat.id} onPick={onPickChat} onMenu={(open) => setRowMenu(open ? chat.id : undefined)} />
                   ))}
                   {archived.chats !== undefined && archived.chats.length === 0 && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">No archived chats</div>}
                   {archived.chats === undefined && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">Loading</div>}
@@ -384,34 +339,17 @@ export default function SidebarNav({
               {menuIcon}
               <span className="sidebar-copy min-w-0 truncate">{menuLabel}</span>
             </button>
-            {workspaceOpen && <WorkspaceMenu position={workspacePosition}>{menu(() => setWorkspaceOpen(false))}</WorkspaceMenu>}
+            {workspaceOpen && <MenuPopover position={workspacePosition}>{menu(() => setWorkspaceOpen(false))}</MenuPopover>}
           </div>
         )}
       </div>
 
-      {rowMenu !== undefined && (
-        <WorkspaceMenu position={{ top: rowMenu.top, left: rowMenu.left }} width="w-44">
-          {(rowMenu.chat.actions ?? []).map((action) => (
-            <MenuRow
-              key={action.key}
-              icon={action.icon}
-              danger={action.danger === true}
-              onClick={() => {
-                setRowMenu(undefined);
-                action.onSelect();
-              }}
-            >
-              {action.label}
-            </MenuRow>
-          ))}
-        </WorkspaceMenu>
-      )}
     </aside>
   );
 }
 
-/** One chat of the list: its link, and, on hover or focus, its "…" menu's trigger when it has actions. */
-function ChatRow({ chat, menuOpen, onPick, onMenu }: { chat: SidebarChat; menuOpen: boolean; onPick: (id: string) => void; onMenu: (at: { top: number; left: number }) => void }) {
+/** One chat of the list: its link, and, on hover or focus, its "…" menu (`ActionsMenu`) when it has actions. */
+function ChatRow({ chat, menuOpen, onPick, onMenu }: { chat: SidebarChat; menuOpen: boolean; onPick: (id: string) => void; onMenu: (open: boolean) => void }) {
   const withMenu = (chat.actions?.length ?? 0) > 0;
   return (
     <div className="group/chat relative">
@@ -429,19 +367,15 @@ function ChatRow({ chat, menuOpen, onPick, onMenu }: { chat: SidebarChat; menuOp
         )}
       </a>
       {withMenu && (
-        <button
-          type="button"
-          data-row-menu-trigger
-          aria-label={`Actions for ${chat.label}`}
-          aria-expanded={menuOpen}
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            onMenu({ top: rect.bottom + 4, left: Math.max(8, rect.right - 176) });
-          }}
-          className={`sidebar-copy absolute top-1 right-3 z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover-2 hover:text-ink focus-visible:opacity-100 ${menuOpen ? "bg-hover-2 text-ink opacity-100" : "opacity-0 group-hover/chat:opacity-100"}`}
-        >
-          <MoreVert width={16} height={16} strokeWidth={2} />
-        </button>
+        <div className="sidebar-copy absolute top-1 right-3 z-20">
+          <ActionsMenu
+            actions={chat.actions ?? []}
+            label={`Actions for ${chat.label}`}
+            open={menuOpen}
+            onOpenChange={onMenu}
+            className="size-6 rounded-[6px] text-ink-3 opacity-0 transition-[opacity,background-color,color] duration-100 group-hover/chat:opacity-100 hover:bg-hover-2 hover:text-ink focus-visible:opacity-100 aria-expanded:bg-hover-2 aria-expanded:text-ink aria-expanded:opacity-100"
+          />
+        </div>
       )}
     </div>
   );

@@ -6,9 +6,10 @@
  *   is shared too, but in no item: every shadcn project has its own.
  * - `ADMIN_CLIENT` (`@pikit/admin-client`): the rest of `src/lib/`, the admin API's client and the
  *   dashboard's shell. Every file of `src/lib/` is in exactly one of the two.
- * - `SHARED_UI_FILES`: the lib-ui files, Beautiful UI's primitives (`src/components/bui/`) and the
- *   pieces that take everything by props and never fetch (`message`, `error-note`, `markdown`,
- *   `markdown-engine`), as paths from the dashboard's root.
+ * - `SHARED_UI_FILES`: the lib-ui files, Beautiful UI's primitives (`src/components/bui/`, its
+ *   `ActionsMenu` too) and the pieces that take everything by props and never fetch (`message`,
+ *   `error-note`, `markdown`, `markdown-engine`, and a settings dialog's frame and rows:
+ *   `settings-shell`, `settings-rows`), as paths from the dashboard's root.
  *
  * `sharedUiViolations` keeps them so: a shared file reaches (by `@/` or a relative path) only other
  * shared files, never the admin client. `scripts/ui-shared.test.ts` runs it on the template.
@@ -28,7 +29,7 @@ export const ADMIN_CLIENT: readonly string[] = ["admin-api.ts", "api.ts", "chats
 export const SHADCN_UTILS = "utils.ts";
 
 /** The pieces of `src/components/pikit/` that need lib-ui only. */
-const SHARED_PIECES = ["error-note.tsx", "markdown-engine.tsx", "markdown.tsx", "message.tsx"];
+const SHARED_PIECES = ["error-note.tsx", "markdown-engine.tsx", "markdown.tsx", "message.tsx", "settings-rows.tsx", "settings-shell.tsx"];
 
 /** The shared files, from the dashboard's root `root`, sorted. */
 export function sharedUiFiles(root = DASHBOARD): string[] {

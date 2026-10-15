@@ -1,0 +1,186 @@
+/**
+ * A settings dialog's frame, apart from any dialog and any data (the dashboard's Settings, channel-web's
+ * chat page's): the sections, grouped, with a search box on the left, the chosen one's title and rows on
+ * the right, a close button at the top. The caller puts it in its own modal (`SETTINGS_FRAME` sizes it)
+ * and renders the chosen section. Everything by props: no admin client (`scripts/ui-shared.ts`).
+ *
+ * `useSettingsChoice` keeps what is searched and chosen: the first section shown when the chosen one is
+ * not (a search that hides it), a section chosen by its id whenever the dialog opens with one.
+ */
+
+import { Search, Xmark } from "iconoir-react";
+import { type ComponentType, type ReactNode, useEffect, useState } from "react";
+
+/** One section, as the navigation lists it. */
+export interface SettingsEntry {
+  id: string;
+  title: string;
+  /** Its group's name: the navigation's headings, in the order the sections come. */
+  group: string;
+  icon?: ComponentType<{ className?: string; width?: number; height?: number; strokeWidth?: number }>;
+  /** Words the search finds it by, besides its title, id and group. */
+  keywords?: readonly string[];
+}
+
+/**
+ * The modal's own classes: centred, large, rounded (`fullScreenOnMobile`: the whole screen below `sm`,
+ * the navigation a list at the top). Its animation: `SETTINGS_FRAME_STYLE`.
+ */
+export function settingsFrameClass(fullScreenOnMobile = false): string {
+  const size = fullScreenOnMobile
+    ? "inset-0 h-[100dvh] w-screen sm:inset-auto sm:top-1/2 sm:left-1/2 sm:h-[min(760px,calc(100dvh-2rem))] sm:w-[min(1040px,calc(100vw-2rem))] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-window"
+    : "top-1/2 left-1/2 h-[min(760px,calc(100dvh-2rem))] w-[min(1040px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-window";
+  return `fixed z-50 flex ${size} flex-col overflow-hidden bg-page text-ink shadow-overlay outline-none sm:flex-row`;
+}
+export const SETTINGS_FRAME_STYLE = { animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both" } as const;
+
+function matches(section: SettingsEntry, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const text = [section.title, section.id, section.group, ...(section.keywords ?? [])].join(" ").toLowerCase();
+  return words.every((word) => text.includes(word));
+}
+
+export interface SettingsChoice<T extends SettingsEntry> {
+  query: string;
+  setQuery(query: string): void;
+  /** The sections the search finds. */
+  shown: T[];
+  /** The chosen section, or the first shown when it is not. */
+  current: T | undefined;
+  /** Chooses a section by its id (the search cleared: a section's link to another shows it whatever the search). */
+  open(id: string): void;
+  choose(id: string): void;
+}
+
+/** What is searched and chosen among `all`; opened (`open`) at `section` when given. */
+export function useSettingsChoice<T extends SettingsEntry>(all: readonly T[], open: boolean, section?: string): SettingsChoice<T> {
+  const [query, setQuery] = useState("");
+  const [chosen, setChosen] = useState(all[0]?.id ?? "");
+  // Opened at a section by its id: chosen whenever the dialog opens with one.
+  useEffect(() => {
+    if (!open || section === undefined) return;
+    setQuery("");
+    setChosen(section);
+  }, [open, section]);
+  const shown = all.filter((each) => matches(each, query));
+  const current = shown.find((each) => each.id === chosen) ?? shown[0];
+  return {
+    query,
+    setQuery,
+    shown,
+    current,
+    open: (id) => {
+      setQuery("");
+      setChosen(id);
+    },
+    choose: setChosen,
+  };
+}
+
+/** The navigation: a search box, then each group's sections. */
+export function SettingsNav<T extends SettingsEntry>({ choice, onChoose, className = "" }: { choice: SettingsChoice<T>; onChoose?: (id: string) => void; className?: string }) {
+  const { shown, current } = choice;
+  const groups = [...new Set(shown.map((section) => section.group))];
+  return (
+    <nav aria-label="Settings sections" className={`flex shrink-0 flex-col gap-1 overflow-y-auto border-b border-line bg-canvas p-3 sm:max-h-none sm:w-64 sm:border-r sm:border-b-0 ${className}`}>
+      <div className="flex h-9 shrink-0 items-center gap-2 rounded-control bg-surface px-2.5 shadow-btn focus-within:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]">
+        <Search width={15} height={15} strokeWidth={2} className="shrink-0 text-ink-3" />
+        <input
+          value={choice.query}
+          onChange={(event) => choice.setQuery(event.target.value)}
+          placeholder="Search"
+          aria-label="Search the settings"
+          className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-ink-3"
+        />
+      </div>
+      {groups.map((group) => (
+        <div key={group} className="mt-3 flex flex-col gap-px">
+          <div className="px-2.5 pb-1 text-[12.5px] font-medium text-ink-3">{group}</div>
+          {shown
+            .filter((section) => section.group === group)
+            .map((section) => {
+              const Icon = section.icon;
+              const active = section.id === current?.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => {
+                    choice.choose(section.id);
+                    onChoose?.(section.id);
+                  }}
+                  className={`flex h-9 shrink-0 items-center gap-2.5 rounded-[8px] px-2.5 text-left text-[14px] transition-colors duration-100 ${active ? "bg-hover-2 font-medium text-ink" : "text-ink-2 hover:bg-hover hover:text-ink"}`}
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center">{Icon !== undefined && <Icon width={17} height={17} strokeWidth={1.8} />}</span>
+                  <span className="min-w-0 flex-1 truncate">{section.title}</span>
+                </button>
+              );
+            })}
+        </div>
+      ))}
+      {shown.length === 0 && <p className="px-2.5 pt-3 text-[13px] text-ink-3">No settings match.</p>}
+    </nav>
+  );
+}
+
+/**
+ * The navigation, and the chosen section on the right under its title (`children`, rendered by the
+ * caller for `choice.current`), with a close button (`onClose`). `navClassName`: the navigation's height
+ * on a narrow screen, where it sits on top. `fullScreenOnMobile` (with `settingsFrameClass(true)`): below
+ * `sm` a bar heads the screen, its `title` and the close button.
+ */
+export function SettingsPanels<T extends SettingsEntry>({
+  choice,
+  onChoose,
+  onClose,
+  closeLabel = "Close the settings",
+  navClassName = "max-h-56",
+  fullScreenOnMobile = false,
+  title = "Settings",
+  children,
+}: {
+  choice: SettingsChoice<T>;
+  onChoose?: (id: string) => void;
+  onClose: () => void;
+  closeLabel?: string;
+  navClassName?: string;
+  fullScreenOnMobile?: boolean;
+  title?: string;
+  children: ReactNode;
+}) {
+  const { current } = choice;
+  const close = (className: string) => (
+    <button
+      type="button"
+      aria-label={closeLabel}
+      onClick={onClose}
+      className={`z-10 flex size-8 shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink ${className}`}
+    >
+      <Xmark width={18} height={18} strokeWidth={2} />
+    </button>
+  );
+  return (
+    <>
+      {fullScreenOnMobile && (
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-canvas pr-2 pl-4 sm:hidden">
+          <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{title}</span>
+          {/* focused when the modal opens on a phone: shaded, not ringed (the page's ring is unlayered: `!`) */}
+          {close("focus-visible:rounded-full! focus-visible:outline-none! focus-visible:bg-hover-2 focus-visible:text-ink")}
+        </div>
+      )}
+      <SettingsNav choice={choice} onChoose={onChoose} className={navClassName} />
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        {close(`absolute top-3 right-3 ${fullScreenOnMobile ? "max-sm:hidden" : ""}`)}
+        <div className={`min-h-0 flex-1 overflow-y-auto px-6 pb-10 sm:px-10 sm:pt-12 ${fullScreenOnMobile ? "pt-6" : "pt-12"}`}>
+          {current !== undefined && (
+            <>
+              <h2 className="mb-6 text-[19px] font-semibold text-ink">{current.title}</h2>
+              {children}
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
