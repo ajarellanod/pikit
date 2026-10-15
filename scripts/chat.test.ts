@@ -3,8 +3,9 @@
  * and 5): its copies of the dashboard's shared pieces and of channel-web's `api.ts` are the sources,
  * byte for byte; it never reaches the admin client; its build embeds into channel-web's
  * `chat-files.ts` only where channel-web is installed, and refuses a bundle naming the admin API; and
- * its pure modules (the live events' parser and state, errors, image limits, routes and the links that
- * land on them, the config read when the tab comes back) do what the page needs.
+ * its pure modules (the live events' parser, the conversation's source for the shared view, errors,
+ * image limits, routes and the links that land on them, the config read when the tab comes back) do
+ * what the page needs.
  * Building it needs its npm packages, so it is built by hand (`bun install && bun run build` there);
  * a built `dist/` is checked when there is one.
  */
@@ -18,9 +19,10 @@ import { type ChatFiles, createAssets } from "../registry/components/channel-web
 import { IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "../registry/components/channel-web/chat/src/lib/chat-api.ts";
 import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../registry/components/channel-web/chat/src/lib/errors.ts";
 import { base64Bytes, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
-import { type Action, INITIAL, type LiveState, liveTexts, reduce } from "../registry/components/channel-web/chat/src/lib/live-state.ts";
+import { INITIAL, type LiveState, reduce } from "../registry/components/channel-web/chat/src/lib/transcript.ts";
+import { type ChatClient, chatSource, conversationsPath, transcriptPath } from "../registry/components/channel-web/chat/src/lib/source.ts";
 import { parseRoute, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
-import { SseParser } from "../registry/components/channel-web/chat/src/lib/sse.ts";
+import { readSse, SseParser } from "../registry/components/channel-web/chat/src/lib/sse.ts";
 import { onVisibleAgain } from "../registry/components/channel-web/chat/src/lib/visible.ts";
 import { CHAT, chatBoundaryViolations, chatCopies, staleCopies } from "./chat-shared.ts";
 import { SHARED_UI_FILES } from "./ui-shared.ts";
@@ -191,75 +193,90 @@ describe("live events", () => {
     expect(split.push("\n\r\n")).toEqual([{ event: "message", data: "a" }]);
   });
 
-  const fold = (actions: Action[], from: LiveState = INITIAL): LiveState => actions.reduce(reduce, from);
-  const event = (value: Extract<Action, { type: "event" }>["event"]): Action => ({ type: "event", event: value });
+  /** A body that gives `chunks` one by one, as a `fetch` response's. */
+  const body = (chunks: string[]) =>
+    new ReadableStream<Uint8Array<ArrayBuffer>>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk) as Uint8Array<ArrayBuffer>);
+        controller.close();
+      },
+    });
+  const fold = (events: unknown[], from: LiveState = INITIAL): LiveState => events.reduce<LiveState>((state, event) => reduce(state, { type: "event", event: event as { type: string } }), from);
 
-  test("the state follows a run: busy, the answer as written, the tools running, then the answer kept until the messages have the stored answer its message event named", () => {
-    const running = fold([
-      { type: "connected" },
-      event({ type: "state", busy: true }),
-      event({ type: "partial", text: "", requests: ["web:r1"] }),
-      event({ type: "tool", name: "websearch", state: "running" }),
-      event({ type: "tool", name: "fetch", state: "running" }),
-      event({ type: "tool", name: "websearch", state: "done" }),
-      event({ type: "partial", text: "Hel", requests: ["web:r1"] }),
-      event({ type: "partial", text: "Hello", requests: ["web:r1"] }),
+  test("a stream's events, read with fetch and folded by the shared live state: the answer as written, then its entry by the transcript's id; an error event ends it", async () => {
+    const answer = { role: "assistant", content: [{ type: "text", text: "Hello" }], timestamp: 2 };
+    const text = [
+      `data: ${JSON.stringify({ type: "snapshot", run: {}, tools: [] })}\n\n`,
+      ": heartbeat\n\n",
+      `data: ${JSON.stringify({ type: "message_start", message: { ...answer, content: [{ type: "text", text: "" }] } })}\n\n`,
+      `data: ${JSON.stringify({ type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: "Hel" }] })}\n\n`,
+      `data: ${JSON.stringify({ type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: "lo" }] })}\n\n`,
+      `data: ${JSON.stringify({ type: "message_end", entry: { id: "web:r1#ab12", kind: "message", model: [answer] } })}\n\n`,
+      `data: ${JSON.stringify({ type: "run_end" })}\n\n`,
+      'event: error\ndata: {"error":"watch_failed"}\n\n',
+      `data: ${JSON.stringify({ type: "run_start" })}\n\n`,
+    ].join("");
+    // Cut anywhere: the parser waits for each event's blank line.
+    const chunks = text.match(/[\s\S]{1,7}/g) ?? [];
+    const events: unknown[] = [];
+    await readSse(body(chunks), (event) => events.push(event));
+
+    expect(events.map((event) => (event as { type: string }).type)).toEqual(["snapshot", "message_start", "message_update", "message_update", "message_end", "run_end"]);
+    const writing = fold(events.slice(0, 4));
+    expect(writing).toMatchObject({ busy: true, partial: { content: [{ type: "text", text: "Hello" }] } });
+    // The ended answer is the transcript's entry, by its id: the view merges it with the transcript, nothing swapped.
+    const ended = fold(events);
+    expect(ended).toMatchObject({ busy: false, partial: undefined, entries: [{ id: "web:r1#ab12", kind: "message", messages: [answer] }] });
+    expect(ended.changes).toBeGreaterThan(0);
+  });
+
+  test("the chat's source reads the chat API's transcript, events, messages and abort, and checks a message before it goes", async () => {
+    const calls: { method: string; path: string; body?: unknown }[] = [];
+    const client: ChatClient = {
+      get: async <T>(path: string) => (calls.push({ method: "GET", path }), { items: [], next: "c2" } as T),
+      post: async <T>(path: string, body?: unknown) => (calls.push({ method: "POST", path, body }), { requestId: "web:x", admission: "queued" } as T),
+      follow: async (path) => void calls.push({ method: "FOLLOW", path }),
+    };
+    const source = chatSource("a b/c", client, "durable");
+    /** What the composer sends (`ComposerMessage`): with the image's file name, and whether to search the web. */
+    const composed = (message: { text: string; images: { name: string; mimeType: string; data: string }[]; webSearch: boolean }) => message;
+
+    expect(source.id).toBe("a b/c");
+    expect(await source.transcript({ limit: 50 })).toEqual({ items: [], next: "c2" });
+    await source.transcript({ limit: 50, cursor: "x&y=1" });
+    await source.follow(() => {}, new AbortController().signal);
+    expect(await source.send(composed({ text: "hi", images: [{ name: "a.png", mimeType: "image/png", data: "iVBORw0KGgo=" }], webSearch: true }))).toEqual({ requestId: "web:x", admission: "queued" });
+    await source.send(composed({ text: "only text", images: [], webSearch: false }));
+    await source.abort();
+    expect(calls).toEqual([
+      { method: "GET", path: "/conversations/a%20b%2Fc/transcript?limit=50" },
+      { method: "GET", path: "/conversations/a%20b%2Fc/transcript?limit=50&cursor=x%26y%3D1" },
+      { method: "FOLLOW", path: "/conversations/a%20b%2Fc/events" },
+      // Never a web search: the chat has none.
+      { method: "POST", path: "/conversations/a%20b%2Fc/messages", body: { text: "hi", images: [{ mimeType: "image/png", data: "iVBORw0KGgo=" }] } },
+      { method: "POST", path: "/conversations/a%20b%2Fc/messages", body: { text: "only text" } },
+      { method: "POST", path: "/conversations/a%20b%2Fc/abort", body: undefined },
     ]);
-    expect(running).toMatchObject({ connected: true, busy: true, partial: "Hello", requests: ["web:r1"], tools: ["fetch"], ended: [], changes: 0 });
 
-    // The run ends; its user's message is answered (a message event): the live text stays, whatever the read says.
-    const ended = fold([event({ type: "state", busy: false }), event({ type: "message", id: "web:r1" })], running);
-    expect(ended).toMatchObject({ busy: false, partial: undefined, tools: [], ended: [{ text: "Hello", requests: ["web:r1"] }], changes: 1 });
-    const answeredOnly = fold([{ type: "read", messages: [{ id: "web:r1", role: "user", state: "answered" }] }], ended);
-    expect(liveTexts(answeredOnly, ["web:r1"])).toEqual({ ended: ["Hello"], partial: undefined });
-
-    // Its answer is stored: the event names it and the request it answers; a read with it replaces the live text.
-    const stored = fold([event({ type: "message", id: "s1:web:r1#0", answers: "web:r1" })], answeredOnly);
-    expect(stored.ended).toEqual([{ text: "Hello", requests: ["web:r1"], answer: "s1:web:r1#0" }]);
-    expect(liveTexts(stored, ["web:r1"])).toEqual({ ended: ["Hello"], partial: undefined });
-    expect(liveTexts(stored, ["web:r1", "s1:web:r1#0"])).toEqual({ ended: [], partial: undefined });
-    expect(fold([{ type: "read", messages: [{ id: "s1:web:r1#0", role: "assistant" }, { id: "web:r1", role: "user", state: "answered" }] }], stored).ended).toEqual([]);
-    // Another answer with the same text replaces nothing: identity, never text.
-    const other = fold([event({ type: "message", id: "s1:web:r2#0", answers: "web:r2" }), { type: "read", messages: [{ id: "s1:web:r2#0", role: "assistant" }] }], ended);
-    expect(other.ended).toEqual([{ text: "Hello", requests: ["web:r1"] }]);
+    // Refused before it goes: nothing sent.
+    const before = calls.length;
+    await expect(source.send(composed({ text: "  ", images: [], webSearch: false }))).rejects.toThrow("Write something");
+    const two = [0, 1].map((i) => ({ name: `${i}.png`, mimeType: "image/png", data: Buffer.alloc(600 * 1024).toString("base64") }));
+    await expect(source.send(composed({ text: "", images: two, webSearch: false }))).rejects.toThrow("1 MB in all");
+    expect(calls.length).toBe(before);
   });
 
-  test("an answer stored before the run's end reached the page replaces the partial; a failed or stopped run's text goes; one whose requests are unknown takes the next answer", () => {
-    const writing = fold([event({ type: "state", busy: true }), event({ type: "partial", text: "Hi", requests: ["web:r1"] })]);
-    const early = fold([event({ type: "message", id: "s1:web:r1#0", answers: "web:r1" })], writing);
-    expect(early).toMatchObject({ partial: undefined, ended: [{ text: "Hi", answer: "s1:web:r1#0" }] });
-    expect(fold([event({ type: "state", busy: false })], early).ended).toHaveLength(1);
-
-    const failed = fold([event({ type: "state", busy: false }), { type: "read", messages: [{ id: "web:r1", role: "user", state: "failed" }] }], writing);
-    expect(failed.ended).toEqual([]);
-
-    // A run going before the stream opened: its requests unknown.
-    const unknown = fold([event({ type: "state", busy: true }), event({ type: "partial", text: "Hey" }), event({ type: "state", busy: false })]);
-    expect(unknown.ended).toEqual([{ text: "Hey" }]);
-    expect(fold([event({ type: "message", id: "web:r9" })], unknown).ended).toEqual([{ text: "Hey" }]);
-    expect(fold([event({ type: "message", id: "s1:web:r9#0", answers: "web:r9" })], unknown).ended).toEqual([{ text: "Hey", answer: "s1:web:r9#0" }]);
-    expect(fold([{ type: "read", messages: [{ id: "web:r9", role: "user", state: "aborted" }] }], unknown).ended).toEqual([]);
+  test("the paths: a transcript's page, and the conversations by page, archived or searched", () => {
+    expect(transcriptPath("c1", { limit: 20 })).toBe("/conversations/c1/transcript?limit=20");
+    expect(conversationsPath({ limit: 30 })).toBe("/conversations?limit=30");
+    expect(conversationsPath({ limit: 30, cursor: "n/1", archived: true, q: "  trip to Rome " })).toBe("/conversations?limit=30&cursor=n%2F1&archived=1&q=trip+to+Rome");
+    expect(conversationsPath({ limit: 30, q: "   " })).toBe("/conversations?limit=30");
   });
 
-  test("a new answer in the same run leaves the one before as ended; the run's answer replaces them all; a tool's end it never saw changes nothing", () => {
-    const state = fold([
-      event({ type: "state", busy: true }),
-      event({ type: "partial", text: "First", requests: ["web:r1"] }),
-      event({ type: "partial", text: "", requests: ["web:r1"] }),
-      event({ type: "tool", name: "x", state: "done" }),
-      event({ type: "partial", text: "Second", requests: ["web:r1"] }),
-      event({ type: "state", busy: false }),
-    ]);
-    expect(state).toMatchObject({ partial: undefined, tools: [], ended: [{ text: "First" }, { text: "Second" }] });
-    const answered = fold([event({ type: "message", id: "s1:web:r1#0", answers: "web:r1" })], state);
-    expect(liveTexts(answered, ["s1:web:r1#0"])).toEqual({ ended: [], partial: undefined });
-  });
-
-  test("a reconnection asks for the messages again (the first connection does not); a drop forgets the tools; reset forgets all", () => {
-    const dropped = fold([{ type: "connected" }, event({ type: "state", busy: true }), event({ type: "tool", name: "bash", state: "running" }), { type: "disconnected" }]);
-    expect(dropped).toMatchObject({ connected: false, busy: true, tools: [], changes: 0 });
-    expect(fold([{ type: "connected" }], dropped)).toMatchObject({ connected: true, connections: 2, changes: 1 });
-    expect(fold([{ type: "reset" }], dropped)).toEqual(INITIAL);
+  test("the old conversation code is gone: the page renders the shared view, never its own", () => {
+    for (const file of ["src/lib/live.ts", "src/lib/live-state.ts", "src/lib/outbox.ts"]) expect(existsSync(join(CHAT, file))).toBe(false);
+    expect(read("src/screens/conversation.tsx")).toContain("<ConversationView");
+    expect(read("src/screens/conversation.tsx")).not.toContain("<Reply");
   });
 });
 

@@ -141,7 +141,7 @@ export function App() {
     chatId !== undefined ? (
       <ConversationScreen key={chatId} chatId={chatId} />
     ) : route.path === "/" || SIGNED_OUT.has(route.path) || settingsSectionOf(route.path) !== undefined ? (
-      <NewChatScreen />
+      <NewChatScreen agent={route.query.get("agent") ?? undefined} />
     ) : route.path === "/chats" ? (
       <ChatsScreen />
     ) : (
@@ -152,7 +152,7 @@ export function App() {
 
   return (
     <SessionContext.Provider value={session}>
-      <ConversationsProvider>
+      <ConversationsProvider key={me.user.id} userId={me.user.id}>
         <Layout route={route}>
           {landing !== undefined && (
             <div className="flex items-start gap-2 border-b border-line px-3 py-2">

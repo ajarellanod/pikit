@@ -2,10 +2,12 @@
 
 The page your assistant's users talk to it from, at `/chat/` (channel-web): sign in (email and
 password, a link by email, a button per provider the App offers), their own conversations (one menu
-on each, in the sidebar, the list and the conversation's header: rename, archive or restore, delete;
-the archived ones apart in the sidebar), one live (the answer as it is written, the tool running,
-stop), a new one, images, and their Settings, a modal (profile, password, connected accounts,
-sessions, appearance). It is yours: a Vite + React + Tailwind
+on each, in the sidebar, the list and the conversation's tab bar: rename, archive or restore, delete;
+the archived ones apart in the sidebar; a search by title in Conversations), opened as tabs, one live
+in the dashboard's own conversation view (the answer as it is written, the thinking and the tools as
+far as the operator lets users see them, the Context panel when allowed, stop), a new one with the
+assistant picked when the operator offers several, images, and their Settings, a modal (profile,
+password, connected accounts, sessions, appearance). It is yours: a Vite + React + Tailwind
 v4 project whose source you change like any other file of the project. It looks like the dashboard
 (`src/dashboard/`), light and dark, and carries none of its admin code.
 
@@ -34,14 +36,14 @@ again. A bundle that names the admin API (`/admin/api`) is refused.
 | Path | What |
 |---|---|
 | `src/app.tsx` | what the App offers and who is signed in, then the screen of the route |
-| `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar, the conversation menu), a new chat, a conversation, the conversations, Settings (`settings.tsx`, a modal) |
+| `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar, the conversation menu, the tabs, where a page's actions and side panel go), a new chat (the assistant picker), a conversation (the shared `ConversationView`), the conversations (search, archived), Settings (`settings.tsx`, a modal) |
 | `src/lib/chat-api.ts` | the chat API's JSON: a copy of channel-web's `api.ts` |
 | `src/lib/client.ts`, `auth.ts` | the API (`fetch`, the session cookie, `x-pikit-chat: 1` on changes) and better-auth's routes |
-| `src/lib/live.ts`, `live-state.ts`, `sse.ts` | a conversation live: its server-sent events read with `fetch`, folded into a state; a finished answer's live text stays until the messages read have the stored answer its `message` event named (by id, never by text) |
-| `src/lib/outbox.ts` | messages sent from here not shown yet: sending, queued, failed (send again) |
+| `src/lib/source.ts`, `sse.ts` | a conversation for the shared view (`chatSource`): its transcript, its live events (server-sent events read with `fetch`), a message (checked first: `images.ts`) and a stop; the API's paths |
+| `src/lib/conversations.tsx` | the user's conversations (sidebar, list, archived), the messages sent and not shown yet (the shared `useSentMessages`), and the tabs, kept in this browser per user |
 | `src/lib/location.ts`, `routes.ts` | the hash routes (`#/c/<id>`, `#/set-password?token=…&email=…`); each signed-out screen keyed by its route, so another route starts it anew |
 | `src/lib/visible.ts` | signed out, the config read again when the tab comes back (a sign-up mode changed meanwhile) |
-| `src/components/bui/` (`ActionsMenu` too), `src/components/pikit/` (`settings-shell`, `settings-rows`: the dashboard's settings dialog's frame and rows), `src/lib/{activity,format,messages,names,sounds,theme,utils}.ts`, `src/index.css`, `public/` | the dashboard's shared pieces and look, copied |
+| `src/components/bui/` (`ActionsMenu` too), `src/components/pikit/` (`conversation`, `context-panel`, `tab-bar`, `message`; `settings-shell`, `settings-rows`: the dashboard's settings dialog's frame and rows), `src/lib/{activity,format,messages,names,sounds,sources,theme,transcript,utils}.ts`, `src/index.css`, `public/` | the dashboard's shared pieces and look, copied |
 
 The copies are the dashboard's own files: in the kit, `bun scripts/chat-shared.ts generate` makes them
 and `scripts/chat.test.ts` checks them; in your project `pikit upgrade` merges them as any other file.
@@ -50,7 +52,7 @@ and `scripts/chat.test.ts` checks them; in your project `pikit upgrade` merges t
 
 | Route | Screen |
 |---|---|
-| `#/` | a new chat |
+| `#/[?agent=<name>]` | a new chat (with that assistant picked) |
 | `#/c/<chat id>` | a conversation |
 | `#/chats` | the conversations |
 | `#/settings[/<section>]` | Settings over a new chat, at `profile`, `password`, `accounts` (where linking a provider comes back), `sessions` or `appearance` |

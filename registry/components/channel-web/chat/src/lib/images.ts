@@ -4,7 +4,7 @@
  * checked before it is sent. The server checks them again. Pure (`scripts/chat.test.ts` reads it).
  */
 
-import { type ChatImage, type ChatImageRef, IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "./chat-api.ts";
+import { type ChatImage, IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "./chat-api.ts";
 
 /** What the composer (`PromptBar`'s `images`) takes, for an App on `target` (`ChatConfig.target`). */
 export interface ImageLimits {
@@ -41,18 +41,4 @@ export function messageProblem(text: string, images: readonly ChatImage[], targe
   }
   if (limits.totalBytes !== undefined && total > limits.totalBytes) return `The images of a message are at most ${megabytes(limits.totalBytes)} in all here.`;
   return undefined;
-}
-
-/** A stored message's images (`ChatMessage.images`, by URL) as a message takes them again: read with the session, base64. */
-export async function imagesOf(refs: readonly ChatImageRef[]): Promise<ChatImage[]> {
-  return Promise.all(
-    refs.map(async (ref) => {
-      const response = await fetch(ref.url, { credentials: "same-origin" });
-      if (!response.ok) throw new Error("An image of that message could not be read again.");
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      let binary = "";
-      for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
-      return { mimeType: ref.mimeType, data: btoa(binary) };
-    }),
-  );
 }

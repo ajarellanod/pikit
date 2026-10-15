@@ -14,6 +14,27 @@ export interface SseEvent {
   data: string;
 }
 
+/**
+ * Reads `body`'s server-sent events until it ends: each `message` event's data, parsed as JSON, to
+ * `onEvent`; an `error` event ends it (the server gave up on the stream: the caller reconnects).
+ */
+export async function readSse(body: ReadableStream<Uint8Array<ArrayBuffer>>, onEvent: (data: unknown) => void): Promise<void> {
+  const reader = body.pipeThrough(new TextDecoderStream()).getReader();
+  const parser = new SseParser();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      for (const event of parser.push(value)) {
+        if (event.event === "error") return;
+        if (event.event === "message") onEvent(JSON.parse(event.data));
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export class SseParser {
   #buffer = "";
   #event = "";

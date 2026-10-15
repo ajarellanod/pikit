@@ -9,15 +9,22 @@
  * Rename, Archive (Restore when archived), Delete (`useConversationMenu`, `bui/ActionsMenu`). Renaming
  * and deleting ask in a dialog. Settings is a modal (`settings.tsx`), opened from the foot's menu or
  * by `#/settings/<section>` (the route opens it over a new chat).
+ *
+ * Above the screen, the tabs (the shared `TabBar`, as the dashboard's): the conversations opened, New
+ * chat's while it shows, "+" for a fresh one; each closes, the one shown giving way to its neighbour
+ * (or a fresh New chat). At the tab bar's right end a page's actions (`TabActions`: a conversation's
+ * Archived, Context and menu), and beside the window a panel a page may fill (`SidePanel`: the Context).
  */
 
 import { Archive, ChatBubble, EditPencil, LogOut, Plus, Settings, Trash, Undo, User } from "iconoir-react";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { createContext, Fragment, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import type { ActionsMenuItem } from "@/components/bui/ActionsMenu";
 import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem } from "@/components/bui/SidebarNav";
 import { ThemeToggle } from "@/components/bui/ThemeToggle";
 import { ConfirmDialog, RenameDialog } from "@/components/chat/dialog";
 import { ErrorNote } from "@/components/pikit/error-note";
+import { TabBar } from "@/components/pikit/tab-bar";
 import { type ChatConversation, TITLE_MAX } from "@/lib/chat-api";
 import { useConversations } from "@/lib/conversations";
 import { asError } from "@/lib/errors";
@@ -27,15 +34,70 @@ import { useSession } from "@/lib/session";
 import { AssistantBadge } from "./auth-card";
 import { SettingsModal } from "./settings";
 
-/** A conversation's menu, the same everywhere: its items for `conversation`; `changed` hears what renaming or archiving made of it. */
-export type ConversationMenu = (conversation: ChatConversation, changed?: (now: ChatConversation) => void) => ActionsMenuItem[];
+/** A conversation's menu, the same everywhere: its items for `conversation`; `changed` hears it was renamed, archived, restored or deleted. */
+export type ConversationMenu = (conversation: ChatConversation, changed?: () => void) => ActionsMenuItem[];
 
-const MenuContext = createContext<ConversationMenu | undefined>(undefined);
+interface Shell {
+  menu: ConversationMenu;
+  /** A fresh New chat (its draft empty), with `agent` chosen when given. */
+  newChat(agent?: string): void;
+  /** Where a page's actions go (the tab bar's end), and its side panel (beside the window). */
+  slots: { actions: HTMLDivElement | null; side: HTMLDivElement | null };
+}
 
-export function useConversationMenu(): ConversationMenu {
-  const value = useContext(MenuContext);
-  if (value === undefined) throw new Error("useConversationMenu outside the layout");
+const ShellContext = createContext<Shell | undefined>(undefined);
+
+function useShell(): Shell {
+  const value = useContext(ShellContext);
+  if (value === undefined) throw new Error("used outside the layout");
   return value;
+}
+
+export const useConversationMenu = (): ConversationMenu => useShell().menu;
+export const useNewChat = (): Shell["newChat"] => useShell().newChat;
+
+/** A page's actions, at the tab bar's right end. */
+export function TabActions({ children }: { children: ReactNode }) {
+  const target = useShell().slots.actions;
+  return target === null ? null : createPortal(children, target);
+}
+
+/** A panel of a page's own beside the window (wide screens): the Context. */
+export function SidePanel({ children }: { children: ReactNode }) {
+  const target = useShell().slots.side;
+  return target === null ? null : createPortal(children, target);
+}
+
+/** The tabs over `useConversations`: the conversations opened, then New chat's while it shows. */
+function ChatTabs({ route, onActions, onNewChat }: { route: Route; onActions: (element: HTMLDivElement | null) => void; onNewChat: () => void }) {
+  const conversations = useConversations();
+  const busy = new Map([...(conversations.archived ?? []), ...(conversations.items ?? [])].map((each) => [each.id, each.busy]));
+  const shown = chatIdOf(route.path);
+  const active = conversations.tabs.some((tab) => tab.id === shown) ? shown : undefined;
+
+  const close = (id: string, wasShown: boolean) => {
+    const next = conversations.closeTab(id);
+    if (!wasShown) return;
+    if (next === undefined) onNewChat();
+    else go(chatPath(next.id));
+  };
+  const closeNewChat = () => {
+    const last = conversations.tabs.at(-1);
+    if (last === undefined) onNewChat();
+    else go(chatPath(last.id));
+  };
+
+  return (
+    <TabBar
+      tabs={conversations.tabs.map((tab) => ({ id: tab.id, title: conversations.tabTitle(tab), busy: busy.get(tab.id) === true }))}
+      active={active}
+      newChat={route.path === "/" ? { onClose: closeNewChat } : undefined}
+      onSelect={(id) => go(chatPath(id))}
+      onClose={close}
+      onNewChat={onNewChat}
+      actionsRef={onActions}
+    />
+  );
 }
 
 const NARROW = "(max-width: 767px)";
@@ -55,11 +117,18 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
   const { config, me, signOut } = useSession();
   const conversations = useConversations();
   const narrow = useNarrow();
-  const [renaming, setRenaming] = useState<{ conversation: ChatConversation; changed?: (now: ChatConversation) => void }>();
-  const [deleting, setDeleting] = useState<ChatConversation>();
+  const [renaming, setRenaming] = useState<{ conversation: ChatConversation; changed?: (() => void) | undefined }>();
+  const [deleting, setDeleting] = useState<{ conversation: ChatConversation; changed?: (() => void) | undefined }>();
   const [problem, setProblem] = useState<Error>();
   const [settings, setSettings] = useState<string>();
+  const [draft, setDraft] = useState(0);
+  const [actions, setActions] = useState<HTMLDivElement | null>(null);
+  const [side, setSide] = useState<HTMLDivElement | null>(null);
   const openId = chatIdOf(route.path);
+  const newChat = useCallback((agent?: string) => {
+    setDraft((n) => n + 1);
+    go(agent === undefined ? "/" : `/?agent=${encodeURIComponent(agent)}`);
+  }, []);
 
   // `#/settings/<section>` opens Settings over a new chat.
   const asked = settingsSectionOf(route.path);
@@ -69,10 +138,10 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
     go("/", true);
   }, [asked]);
 
-  const remove = (conversation: ChatConversation) => {
+  const remove = ({ conversation, changed }: { conversation: ChatConversation; changed?: (() => void) | undefined }) => {
     setProblem(undefined);
     conversations.remove(conversation.id).then(
-      () => openId === conversation.id && go("/", true),
+      () => (openId === conversation.id ? go("/", true) : changed?.()),
       (error: unknown) => setProblem(asError(error)),
     );
   };
@@ -83,7 +152,7 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
       const put = (archived: boolean) => {
         setProblem(undefined);
         archive(conversation.id, archived).then(
-          (now) => changed?.(now),
+          () => changed?.(),
           (error: unknown) => setProblem(asError(error)),
         );
       };
@@ -92,14 +161,14 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
         conversation.archived
           ? { key: "unarchive", label: "Restore", icon: <Undo />, onSelect: () => put(false) }
           : { key: "archive", label: "Archive", icon: <Archive />, onSelect: () => put(true) },
-        { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeleting(conversation) },
+        { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeleting({ conversation, changed }) },
       ];
     },
     [archive],
   );
 
   const items: SidebarItem[] = [
-    { key: "new", label: "New chat", icon: <Plus />, active: route.path === "/", href: href("/"), onSelect: () => go("/") },
+    { key: "new", label: "New chat", icon: <Plus />, active: route.path === "/", href: href("/"), onSelect: () => newChat() },
     { key: "chats", label: "Conversations", icon: <ChatBubble />, active: route.path === "/chats", href: href("/chats"), onSelect: () => go("/chats") },
   ];
   const rowOf = (conversation: ChatConversation): SidebarChat => ({
@@ -112,7 +181,7 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
   });
 
   return (
-    <MenuContext.Provider value={menu}>
+    <ShellContext.Provider value={{ menu, newChat, slots: { actions, side } }}>
       <main className="flex h-[100dvh] bg-canvas p-1.5 pl-0 text-ink sm:p-2.5 sm:pl-0">
         <SidebarNav
           key={narrow ? "narrow" : "wide"}
@@ -166,14 +235,21 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
           )}
         />
 
-        <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-window border border-line bg-page">
-          {problem !== undefined && (
-            <div className="border-b border-line px-3 py-2">
-              <ErrorNote error={problem} title="The conversation could not be changed" />
+        <div className="flex min-w-0 flex-1 gap-2.5">
+          <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-window border border-line bg-page">
+            {problem !== undefined && (
+              <div className="border-b border-line px-3 py-2">
+                <ErrorNote error={problem} title="The conversation could not be changed" />
+              </div>
+            )}
+            <ChatTabs route={route} onActions={setActions} onNewChat={() => newChat()} />
+            {/* New chat starts anew each time it is asked for ("+", another assistant picked) */}
+            <div className="flex min-h-0 flex-1 flex-col">
+              <Fragment key={route.path === "/" ? `new-${draft}-${route.query.get("agent") ?? ""}` : "page"}>{children}</Fragment>
             </div>
-          )}
-          <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-        </section>
+          </section>
+          <div ref={setSide} className="contents" />
+        </div>
       </main>
 
       <SettingsModal section={settings} onClose={() => setSettings(undefined)} />
@@ -183,17 +259,19 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
         max={TITLE_MAX}
         onClose={() => setRenaming(undefined)}
         onRename={async (title) => {
-          if (renaming !== undefined) renaming.changed?.(await conversations.rename(renaming.conversation.id, title));
+          if (renaming === undefined) return;
+          await conversations.rename(renaming.conversation.id, title);
+          renaming.changed?.();
         }}
       />
       <ConfirmDialog
         open={deleting !== undefined}
         title="Delete this conversation?"
-        description={<>“{deleting === undefined ? "" : titleOf(deleting)}” leaves your list for good.</>}
+        description={<>“{deleting === undefined ? "" : titleOf(deleting.conversation)}” leaves your list for good.</>}
         action="Delete"
         onClose={() => setDeleting(undefined)}
         onConfirm={() => deleting !== undefined && remove(deleting)}
       />
-    </MenuContext.Provider>
+    </ShellContext.Provider>
   );
 }

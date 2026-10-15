@@ -1,271 +1,52 @@
 /**
- * One conversation, live: under its header (its title, "Archived" when it is, its menu: the sidebar
- * row's own, `useConversationMenu`), its messages (newest at the bottom, older pages on demand), the answer as
- * it is written (`partial` events, markdown), the tool running now (its name), a stop button while a
- * run goes, and the composer (text and images).
+ * One conversation, live, in the dashboard's shared view (`components/pikit/conversation.tsx`,
+ * features/chat-parity.md) over the chat API (`lib/source.ts`): its transcript and live events as the
+ * operator lets users see them (`ChatConfig.visibility`: the thinking, the tools, cut by the server),
+ * the answer as it is written, a stop while a run goes, and the composer (text and images; no "/"
+ * menu, no web search). A message sent shows at once, marked while it waits for the run going.
  *
- * A message sent shows at once, where it goes: "Sending", then "Queued" when it waits for the run
- * going, or "Not sent" with why and "Send again" (the same request id: never answered twice). One the
- * run failed on says so, with "Send again" (a new message). The messages are read again when the live
- * stream says one was stored, after a reconnection, and every few seconds while an answer is awaited
- * without a stream.
+ * At the tab bar's end (`TabActions`): "Archived" when it is, the Context panel's button when the
+ * operator's policy shows it (`visibility.context`; the panel goes beside the window, `SidePanel`), and
+ * its menu (the sidebar row's own, `useConversationMenu`). Its composer shows its assistant when it
+ * was made with one of `ChatConfig.agents`: a conversation keeps its assistant, so picking another
+ * starts a new chat with it.
+ *
+ * An archived conversation is still talked to: a message lists it again (the server's rule), and the
+ * page reads it again when the live stream says it changed.
  */
 
-import { type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
-import LoadingState, { LoaderGrid } from "@/components/bui/LoadingState";
-import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { StatusPill } from "@/components/bui/StatusPill";
+import { ConversationView } from "@/components/pikit/conversation";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { Reply, UserBubble, type UserMessage } from "@/components/pikit/message";
-import { every, usePolling } from "@/lib/activity";
-import type { ChatConversation, ChatImage, ChatImageRef, ChatMessage, ChatPage } from "@/lib/chat-api";
-import { get, post, useGet } from "@/lib/client";
+import type { ChatConversation } from "@/lib/chat-api";
+import { follow, get, post, useGet } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
-import { asError, ChatFailure } from "@/lib/errors";
-import { imageLimits, imagesOf, messageProblem } from "@/lib/images";
-import { useLive } from "@/lib/live";
-import { liveTexts } from "@/lib/live-state";
-import { discard, type Outgoing, sendTo, settle, useOutbox } from "@/lib/outbox";
+import { ChatFailure } from "@/lib/errors";
+import { imageLimits } from "@/lib/images";
+import { assistantName } from "@/lib/names";
 import { usePageTitle, useSession } from "@/lib/session";
-import { titleOf, useConversationMenu } from "./layout";
+import { chatSource, conversationPath } from "@/lib/source";
+import { SidePanel, TabActions, titleOf, useConversationMenu, useNewChat } from "./layout";
 
-const PAGE = 50;
-/** Without a live stream, how often the messages are read while an answer is awaited. */
-const POLL_MS = 5000;
-
-/** A message as the shared bubble takes it (pi-ai's user message). */
-export const userMessageOf = (text: string, images: readonly ChatImage[] = []): UserMessage => ({
-  role: "user",
-  content: [...(text === "" ? [] : [{ type: "text" as const, text }]), ...images.map((image) => ({ type: "image" as const, mimeType: image.mimeType, data: image.data }))],
-});
-
-/** A stored message's images, from their URLs (the session's cookies), as the shared bubble shows them. */
-function StoredImages({ images }: { images: readonly ChatImageRef[] }) {
-  return (
-    <div className="flex max-w-full flex-wrap justify-end gap-2 self-end pl-10 sm:pl-24">
-      {images.map((image, i) => (
-        <img key={image.url} className="max-h-56 max-w-[min(100%,320px)] rounded-xl object-contain shadow-hairline" alt={`Image ${i + 1}`} src={image.url} loading="lazy" />
-      ))}
-    </div>
-  );
-}
-
-/** An answer, as the shared reply shows one: its markdown. */
-function Answer({ text, streaming = false }: { text: string; streaming?: boolean }) {
-  return <Reply segments={[{ kind: "text", text, streaming }]} />;
-}
-
-/** `page`'s messages, then those of `kept` it does not have: both newest first, as the API gives them. */
-const newestFirst = (page: ChatMessage[], kept: ChatMessage[]): ChatMessage[] => {
-  const ids = new Set(page.map((message) => message.id));
-  return [...page, ...kept.filter((message) => !ids.has(message.id))];
-};
-
-/**
- * The messages' latest page, read again on `read()` and at each of the live view's `changes`, and older
- * pages on demand; what was read stays. `onRead` is told each read's messages (newest first).
- */
-function useMessages(chatId: string, changes: number, onRead: (messages: ChatMessage[]) => void) {
-  const [kept, setKept] = useState<ChatMessage[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<Error>();
-  const [cursor, setCursor] = useState<string | null>();
-  const told = useRef(onRead);
-  told.current = onRead;
-  const base = `/conversations/${encodeURIComponent(chatId)}/messages?limit=${PAGE}`;
-
-  const read = useCallback(() => {
-    get<ChatPage<ChatMessage>>(base).then(
-      (page) => {
-        setKept((items) => newestFirst(page.items, items));
-        setCursor((current) => (current === undefined ? (page.next ?? null) : current));
-        setLoaded(true);
-        setError(undefined);
-        told.current(page.items);
-      },
-      (thrown: unknown) => setError(asError(thrown)),
-    );
-  }, [base]);
-
-  useEffect(read, [read]);
-  useEffect(() => {
-    if (changes === 0) return;
-    const timer = setTimeout(read, 250);
-    return () => clearTimeout(timer);
-  }, [changes, read]);
-
-  const loadOlder = async () => {
-    if (cursor === undefined || cursor === null) return;
-    try {
-      const older = await get<ChatPage<ChatMessage>>(`${base}&cursor=${encodeURIComponent(cursor)}`);
-      setKept((items) => newestFirst(items, older.items));
-      setCursor(older.next ?? null);
-    } catch (thrown) {
-      setError(asError(thrown));
-    }
-  };
-
-  return { messages: [...kept].reverse(), loaded, error, hasOlder: typeof cursor === "string", loadOlder, read };
-}
-
-/** The thread follows its end while the person is there; scrolling up to read releases it. */
-function useStickToBottom(scroller: RefObject<HTMLDivElement | null>, id: string) {
-  useEffect(() => {
-    const el = scroller.current;
-    const content = el?.firstElementChild;
-    if (!el || !content) return;
-    let stick = true;
-    let raf = 0;
-    const onScroll = () => {
-      stick = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    };
-    const pin = () => {
-      if (!stick) return;
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        el.scrollTop = el.scrollHeight;
-      });
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    const resize = new ResizeObserver(pin);
-    resize.observe(content);
-    const mutate = new MutationObserver(pin);
-    mutate.observe(content, { childList: true, subtree: true, characterData: true });
-    pin();
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      resize.disconnect();
-      mutate.disconnect();
-      cancelAnimationFrame(raf);
-    };
-  }, [scroller, id]);
-}
-
-/** A quiet line under a message of the user's, with its actions. */
-function MessageNote({ tone = "quiet", children, actions }: { tone?: "quiet" | "problem"; children: ReactNode; actions?: ReactNode }) {
-  return (
-    <div className={`flex flex-wrap items-center justify-end gap-x-3 gap-y-1 px-1 chat-text-11.5 ${tone === "problem" ? "text-red" : "text-ink-3"}`}>
-      <span className="[overflow-wrap:anywhere]">{children}</span>
-      {actions}
-    </div>
-  );
-}
-
-function NoteButton({ onClick, children }: { onClick: () => void; children: string }) {
-  return (
-    <button type="button" onClick={onClick} className="rounded-[6px] px-1.5 py-0.5 font-medium text-ink-2 shadow-btn transition-colors duration-100 hover:bg-hover hover:text-ink">
-      {children}
-    </button>
-  );
-}
-
-function OutgoingRow({ chatId, item, onSent }: { chatId: string; item: Outgoing; onSent: () => void }) {
-  return (
-    <div className={`mx-auto flex w-full max-w-[720px] flex-col items-end gap-1 transition-opacity duration-200 ${item.status === "sending" || item.queued === true ? "opacity-70" : ""}`}>
-      <UserBubble message={userMessageOf(item.text, item.images)} animate />
-      {item.status === "sending" && <MessageNote>Sending…</MessageNote>}
-      {item.status === "sent" && item.queued === true && <MessageNote>Queued: it runs once the answer going ends</MessageNote>}
-      {item.status === "failed" && (
-        <MessageNote
-          tone="problem"
-          actions={
-            <>
-              <NoteButton onClick={() => void sendTo(chatId, { requestId: item.requestId, text: item.text, images: item.images }).then(onSent)}>Send again</NoteButton>
-              <NoteButton onClick={() => discard(chatId, item.requestId)}>Remove</NoteButton>
-            </>
-          }
-        >
-          Not sent: {item.error ?? "it failed"}
-        </MessageNote>
-      )}
-    </div>
-  );
-}
+const client = { get, post, follow };
 
 export function ConversationScreen({ chatId }: { chatId: string }) {
   const { config } = useSession();
   const conversations = useConversations();
   const menu = useConversationMenu();
-  const live = useLive(chatId);
-  const summary = useGet<ChatConversation>(`/conversations/${encodeURIComponent(chatId)}`);
-  const { dispatch } = live;
-  const thread = useMessages(
-    chatId,
-    live.changes,
-    useCallback(
-      (messages: ChatMessage[]) => {
-        dispatch({ type: "read", messages });
-        settle(chatId, new Set(messages.map((message) => message.id)));
-      },
-      [chatId, dispatch],
-    ),
-  );
-  const outbox = useOutbox(chatId);
-  const [actionError, setActionError] = useState<Error>();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<HTMLDivElement>(null);
-  const [composerH, setComposerH] = useState(120);
+  const newChat = useNewChat();
+  const source = useMemo(() => chatSource(chatId, client, config.target), [chatId, config.target]);
+  const summary = useGet<ChatConversation>(conversationPath(chatId));
   const conversation = summary.data?.id === chatId ? summary.data : undefined;
   usePageTitle(config.name, conversation === undefined ? undefined : titleOf(conversation));
 
-  // The list's busy flags and titles follow what happens here.
+  const { openTab, reload: reloadList } = conversations;
   const { reload: reloadSummary } = summary;
-  const { reload: reloadList } = conversations;
   useEffect(() => {
-    if (live.changes === 0) return;
-    const timer = setTimeout(() => (reloadSummary(), reloadList()), 400);
-    return () => clearTimeout(timer);
-  }, [live.changes, reloadSummary, reloadList]);
-
-  useStickToBottom(scrollRef, chatId);
-  useLayoutEffect(() => {
-    const el = composerRef.current;
-    if (!el) return;
-    const measure = () => setComposerH(el.offsetHeight);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const read = new Set(thread.messages.map((message) => message.id));
-  const unsent = outbox.filter((item) => !read.has(item.requestId));
-  // The live texts the stored answers do not replace yet (matched by the answers' ids, `live-state.ts`).
-  const { ended, partial } = liveTexts(live, thread.messages.map((message) => message.id));
-  const busy = live.connected ? live.busy : (conversation?.busy ?? false);
-  const lastUser = [...thread.messages].reverse().find((message) => message.role === "user");
-  const awaiting = lastUser?.state === "pending" || unsent.some((item) => item.status !== "failed");
-  const waiting = busy || unsent.some((item) => item.status === "sent" && item.queued !== true);
-  const tool = live.tools.at(-1);
-  const activity = tool !== undefined ? `Running ${tool}` : partial !== undefined && partial !== "" ? "Writing" : "Thinking";
-  const since = unsent.at(-1)?.at ?? lastUser?.at;
-
-  // Without a stream (paused, or failing), an answer awaited is polled for.
-  usePolling(thread.read, !live.connected && !live.paused && (busy || awaiting) ? every(POLL_MS) : undefined);
-
-  const send = async ({ text, images }: ComposerMessage) => {
-    const chatImages = images.map(({ mimeType, data }) => ({ mimeType, data }));
-    const problem = messageProblem(text, chatImages, config.target);
-    if (problem !== undefined) {
-      setActionError(new Error(problem));
-      throw new Error(problem);
-    }
-    setActionError(undefined);
-    requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
-    // Read again once it is taken, in case the live stream is not there to say so.
-    void sendTo(chatId, { text, images: chatImages }).then(thread.read);
-  };
-  const sendAgain = (message: ChatMessage) =>
-    void imagesOf(message.images ?? [])
-      .then((images) => sendTo(chatId, { text: message.text, images }))
-      .then(thread.read, (thrown: unknown) => setActionError(asError(thrown)));
-  const stop = () => {
-    post(`/conversations/${encodeURIComponent(chatId)}/abort`).then(
-      () => setActionError(undefined),
-      (thrown: unknown) => setActionError(asError(thrown)),
-    );
-  };
+    if (conversation !== undefined) openTab(conversation);
+  }, [conversation, openTab]);
 
   if (summary.error !== undefined && conversation === undefined) {
     const missing = summary.error instanceof ChatFailure && summary.error.status === 404;
@@ -279,89 +60,49 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
     );
   }
 
+  const agents = config.agents.map((agent) => agent.name);
+  const agent = conversation?.agent;
+
   return (
-    <div className="chat relative flex min-h-0 flex-1 flex-col">
-      <header className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-3 sm:px-4">
-        <h1 className="min-w-0 flex-1 truncate chat-text-13.5 font-medium text-ink">{conversation === undefined ? "" : titleOf(conversation)}</h1>
-        {conversation !== undefined && (
-          <>
+    <ConversationView
+      source={source}
+      sent={conversations}
+      context={config.visibility.context}
+      // Its busy flag, its title and where it is listed (a message lists an archived one again) follow.
+      onChange={() => {
+        reloadSummary();
+        reloadList();
+      }}
+      actions={(contextButton) =>
+        conversation !== undefined && (
+          <TabActions>
             {conversation.archived && <StatusPill tone="neutral">Archived</StatusPill>}
+            {contextButton}
             <ActionsMenu
               actions={menu(conversation, reloadSummary)}
               label="Conversation actions"
-              className="size-8 rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink aria-expanded:bg-hover aria-expanded:text-ink"
+              className="size-7 rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink aria-expanded:bg-hover-2 aria-expanded:text-ink"
             />
-          </>
-        )}
-      </header>
-
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain" aria-live="polite" aria-busy={waiting}>
-        <div className="flex flex-col gap-8 px-4 pt-8 sm:px-8 lg:px-12" style={{ paddingBottom: composerH + 48 }}>
-          {thread.hasOlder && (
-            <div className="mx-auto w-full max-w-[720px]">
-              <button type="button" onClick={() => void thread.loadOlder()} className="mx-auto flex h-7 items-center rounded-full px-3 chat-text-12.5 font-medium text-ink-2 shadow-btn transition-colors duration-100 hover:bg-hover">
-                Earlier messages
-              </button>
-            </div>
-          )}
-          {thread.error !== undefined && (
-            <div className="mx-auto w-full max-w-[720px]">
-              <ErrorNote error={thread.error} title="The messages cannot be read" />
-            </div>
-          )}
-          {!thread.loaded && thread.error === undefined && unsent.length === 0 && (
-            <div className="mx-auto flex w-full max-w-[720px] items-center gap-2.5 chat-text-13 text-ink-3">
-              <LoaderGrid /> Loading the conversation
-            </div>
-          )}
-          {thread.messages.map((message) => (
-            <div key={message.id} className="mx-auto flex w-full max-w-[720px] flex-col gap-1">
-              {message.role === "user" ? (
-                <>
-                  {message.images !== undefined && message.images.length > 0 && <StoredImages images={message.images} />}
-                  {message.text !== "" && <UserBubble message={userMessageOf(message.text)} />}
-                  {message.state === "failed" && (
-                    <MessageNote tone="problem" actions={<NoteButton onClick={() => sendAgain(message)}>Send again</NoteButton>}>
-                      Not answered: something failed
-                    </MessageNote>
-                  )}
-                  {message.state === "aborted" && <MessageNote>Stopped</MessageNote>}
-                </>
-              ) : (
-                <Answer text={message.text} />
-              )}
-            </div>
-          ))}
-          {unsent.map((item) => (
-            <OutgoingRow key={item.requestId} chatId={chatId} item={item} onSent={thread.read} />
-          ))}
-          {ended.map((text, i) => (
-            <div key={`ended-${i}`} className="mx-auto w-full max-w-[720px]">
-              <Answer text={text} />
-            </div>
-          ))}
-          {partial !== undefined && partial !== "" && (
-            <div className="mx-auto w-full max-w-[720px]">
-              <Answer text={partial} streaming />
-            </div>
-          )}
-          {waiting && (
-            <div className="mx-auto -mt-4 flex min-h-6 w-full max-w-[720px] items-center" style={{ animation: "fade-in 200ms ease-out both" }}>
-              <LoadingState label={activity} variant="Dots" since={since} />
-            </div>
-          )}
-          {thread.loaded && thread.messages.length === 0 && unsent.length === 0 && !waiting && <p className="mx-auto w-full max-w-[720px] chat-text-13.5 text-ink-3">No messages yet.</p>}
-        </div>
-      </div>
-
-      <div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ height: composerH + 32, background: "linear-gradient(to top, var(--page) 64%, transparent)" }} />
-
-      <div ref={composerRef} className="absolute inset-x-0 bottom-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8 sm:pb-6 lg:px-12">
-        <div className="mx-auto flex max-w-[720px] flex-col gap-2">
-          {actionError !== undefined && <ErrorNote error={actionError} title="That did not work" />}
-          <PromptBar compact commandsMenu={false} placeholder={busy ? "Reply: it runs after the answer going" : "Reply"} images={imageLimits(config.target)} busy={busy} onStop={stop} onSend={send} />
-        </div>
-      </div>
-    </div>
+          </TabActions>
+        )
+      }
+      side={(panel) => <SidePanel>{panel}</SidePanel>}
+      composer={{
+        disabled: conversation === undefined,
+        commandsMenu: false,
+        images: imageLimits(config.target),
+        placeholder: (busy) => (busy ? "Reply: it runs after the answer going" : "Reply"),
+        picker:
+          agent === undefined
+            ? undefined
+            : {
+                label: "assistant",
+                options: (agents.includes(agent) ? agents : [agent, ...agents]).map((name) => ({ key: name, name: assistantName(name), ...(name !== agent && { tag: "new chat" }) })),
+                value: agent,
+                onChange: (name) => newChat(name),
+                ...(agents.some((name) => name !== agent) && { note: "A chat keeps its assistant: another one starts a new chat with it." }),
+              },
+      }}
+    />
   );
 }

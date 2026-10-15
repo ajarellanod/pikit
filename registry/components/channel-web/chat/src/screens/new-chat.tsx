@@ -1,20 +1,25 @@
 /**
  * A new conversation: a greeting, the composer (text and images), and the last conversations to go
- * on with. The first message makes the conversation (`POST /chat/api/conversations`, with its own
- * request id), which opens with the message already in it.
+ * on with. The first message makes the conversation (`POST /chat/api/conversations`), which opens with
+ * the message already in it (the shared sent messages, `useConversations`).
+ *
+ * When the operator lets users pick an assistant (`ChatConfig.agents`), the composer has a picker
+ * (where the dashboard's has its): the first one is chosen at first, or the one `?agent=` names (a
+ * conversation's composer sends here when another one is picked there), and the conversation is made
+ * with it (`agent`). With none to pick, no picker: the router decides.
  */
 
 import { ChatBubble } from "iconoir-react";
 import { type CSSProperties, useEffect, useState } from "react";
 import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
-import type { ChatStartResponse } from "@/lib/chat-api";
+import type { ChatStartRequest, ChatStartResponse } from "@/lib/chat-api";
 import { post } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
 import { asError } from "@/lib/errors";
 import { imageLimits, messageProblem } from "@/lib/images";
 import { chatPath, go } from "@/lib/location";
-import { addSent, newRequestId } from "@/lib/outbox";
+import { assistantName } from "@/lib/names";
 import { usePageTitle, useSession } from "@/lib/session";
 import { titleOf } from "./layout";
 
@@ -32,9 +37,11 @@ function revealStyle(visible: boolean): CSSProperties {
   };
 }
 
-export function NewChatScreen() {
+export function NewChatScreen({ agent: asked }: { agent?: string | undefined }) {
   const { config, me } = useSession();
   const conversations = useConversations();
+  const agents = config.agents.map((each) => each.name);
+  const [agent, setAgent] = useState(() => (asked !== undefined && agents.includes(asked) ? asked : agents[0]));
   const [error, setError] = useState<Error>();
   const [stage, setStage] = useState(0);
   usePageTitle(config.name, "New chat");
@@ -52,10 +59,14 @@ export function NewChatScreen() {
       throw new Error(problem);
     }
     setError(undefined);
-    const requestId = newRequestId();
     try {
-      const started = await post<ChatStartResponse>("/conversations", { text, ...(chatImages.length > 0 && { images: chatImages }), requestId });
-      addSent(started.id, { requestId: started.requestId, text, images: chatImages }, started.admission === "queued");
+      const body: ChatStartRequest = { text, ...(chatImages.length > 0 && { images: chatImages }), ...(agent !== undefined && { agent }) };
+      const started = await post<ChatStartResponse>("/conversations", body);
+      // The conversation shows the message at once, before its transcript is read.
+      if (started.admission !== "duplicate") {
+        const sent = conversations.addSent(started.id, { text, images: chatImages, before: 0 });
+        if (started.admission === "queued") conversations.updateSent(started.id, sent, "queued");
+      }
       conversations.reload();
       go(chatPath(started.id));
     } catch (thrown) {
@@ -80,7 +91,22 @@ export function NewChatScreen() {
         </h1>
 
         <div className="chat new-chat-reveal relative mt-7" style={revealStyle(stage >= 3)}>
-          <PromptBar autoFocus commandsMenu={false} placeholder={`Ask ${config.name} anything…`} images={imageLimits(config.target)} onSend={start} />
+          <PromptBar
+            autoFocus
+            commandsMenu={false}
+            placeholder={`Ask ${agent === undefined ? config.name : assistantName(agent)} anything…`}
+            images={imageLimits(config.target)}
+            {...(agent !== undefined && {
+              picker: {
+                label: "assistant",
+                options: agents.map((name) => ({ key: name, name: assistantName(name) })),
+                value: agent,
+                onChange: setAgent,
+                ...(agents.length > 1 && { note: "A chat keeps the assistant it starts with." }),
+              },
+            })}
+            onSend={start}
+          />
           {error !== undefined && (
             <div className="mt-3">
               <ErrorNote error={error} title="Not started" />

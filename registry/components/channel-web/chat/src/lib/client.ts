@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolling } from "./activity.ts";
 import { CHAT_CLIENT_HEADER, type ChatEvent } from "./chat-api.ts";
 import { ChatFailure, failureOf } from "./errors.ts";
-import { SseParser } from "./sse.ts";
+import { readSse } from "./sse.ts";
 
 export const API = "/chat/api";
 
@@ -59,22 +59,11 @@ export const post = <T>(path: string, body?: unknown): Promise<T> => request<T>(
 export async function follow(path: string, onEvent: (event: ChatEvent) => void, signal: AbortSignal): Promise<void> {
   const response = await send(path, { headers: { accept: "text/event-stream" }, signal });
   if (!response.ok || response.body === null) throw await failure(path, response);
-  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-  const parser = new SseParser();
   try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return;
-      for (const event of parser.push(value)) {
-        if (event.event === "error") return;
-        if (event.event === "message") onEvent(JSON.parse(event.data) as ChatEvent);
-      }
-    }
+    await readSse(response.body, (data) => onEvent(data as ChatEvent));
   } catch (error) {
     if (signal.aborted) return;
     throw error;
-  } finally {
-    reader.releaseLock();
   }
 }
 

@@ -91,6 +91,32 @@ Conversations, and the dashboard lacks the conversation header's menu the chat h
 - Tabs, the assistant picker (new chat; a conversation's composer shows its assistant), the Context
   panel when the policy allows, the search in Conversations.
 
+### As built (the page), and why
+
+- **One source, pure.** `chatSource(id, client, target)` (`src/lib/source.ts`) is the view's
+  `ConversationSource` over `/chat/api`, its requests through the client given (the page's `fetch`
+  client), so its paths and bodies are tested without a browser. A message is checked before it goes
+  (the image limits of the target); the server makes its request id. The events are read by the same
+  SSE reader as before (`readSse`). The old renderer, `live.ts`, `live-state.ts` and the outbox are
+  gone: the shared `useSentMessages` (in `ConversationsProvider`, so New chat's first message shows in
+  the conversation it opens) replaces the outbox, without its "Send again" (the view refuses with the
+  reason, the draft comes back).
+- **The header is the tab bar**, as in the dashboard: the title is the tab's; "Archived", the Context
+  button (only when `visibility.context`, and only when there is something to show) and the menu go at
+  its right end (`TabActions`), the Context panel beside the window (`SidePanel`).
+- **An archived conversation is still talked to**: the server lists it again on a message, so the
+  composer stays (no `closed`) and the page reads the conversation and the lists again when the live
+  stream says it changed: the pill goes, the sidebar has it back.
+- **Tabs** are kept in `localStorage["pikit-chat-tabs:<user id>"]`: per browser, and per user (two
+  people on one browser never see each other's titles), never the dashboard's `pikit-tabs`. A deleted
+  conversation's tab closes; an archived one's stays (it is still read and written).
+- **The picker** shows only with `ChatConfig.agents`; the first one is chosen at first (the conversation
+  then always records its assistant, and its composer shows it), or the one `#/?agent=` names (a
+  conversation's composer sends there when another assistant is picked: a chat keeps its assistant).
+- **Search** in Conversations: `?q=` 250 ms after the last key, with an "Archived" switch that searches
+  the archived ones alike; without either the list is the sidebar's. The sidebar's own search still
+  filters the chats it has loaded (its field is the shared `SidebarNav`'s, unchanged).
+
 ## The dashboard
 - Uses the same shared view over its admin source: unchanged behaviour.
 - The conversation header gets the menu (Rename, Archive or Restore, Delete), the sidebar's.
