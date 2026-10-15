@@ -18,6 +18,13 @@
  *
  * `seen` is an upsert: sent twice, or late, it changes nothing a newer one wrote.
  *
+ * **Search.** A row also carries its conversation's title as it is listed (a model's, the operator's,
+ * else its first message: `ApiConversation.title`), lowercased, for `list`'s `q`: an entry of `seen`
+ * that has a `title` replaces it, one without keeps it. The conversation's App tells it whenever the
+ * title changes (a first message claimed for titling, a model's title, `/name`, a rename) and at
+ * start, with each conversation it backfills: on Cloudflare the titles are each conversation's
+ * object's, and the index object learns them only so. `q` matches the title or the key, any case.
+ *
  * **Archived and deleted.** The operator puts a conversation away (`hide`): a third table,
  * `admin_api_hidden`, holds one row per conversation put away, with how (`archived`: listed apart,
  * restorable; `deleted`: never listed again) and its activity then. New activity brings it back to
@@ -57,8 +64,10 @@ export interface IndexedConversation {
   /** The runtime's id: on Cloudflare its object's own, unique with its key. */
   conversationId: string;
   agent: string;
-  /** Epoch ms of the newest activity seen. */
+  /** Epoch ms of the newest activity seen (`0` with a title alone: it changes no time). */
   at: number;
+  /** The title it is listed by now, when it has one: what `list`'s `q` searches, with the key. Absent, the last one told is kept. */
+  title?: string;
 }
 
 export interface IndexPage {
@@ -71,9 +80,10 @@ export interface ConversationIndex {
   seen(entries: readonly IndexedConversation[]): Promise<void>;
   /**
    * At most `limit` conversations, the most recently active first: those listed (not put away), or
-   * with `archived` those archived. Throws `invalid_cursor`.
+   * with `archived` those archived; with `q`, only those whose title (as last told) or key holds it,
+   * any case. Throws `invalid_cursor`.
    */
-  list(page: { limit: number; cursor?: string; archived?: boolean }): Promise<IndexPage>;
+  list(page: { limit: number; cursor?: string; archived?: boolean; q?: string }): Promise<IndexPage>;
   /**
    * Puts conversation `conversationId` of `key` away (`archived`, `deleted`) as of its activity now, or
    * back in the list (`undefined`). `false` when the index has no such conversation.
@@ -103,6 +113,11 @@ export interface ConversationIndex {
 /** `{at}:{key}:{conversationId}` of a page's last item, the key and id URI-encoded (`:` never appears in them). */
 const cursorOf = ({ at, key, conversationId }: IndexedConversation): string => `${at}:${encodeURIComponent(key)}:${encodeURIComponent(conversationId)}`;
 
+/** What `q` searches: lowercased (SQL's `lower` knows only ASCII). */
+const searchOf = (text: string): string => text.toLowerCase();
+/** `q` as `LIKE` reads it: lowercased, its wildcards escaped. */
+const likeOf = (q: string): string => `%${searchOf(q).replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
 function parseCursor(cursor: string): { at: number; key: string; conversationId: string } {
   const parts = cursor.split(":");
   if (parts.length === 3 && /^[0-9]+$/.test(parts[0] as string)) {
@@ -122,7 +137,7 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
     const database = sql();
     ready ??= (async () => {
       await database.run(
-        `CREATE TABLE IF NOT EXISTS ${TABLE} (key TEXT NOT NULL, conversation TEXT NOT NULL, agent TEXT NOT NULL, at BIGINT NOT NULL, PRIMARY KEY (key, conversation))`,
+        `CREATE TABLE IF NOT EXISTS ${TABLE} (key TEXT NOT NULL, conversation TEXT NOT NULL, agent TEXT NOT NULL, at BIGINT NOT NULL, title_search TEXT, PRIMARY KEY (key, conversation))`,
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${TABLE}_at ON ${TABLE} (at, key, conversation)`);
       await database.run(`CREATE INDEX IF NOT EXISTS ${TABLE}_conversation ON ${TABLE} (conversation)`);
@@ -145,28 +160,35 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
       if (entries.length === 0) return;
       const database = await db();
       await database.transaction(async (tx) => {
-        for (const { key, conversationId, agent, at } of entries) {
+        for (const { key, conversationId, agent, at, title } of entries) {
           await tx.run(
-            `INSERT INTO ${TABLE} (key, conversation, agent, at) VALUES (?, ?, ?, ?) ON CONFLICT (key, conversation) DO UPDATE SET ` +
+            `INSERT INTO ${TABLE} (key, conversation, agent, at, title_search) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key, conversation) DO UPDATE SET ` +
               `agent = CASE WHEN excluded.at >= ${TABLE}.at THEN excluded.agent ELSE ${TABLE}.agent END, ` +
-              `at = CASE WHEN excluded.at > ${TABLE}.at THEN excluded.at ELSE ${TABLE}.at END`,
-            [key, conversationId, agent, Math.max(0, Math.floor(at))],
+              `at = CASE WHEN excluded.at > ${TABLE}.at THEN excluded.at ELSE ${TABLE}.at END, ` +
+              `title_search = COALESCE(excluded.title_search, ${TABLE}.title_search)`,
+            [key, conversationId, agent, Math.max(0, Math.floor(at)), title === undefined ? null : searchOf(title)],
           );
         }
       });
     },
 
-    async list({ limit, cursor, archived = false }) {
+    async list({ limit, cursor, archived = false, q }) {
       const after = cursor === undefined ? undefined : parseCursor(cursor);
+      const like = q === undefined || q.trim() === "" ? undefined : likeOf(q.trim());
       // Put away while no newer activity came: archived ones listed apart, deleted ones never.
       const away = `h.how IS NOT NULL AND h.at >= c.at`;
       const rows = await (await db()).query<{ key: string; conversation: string; agent: string; at: number }>(
         `SELECT c.key AS key, c.conversation AS conversation, c.agent AS agent, c.at AS at FROM ${TABLE} c ` +
           `LEFT JOIN ${HIDDEN} h ON h.key = c.key AND h.conversation = c.conversation ` +
           `WHERE ${archived ? `${away} AND h.how = 'archived'` : `NOT (${away})`}` +
+          (like === undefined ? "" : " AND (c.title_search LIKE ? ESCAPE '\\' OR lower(c.key) LIKE ? ESCAPE '\\')") +
           (after === undefined ? "" : " AND (c.at < ? OR (c.at = ? AND (c.key > ? OR (c.key = ? AND c.conversation > ?))))") +
           " ORDER BY c.at DESC, c.key ASC, c.conversation ASC LIMIT ?",
-        after === undefined ? [limit + 1] : [after.at, after.at, after.key, after.key, after.conversationId, limit + 1],
+        [
+          ...(like === undefined ? [] : [like, like]),
+          ...(after === undefined ? [] : [after.at, after.at, after.key, after.key, after.conversationId]),
+          limit + 1,
+        ],
       );
       const items = rows.slice(0, limit).map(({ key, conversation, agent, at }) => ({ key, conversationId: conversation, agent, at: Number(at) }));
       const last = items.at(-1);

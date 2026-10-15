@@ -999,3 +999,39 @@ test("at start, the conversations with no title yet are titled from their first 
   expect(await titleOf(s, "c2")).toBe("Title of review the notes");
   expect(await titleOf(s, "c1")).toBe("Title of plan a trip to Lisbon");
 });
+
+test("search (?q=): the title each is listed by (a model's, the operator's by rename or /name, else its first message) or its key, any case; with archived=1 those archived; too long 400", async () => {
+  const model = fakeModel((request) => {
+    if (request.prompt.includes("Groceries")) throw new Error("the provider is down");
+    return "Trip to Lisbon";
+  });
+  const runtime = new Runtime();
+  runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", lastActivity: 1 });
+  runtime.add({ conversationId: "c2", key: "telegram:2", agent: "assistant", lastActivity: 2 });
+  runtime.add({ conversationId: "c3", key: "dashboard:3", agent: "assistant", lastActivity: 3 });
+  runtime.add({ conversationId: "c4", key: "http:ops-bot", agent: "assistant", lastActivity: 4 });
+  runtime.add({ conversationId: "c5", key: "telegram:5", agent: "assistant", lastActivity: 5 });
+  const s = await started({}, [model.component], runtime);
+  const ctx = s.app.context();
+
+  await ctx.emit("agent.settled", settled("telegram:1", "c1", "plan a trip"));
+  await until(async () => (await titleOf(s, "c1")) === "Trip to Lisbon", "the model's title");
+  expect(await listed(s, "?q=LISBON")).toEqual(["c1"]);
+  // A model that failed: its first message names it, and is searched.
+  await ctx.emit("agent.settled", settled("telegram:5", "c5", "Groceries for sunday"));
+  await until(() => s.logged.some((each) => each.message.includes("did not title")), "the failure");
+  expect(await listed(s, "?q=groceries")).toEqual(["c5"]);
+
+  expect((await s.fetch("/admin/api/conversations/c2/rename", post({ title: "Ñandú notes" }))).status).toBe(200);
+  expect(await listed(s, `?q=${encodeURIComponent("ñandú")}`)).toEqual(["c2"]);
+  await command(s, "c3", "name", { args: "Weekend in Porto" });
+  expect(await listed(s, "?q=porto")).toEqual(["c3"]);
+  // The key.
+  expect(await listed(s, "?q=ops-bot")).toEqual(["c4"]);
+
+  expect((await s.fetch("/admin/api/conversations/c3/archive", post())).status).toBe(200);
+  expect(await listed(s, "?q=porto")).toEqual([]);
+  expect(await listed(s, "?q=porto&archived=1")).toEqual(["c3"]);
+  expect((await listed(s, "?q=%20%20")).length).toBe(4);
+  expect((await s.fetch(`/admin/api/conversations?q=${"x".repeat(201)}`, { headers: AUTH })).status).toBe(400);
+});

@@ -18,7 +18,7 @@
  * | `GET /admin/api/agents` | `ApiAgents`: the App's agents (the code's, then the live ones), their model and tools, and which is the steward; every tool and skill an agent may have, each with its one line |
  * | `POST /admin/api/session` | the credential once → `200 ApiSession` and a session cookie (a browser's) |
  * | `DELETE /admin/api/session` | `204`: the session cookie cleared |
- * | `GET /admin/api/conversations?limit&cursor&archived` | `ApiPage<ApiConversation>`, the most recently active first: those listed, or with `archived=1` those archived |
+ * | `GET /admin/api/conversations?limit&cursor&archived&q` | `ApiPage<ApiConversation>`, the most recently active first: those listed, or with `archived=1` those archived; with `q` (at most `SEARCH_MAX` characters), only those whose title or key holds it, any case |
  * | `POST /admin/api/conversations` | `ApiStartRequest` → `201 ApiStartResponse`: a conversation of the dashboard's own |
  * | `GET /admin/api/conversations/:id` | `ApiConversation` |
  * | `GET /admin/api/conversations/:id/transcript?limit&cursor` | `ApiPage<ApiTranscriptEntry>`, newest first |
@@ -62,6 +62,9 @@ export function operatorPrompt(key: string, text: string, options: { webSearch?:
 
 /** The longest title a conversation has (`cleanTitle`). */
 export const TITLE_MAX = 60;
+
+/** The longest search of the conversations (`q`). */
+export const SEARCH_MAX = 200;
 
 /** Labels a model may put before a title ("Title: …"), in a few languages: taken off. */
 const TITLE_LABEL = /^(?:title|name|subject|topic|t\u00edtulo|titulo|titre|titel|titolo|nombre|nom)(?:\s*:\s*|\s+[-\u2013\u2014]\s+)/i;

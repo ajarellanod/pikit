@@ -263,6 +263,12 @@ it("slash commands in real objects: listed from the index object's App, run in t
     expect(named.status).toBe(200);
     const listed = (await (await worker.fetch("/admin/api/conversations?limit=1")).json()) as { items: { conversationId: string; title?: string }[] };
     expect(listed.items).toMatchObject([{ conversationId: started.conversationId, title: "Porto weekend" }]);
+    // Searched in the index object, which the conversation's object told each title.
+    const found = async (q: string) =>
+      ((await (await worker.fetch(`/admin/api/conversations?q=${encodeURIComponent(q)}`)).json()) as { items: { conversationId: string }[] }).items.map((each) => each.conversationId);
+    await vi.waitFor(async () => expect(await found("PORTO WEEK")).toEqual([started.conversationId]), { timeout: 10_000 });
+    expect(await found("answer: plan")).toEqual([]);
+    expect(await found(started.key)).toEqual([started.conversationId]);
     expect((await worker.fetch(path("nope"), { method: "POST" })).status).toBe(404);
 
     const fresh = await worker.fetch(path("new"), { method: "POST" });

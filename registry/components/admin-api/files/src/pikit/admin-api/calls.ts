@@ -18,14 +18,15 @@
  * | `admin-api.commands` | — | `ApiCommands`: this App's slash commands |
  * | `admin-api.command` | `{ conversationId, name, args }` | `ApiCommandResponse`: the command run in the conversation |
  * | `admin-api.rename` | `{ conversationId, title }` | `ApiConversation`, titled with `title` cleaned (`cleanTitle`) |
- * | `admin-api.list` | `{ limit, cursor?, archived? }` | `IndexPage` (the index object's) |
+ * | `admin-api.list` | `{ limit, cursor?, archived?, q? }` | `IndexPage` (the index object's): `q` searches the titles the objects told it, and the keys |
  * | `admin-api.hide` | `{ key, conversationId, how? }` (`archived`, `deleted`; absent: back in the list) | `{}` (the index object's; `not_found` when it has no such conversation) |
  *
  * And one stream: `admin-api.live` `{ conversationId }`, the conversation's live events (`ApiEvent`s,
  * a `snapshot` first), refused `not_found` before the first; it ends when the Worker closes it.
  *
  * And one message (`send`, `actor.inbox.handle`): `admin-api.seen` `{ entries: [{ key,
- * conversationId, agent, at }] }`, to the index.
+ * conversationId, agent, at, title? }] }`, to the index: activity, and the title the conversation is
+ * listed by when it changed (`at` `0` then: no time changes), at most `TITLE_MAX` characters.
  *
  * A refusal is an `ActorCallError` (`not_found`, `no_agent`, `not_current`, `invalid_cursor`,
  * `invalid_request`, `unknown_agent`, `too_large`, `unknown_command`, `command_failed`), whose code
@@ -37,7 +38,7 @@
  */
 
 import { type ActorInbox, ActorCallError, type JsonValue, type PageRequest } from "@pikit/contracts";
-import { type ApiAttachment, attachmentsProblem } from "./api.ts";
+import { type ApiAttachment, attachmentsProblem, SEARCH_MAX, TITLE_MAX } from "./api.ts";
 import { type AdminBackend, type Message, refusal } from "./backend.ts";
 import type { ConversationIndex, IndexedConversation } from "./conversation-index.ts";
 
@@ -96,7 +97,9 @@ const seenOf = (message: JsonValue): IndexedConversation[] => {
   return entries.map((entry) => {
     const at = fieldsOf(entry).at;
     if (typeof at !== "number" || !Number.isFinite(at)) throw new ActorCallError("invalid_request", 'admin-api: "at" is epoch milliseconds');
-    return { key: text(entry, "key"), conversationId: text(entry, "conversationId"), agent: text(entry, "agent"), at };
+    const title = fieldsOf(entry).title;
+    if (title !== undefined && (typeof title !== "string" || title.length > TITLE_MAX)) throw new ActorCallError("invalid_request", `admin-api: "title" is a string of at most ${TITLE_MAX} characters`);
+    return { key: text(entry, "key"), conversationId: text(entry, "conversationId"), agent: text(entry, "agent"), at, ...(title !== undefined && { title }) };
   });
 };
 
@@ -162,8 +165,9 @@ export function answerCalls(inbox: ActorInbox, backendOf: (key: string) => Admin
   inbox.handle(SEEN, async (_key, message) => index.seen(seenOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {
     const page = pageOf(message);
-    const archived = fieldsOf(message).archived === true;
-    return json(await index.list({ limit: page.limit ?? 50, archived, ...(page.cursor !== undefined && { cursor: page.cursor }) }));
+    const { archived, q } = fieldsOf(message);
+    if (q !== undefined && (typeof q !== "string" || q.length > SEARCH_MAX)) throw refusal("invalid_request", `admin-api: "q" is a string of at most ${SEARCH_MAX} characters`);
+    return json(await index.list({ limit: page.limit ?? 50, archived: archived === true, ...(q !== undefined && { q }), ...(page.cursor !== undefined && { cursor: page.cursor }) }));
   });
   inbox.answer(CALL.hide, async (_key, message) => {
     const how = fieldsOf(message).how;

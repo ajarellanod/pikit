@@ -160,3 +160,38 @@ test("hide pages like the list: archived ones a page at a time", async () => {
   expect(second.items.map((each) => each.key)).toEqual(["telegram:1"]);
   expect(second.next).toBeUndefined();
 });
+
+test("search (q): a title as last told or the key holds it, any case (accents too), its wildcards literal; archived ones apart; pages like the list", async () => {
+  const { index: conversations } = await index();
+  await conversations.seen([
+    { ...row("telegram:1", 100), title: "Viaje a LISBOA" },
+    { ...row("telegram:2", 200), title: "Ñandú facts" },
+    { ...row("http:lisboa-bot", 300) },
+    { ...row("telegram:4", 400), title: "100% sure" },
+    { ...row("telegram:5", 500), title: "Lisbon trip" },
+  ]);
+  const keys = async (q: string, archived = false) => (await conversations.list({ limit: 10, archived, q })).items.map((each) => each.key);
+
+  expect(await keys("lisbo")).toEqual(["telegram:5", "http:lisboa-bot", "telegram:1"]);
+  expect(await keys("  ÑANDÚ ")).toEqual(["telegram:2"]);
+  expect(await keys("telegram:4")).toEqual(["telegram:4"]);
+  // `%` and `_` are what they are, not wildcards.
+  expect(await keys("0%")).toEqual(["telegram:4"]);
+  expect(await keys("_")).toEqual([]);
+  expect(await keys("")).toHaveLength(5);
+
+  // Activity without a title keeps the last one; a title alone (`at` 0) changes no time.
+  await conversations.seen([row("telegram:1", 600)]);
+  expect(await keys("lisboa")).toEqual(["telegram:1", "http:lisboa-bot"]);
+  await conversations.seen([{ ...row("telegram:1", 0), title: "Weekend" }]);
+  expect(await keys("lisboa")).toEqual(["http:lisboa-bot"]);
+  expect((await conversations.list({ limit: 1, q: "weekend" })).items).toEqual([row("telegram:1", 600)]);
+
+  await conversations.hide("telegram:5", "1", "archived");
+  expect(await keys("lisbo")).toEqual(["http:lisboa-bot"]);
+  expect(await keys("lisbo", true)).toEqual(["telegram:5"]);
+
+  const first = await conversations.list({ limit: 1, q: "telegram" });
+  const second = await conversations.list({ limit: 10, q: "telegram", ...(first.next !== undefined && { cursor: first.next }) });
+  expect([...first.items, ...second.items].map((each) => each.key)).toEqual(["telegram:1", "telegram:4", "telegram:2"]);
+});

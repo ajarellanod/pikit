@@ -32,7 +32,9 @@
  *   `titleModel`, else the agent's) titles it from its first message, in the background, once (tried
  *   once more after a later run if that failed): `titles.ts`. A reset's new conversation gets its own.
  *   `/name` replaces the current one's. They are kept with the index (`conversation-index.ts`) and
- *   listed with each conversation; one with no title yet is listed by its first message.
+ *   listed with each conversation; one with no title yet is listed by its first message. Each change
+ *   of the title a conversation is listed by is told to the index (`seen` with its `title`, as at
+ *   start), which searches it (`?q=`): on Cloudflare the titles are the objects', not the index's.
  * - **Only a conversation's current one is talked to.** A message, an abort or a reset to a
  *   conversation a reset left behind is `409 not_current`. A reset's new conversation is its key's
  *   current one, with the key's agent, before any message reaches it: it is talked to at once.
@@ -56,7 +58,7 @@ import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal }
 import { type ActorInbox, type ActorMailbox, type AgentCommand, type AgentObserver, type ConversationRef, isCommandName } from "@pikit/contracts";
 import { type ApiAgent, cleanTitle } from "./api.ts";
 import { createAssets } from "./assets.ts";
-import { agentOf, createLocalBackend, summariesOf } from "./backend.ts";
+import { agentOf, createLocalBackend, listedTitle, summariesOf } from "./backend.ts";
 import { answerCalls, SEEN } from "./calls.ts";
 import { Config } from "./config.ts";
 import { createConversationIndex, INDEX_KEY, type IndexedConversation } from "./conversation-index.ts";
@@ -135,8 +137,14 @@ export default defineComponent({
           definitions.keys().map((name) => definitions.get(name)),
         ),
     };
+    /** Tells the index the title `conversation` is listed by now, which it searches: `at` 0 changes no time. */
+    const retitled = async ({ key, conversationId, agent }: ConversationRef, ctx: AppContext): Promise<void> => {
+      const title = await listedTitle(index, conversationId);
+      if (title !== undefined) await seen([{ key, conversationId, agent, at: 0, title }], ctx);
+    };
+    const local = { ...contracts, retitled: (conversation: ConversationRef, ctx: AppContext) => retitled(conversation, ctx) };
     // A server's: a conversation no message reached yet is its key's by the index's row (a reset's new one).
-    const backend = createLocalBackend({ ...contracts, keyOf: (conversationId) => index.keyOf(conversationId) });
+    const backend = createLocalBackend({ ...local, keyOf: (conversationId) => index.keyOf(conversationId) });
 
     provideRoutes(pikit, {
       auth,
@@ -159,10 +167,11 @@ export default defineComponent({
     const nameCommand: AgentCommand = {
       description: "Set the conversation's title",
       argumentHint: "<title>",
-      async run(conversation, args) {
+      async run(conversation, args, ctx) {
         const title = cleanTitle(args);
         if (title === undefined) throw new Error("Write the title after the command: /name <title>");
         await index.name(conversation.conversationId, title);
+        await retitled(conversation, ctx);
         return { text: `Titled \u201c${title}\u201d.` };
       },
     };
@@ -173,6 +182,7 @@ export default defineComponent({
       index: () => index,
       complete: () => completion.get(),
       modelFor: (agent) => config.titleModel ?? definitions.get(agent)?.model,
+      retitled,
     });
 
     /**
@@ -228,7 +238,9 @@ export default defineComponent({
         const entries = page.items.flatMap(({ key, agent, conversationId, lastActivity }) =>
           key === undefined || agent === undefined ? [] : [{ key, agent, conversationId, at: lastActivity ?? 0 }],
         );
-        await seen(entries, ctx);
+        // With each one's title: the index searches it (on Cloudflare it has the objects' only so).
+        const titled = await Promise.all(entries.map(async (entry) => ({ ...entry, ...(await listedTitle(index, entry.conversationId).then((title) => title !== undefined && { title })) })));
+        await seen(titled, ctx);
         all.push(...entries);
         cursor = page.next;
       } while (cursor !== undefined);
@@ -264,7 +276,7 @@ export default defineComponent({
         tellsStarted: (resumed) => resumed,
         async start(ctx) {
           // An object's conversations are all of its key.
-          answerCalls(calls, (key) => createLocalBackend({ ...contracts, keyOf: async () => key }), index);
+          answerCalls(calls, (key) => createLocalBackend({ ...local, keyOf: async () => key }), index);
           // This object's conversations (a few): the index learns of them even if their events were missed.
           await backfill(observe.get(), ctx).catch((error: unknown) =>
             ctx.logger.warn("admin-api: this object's conversations were not told to the index", { error: error instanceof Error ? error.message : String(error) }),

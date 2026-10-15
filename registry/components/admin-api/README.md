@@ -36,7 +36,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | `GET /admin/api/agents` | `{ items: [{ name, live?, description?, model, tools, steward }] }`: the App's agents (`agent.definition`), then the live ones (`agent.directory`, `live: true`, never the steward), the names of the tools each is defined with, and whether it is the steward; `tools` and `skills`, `[{ name, summary }]`: every tool an agent may have (`agent.tool`, then the tool objects a definition holds) and every skill (`agent.skill`, then a definition's own), `summary` one line for an operator (a tool's own `summary`, else its description's first sentence, at most 90 characters) |
 | `POST /admin/api/session` | the credential once → `200 { operator }` and a session cookie |
 | `DELETE /admin/api/session` | `204`, the session cookie cleared |
-| `GET /admin/api/conversations?limit&cursor` | a page of conversations, the most recently active first: key, agent, busy, last activity, cost, and `current` (whether its key points to it now) |
+| `GET /admin/api/conversations?limit&cursor&archived&q` | a page of conversations, the most recently active first: key, agent, busy, last activity, cost, and `current` (whether its key points to it now); `archived=1` those archived instead; `q` (at most 200 characters) only those whose title or key holds it, any case |
 | `POST /admin/api/conversations` | `{ agent, text, attachments?, webSearch?, requestId? }`: a conversation of the dashboard's own → `201 { conversationId, key, requestId, admission }` |
 | `GET /admin/api/conversations/:id` | one conversation |
 | `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first, a page at a time |
@@ -164,6 +164,14 @@ A write is an upsert that keeps the newest time: told twice, or late, it changes
 conversation the runtime no longer has is left out of the page. Any conversation can always be read
 by its id.
 
+**Search** (`?q=`) is the index's too: each row also carries the title its conversation is listed by
+(a model's, the operator's, else its first message), lowercased, and `q` matches it or the key, any
+case (`%` and `_` literal). The conversation's App tells the index the title whenever it changes (a
+first message given to a model to title, a model's title, `/name`, a rename) and with each
+conversation at start, so on Cloudflare, where titles are the objects', the index object searches
+them too. A conversation whose title changed while the index could not be told is found by its old
+title until its object starts again.
+
 Titles are a second table of the same storage, `admin_api_conversation_titles`: one row per
 conversation (its title, a model's or the operator's, the first message a model titles, its tries).
 On a server it is the App's `storage.sql` (its conversation ids are unique); on Cloudflare the
@@ -188,7 +196,7 @@ by `actor.mailbox.call` (JSON in, JSON out). So admin-api has two halves, which 
   object. It needs only `admin.auth` and `actor.mailbox`.
 - **The object's half** (the default export, in each object's App) answers those calls about its own
   conversations, through the same contracts as on a server (`calls.ts`), and tells the index of their
-  activity (`admin-api.seen`, a message to the index object).
+  activity and their titles (`admin-api.seen`, a message to the index object).
 - **Ids** name the object: `<conversation key>~<the object's id>` (`telegram:12345~1`), split on the last
   `~`. Every object numbers its own conversations, so its own id alone names nothing.
 - **The index** is the object `admin-api:index` (an object of the same class, which runs the same App
@@ -283,7 +291,8 @@ still answers.
   the tool); ids with `.` and `/`; redacted config; server-sent events; messages logged without their
   text; the commands (listed, run as actions, `404` / `409` / `422`, a project's own, logged by name)
   and admin-api's own through the `agent.command` suite; titles (made in the background after the first
-  run, once, retried once, `titleModel`, `/name` first).
+  run, once, retried once, `titleModel`, `/name` first); search (`q`: a model's title, a rename, `/name`,
+  a first message, the key; with `archived=1`; too long `400`).
 - `remote.test.ts`: the Worker's half over a fake platform whose every key is an App running the
   default export on `durable`: ids, the list from the index (order, pages, an object that does not
   answer), the index told at an object's start and on dispatch (once per conversation), a dashboard
@@ -291,7 +300,9 @@ still answers.
   and web search across the call (over 1 MB `413` before any call), a transcript page answered shorter
   until it fits, live events over the object's stream (each event, the watch released when the client
   leaves, `404` and `503` before any stream), `401` before any call; commands listed from the index object and
-  run in the conversation's, the title in the list.
+  run in the conversation's, the title in the list; search on the index object over the titles the
+  objects tell it (a rename, `/name`, an object's start after the index lost its rows), only the found
+  ones read.
 - `conversation-index.test.ts`: the index on SQLite (an upsert a late `seen` does not move back, one
   row per conversation, order, pages, cursors; titles: one model's try and one more, the operator's
   first). `assets.test.ts`: the files served from the module,

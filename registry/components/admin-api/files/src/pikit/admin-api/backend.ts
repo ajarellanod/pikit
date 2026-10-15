@@ -93,6 +93,12 @@ export interface NewConversation extends Message {
   agent: string;
 }
 
+/** Which conversations a list shows: archived ones (else those listed), and those a search finds. */
+export interface ConversationFilter {
+  archived?: boolean;
+  q?: string;
+}
+
 /** What an action did, and to which key (for the operator's log line). */
 export type Sent = ApiSendResponse & { key: string };
 export type Aborted = ApiAbortResponse & { key: string };
@@ -104,10 +110,11 @@ export interface AdminBackend {
   /** The App's agents, by name. */
   agents(ctx: AppContext): Promise<ApiAgents>;
   /**
-   * The most recently active first: those listed, or with `archived` those the operator archived.
+   * The most recently active first: those listed, or with `archived` those the operator archived;
+   * with `q`, only those whose title or key holds it, any case (`ConversationIndex.list`).
    * Throws `invalid_cursor` for a cursor it did not give.
    */
-  conversations(page: PageRequest, ctx: AppContext, archived?: boolean): Promise<ApiPage<ApiConversation>>;
+  conversations(page: PageRequest, ctx: AppContext, filter?: ConversationFilter): Promise<ApiPage<ApiConversation>>;
   /**
    * Puts the conversation away (`archived`, `deleted`) or back in the list (`undefined`): the list
    * only, nothing of the runtime's. Any conversation, current or not. Throws `not_found`.
@@ -177,6 +184,12 @@ export function unqualify(id: string): { key: string; local: string } | undefine
   return match === null ? undefined : { key: match[1] as string, local: match[2] as string };
 }
 
+/** The title conversation `conversationId` is listed by: its own (a model's, the operator's), else its first message, cleaned; `undefined` without either. */
+export async function listedTitle(index: ConversationIndex, conversationId: string): Promise<string | undefined> {
+  const named = await index.title(conversationId);
+  return named.title ?? (named.firstMessage === undefined ? undefined : cleanTitle(named.firstMessage));
+}
+
 export interface LocalContracts {
   observe(): AgentObserver;
   runtime(): AgentRuntime;
@@ -189,6 +202,8 @@ export interface LocalContracts {
    * pointed the key to it; in a Cloudflare object, the object's own key.
    */
   keyOf(conversationId: string, ctx: AppContext): Promise<string | undefined>;
+  /** The conversation's title changed (a rename): the index is told, which searches it (`list`'s `q`). */
+  retitled(conversation: ConversationRef, ctx: AppContext): Promise<void>;
   /** The App's agents now: the code's (`agent.definition`, `agentOf` describes each) by name, then the live ones (`agent.directory`). */
   agents(ctx: AppContext): Promise<ApiAgent[]>;
   /** The App's slash commands (`agent.command`). */
@@ -270,8 +285,7 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
   const described = async (conversation: ObservedConversation, ctx: AppContext): Promise<ApiConversation> => {
     const identity = await identify(conversation, ctx);
     if (identity === undefined) return conversation as ApiConversation;
-    const named = await contracts.index().title(conversation.conversationId);
-    const title = named.title ?? (named.firstMessage === undefined ? undefined : cleanTitle(named.firstMessage));
+    const title = await listedTitle(contracts.index(), conversation.conversationId);
     return { ...(conversation as ApiConversation), ...identity, ...(title !== undefined && { title }) };
   };
 
@@ -346,8 +360,8 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
 
     agents: async (ctx) => ({ items: await contracts.agents(ctx), ...contracts.summaries() }),
 
-    async conversations(page, ctx, archived = false) {
-      const listed = await contracts.index().list({ limit: page.limit ?? 50, archived, ...(page.cursor !== undefined && { cursor: page.cursor }) });
+    async conversations(page, ctx, { archived = false, q } = {}) {
+      const listed = await contracts.index().list({ limit: page.limit ?? 50, archived, ...(q !== undefined && { q }), ...(page.cursor !== undefined && { cursor: page.cursor }) });
       // A row whose conversation the runtime no longer has is left out.
       const found = await Promise.all(listed.items.map((row) => contracts.observe().conversation(row.conversationId, ctx)));
       const items = await Promise.all(found.filter((each) => each !== undefined).map((each) => described(each, ctx)));
@@ -379,6 +393,8 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       if (cleaned === undefined) throw refusal("invalid_request", "/title: write a title");
       const conversation = await found(id, ctx);
       await contracts.index().name(conversation.conversationId, cleaned);
+      const identity = await identify(conversation, ctx);
+      if (identity !== undefined) await contracts.retitled({ key: identity.key, agent: identity.agent, conversationId: conversation.conversationId }, ctx);
       return described(conversation, ctx);
     },
 

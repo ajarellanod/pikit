@@ -62,6 +62,8 @@ export interface TitlerOptions {
   complete(): ModelComplete | undefined;
   /** The model a conversation of `agent` is titled with: `titleModel`, else the agent's. */
   modelFor(agent: string): string | undefined;
+  /** The title `conversation` is listed by changed (its first message claimed, a model's title): the index is told, which searches it. */
+  retitled(conversation: { key: string; conversationId: string; agent: string }, ctx: AppContext): Promise<void>;
 }
 
 /**
@@ -84,11 +86,14 @@ export function createTitler(options: TitlerOptions) {
     if (input === undefined) return;
     const claim = await options.index().titling(conversationId, input);
     if (claim === undefined) return;
+    // Its first message names it meanwhile.
+    await options.retitled(conversation, ctx);
     try {
       const answer = await complete.complete({ model, system: TITLE_SYSTEM, prompt: claim.input, maxTokens: TITLE_TOKENS }, ctx);
       const made = cleanTitle(answer);
       if (made === undefined) throw new Error("the model's answer had no title in it");
       await options.index().titled(conversationId, made);
+      await options.retitled(conversation, ctx);
       ctx.logger.info("admin-api: a model titled a conversation", { conversation: key, conversationId, model });
     } catch (error) {
       ctx.logger.warn("admin-api: a model did not title this conversation; it is tried once more after a later run", {

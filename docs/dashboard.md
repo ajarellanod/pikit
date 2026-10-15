@@ -42,7 +42,7 @@ Every `/admin/api/*` route asks `admin.auth` first and answers `401` without an 
 | `GET /admin/api/app` | the composition (`APP_DESCRIPTION`, config redacted) |
 | `GET /admin/api/agents` | the agents: name, model, tools, whether it is the steward; then the live ones (`agent.directory`: `live: true`, `description`) |
 | `POST`, `DELETE /admin/api/session` | open or close a browser session |
-| `GET /admin/api/conversations?limit&cursor` | conversations, most recently active first |
+| `GET /admin/api/conversations?limit&cursor&archived&q` | conversations, most recently active first; `archived=1` the archived ones; `q` those whose title or key holds it (any case) |
 | `POST /admin/api/conversations` | a new conversation of the dashboard's own (`dashboard:<uuid>`) with its first message |
 | `GET /admin/api/conversations/:id` | one conversation |
 | `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first |
@@ -93,6 +93,9 @@ conversation `agent.observe` holds. On Cloudflare the index is the object `admin
 each conversation's object with the message `admin-api.seen`. Titles are a second table,
 `admin_api_conversation_titles`: after a conversation's first run, `model.complete` writes a 2-6 word
 title in the background (`titleModel`, else the agent's model); `/name` or Rename (`POST …/rename`) replaces it.
+Each index row also carries its conversation's title, lowercased, for the list's `q`: the
+conversation's App tells it with `admin-api.seen` whenever the title changes and at start (on
+Cloudflare the titles are each object's, so the index object learns them only so).
 
 ## Building and embedding
 

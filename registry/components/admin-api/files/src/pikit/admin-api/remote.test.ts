@@ -7,7 +7,7 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { type App, type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type App, type AppContext, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import {
   type ActorCallHandler,
   ActorCallError,
@@ -52,6 +52,8 @@ class Platform {
   readonly warnings: string[] = [];
   /** What a key's runtime holds before its object starts. */
   readonly before = new Map<string, (runtime: Runtime) => void>();
+  /** Each key's `storage.sql`: an object started again keeps it, as a Durable Object's storage outlives it. */
+  readonly storage = new Map<string, ComponentDefinition>();
 
   readonly mailbox: ActorMailbox = {
     send: async (key, type, message) => {
@@ -106,7 +108,9 @@ class Platform {
       },
     });
     const logger = { ...silentLogger, warn: (message: string) => void this.warnings.push(message) };
-    const app = await defineApp({ components: [auth, agents, runtime.component(), platform, sqliteStorage(), adminApi], target: "durable", logger }).create();
+    const storage = this.storage.get(key) ?? sqliteStorage();
+    this.storage.set(key, storage);
+    const app = await defineApp({ components: [auth, agents, runtime.component(), platform, storage, adminApi], target: "durable", logger }).create();
     await app.start();
     return { app, runtime, answers, handlers, streams, ctx: app.context() };
   }
@@ -566,4 +570,45 @@ test("archive and delete on the Worker: one call to the index object, which list
   expect(await ids(true)).toEqual(["telegram:1~1"]);
   const unknown = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:9~1")}/archive`, { method: "POST", headers: { ...AUTH, "x-pikit-admin": "1" } });
   expect(unknown.status).toBe(404);
+});
+
+test("search on the Worker (?q=): the index object's, over the titles each object tells it (a rename, /name, its backfill at start) and the keys; only what it finds is read", async () => {
+  const { platform, worker: w } = await cloud();
+  for (const [n, at] of [[1, 100], [2, 200], [3, 300]] as const) {
+    await chat(platform, `telegram:${n}`);
+    await platform.active(`telegram:${n}`, at);
+  }
+  const ids = async (query: string) =>
+    ((await (await w.fetch(`/admin/api/conversations${query}`, { headers: AUTH })).json()) as { items: ApiConversation[] }).items.map((each) => each.conversationId);
+
+  expect((await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/rename`, post({ title: "Weekend plans" }))).status).toBe(200);
+  await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:2~1")}/commands/name`, post({ args: "Ñandú notes" }));
+  platform.calls.length = 0;
+  expect(await ids("?q=WEEKEND")).toEqual(["telegram:1~1"]);
+  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.list`, "telegram:1 admin-api.conversation"]);
+  expect(await ids(`?q=${encodeURIComponent("ñandú")}`)).toEqual(["telegram:2~1"]);
+  expect(await ids("?q=telegram:3")).toEqual(["telegram:3~1"]);
+  expect(await ids("?q=nothing")).toEqual([]);
+  // Activity without a title keeps the one told.
+  await platform.active("telegram:1", 400);
+  expect(await ids("?q=weekend")).toEqual(["telegram:1~1"]);
+
+  // An index that lost its rows learns the titles again from each object's start (its backfill).
+  for (const key of [INDEX_KEY, "telegram:1"]) {
+    await (await platform.object(key)).app.stop();
+    platform.objects.delete(key);
+  }
+  platform.storage.delete(INDEX_KEY);
+  platform.before.set("telegram:1", (runtime) => runtime.add({ conversationId: "1", key: "telegram:1", agent: "assistant", lastActivity: 10 }));
+  await platform.object("telegram:1");
+  expect(await ids("?q=weekend")).toEqual(["telegram:1~1"]);
+
+  // What the index takes: a title is a string of at most TITLE_MAX characters; q at most SEARCH_MAX.
+  const ctx = w.app.context();
+  for (const title of [5, "x".repeat(61)]) {
+    const refused = await platform.mailbox.send(INDEX_KEY, "admin-api.seen", { entries: [{ key: "telegram:9", conversationId: "1", agent: "assistant", at: 1, title }] }, ctx).catch((error: unknown) => error);
+    expect((refused as ActorCallError).code).toBe("invalid_request");
+  }
+  const long = await platform.mailbox.call(INDEX_KEY, "admin-api.list", { limit: 1, q: "x".repeat(201) }, ctx).catch((error: unknown) => error);
+  expect((long as ActorCallError).code).toBe("invalid_request");
 });

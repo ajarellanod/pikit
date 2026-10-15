@@ -8,6 +8,8 @@
  *   the most recently active first, then each one's object for it. A page is at most
  *   `CONVERSATIONS_PER_PAGE` whatever `limit` asks (each is a subrequest; Workers count them). An
  *   object that does not answer, or no longer has the conversation, is left out of the page, and logged.
+ *   A search (`q`) is the index's too: each object tells it its conversations' titles
+ *   (`admin-api.seen`), which live in the object.
  * - **Archived and deleted** are the index object's (one call there); **a title** is the conversation's
  *   object's (a rename is one call there, as `/name` is).
  * - **A new conversation** of the dashboard's own is its key's object's (`dashboard:<uuid>`): one call.
@@ -68,9 +70,14 @@ export function createRemoteBackend(mailbox: () => ActorMailbox): AdminBackend {
 
     agents: (ctx) => call<ApiAgents>(INDEX_KEY, CALL.agents, null, ctx),
 
-    async conversations(page, ctx, archived = false) {
+    async conversations(page, ctx, { archived = false, q } = {}) {
       const limit = Math.min(page.limit ?? CONVERSATIONS_PER_PAGE, CONVERSATIONS_PER_PAGE);
-      const listed = await call<IndexPage>(INDEX_KEY, CALL.list, { limit, ...(archived && { archived }), ...(page.cursor !== undefined && { cursor: page.cursor }) }, ctx);
+      const listed = await call<IndexPage>(
+        INDEX_KEY,
+        CALL.list,
+        { limit, ...(archived && { archived }), ...(q !== undefined && { q }), ...(page.cursor !== undefined && { cursor: page.cursor }) },
+        ctx,
+      );
       const found = await Promise.all(
         listed.items.map(async ({ key, conversationId }) => {
           try {

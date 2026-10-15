@@ -62,6 +62,7 @@ import {
   MAX_COMMAND_ARGS,
   MAX_IMAGE_BYTES,
   MAX_IMAGES,
+  SEARCH_MAX,
 } from "./api.ts";
 import { type Assets, BASE } from "./assets.ts";
 import type { AdminBackend } from "./backend.ts";
@@ -314,9 +315,12 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   api("GET /admin/api/conversations", async (request, ctx) => {
     const page = pageOf(request);
     if ("problem" in page) return failure(400, "invalid_request", page.problem);
-    const archived = new URL(request.url).searchParams.get("archived");
+    const params = new URL(request.url).searchParams;
+    const archived = params.get("archived");
     if (archived !== null && archived !== "1" && archived !== "0") return failure(400, "invalid_request", "archived is 1 or 0");
-    return json<ApiPage<ApiConversation>>(200, await backend().conversations(page, ctx, archived === "1"));
+    const q = params.get("q")?.trim() ?? "";
+    if (q.length > SEARCH_MAX) return failure(400, "invalid_request", `q is at most ${SEARCH_MAX} characters`);
+    return json<ApiPage<ApiConversation>>(200, await backend().conversations(page, ctx, { archived: archived === "1", ...(q !== "" && { q }) }));
   });
 
   api("GET /admin/api/conversations/:id", async (request, ctx) => json<ApiConversation>(200, await backend().conversation(conversationIdOf(request), ctx)));
