@@ -27,6 +27,7 @@
  * | `POST /admin/api/conversations/:id/abort` | `200 ApiAbortResponse` |
  * | `POST /admin/api/conversations/:id/reset` | `200 ApiResetResponse` |
  * | `POST /admin/api/conversations/:id/archive`, `…/unarchive`, `…/delete` | `200 ApiHideResponse`: the list only (a deleted one is never listed again, nothing of the runtime's is deleted; new activity lists either again) |
+ * | `POST /admin/api/conversations/:id/rename` | `ApiRenameRequest` → `200 ApiConversation`: the operator's title (`cleanTitle`), as `/name` sets it, on any conversation, current or not |
  * | `GET /admin/api/commands` | `ApiCommands`: the slash commands the App registered (`agent.command`) |
  * | `POST /admin/api/conversations/:id/commands/:name` | `ApiCommandRequest` → `200 ApiCommandResponse`: the command run in the conversation |
  * | `GET /admin/api/delivery/pending?limit&cursor` | `ApiPage<ApiPendingPiece>`, oldest stored first (with `outbound.queue`) |
@@ -309,6 +310,12 @@ export interface ApiSession {
 
 export interface ApiAbortResponse {
   conversationId: string;
+}
+
+/** A conversation's new title, the operator's: cleaned (`cleanTitle`), it replaces any, and no model replaces it. */
+export interface ApiRenameRequest {
+  /** Something to title it with once cleaned; at most `MAX_COMMAND_ARGS` characters before. */
+  title: string;
 }
 
 /** What archive, unarchive and delete did: the conversation, put away or back in the list. */

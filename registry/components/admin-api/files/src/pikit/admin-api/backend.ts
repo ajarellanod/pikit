@@ -111,6 +111,12 @@ export interface AdminBackend {
    * only, nothing of the runtime's. Any conversation, current or not. Throws `not_found`.
    */
   hide(id: string, how: Hidden | undefined, ctx: AppContext): Promise<void>;
+  /**
+   * Titles the conversation with the operator's `title`, cleaned (`cleanTitle`), as `/name` does: it
+   * replaces any, and no model replaces it. Any conversation, current or not. Answers it, titled.
+   * Throws `invalid_request` (nothing left once cleaned), `not_found`.
+   */
+  rename(id: string, title: string, ctx: AppContext): Promise<ApiConversation>;
   /** A conversation of the dashboard's own, with its first message. Throws `unknown_agent`, `invalid_request`. */
   start(conversation: NewConversation, ctx: AppContext): Promise<ApiStartResponse>;
   /** Throws `not_found`. */
@@ -317,6 +323,14 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       const conversation = await found(id, ctx);
       const key = conversation.key ?? (await contracts.keyOf(conversation.conversationId, ctx));
       if (key === undefined || !(await contracts.index().hide(key, conversation.conversationId, how))) throw refusal("not_found", NOT_FOUND);
+    },
+
+    async rename(id, title, ctx) {
+      const cleaned = cleanTitle(title);
+      if (cleaned === undefined) throw refusal("invalid_request", "/title: write a title");
+      const conversation = await found(id, ctx);
+      await contracts.index().name(conversation.conversationId, cleaned);
+      return described(conversation, ctx);
     },
 
     async transcript(id, page, ctx) {

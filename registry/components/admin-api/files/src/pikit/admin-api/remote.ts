@@ -8,6 +8,8 @@
  *   the most recently active first, then each one's object for it. A page is at most
  *   `CONVERSATIONS_PER_PAGE` whatever `limit` asks (each is a subrequest; Workers count them). An
  *   object that does not answer, or no longer has the conversation, is left out of the page, and logged.
+ * - **Archived and deleted** are the index object's (one call there); **a title** is the conversation's
+ *   object's (a rename is one call there, as `/name` is).
  * - **A new conversation** of the dashboard's own is its key's object's (`dashboard:<uuid>`): one call.
  * - **Live events are streamed**: `live` opens the object's `admin-api.live` stream (one RPC,
  *   `actor.mailbox.stream`), which yields its conversation's events as they happen, as on a server:
@@ -95,6 +97,12 @@ export function createRemoteBackend(mailbox: () => ActorMailbox): AdminBackend {
       // The index object keeps what is put away: the conversation's own object is not asked.
       const { key, local } = target(id);
       await call<JsonValue>(INDEX_KEY, CALL.hide, { key, conversationId: local, ...(how !== undefined && { how }) }, ctx);
+    },
+
+    async rename(id, title, ctx) {
+      // The title is kept where the conversation is: its object's.
+      const { key, local } = target(id);
+      return qualified(key, await call<ApiConversation>(key, CALL.rename, { conversationId: local, title }, ctx));
     },
 
     async conversation(id, ctx) {

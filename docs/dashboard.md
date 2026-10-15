@@ -50,6 +50,7 @@ Every `/admin/api/*` route asks `admin.auth` first and answers `401` without an 
 | `POST /admin/api/conversations/:id/messages` | the operator's follow-up |
 | `POST /admin/api/conversations/:id/abort` | `agent.runtime.abort` |
 | `POST /admin/api/conversations/:id/reset` | `conversations.registry.reset` |
+| `POST /admin/api/conversations/:id/rename` | the operator's title (as `/name`), from the sidebar's Rename |
 | `GET /admin/api/commands` | the App's `agent.command`s |
 | `POST /admin/api/conversations/:id/commands/:name` | run one in the conversation |
 | `GET /admin/api/delivery/pending`, `GET /admin/api/delivery/receipts` | `outbound.queue`'s, on a server |
@@ -91,7 +92,7 @@ resumed runs), `agent.settled`, `agent.failed`, `conversation.reset`, and at sta
 conversation `agent.observe` holds. On Cloudflare the index is the object `admin-api:index`, told by
 each conversation's object with the message `admin-api.seen`. Titles are a second table,
 `admin_api_conversation_titles`: after a conversation's first run, `model.complete` writes a 2-6 word
-title in the background (`titleModel`, else the agent's model); `/name` replaces it.
+title in the background (`titleModel`, else the agent's model); `/name` or Rename (`POST …/rename`) replaces it.
 
 ## Building and embedding
 

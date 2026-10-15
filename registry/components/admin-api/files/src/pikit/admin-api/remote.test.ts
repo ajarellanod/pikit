@@ -523,6 +523,28 @@ test("slash commands on the Worker: listed from the index object's App, run in t
   expect(await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}`, { headers: AUTH })).json()).toMatchObject({ current: false, title: "Weekend plans" });
 });
 
+test("rename on the Worker: one call to the conversation's object, which keeps the title (cleaned there); the list shows it; refusals cross the call", async () => {
+  const { platform, worker: w } = await cloud();
+  await chat(platform, "telegram:1", true);
+  await platform.active("telegram:1", 100, "1");
+  const path = (id: string) => `/admin/api/conversations/${encodeURIComponent(id)}/rename`;
+  platform.calls.length = 0;
+
+  // Left behind by a reset (`chat`'s `reset`): renamed all the same.
+  const renamed = await w.fetch(path("telegram:1~1"), post({ title: "  weekend plans.  " }));
+  expect(renamed.status).toBe(200);
+  expect(await renamed.json()).toMatchObject({ conversationId: "telegram:1~1", current: false, title: "Weekend plans" });
+  expect(platform.calls).toEqual(["telegram:1 admin-api.rename"]);
+  expect(w.logged.find((each) => each.message.includes("renamed"))?.fields).toEqual({ operator: "ops", conversation: "telegram:1" });
+  const page = (await (await w.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: ApiConversation[] };
+  expect(page.items).toMatchObject([{ conversationId: "telegram:1~1", title: "Weekend plans" }]);
+
+  const empty = await w.fetch(path("telegram:1~1"), post({ title: " \"\" " }));
+  expect({ status: empty.status, body: await empty.json() }).toMatchObject({ status: 400, body: { error: "invalid_request" } });
+  expect((await w.fetch(path("telegram:1~9"), post({ title: "x" }))).status).toBe(404);
+  expect((await w.fetch(path("telegram:1"), post({ title: "x" }))).status).toBe(404);
+});
+
 test("archive and delete on the Worker: one call to the index object, which lists them apart (archived) or never (deleted)", async () => {
   const { platform, worker: w } = await cloud();
   await chat(platform, "telegram:1", true);

@@ -5,7 +5,7 @@
  * the messages sent from here that the conversation does not show yet (shown at once, where they go).
  *
  * A title names one conversation (a reset's new one has its own). It is the API's
- * (`ApiConversation.title`: a model's, made after its first run, or the operator's `/name`; until then
+ * (`ApiConversation.title`: a model's, made after its first run, or the operator's, `/name` or `rename`; until then
  * its first message, once a model was asked to title it); until there is one, its first message when
  * this page has it at hand (sent from New chat, or read in the open conversation's transcript: never
  * looked for), else for another channel's key the id in it (`telegram:12345` is `12345`), and "New
@@ -21,7 +21,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { every, usePolling } from "./activity.ts";
 import { cleanTitle, isDashboardKey } from "./admin-api.ts";
-import { type ApiAgent, api, type ApiApp, type ApiConversation, type ApiPage, post } from "./api.ts";
+import { type ApiAgent, api, type ApiApp, type ApiConversation, type ApiPage, type ApiRenameRequest, post } from "./api.ts";
 
 const PAGE = 50;
 const TABS = "pikit-tabs";
@@ -130,6 +130,8 @@ export interface Chats {
   loadArchived(): void;
   /** Archives, restores (`unarchive`) or deletes a conversation: from the list only. Its tab closes when it leaves the list. */
   hide(id: string, action: "archive" | "unarchive" | "delete"): Promise<void>;
+  /** Titles a conversation with the operator's `title` (the API cleans it, as `/name` does); the lists are read again. */
+  rename(id: string, title: string): Promise<void>;
 }
 
 const ChatsContext = createContext<Chats | undefined>(undefined);
@@ -277,6 +279,15 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     [archived, first, older, loadArchived, reload],
   );
 
+  const rename = useCallback(
+    async (id: string, title: string) => {
+      await post<ApiConversation>(`/conversations/${encodeURIComponent(id)}/rename`, { title } satisfies ApiRenameRequest);
+      if (archived !== undefined) loadArchived();
+      reload();
+    },
+    [archived, loadArchived, reload],
+  );
+
   // Active again since it was put away (a person wrote): the API lists it again, and so does this page.
   useEffect(() => {
     if (first === undefined || gone.size === 0) return;
@@ -284,6 +295,6 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     if (back.length > 0) setGone((all) => new Map([...all].filter(([id]) => !back.includes(id))));
   }, [first, gone]);
 
-  const value: Chats = { items, error, hasOlder: cursor !== undefined, loadOlder, reload, titleOf, tabTitle, setFirstMessage, notesOf, addNote, sentOf, addSent, updateSent, lastSentAt, tabs, openTab, closeTab, replaced, archived, loadArchived, hide };
+  const value: Chats = { items, error, hasOlder: cursor !== undefined, loadOlder, reload, titleOf, tabTitle, setFirstMessage, notesOf, addNote, sentOf, addSent, updateSent, lastSentAt, tabs, openTab, closeTab, replaced, archived, loadArchived, hide, rename };
   return <ChatsContext.Provider value={value}>{children}</ChatsContext.Provider>;
 }

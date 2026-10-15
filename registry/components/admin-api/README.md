@@ -43,6 +43,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | `POST /admin/api/conversations/:id/messages` | `{ text, attachments?, webSearch?, requestId? }`: the operator's follow-up → `202 { requestId, admission }` |
 | `POST /admin/api/conversations/:id/abort` | stops its run → `200` |
 | `POST /admin/api/conversations/:id/reset` | points its key to a new, empty conversation; the old one is kept → `200 { key, previousConversationId, conversationId }` |
+| `POST /admin/api/conversations/:id/rename` | `{ title }`: the operator's title, cleaned (`cleanTitle`), as `/name` sets it, on any conversation (current or not) → `200`, the conversation titled; nothing left once cleaned `400` |
 | `GET /admin/api/commands` | `{ items: [{ name, description, argumentHint? }] }`: the App's slash commands (`agent.command`), by name |
 | `POST /admin/api/conversations/:id/commands/:name` | `{ args? }`: the command run in the conversation → `200 { text? }`, a note for the operator |
 | `GET /admin/api/delivery/pending?limit&cursor` | what is not delivered yet (with an `outbound.queue`, on a server) |
@@ -129,8 +130,8 @@ characters; `maxTokens` 32, besides what a reasoning model thinks: `model.comple
 and asks one whose thinking cannot be turned off for the least). The model is `titleModel` when set, else the conversation's agent's. The
 answer is cleaned (`cleanTitle` in `api.ts`: its first line, no label, quotes or markdown, at most 60
 characters, cut at a word). A failure (a model error, an answer with no title) is logged, and tried
-once more after a later run; then never (`TITLE_TRIES`). `/name` replaces any title, and no model
-replaces the operator's. A title names one conversation: a reset (`/new`) starts one that gets its
+once more after a later run; then never (`TITLE_TRIES`). `/name` (or the dashboard's Rename,
+`POST …/rename`) replaces any title, and no model replaces the operator's. A title names one conversation: a reset (`/new`) starts one that gets its
 own from its own first message. Until a conversation has a title, its first message (cleaned the same
 way) names it, once a model was asked to title it. Titles are kept with the index (below) and come
 with each conversation (`title`). With a fake model

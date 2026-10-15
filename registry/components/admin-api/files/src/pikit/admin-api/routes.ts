@@ -15,6 +15,8 @@
  *   call that failed) is `503 unavailable`, logged.
  * - A slash command (`agent.command`) runs in a conversation as the other actions do (an operator, the
  *   key's current conversation), logged with its name, never its arguments.
+ * - A rename is the operator's title (`/name`'s), on any conversation (current or not, archived), logged
+ *   without the title.
  * - A message's images are checked here (`attachmentsProblem`: their number and types `400`, their size
  *   `413`), and a body larger than the most a message can be is `413` before it is read.
  * - Each action is logged with the operator's id and the conversation's key, never the message's text.
@@ -34,7 +36,7 @@ import {
   type OutboundQueue,
   type PageRequest,
 } from "@pikit/contracts";
-import Type, { type Static } from "typebox";
+import Type, { type Static, type TSchema } from "typebox";
 import Value from "typebox/value";
 import {
   type ApiAbortResponse,
@@ -85,6 +87,7 @@ const MessageFields = {
 const SendBody = Type.Object(MessageFields, { additionalProperties: false });
 const StartBody = Type.Object({ agent: Type.String({ minLength: 1, maxLength: 200 }), ...MessageFields }, { additionalProperties: false });
 const CommandBody = Type.Object({ args: Type.Optional(Type.String({ maxLength: MAX_COMMAND_ARGS })) }, { additionalProperties: false });
+const RenameBody = Type.Object({ title: Type.String({ maxLength: MAX_COMMAND_ARGS }) }, { additionalProperties: false });
 
 /** The status of each refusal a backend throws; any other is `503`. */
 const STATUS: Record<string, number> = {
@@ -163,6 +166,26 @@ async function readMessage<S extends typeof SendBody | typeof StartBody>(request
   const wrong = attachmentsProblem(attachments);
   if (wrong !== undefined) return { status: wrong.status, error: wrong.status === 413 ? "too_large" : "invalid_request", problem: `/attachments: ${wrong.message}` };
   return { body };
+}
+
+/**
+ * A small JSON body (a command's, a rename's: at most `MAX_COMMAND_ARGS` characters of text), checked
+ * against `schema`; an empty body is `{}`. Or the refusal to answer with.
+ */
+async function readSmall<S extends TSchema>(request: Request, schema: S, tooLarge: string): Promise<{ body: Static<S> } | Response> {
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_COMMAND_ARGS * 6 + 1024) return failure(413, "too_large", tooLarge);
+  const raw = await request.text();
+  let parsed: unknown = {};
+  try {
+    if (raw.trim() !== "") parsed = JSON.parse(raw);
+  } catch {
+    return failure(400, "invalid_request", "the body is not JSON");
+  }
+  if (!Value.Check(schema, parsed)) {
+    const [first] = Value.Errors(schema, parsed);
+    return failure(400, "invalid_request", `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}`);
+  }
+  return { body: parsed as Static<S> };
 }
 
 /** What the log says of a message besides its text: how many images, whether it asks for a web search. */
@@ -348,23 +371,22 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     });
   }
 
+  api("POST /admin/api/conversations/:id/rename", async (request, ctx, operator) => {
+    const read = await readSmall(request, RenameBody, `a title is at most ${MAX_COMMAND_ARGS} characters`);
+    if (read instanceof Response) return read;
+    const id = conversationIdOf(request);
+    const renamed = await backend().rename(id, read.body.title, ctx);
+    ctx.logger.info("admin-api: an operator renamed a conversation", { operator: operator.id, conversation: renamed.key ?? id });
+    return json<ApiConversation>(200, renamed);
+  });
+
   api("GET /admin/api/commands", async (_request, ctx) => json<ApiCommands>(200, await backend().commands(ctx)));
 
   api("POST /admin/api/conversations/:id/commands/:name", async (request, ctx, operator) => {
-    if (Number(request.headers.get("content-length") ?? 0) > MAX_COMMAND_ARGS * 6 + 1024) return failure(413, "too_large", `a command's arguments are at most ${MAX_COMMAND_ARGS} characters`);
-    const raw = await request.text();
-    let parsed: unknown = {};
-    try {
-      if (raw.trim() !== "") parsed = JSON.parse(raw);
-    } catch {
-      return failure(400, "invalid_request", "the body is not JSON");
-    }
-    if (!Value.Check(CommandBody, parsed)) {
-      const [first] = Value.Errors(CommandBody, parsed);
-      return failure(400, "invalid_request", `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}`);
-    }
+    const read = await readSmall(request, CommandBody, `a command's arguments are at most ${MAX_COMMAND_ARGS} characters`);
+    if (read instanceof Response) return read;
     const name = commandNameOf(request);
-    const ran = await backend().command(conversationIdOf(request), name, (parsed as Static<typeof CommandBody>).args ?? "", ctx);
+    const ran = await backend().command(conversationIdOf(request), name, read.body.args ?? "", ctx);
     ctx.logger.info("admin-api: an operator ran a command", { operator: operator.id, conversation: ran.key, command: name });
     return json<ApiCommandResponse>(200, ran.text === undefined ? {} : { text: ran.text });
   });

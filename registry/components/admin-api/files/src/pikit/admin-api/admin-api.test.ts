@@ -910,6 +910,40 @@ test("archive, unarchive, delete: the list only, any conversation; archived ones
   expect((await s.fetch("/admin/api/conversations/c1/delete", { method: "POST" })).status).toBe(401);
 });
 
+test("rename: the operator's title, cleaned, on any conversation (archived, left behind by a reset); in the list too; logged without it; empty 400, unknown 404", async () => {
+  const runtime = new Runtime();
+  runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", lastActivity: 1 });
+  const s = await started({}, [], runtime);
+  const rename = (id: string, body: unknown) => s.fetch(`/admin/api/conversations/${id}/rename`, post(body));
+
+  const renamed = await rename("c1", { title: '  "trip to Lisbon."  ' });
+  expect(renamed.status).toBe(200);
+  expect(await renamed.json()).toMatchObject({ conversationId: "c1", key: "telegram:1", title: "Trip to Lisbon" });
+  expect(await titleOf(s, "c1")).toBe("Trip to Lisbon");
+  const page = (await (await s.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: { conversationId: string; title?: string }[] };
+  expect(page.items.find((each) => each.conversationId === "c1")?.title).toBe("Trip to Lisbon");
+  expect(s.logged.find((each) => each.message.includes("renamed"))?.fields).toEqual({ operator: "ops", conversation: "telegram:1" });
+  expect(JSON.stringify(s.logged)).not.toContain("Lisbon");
+
+  // Archived, then left behind by a reset: still renamed (the list's rows, not an action on the key).
+  expect((await s.fetch("/admin/api/conversations/c1/archive", post())).status).toBe(200);
+  expect((await s.fetch("/admin/api/conversations/c1/reset", post())).status).toBe(200);
+  expect(await (await rename("c1", { title: "Old trip" })).json()).toMatchObject({ current: false, title: "Old trip" });
+
+  // Cut as any title is (`TITLE_MAX`).
+  const long = "word ".repeat(40);
+  expect(((await (await rename("c1", { title: long })).json()) as { title: string }).title.length).toBeLessThanOrEqual(60);
+
+  for (const body of [{ title: "  " }, { title: '""' }, {}, { title: 5 }, { title: "x", more: 1 }, { title: "x".repeat(4_001) }]) {
+    const refused = await rename("c1", body);
+    expect({ body, status: refused.status }).toEqual({ body, status: 400 });
+  }
+  expect(await (await rename("c9", { title: "x" })).json()).toMatchObject({ error: "not_found" });
+  expect((await rename("c9", { title: "x" })).status).toBe(404);
+  expect((await s.fetch("/admin/api/conversations/c1/rename", { method: "POST", body: JSON.stringify({ title: "x" }) })).status).toBe(401);
+  expect(await titleOf(s, "c1")).not.toBe("X");
+});
+
 test("at start, the conversations with no title yet are titled from their first message, the most recently active first", async () => {
   const runtime = new Runtime();
   runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", lastActivity: 1 });

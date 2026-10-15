@@ -17,6 +17,7 @@
  * | `admin-api.reset` | `{ conversationId }` | `ApiResetResponse` |
  * | `admin-api.commands` | — | `ApiCommands`: this App's slash commands |
  * | `admin-api.command` | `{ conversationId, name, args }` | `ApiCommandResponse`: the command run in the conversation |
+ * | `admin-api.rename` | `{ conversationId, title }` | `ApiConversation`, titled with `title` cleaned (`cleanTitle`) |
  * | `admin-api.list` | `{ limit, cursor?, archived? }` | `IndexPage` (the index object's) |
  * | `admin-api.hide` | `{ key, conversationId, how? }` (`archived`, `deleted`; absent: back in the list) | `{}` (the index object's; `not_found` when it has no such conversation) |
  *
@@ -52,6 +53,7 @@ export const CALL = {
   reset: "admin-api.reset",
   commands: "admin-api.commands",
   command: "admin-api.command",
+  rename: "admin-api.rename",
   list: "admin-api.list",
   hide: "admin-api.hide",
 } as const;
@@ -152,6 +154,8 @@ export function answerCalls(inbox: ActorInbox, backendOf: (key: string) => Admin
     const { text: note } = await backendOf(key).command(id(message), text(message, "name"), args ?? "", ctx);
     return note === undefined ? {} : { text: note };
   });
+
+  inbox.answer(CALL.rename, async (key, message, ctx) => json(await backendOf(key).rename(id(message), text(message, "title"), ctx)));
 
   inbox.answerStream(LIVE, async (key, message, ctx) => (await backendOf(key).live(id(message), ctx)) as AsyncIterable<JsonValue>);
 

@@ -8,7 +8,8 @@
  */
 
 import { Archive, EditPencil, LogOut, Settings, SoundHigh, SoundOff, Trash, Undo } from "iconoir-react";
-import { useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/bui/Button";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem } from "@/components/bui/SidebarNav";
 import { Switch } from "@/components/bui/Switch";
@@ -29,8 +30,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setTarget } from "@/lib/activity";
+import { TITLE_MAX } from "@/lib/admin-api";
 import { api, type ApiAgents, type ApiApp, type ApiCommands, type ApiConversation, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
-import { ChatsProvider, useChats } from "@/lib/chats";
+import { ChatsProvider, NEW_CHAT, useChats } from "@/lib/chats";
 import { BASE, match, navigate, pagePath, usePath } from "@/lib/router";
 import { appName, ShellContext, usePageTitle } from "@/lib/shell";
 import { setSounds, useSounds } from "@/lib/sounds";
@@ -196,6 +198,8 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
 
   /** The conversation the operator asked to delete: confirmed first. */
   const [deleting, setDeleting] = useState<{ id: string; title: string }>();
+  /** The conversation the operator is renaming, with the title the field starts with. */
+  const [renaming, setRenaming] = useState<{ id: string; title: string }>();
   const [hideError, setHideError] = useState<Error>();
   const put = (id: string, action: "archive" | "unarchive" | "delete") => {
     setHideError(undefined);
@@ -215,6 +219,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       active: path === pagePath(CHAT, id),
       href: `${BASE}${pagePath(CHAT, id)}`,
       actions: [
+        { key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenaming({ id, title: title === NEW_CHAT ? "" : title }) },
         archived
           ? { key: "unarchive", label: "Restore", icon: <Undo />, onSelect: () => put(id, "unarchive") }
           : { key: "archive", label: "Archive", icon: <Archive />, onSelect: () => put(id, "archive") },
@@ -325,6 +330,8 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           </AlertDialogContent>
         </AlertDialog>
 
+        <RenameDialog chat={renaming} onClose={() => setRenaming(undefined)} rename={chats.rename} />
+
         <div className="flex min-w-0 flex-1 gap-2.5">
           <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-window border border-line bg-page">
             {hideError !== undefined && (
@@ -339,6 +346,65 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
         </div>
       </main>
     </ShellContext.Provider>
+  );
+}
+
+/** A chat's new title, the operator's: the field starts with its title, Enter saves (the API cleans it, as `/name` does). */
+function RenameDialog({ chat, onClose, rename }: { chat: { id: string; title: string } | undefined; onClose: () => void; rename: (id: string, title: string) => Promise<void> }) {
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState<Error>();
+  useEffect(() => {
+    if (chat === undefined) return;
+    setValue(chat.title);
+    setSaving(false);
+    setFailed(undefined);
+  }, [chat]);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (chat === undefined || value.trim() === "") return;
+    setSaving(true);
+    setFailed(undefined);
+    try {
+      await rename(chat.id, value.trim());
+      onClose();
+    } catch (thrown) {
+      setFailed(thrown instanceof Error ? thrown : new Error(String(thrown)));
+      setSaving(false);
+    }
+  };
+  return (
+    <AlertDialog open={chat !== undefined} onOpenChange={(open) => !open && onClose()}>
+      <AlertDialogContent className="data-[size=default]:sm:max-w-[420px]">
+        <form onSubmit={(event) => void submit(event)} className="contents">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rename this chat</AlertDialogTitle>
+            <AlertDialogDescription>The title the sidebar and its tab show.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <input
+            type="text"
+            required
+            autoFocus
+            maxLength={TITLE_MAX}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onFocus={(event) => event.currentTarget.select()}
+            placeholder="A title"
+            aria-label="The chat's title"
+            className="h-9 w-full rounded-lg bg-field px-3 text-[13px] text-ink shadow-[var(--shadow-hairline)] outline-none placeholder:text-ink-3 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
+          />
+          {failed !== undefined && <ErrorNote error={failed} title="Not renamed" />}
+          <AlertDialogFooter>
+            <Button size="sm" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" variant="primary" disabled={saving || value.trim() === ""}>
+              {saving ? "Saving" : "Save"}
+            </Button>
+          </AlertDialogFooter>
+        </form>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
