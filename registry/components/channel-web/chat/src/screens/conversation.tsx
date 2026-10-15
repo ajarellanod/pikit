@@ -1,6 +1,6 @@
 /**
  * One conversation, live, in the dashboard's shared view (`components/pikit/conversation.tsx`,
- * features/chat-parity.md) over the chat API (`lib/source.ts`): its transcript and live events as the
+ * features/completed/chat-parity.md) over the chat API (`lib/source.ts`): its transcript and live events as the
  * operator lets users see them (`ChatConfig.visibility`: the thinking, the tools, cut by the server),
  * the answer as it is written, a stop while a run goes, and the composer (text and images; no "/"
  * menu, no web search). A message sent shows at once, marked while it waits for the run going.

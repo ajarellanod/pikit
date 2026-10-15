@@ -9,7 +9,7 @@
  * - `SHARED_UI_FILES`: the lib-ui files, Beautiful UI's primitives (`src/components/bui/`, its
  *   `ActionsMenu` too) and the pieces that take everything by props and never fetch (`message`,
  *   `error-note`, `markdown`, `markdown-engine`, a settings dialog's frame and rows: `settings-shell`,
- *   `settings-rows`; and a conversation's view over a source each app implements, features/chat-parity.md:
+ *   `settings-rows`; and a conversation's view over a source each app implements, features/completed/chat-parity.md:
  *   `conversation`, `context-panel`, `tab-bar`), as paths from the dashboard's root.
  *
  * `sharedUiViolations` keeps them so: a shared file reaches (by `@/` or a relative path) only other

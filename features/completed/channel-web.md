@@ -172,7 +172,7 @@ settings-store do.
   together; one too many is `429 rate_limited` with `retry-after`, before its body is read. Counted in
   memory where every message of a user passes: on a server the App; on Cloudflare the accounts actor,
   which the Worker asks before each message (`channel-web.rate`). A restart forgets it.
-- **Since [chat parity](../chat-parity.md)** the store is a transcript (`channel_web_entries`: the
+- **Since [chat parity](chat-parity.md)** the store is a transcript (`channel_web_entries`: the
   user's messages, and what each run that answered them wrote, stored when it ends), the page reads
   `GET .../transcript` and the live view gives the dashboard's event shapes, both cut by the operator's
   `visibility`; delivery writes an answer only for a run whose end was never heard. The bullets on
@@ -226,7 +226,7 @@ cannot send it without CORS, which nothing allows).
 
 | Route | Answer |
 |---|---|
-| `GET /chat/api/config` | `ChatConfig`: the assistant's name, sign-in methods (password, magic link, providers with display names), whether one may sign up, `visibility` (`{ thinking, tools: "none" \| "names" \| "full", context }`), `agents` (`{ name, description? }[]`, the ones users may pick) (features/chat-parity.md) |
+| `GET /chat/api/config` | `ChatConfig`: the assistant's name, sign-in methods (password, magic link, providers with display names), whether one may sign up, `visibility` (`{ thinking, tools: "none" \| "names" \| "full", context }`), `agents` (`{ name, description? }[]`, the ones users may pick) (chat-parity.md) |
 | `/chat/api/auth/*` | better-auth (sign in, sign up, sign out, OAuth callbacks, verification, reset, link, account linking, sessions) |
 | `GET /chat/api/me` | `ChatMe`: the user (id, name, email, image) and their linked methods |
 | `GET /chat/api/conversations?limit&cursor&archived&q` | `ChatPage<ChatConversation>`, newest activity first: not archived, or with `archived=1` the archived ones; with `q`, those whose title holds it (any case) |

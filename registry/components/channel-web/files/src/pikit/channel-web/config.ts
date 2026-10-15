@@ -80,7 +80,7 @@ export const Config = Type.Object({
     { default: {} },
   ),
   /**
-   * What users see of a conversation (features/chat-parity.md): the model's thinking, the tools (`none`,
+   * What users see of a conversation (features/completed/chat-parity.md): the model's thinking, the tools (`none`,
    * `names`: a tool's name only, `full`), the Context panel. A live setting too, read at each request.
    */
   visibility: Type.Object(

@@ -3,7 +3,7 @@
 **Public appeal:** ⭐ The users' chat page (`channel-web`, `/chat/`) looks and behaves as the
 operator's dashboard does: the thinking, the tools, the context, tabs, an assistant to pick, search.
 
-**Specified:** yes (this note is the build guide). Builds on [channel-web](completed/channel-web.md).
+**Status:** built, on both targets. This note was its build guide; "As built" records where it differs. Builds on [channel-web](channel-web.md).
 
 ## Why
 The chat page was written apart from the dashboard: it shares only low-level pieces (bui, markdown,

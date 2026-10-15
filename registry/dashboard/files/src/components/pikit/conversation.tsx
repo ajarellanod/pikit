@@ -1,5 +1,5 @@
 /**
- * One conversation, live, whatever serves it (features/chat-parity.md): its transcript, the answer
+ * One conversation, live, whatever serves it (features/completed/chat-parity.md): its transcript, the answer
  * being written, the thinking and the tools running, the messages sent and not shown yet, a composer
  * floating over the thread, and the Context panel. The data is the app's: a `ConversationSource` reads
  * the transcript (entries newest first, paged), follows the live events (a `snapshot` first) and sends

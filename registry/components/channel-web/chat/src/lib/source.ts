@@ -1,6 +1,6 @@
 /**
  * A conversation as the chat API serves it (`/chat/api/conversations/:id/…`, `chat-api.ts`), for the
- * shared view (`components/pikit/conversation.tsx`, features/chat-parity.md): its transcript (entries
+ * shared view (`components/pikit/conversation.tsx`, features/completed/chat-parity.md): its transcript (entries
  * newest first, paged), its live events (a `snapshot` first, read with `fetch`: `client.ts`'s `follow`),
  * a message (text and images, checked before it goes: `images.ts`) and a stop.
  *

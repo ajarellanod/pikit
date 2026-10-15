@@ -12,7 +12,7 @@
  * conversation key is `web:<user id>:<chat id>`, built from the session's user. A chat id of another
  * user's is `404`, as one that never existed.
  *
- * A conversation reads as the dashboard's does (features/chat-parity.md): a transcript of entries
+ * A conversation reads as the dashboard's does (features/completed/chat-parity.md): a transcript of entries
  * (`ChatTranscriptEntry`, admin-api's `ApiTranscriptEntry`: pi-ai messages) and live events (`ChatEvent`,
  * admin-api's `ApiEvent`), both cut to what the operator lets users see (`ChatConfig.visibility`).
  *

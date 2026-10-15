@@ -157,7 +157,7 @@ component's view in it.
 The shared pieces (`bui`, `message`, `error-note`, `markdown`, `markdown-engine`, `conversation`,
 `context-panel`, `tab-bar`, with `lib-ui`) take everything by props and never fetch, so a UI project
 other than the dashboard (channel-web's chat page) carries them without the admin client. A
-conversation's view (`ConversationView`, features/chat-parity.md) reads through a
+conversation's view (`ConversationView`, features/completed/chat-parity.md) reads through a
 `ConversationSource` each app implements (the dashboard's: `views/conversations/source.ts`, over
 `/admin/api/conversations/:id/...`): its transcript's entries, its live events (`lib/transcript.ts`
 folds them), a message and a stop; the app fills its slots (the header's actions, the side panel, its
