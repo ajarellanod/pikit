@@ -17,11 +17,12 @@
  * | `GET /chat/api/config` | `ChatConfig` (no session needed) |
  * | `/chat/api/auth/*` | better-auth's own routes (sign in, sign up, OAuth callbacks, links, sessions) |
  * | `GET /chat/api/me` | `ChatMe` |
- * | `GET /chat/api/conversations?limit&cursor` | `ChatPage<ChatConversation>`, newest activity first |
+ * | `GET /chat/api/conversations?limit&cursor&archived` | `ChatPage<ChatConversation>`, newest activity first: those not archived, or with `archived=1` the archived ones |
  * | `POST /chat/api/conversations` | `ChatSendRequest` → `201 ChatStartResponse` (`429` past `ChatConfig`'s rate) |
  * | `GET /chat/api/conversations/:id` | `ChatConversation` |
  * | `PATCH /chat/api/conversations/:id` | `ChatRenameRequest` → `200 ChatConversation` |
- * | `DELETE /chat/api/conversations/:id` | `204`: out of the list (nothing of the runtime's is deleted) |
+ * | `POST /chat/api/conversations/:id/archive`, `…/unarchive` | `200 ChatConversation`: listed apart, or back in the list (new activity lists an archived one again) |
+ * | `DELETE /chat/api/conversations/:id` | `204`: out of the list, gone for the user (nothing of the runtime's is deleted) |
  * | `GET /chat/api/conversations/:id/messages?limit&cursor` | `ChatPage<ChatMessage>`, newest first, at most `PAGE_TEXT_MAX` characters of text (then fewer than `limit`, and `next`) |
  * | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | the bytes of a message's image `n` (`ChatImageRef.url`), its type, cached privately |
  * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` |
@@ -104,6 +105,8 @@ export interface ChatConversation {
   title: string;
   /** Whether a run is going now. */
   busy: boolean;
+  /** Whether the user archived it: listed apart (`?archived=1`) until new activity lists it again. */
+  archived: boolean;
   /** Epoch ms of its newest message. */
   lastActivity: number;
   /** Epoch ms it was made. */

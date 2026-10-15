@@ -41,14 +41,19 @@ export type ChatRef = { userId: string; chatId: string; key: string };
 /** A user's message, checked by the route. JSON. */
 export type NewMessage = { text: string; images?: ChatImage[]; requestId: string };
 
+/** A page of the user's list: those not archived, or with `archived` the archived ones. */
+export type ListPage = { limit: number; cursor?: string; archived?: boolean };
+
 export interface ChatBackend {
   /** The user's conversations, newest activity first. Throws `invalid_cursor`. */
-  list(userId: string, page: { limit: number; cursor?: string }, ctx: AppContext): Promise<ChatPage<ChatConversation>>;
+  list(userId: string, page: ListPage, ctx: AppContext): Promise<ChatPage<ChatConversation>>;
   /** A new conversation, with its first message. Throws the admission's refusals (`denied`, `rejected`, `no_route`), `invalid_request`, `too_large`. */
   start(ref: ChatRef, message: NewMessage, ctx: AppContext): Promise<ChatSendResponse>;
   /** Throws `not_found`. */
   conversation(ref: ChatRef, ctx: AppContext): Promise<ChatConversation>;
   rename(ref: ChatRef, title: string, ctx: AppContext): Promise<ChatConversation>;
+  /** Archives it (`true`: listed apart) or puts it back in the list (`false`). Throws `not_found`. */
+  archive(ref: ChatRef, archived: boolean, ctx: AppContext): Promise<ChatConversation>;
   /** Out of the user's list, and gone for them: nothing of the runtime's is deleted. */
   hide(ref: ChatRef, ctx: AppContext): Promise<void>;
   /** Newest first, a user's images as their URLs. Throws `not_found`, `invalid_cursor`. */
@@ -93,6 +98,7 @@ export const conversationOf = (row: ConversationRow, busy = row.busy): ChatConve
   id: row.chatId,
   title: row.title,
   busy,
+  archived: row.archived,
   lastActivity: row.lastActivity,
   createdAt: row.createdAt,
 });
@@ -221,6 +227,13 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     async rename(ref, title, ctx) {
       await owned(ref);
       const row = (await store.change(ref.key, { title })) as ConversationRow;
+      await contracts.changed(row, ctx);
+      return conversationOf(row, await busyOf(row, ctx));
+    },
+
+    async archive(ref, archived, ctx) {
+      await owned(ref);
+      const row = (await store.change(ref.key, { archived })) as ConversationRow;
       await contracts.changed(row, ctx);
       return conversationOf(row, await busyOf(row, ctx));
     },

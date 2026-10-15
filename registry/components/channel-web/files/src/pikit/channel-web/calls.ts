@@ -13,6 +13,7 @@
  * | `channel-web.send` | the same | `ChatSendResponse` |
  * | `channel-web.conversation` | `{ userId, chatId }` | `ChatConversation` |
  * | `channel-web.rename` | `{ userId, chatId, title }` | `ChatConversation` |
+ * | `channel-web.archive` | `{ userId, chatId, archived }` | `ChatConversation`: archived (`true`) or back in the list (`false`) |
  * | `channel-web.hide` | `{ userId, chatId }` | `{}` |
  * | `channel-web.messages` | `{ userId, chatId, limit, cursor? }` | `ChatPage<ChatMessage>`: images by URL, at most `PAGE_TEXT_MAX` of text (`store.ts`) |
  * | `channel-web.image` | `{ userId, chatId, messageId, index }` | `ChatImage`: one image's bytes (base64), at most 5 MB |
@@ -25,7 +26,7 @@
  *
  * | Type | Message | Answer |
  * |---|---|---|
- * | `channel-web.list` | `{ userId, limit, cursor? }` | `ChatPage<ChatConversation>` |
+ * | `channel-web.list` | `{ userId, limit, cursor?, archived? }` | `ChatPage<ChatConversation>`: not archived, or with `archived: true` the archived ones |
  * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations leave the index |
  * | `channel-web.config` | `{}` | `ChatConfig`: the page's config as the accounts' App makes it (its methods, its live sign-up mode, whether it sends email) |
  * | `channel-web.rate` | `{ userId }` | `{ retryAfter? }`: one message of the user's counted (`messagesPerMinute`); `retryAfter` (seconds) when it is one too many |
@@ -53,6 +54,7 @@ export const CALL = {
   send: "channel-web.send",
   conversation: "channel-web.conversation",
   rename: "channel-web.rename",
+  archive: "channel-web.archive",
   hide: "channel-web.hide",
   messages: "channel-web.messages",
   abort: "channel-web.abort",
@@ -110,7 +112,7 @@ function messageOf(message: JsonValue): NewMessage {
   return { text: written, requestId, ...(list.length > 0 && { images: list }) };
 }
 
-const ROW_FIELDS = { key: "string", userId: "string", chatId: "string", title: "string", createdAt: "number", lastActivity: "number", hidden: "boolean", busy: "boolean", version: "number" } as const;
+const ROW_FIELDS = { key: "string", userId: "string", chatId: "string", title: "string", createdAt: "number", lastActivity: "number", hidden: "boolean", archived: "boolean", busy: "boolean", version: "number" } as const;
 
 function rowsOf(message: JsonValue): ConversationRow[] {
   const rows = fieldsOf(message).rows;
@@ -132,6 +134,11 @@ export function answerConversationCalls(inbox: ActorInbox, backend: ChatBackend)
   inbox.answer(CALL.send, async (key, message, ctx) => json(await backend.send(refOf(key, message), messageOf(message), ctx)));
   inbox.answer(CALL.conversation, async (key, message, ctx) => json(await backend.conversation(refOf(key, message), ctx)));
   inbox.answer(CALL.rename, async (key, message, ctx) => json(await backend.rename(refOf(key, message), text(fieldsOf(message), "title"), ctx)));
+  inbox.answer(CALL.archive, async (key, message, ctx) => {
+    const { archived } = fieldsOf(message);
+    if (typeof archived !== "boolean") throw refusal("invalid_request", 'channel-web: "archived" is a boolean');
+    return json(await backend.archive(refOf(key, message), archived, ctx));
+  });
   inbox.answer(CALL.hide, async (key, message, ctx) => {
     await backend.hide(refOf(key, message), ctx);
     return {};
@@ -187,7 +194,9 @@ export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (c
   inbox.answer(CALL.config, async (_key, _message, ctx) => json(await config(ctx)));
   inbox.handle(SEEN, async (_key, message) => store.seen(rowsOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {
-    const listed = await store.list(text(fieldsOf(message), "userId"), pageOf(message));
+    const { archived } = fieldsOf(message);
+    if (archived !== undefined && typeof archived !== "boolean") throw refusal("invalid_request", 'channel-web: "archived" is a boolean');
+    const listed = await store.list(text(fieldsOf(message), "userId"), { ...pageOf(message), archived: archived === true });
     return json({ items: listed.items.map((row) => conversationOf(row)), ...(listed.next !== undefined && { next: listed.next }) });
   });
   inbox.answer(CALL.forget, async (_key, message) => {

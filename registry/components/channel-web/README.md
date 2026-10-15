@@ -178,6 +178,10 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   delivered after a restart or an eviction. A user's message is `pending`, then `answered`, `failed`
   or `aborted` when its run ends (from `agent.settled` / `agent.failed`, and from `agent.submissions`
   when the page reads a message whose run's end no event brought).
+- **Archiving** a conversation lists it apart (`GET /chat/api/conversations?archived=1`; `POST
+  .../archive`, `.../unarchive`, the owner only): still theirs, read and written to, and a new message
+  or answer in it lists it again, as the dashboard's archive does. On Cloudflare the conversation's
+  object keeps the flag and tells the index (`channel-web.seen`).
 - **Deleting** a conversation takes it out of the user's list (and every route `404`s it): nothing of
   the runtime's is deleted. Removing a user takes their sessions and accounts, and their
   conversations out of the users' list; the runtime keeps them.

@@ -22,11 +22,12 @@ export function createRemoteBackend(mailbox: () => ActorMailbox): ChatBackend {
   const sendable = (ref: ChatRef, message: NewMessage): JsonValue => ({ ...named(ref), ...message }) as unknown as JsonValue;
 
   return {
-    list: (userId, page, ctx) => call<ChatPage<ChatConversation>>(ACCOUNTS_KEY, CALL.list, { userId, ...page }, ctx),
+    list: (userId, { archived, ...page }, ctx) => call<ChatPage<ChatConversation>>(ACCOUNTS_KEY, CALL.list, { userId, ...page, ...(archived === true && { archived }) }, ctx),
     start: (ref, message, ctx) => call<ChatSendResponse>(ref.key, CALL.start, sendable(ref, message), ctx),
     send: (ref, message, ctx) => call<ChatSendResponse>(ref.key, CALL.send, sendable(ref, message), ctx),
     conversation: (ref, ctx) => call<ChatConversation>(ref.key, CALL.conversation, named(ref), ctx),
     rename: (ref, title, ctx) => call<ChatConversation>(ref.key, CALL.rename, { ...named(ref), title }, ctx),
+    archive: (ref, archived, ctx) => call<ChatConversation>(ref.key, CALL.archive, { ...named(ref), archived }, ctx),
     async hide(ref, ctx) {
       await call<JsonValue>(ref.key, CALL.hide, named(ref), ctx);
     },

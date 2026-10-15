@@ -3,8 +3,8 @@
  * their conversations. It is the channel's platform: answers are delivered into it.
  *
  * - **`channel_web_conversations`**: one row per conversation (its key, user, chat id, title, when it
- *   was made, its newest activity, whether the user deleted it from the list, whether a run goes, and a
- *   version). On a server it is the App's own table, and the list reads it. On Cloudflare each
+ *   was made, its newest activity, whether the user deleted it from the list, whether they archived it
+ *   (listed apart until new activity comes), whether a run goes, and a version). On a server it is the App's own table, and the list reads it. On Cloudflare each
  *   conversation's object holds its own row, the truth, and tells the users' index (the same table in
  *   the accounts actor, `channel-web:accounts`) each new version (`seen`): an upsert that a late or
  *   repeated version changes nothing with.
@@ -37,6 +37,8 @@ export type ConversationRow = {
   lastActivity: number;
   /** The user deleted it from their list: it is gone for them (every route `404`), kept in the runtime. */
   hidden: boolean;
+  /** The user archived it: listed apart (`list`'s `archived`), still theirs; newer activity lists it again. */
+  archived: boolean;
   /** Whether a run goes, as last told (a single conversation's read asks the runtime). */
   busy: boolean;
   /** Bumped by every change: the index keeps the newest. */
@@ -63,14 +65,17 @@ export type Paged<T> = { items: T[]; next?: string };
 export interface ChatStore {
   conversation(key: string): Promise<ConversationRow | undefined>;
   /** Makes the conversation's row unless it has one; the row stored. */
-  create(row: Omit<ConversationRow, "version" | "hidden">): Promise<ConversationRow>;
-  /** Changes the row (a newer activity only moves it forward) and bumps its version; `undefined` when there is none. */
-  change(key: string, change: { title?: string; hidden?: boolean; busy?: boolean; activity?: number }): Promise<ConversationRow | undefined>;
+  create(row: Omit<ConversationRow, "version" | "hidden" | "archived">): Promise<ConversationRow>;
+  /**
+   * Changes the row (a newer activity only moves it forward, and takes it out of the archived ones unless
+   * `archived` is given) and bumps its version; `undefined` when there is none.
+   */
+  change(key: string, change: { title?: string; hidden?: boolean; archived?: boolean; busy?: boolean; activity?: number }): Promise<ConversationRow | undefined>;
 
   /** The index's: keeps each row unless it holds a newer version of it. */
   seen(rows: readonly ConversationRow[]): Promise<void>;
-  /** The index's: `userId`'s conversations not deleted, newest activity first. Throws `invalid_cursor`. */
-  list(userId: string, page: { limit: number; cursor?: string }): Promise<Paged<ConversationRow>>;
+  /** The index's: `userId`'s conversations not deleted, newest activity first: not archived, or with `archived` the archived ones. Throws `invalid_cursor`. */
+  list(userId: string, page: { limit: number; cursor?: string; archived?: boolean }): Promise<Paged<ConversationRow>>;
   /** The index's: `userId`'s conversations leave it (the user was removed). */
   forget(userId: string): Promise<void>;
 
@@ -121,6 +126,7 @@ type ConversationSqlRow = {
   created_at: number;
   last_activity: number;
   hidden: number;
+  archived: number;
   busy: number;
   version: number;
 };
@@ -134,6 +140,7 @@ const rowOf = (row: ConversationSqlRow): ConversationRow => ({
   createdAt: Number(row.created_at),
   lastActivity: Number(row.last_activity),
   hidden: Number(row.hidden) === 1,
+  archived: Number(row.archived) === 1,
   busy: Number(row.busy) === 1,
   version: Number(row.version),
 });
@@ -148,7 +155,7 @@ const messageOf = (row: MessageSqlRow): StoredMessage => ({
   ...(row.conversation !== null && { conversation: row.conversation }),
 });
 
-const COLUMNS = "key, user_id, chat_id, title, created_at, last_activity, hidden, busy, version";
+const COLUMNS = "key, user_id, chat_id, title, created_at, last_activity, hidden, archived, busy, version";
 
 /** The store over `sql()` (`storage.sql`); its tables are made at the first use. */
 export function createChatStore(sql: () => SqlDatabase): ChatStore {
@@ -158,7 +165,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
     ready ??= (async () => {
       await database.run(
         `CREATE TABLE IF NOT EXISTS ${CONVERSATIONS} (key TEXT PRIMARY KEY, user_id TEXT NOT NULL, chat_id TEXT NOT NULL, title TEXT NOT NULL, ` +
-          "created_at BIGINT NOT NULL, last_activity BIGINT NOT NULL, hidden INTEGER NOT NULL, busy INTEGER NOT NULL, version BIGINT NOT NULL)",
+          "created_at BIGINT NOT NULL, last_activity BIGINT NOT NULL, hidden INTEGER NOT NULL, archived INTEGER NOT NULL, busy INTEGER NOT NULL, version BIGINT NOT NULL)",
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${CONVERSATIONS}_user ON ${CONVERSATIONS} (user_id, last_activity, chat_id)`);
       await database.run(
@@ -187,7 +194,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
 
     async create(row) {
       await (await db()).run(
-        `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 1) ON CONFLICT (key) DO NOTHING`,
+        `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 1) ON CONFLICT (key) DO NOTHING`,
         [row.key, row.userId, row.chatId, row.title, Math.floor(row.createdAt), Math.floor(row.lastActivity), row.busy ? 1 : 0],
       );
       return (await conversation(row.key)) as ConversationRow;
@@ -198,11 +205,15 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       const changed = await database.transaction(async (tx) => {
         const { changes } = await tx.run(
           `UPDATE ${CONVERSATIONS} SET title = COALESCE(?, title), hidden = COALESCE(?, hidden), busy = COALESCE(?, busy), ` +
+            // Every right-hand side reads the row as it was: newer activity unarchives it.
+            "archived = COALESCE(?, CASE WHEN ? > last_activity THEN 0 ELSE archived END), " +
             "last_activity = CASE WHEN ? > last_activity THEN ? ELSE last_activity END, version = version + 1 WHERE key = ?",
           [
             change.title ?? null,
             change.hidden === undefined ? null : change.hidden ? 1 : 0,
             change.busy === undefined ? null : change.busy ? 1 : 0,
+            change.archived === undefined ? null : change.archived ? 1 : 0,
+            Math.floor(change.activity ?? 0),
             Math.floor(change.activity ?? 0),
             Math.floor(change.activity ?? 0),
             key,
@@ -221,22 +232,22 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       await database.transaction(async (tx) => {
         for (const row of rows) {
           await tx.run(
-            `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET ` +
-              "title = excluded.title, last_activity = excluded.last_activity, hidden = excluded.hidden, busy = excluded.busy, version = excluded.version " +
+            `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET ` +
+              "title = excluded.title, last_activity = excluded.last_activity, hidden = excluded.hidden, archived = excluded.archived, busy = excluded.busy, version = excluded.version " +
               `WHERE excluded.version > ${CONVERSATIONS}.version`,
-            [row.key, row.userId, row.chatId, row.title, Math.floor(row.createdAt), Math.floor(row.lastActivity), row.hidden ? 1 : 0, row.busy ? 1 : 0, Math.floor(row.version)],
+            [row.key, row.userId, row.chatId, row.title, Math.floor(row.createdAt), Math.floor(row.lastActivity), row.hidden ? 1 : 0, row.archived ? 1 : 0, row.busy ? 1 : 0, Math.floor(row.version)],
           );
         }
       });
     },
 
-    async list(userId, { limit, cursor }) {
+    async list(userId, { limit, cursor, archived = false }) {
       const after = cursor === undefined ? undefined : parseCursor(cursor);
       const rows = await (await db()).query<ConversationSqlRow>(
-        `SELECT ${COLUMNS} FROM ${CONVERSATIONS} WHERE user_id = ? AND hidden = 0` +
+        `SELECT ${COLUMNS} FROM ${CONVERSATIONS} WHERE user_id = ? AND hidden = 0 AND archived = ?` +
           (after === undefined ? "" : " AND (last_activity < ? OR (last_activity = ? AND chat_id > ?))") +
           " ORDER BY last_activity DESC, chat_id ASC LIMIT ?",
-        after === undefined ? [userId, limit + 1] : [userId, after.at, after.at, after.id, limit + 1],
+        after === undefined ? [userId, archived ? 1 : 0, limit + 1] : [userId, archived ? 1 : 0, after.at, after.at, after.id, limit + 1],
       );
       const items = rows.slice(0, limit).map(rowOf);
       const last = items.at(-1);

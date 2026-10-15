@@ -125,6 +125,8 @@ test("every route but config and auth needs a session (401); every change also n
     ["POST", "/conversations"],
     ["GET", `/conversations/${id}`],
     ["PATCH", `/conversations/${id}`],
+    ["POST", `/conversations/${id}/archive`],
+    ["POST", `/conversations/${id}/unarchive`],
     ["DELETE", `/conversations/${id}`],
     ["GET", `/conversations/${id}/messages`],
     ["POST", `/conversations/${id}/messages`],
@@ -232,6 +234,47 @@ test("the list: newest activity first, paged with a cursor; a forged cursor is 4
   expect(c.runtime.conversations.size).toBe(3);
 });
 
+test("archive: listed apart (?archived=1), still read and written to; unarchive puts it back; new activity lists it again; a delete takes it from both lists", async () => {
+  const c = await chat();
+  const ids: string[] = [];
+  for (const text of ["one", "two", "three"]) {
+    ids.push((await start(c, "ana", text)).id);
+    await Bun.sleep(3);
+  }
+  const [one, two, three] = ids as [string, string, string];
+  const list = async (query = "") => ((await (await c.served.fetch(`${API}/conversations${query}`, as("ana"))).json()) as { items: ChatConversation[] }).items.map((each) => each.title);
+
+  const archived = await c.served.fetch(`${API}/conversations/${two}/archive`, as("ana", { method: "POST" }));
+  expect({ status: archived.status, body: await archived.json() }).toMatchObject({ status: 200, body: { id: two, title: "two", archived: true } });
+  expect(await list()).toEqual(["three", "one"]);
+  expect(await list("?archived=1")).toEqual(["two"]);
+  expect(await list("?archived=0")).toEqual(["three", "one"]);
+  expect((await c.served.fetch(`${API}/conversations?archived=yes`, as("ana"))).status).toBe(400);
+  // Still the user's: read, and archiving twice is the same.
+  expect(await (await c.served.fetch(`${API}/conversations/${two}`, as("ana"))).json()).toMatchObject({ id: two, archived: true });
+  expect((await messagesOf(c, "ana", two)).length).toBe(1);
+  expect((await c.served.fetch(`${API}/conversations/${two}/archive`, as("ana", { method: "POST" }))).status).toBe(200);
+
+  const back = await c.served.fetch(`${API}/conversations/${two}/unarchive`, as("ana", { method: "POST" }));
+  expect(await back.json()).toMatchObject({ id: two, archived: false });
+  expect(await list()).toEqual(["three", "two", "one"]);
+  expect(await list("?archived=1")).toEqual([]);
+
+  // A message in an archived conversation lists it again, at the top.
+  await c.served.fetch(`${API}/conversations/${one}/archive`, as("ana", { method: "POST" }));
+  expect(await list()).toEqual(["three", "two"]);
+  await Bun.sleep(3);
+  expect((await c.served.fetch(`${API}/conversations/${one}/messages`, post("ana", { text: "again" }))).status).toBe(202);
+  expect(await list()).toEqual(["one", "three", "two"]);
+  expect(await list("?archived=1")).toEqual([]);
+
+  // Deleted while archived: gone from both.
+  await c.served.fetch(`${API}/conversations/${three}/archive`, as("ana", { method: "POST" }));
+  expect((await c.served.fetch(`${API}/conversations/${three}`, as("ana", { method: "DELETE" }))).status).toBe(204);
+  expect(await list("?archived=1")).toEqual([]);
+  expect((await c.served.fetch(`${API}/conversations/${three}/unarchive`, as("ana", { method: "POST" }))).status).toBe(404);
+});
+
 test("ISOLATION: user B naming user A's chat id gets 404 on every route, and A's conversation is untouched", async () => {
   const c = await chat();
   const { id } = await start(c, "ana", "my secret plan");
@@ -239,6 +282,8 @@ test("ISOLATION: user B naming user A's chat id gets 404 on every route, and A's
   const attempts: [string, string, unknown?][] = [
     ["GET", ""],
     ["PATCH", "", { title: "mine now" }],
+    ["POST", "/archive"],
+    ["POST", "/unarchive"],
     ["DELETE", ""],
     ["GET", "/messages"],
     ["POST", "/messages", { text: "hi" }],
@@ -249,6 +294,9 @@ test("ISOLATION: user B naming user A's chat id gets 404 on every route, and A's
     const response = await c.served.fetch(`${API}/conversations/${id}${path}`, as("ben", { method, ...(body !== undefined && { body: JSON.stringify(body) }) }));
     expect({ method, path, status: response.status, body: await response.json() }).toEqual({ method, path, status: 404, body: { error: "not_found", message: "no such conversation" } });
   }
+  // B's lists never show A's, archived or not; A's stays in A's list, not archived.
+  expect(await (await c.served.fetch(`${API}/conversations?archived=1`, as("ben"))).json()).toEqual({ items: [] });
+  expect(await (await c.served.fetch(`${API}/conversations`, as("ana"))).json()).toMatchObject({ items: [{ id, archived: false }] });
   // A path that is not a chat id is 404 too, before anything is read.
   for (const bad of ["..%2F..", encodeURIComponent(`ana:${id}`), id.toUpperCase()]) expect((await c.served.fetch(`${API}/conversations/${bad}`, as("ana"))).status).toBe(404);
   expect(c.runtime.dispatched.length).toBe(dispatched);

@@ -261,6 +261,8 @@ it("a user signs up and in, talks to the agent and follows it live; another user
     [`${theirs}/messages`, { json: { text: "let me in" } }],
     [`${theirs}/events`, {}],
     [`${theirs}/abort`, { method: "POST" }],
+    [`${theirs}/archive`, { method: "POST" }],
+    [`${theirs}/unarchive`, { method: "POST" }],
     [theirs, { method: "DELETE" }],
   ];
   for (const [path, init] of tries) {
@@ -291,9 +293,17 @@ it("a user signs up and in, talks to the agent and follows it live; another user
     },
     { timeout: 15_000, interval: 100 },
   );
+  // Archived (by her conversation's object, which tells the accounts actor's index): listed apart.
+  const archived = await ana.send(`/chat/api/conversations/${chat}/archive`, { method: "POST" });
+  expect(await archived.json()).toMatchObject({ id: chat, archived: true });
+  expect(((await (await ana.send("/chat/api/conversations")).json()) as ChatPage<unknown>).items).toEqual([]);
+  expect(((await (await ana.send("/chat/api/conversations?archived=1")).json()) as ChatPage<{ id: string }>).items.map((each) => each.id)).toEqual([chat]);
+  expect(((await (await ben.send("/chat/api/conversations?archived=1")).json()) as ChatPage<unknown>).items).toEqual([]);
   // Her next message is answered after it: had the operator's answer been delivered, it would be there first.
+  // And it lists the archived conversation again.
   expect((await ana.send(`/chat/api/conversations/${chat}/messages`, { json: { text: "third" } })).status).toBe(202);
   const lines = await answered(ana, chat, 6);
+  expect(((await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string; archived: boolean }>).items).toMatchObject([{ id: chat, archived: false }]);
   expect(lines.slice(4)).toEqual(["user: third (answered)", "assistant: faux: third"]);
   expect(JSON.stringify(lines)).not.toContain("operator only");
   await view.until((seen) => seen.slice(before).some((e) => e.type === "partial" && e.text === "faux: third"));

@@ -11,7 +11,7 @@
  *   key is `keyOf(user, chat id)`, built in one place (`refOf`): another user's chat id names no
  *   conversation of theirs, and is `404` as one that never existed.
  * - **A change needs the page's header** (`x-pikit-chat: 1`, `CHAT_CLIENT_HEADER`): `400` without, so a
- *   page of another site cannot make a signed-in browser send, rename, delete or stop anything.
+ *   page of another site cannot make a signed-in browser send, rename, archive, delete or stop anything.
  * - **Bodies are bounded**: a message at most what its images in base64 and its text need on this
  *   target (`maxBodyOf`: `413` before more is read); its images checked (`imagesProblem`: number and
  *   types `400`, size `413`).
@@ -351,7 +351,11 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     return json<ChatMe>(200, { user: { id, name, email, ...(image !== undefined && { image }) }, methods: await options.accounts().methods(id, ctx) });
   });
 
-  user(`GET ${API}/conversations`, async (request, ctx, me) => json<ChatPage<ChatConversation>>(200, await backend().list(me.id, pageOf(request), ctx)));
+  user(`GET ${API}/conversations`, async (request, ctx, me) => {
+    const archived = new URL(request.url).searchParams.get("archived");
+    if (archived !== null && archived !== "1" && archived !== "0") throw new Refused(400, "invalid_request", "archived is 1 or 0");
+    return json<ChatPage<ChatConversation>>(200, await backend().list(me.id, { ...pageOf(request), archived: archived === "1" }, ctx));
+  });
 
   /** `429` when `me` sent too many messages this minute; `undefined` when this one may go. */
   const limited = async (me: AccountUser, ctx: AppContext): Promise<Response | undefined> => {
@@ -383,6 +387,18 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     ctx.logger.info("channel-web: a user renamed a conversation", { user: me.id, chat: chatId });
     return json<ChatConversation>(200, renamed);
   });
+
+  for (const [action, archived] of [
+    ["archive", true],
+    ["unarchive", false],
+  ] as const) {
+    user(`POST ${API}/conversations/:id/${action}`, async (request, ctx, me) => {
+      const chatId = chatIdOf(request);
+      const changed = await backend().archive(refOf(me, chatId), archived, ctx);
+      ctx.logger.info(`channel-web: a user ${archived ? "archived a conversation" : "put a conversation back in their list"}`, { user: me.id, chat: chatId });
+      return json<ChatConversation>(200, changed);
+    });
+  }
 
   user(`DELETE ${API}/conversations/:id`, async (request, ctx, me) => {
     const chatId = chatIdOf(request);

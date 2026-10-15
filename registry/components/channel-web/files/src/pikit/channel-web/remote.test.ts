@@ -184,6 +184,20 @@ test("a conversation on the Worker: started by one call to its key's object, lis
   // The index was told the run ended and the answer came: busy no more.
   await eventually(async () => (((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items[0]?.busy === false ? true : undefined), "the index's busy flag");
 
+  // Archived by one call to its object, which tells the index: listed apart; unarchived, back.
+  platform.calls.length = 0;
+  const archived = await w.fetch(`${API}/conversations/${started.id}/archive`, as("ana", { method: "POST" }));
+  expect(await archived.json()).toMatchObject({ id: started.id, archived: true });
+  expect(platform.calls).toEqual([`${key} ${CALL.archive}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+  expect(await (await w.fetch(`${API}/conversations`, as("ana"))).json()).toEqual({ items: [] });
+  expect(((await (await w.fetch(`${API}/conversations?archived=1`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id: started.id, archived: true }]);
+  expect(await (await w.fetch(`${API}/conversations/${started.id}/unarchive`, as("ana", { method: "POST" }))).json()).toMatchObject({ id: started.id, archived: false });
+  expect(((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id: started.id, archived: false }]);
+  // Archived again, a message lists it again.
+  await w.fetch(`${API}/conversations/${started.id}/archive`, as("ana", { method: "POST" }));
+  expect((await w.fetch(`${API}/conversations/${started.id}/messages`, post("ana", { text: "more" }))).status).toBe(202);
+  expect(((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id: started.id, archived: false }]);
+
   expect((await w.fetch(`${API}/conversations/${started.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
   expect(await (await w.fetch(`${API}/conversations`, as("ana"))).json()).toEqual({ items: [] });
   expect((await w.fetch(`${API}/conversations/${started.id}/messages`, as("ana"))).status).toBe(404);
@@ -207,6 +221,8 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
   const attempts: [string, string, unknown?][] = [
     ["GET", ""],
     ["PATCH", "", { title: "mine" }],
+    ["POST", "/archive"],
+    ["POST", "/unarchive"],
     ["DELETE", ""],
     ["GET", "/messages"],
     ["POST", "/messages", { text: "hi" }],
@@ -220,6 +236,7 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
   }
   expect(platform.calls.filter((each) => each !== `${ACCOUNTS_KEY} ${CALL.rate}`).every((each) => each.startsWith(`web:ben:${id} `))).toBe(true);
   expect((await platform.object(`web:ana:${id}`)).runtime.dispatched.length).toBe(1);
+  expect(((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id, archived: false }]);
   // An object answers only of itself: a call naming another conversation is refused.
   const other = await platform.mailbox.call(`web:ben:${id}`, CALL.conversation, { userId: "ana", chatId: id }, w.app.context()).catch((error: unknown) => error);
   expect((other as ActorCallError).code).toBe("invalid_request");
@@ -316,7 +333,7 @@ test("the index keeps each conversation's newest version: a late or repeated one
   const { platform } = await cloud();
   const index = await platform.object(ACCOUNTS_KEY);
   const chatId = crypto.randomUUID();
-  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, title: "new", createdAt: 1, lastActivity: 5, hidden: false, busy: false, version: 3 };
+  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, title: "new", createdAt: 1, lastActivity: 5, hidden: false, archived: false, busy: false, version: 3 };
   await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [row] }, index.ctx);
   await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [{ ...row, title: "old", version: 2 }] }, index.ctx);
   const listed = callResult(await answerCall(index.answers.get(CALL.list) as ActorCallHandler, ACCOUNTS_KEY, { userId: "ana", limit: 10 }, index.ctx)) as unknown as { items: ChatConversation[] };
