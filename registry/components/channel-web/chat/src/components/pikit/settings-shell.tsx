@@ -172,7 +172,7 @@ export function SettingsPanels<T extends SettingsEntry>({
       <SettingsNav choice={choice} onChoose={onChoose} className={navClassName} />
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {close(`absolute top-3 right-3 ${fullScreenOnMobile ? "max-sm:hidden" : ""}`)}
-        <div className={`min-h-0 flex-1 overflow-y-auto px-6 pb-10 sm:px-10 sm:pt-12 ${fullScreenOnMobile ? "pt-6" : "pt-12"}`}>
+        <div className={`min-h-0 flex-1 overflow-y-auto px-6 pb-16 sm:px-10 sm:pt-12 ${fullScreenOnMobile ? "pt-6" : "pt-12"}`}>
           {current !== undefined && (
             <>
               <h2 className="mb-6 text-[19px] font-semibold text-ink">{current.title}</h2>

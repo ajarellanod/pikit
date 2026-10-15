@@ -355,9 +355,13 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
   useEffect(() => {
     for (const each of arrived.split(",")) if (each !== "") updateSent(id, Number(each), "gone");
   }, [arrived, id, updateSent]);
-  // The texts of the messages sent the thread has just shown (in the render that swaps the sent bubble
-  // for its own, before the effect above lets them go): that bubble mounts still, the sent one rose in.
-  const arrivedTexts = new Set(allSent.filter((each) => !sentShown.includes(each)).map((each) => each.text));
+  // When each message sent the thread has just shown was sent (in the render that swaps the sent bubble
+  // for its own, before the effect above lets them go): its bubble goes on rising from there, never again.
+  const arrivedAt = new Map(allSent.filter((each) => !sentShown.includes(each)).map((each) => [each.text, each.at]));
+  const risen = (message: UserMessage) => {
+    const at = arrivedAt.get(userText(message).text.trim());
+    return at === undefined ? 0 : Date.now() - at;
+  };
 
   // The first words written in it, once its start is read.
   const firstText = transcript.hasOlder ? undefined : turns.map((turn) => (turn.kind === "user" ? userText(turn.message).text.trim() : "")).find((text) => text !== "");
@@ -477,7 +481,7 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
           {turns.map((turn, i) => (
             <div key={turn.key} className="mx-auto flex w-full max-w-[720px] flex-col gap-8">
               {turn.kind === "user" && notesBefore(i, turn.message.timestamp).map((each) => <Fragment key={each.key}>{each.node}</Fragment>)}
-              {turn.kind === "user" ? <UserBubble message={turn.message} animate={!arrivedTexts.has(userText(turn.message).text.trim())} {...(from !== undefined && { from })} /> : <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />}
+              {turn.kind === "user" ? <UserBubble message={turn.message} risen={risen(turn.message)} {...(from !== undefined && { from })} /> : <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />}
             </div>
           ))}
           {notes

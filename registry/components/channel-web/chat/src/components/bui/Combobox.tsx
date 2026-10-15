@@ -27,6 +27,7 @@ const SEARCH_FROM = 7;
 const GAP = 4;
 const MARGIN = 8;
 const MAX_HEIGHT = 320;
+const MAX_WIDTH = 420;
 
 const words = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean);
 const matches = (option: ComboboxOption, query: string) => {
@@ -129,17 +130,19 @@ export function Combobox({
     const rect = trigger.current.getBoundingClientRect();
     const box = host === undefined || host === document.body ? new DOMRect(0, 0, window.innerWidth, window.innerHeight) : host.getBoundingClientRect();
     const bounds = { top: Math.max(box.top, 0) + MARGIN, bottom: Math.min(box.bottom, window.innerHeight) - MARGIN, left: Math.max(box.left, 0) + MARGIN, right: Math.min(box.right, window.innerWidth) - MARGIN };
-    // Measured once an opening, while it is still at (0, 0) and not scaled by its entrance.
+    // Measured once an opening, while it is still at (0, 0), as wide as its options and not scaled by its entrance.
+    let natural = place?.width ?? 0;
     if (place === undefined) {
       const at = el.getBoundingClientRect();
       origin.current = { top: at.top, left: at.left };
+      natural = at.width;
     }
     const height = Math.min(el.scrollHeight, MAX_HEIGHT);
     const below = bounds.bottom - rect.bottom - GAP;
     const over = rect.top - GAP - bounds.top;
     const above = below < height && over > below;
     const maxHeight = Math.max(120, Math.min(MAX_HEIGHT, above ? over : below));
-    const width = Math.min(Math.max(rect.width, 220), bounds.right - bounds.left);
+    const width = Math.min(Math.max(rect.width, natural, 200), MAX_WIDTH, bounds.right - bounds.left);
     const left = Math.min(Math.max(rect.left, bounds.left), bounds.right - width);
     const top = above ? rect.top - GAP - Math.min(height, maxHeight) : rect.bottom + GAP;
     const next = { top: top - origin.current.top, left: left - origin.current.left, width, maxHeight, above };
@@ -176,10 +179,17 @@ export function Combobox({
     };
   }, [open, searching]);
 
-  // The active option stays in view.
+  // The active option stays in view: the list scrolls, nothing else (scrollIntoView would scroll the
+  // dialog's frame too, overflow hidden or not).
   const activeIndex = ordered.findIndex((option) => option.value === active);
   useEffect(() => {
-    if (open && activeIndex >= 0 && place !== undefined) document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+    const box = list.current;
+    const option = document.getElementById(`${listId}-${activeIndex}`);
+    if (!open || place === undefined || box === null || option === null) return;
+    const at = option.getBoundingClientRect();
+    const view = box.getBoundingClientRect();
+    if (at.top < view.top) box.scrollTop -= view.top - at.top + 4;
+    else if (at.bottom > view.bottom) box.scrollTop += at.bottom - view.bottom + 4;
   }, [open, activeIndex, listId, place]);
 
   /** Type-ahead: the first option whose label starts with what was typed in the last half second. */
@@ -260,7 +270,9 @@ export function Combobox({
               left: place?.left ?? 0,
               width: place?.width,
               maxHeight: place?.maxHeight ?? MAX_HEIGHT,
-              visibility: place === undefined ? "hidden" : undefined,
+              // unseen until placed, yet focusable (a hidden element takes no focus)
+              opacity: place === undefined ? 0 : undefined,
+              pointerEvents: place === undefined ? "none" : undefined,
               animation: place === undefined ? undefined : "pop-in 140ms cubic-bezier(0.23,1,0.32,1) both",
               transformOrigin: place?.above === true ? "bottom" : "top",
             }}

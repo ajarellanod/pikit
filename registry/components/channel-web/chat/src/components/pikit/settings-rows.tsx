@@ -160,7 +160,7 @@ export function PromptEditor({
         className="control min-h-40 w-full resize-y font-mono text-[12.5px] leading-relaxed"
       />
       <div className="flex min-h-(--control-h) items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">{value === undefined ? "The definition's" : "Changed from the dashboard"}</span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">{value === undefined ? "Default" : "Changed from the dashboard"}</span>
         {value !== undefined && onReset !== undefined && !changed && (
           <Button size="sm" variant="quiet" disabled={saving} onClick={() => void onReset()}>
             Use default

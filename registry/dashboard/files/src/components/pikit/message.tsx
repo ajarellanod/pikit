@@ -238,16 +238,20 @@ export function userText(message: UserMessage): { text: string; operator: boolea
   return { text: newline === -1 ? "" : text.slice(newline + 1), operator: true, images };
 }
 
+/** How long a message's rise lasts (`.rise-in`, index.css). */
+const RISE_MS = 220;
+
 /**
  * A person's message, at the right, its images inline or by URL. `from` names who wrote it when it was not the operator. It rises
- * in when it mounts, as a reply does, unless `animate` is false then (the transcript's copy of a message just sent, taking the
- * sent bubble's place, must not move): read once, a later change never starts it.
+ * in when it mounts, as a reply does; `risen` ms of it already played (the transcript's copy of a message just sent, taking the
+ * sent bubble's place: it goes on from where that one was, never starting again). Read once: a later change never starts it.
  */
-export function UserBubble({ message, from, animate = true }: { message: UserMessage; from?: string; animate?: boolean }) {
+export function UserBubble({ message, from, risen = 0 }: { message: UserMessage; from?: string; risen?: number }) {
   const { text, operator, images } = userText(message);
-  const [rise] = useState(animate);
+  const [played] = useState(Math.max(0, risen));
+  const rise = played < RISE_MS;
   return (
-    <div className={`flex flex-col items-end gap-1 pl-10 sm:pl-24 ${rise ? "rise-in" : ""}`}>
+    <div className={`flex flex-col items-end gap-1 pl-10 sm:pl-24 ${rise ? "rise-in" : ""}`} style={rise && played > 0 ? { animationDelay: `-${played}ms` } : undefined}>
       {!operator && from !== undefined && <span className="px-1 chat-text-11.5 font-medium text-ink-3">{from}</span>}
       {images.length > 0 && (
         <div className="flex max-w-full flex-wrap justify-end gap-2">

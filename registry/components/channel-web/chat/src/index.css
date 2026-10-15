@@ -337,11 +337,16 @@ select:focus-visible,
   outline: none;
 }
 
-/* a focused control keeps its own radius (the ring above is unlayered: it would set 4px) */
+/* a focused control keeps its own radius (the ring above is unlayered: it would set 4px); a field (a
+   combobox's trigger too) shows its own ring instead */
 .btn:focus-visible,
 .control:focus-visible,
 .switch:focus-visible {
   border-radius: revert-layer;
+}
+
+.control:focus-visible {
+  outline: none;
 }
 
 /* -- controls: inputs, buttons, switches, badges --------------------------------
