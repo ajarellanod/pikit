@@ -19,6 +19,10 @@
  * The rules under test:
  * - a message reaches the agent only through the whole path, and a sender whose message does not
  *   reach it is told, never left without an answer;
+ * - an answer's parts the channel does not draw reach its sender as their fallback text, also when
+ *   the answer has no text of its own (`messagePieces`, `foldParts`); a part of a kind its transport
+ *   draws (`ChannelTransport.draws`, a part of each the fixture gives in `drawnParts`) reaches its
+ *   platform drawn, never dropped (`ReceivedPiece.drawn`);
  * - the dashboard's answers stay in the dashboard: a run that only an operator's messages from the
  *   dashboard started (request ids `DASHBOARD_REQUEST_PREFIX`) is never sent to the conversation's
  *   chat, and one that also answers a user's message is;
@@ -49,6 +53,7 @@ import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition
 import type { ConversationRegistry } from "../conversations.ts";
 import { AgentUnavailableError } from "../inbound.ts";
 import { DASHBOARD_REQUEST_PREFIX } from "../delivery.ts";
+import type { MessagePart } from "../parts.ts";
 import type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "../submissions.ts";
 import { checker } from "./assert.ts";
 import { createMemoryFeed, type MemoryFeed } from "./feed.ts";
@@ -86,6 +91,13 @@ export interface ChannelFixture {
    * default `answers: "pushed"`); a channel that answers in its response has none.
    */
   platform?: ChannelPlatform;
+  /**
+   * A part of each kind the channel's transport draws (`ChannelTransport.draws`), valid for its kind:
+   * what a run's answer carries in the case that checks a drawn part reaches the platform drawn
+   * (`ReceivedPiece.drawn`). Requires `platform`. Absent or empty: the transport draws none, and the
+   * case checks nothing.
+   */
+  drawnParts?: readonly MessagePart[];
   /** Release what the fixture holds. */
   dispose?(): Promise<void>;
 }
@@ -110,6 +122,11 @@ export interface ReceivedPiece {
   possibleDuplicate: boolean;
   /** The idempotency key the platform got with it, for a platform that takes one. */
   key?: string;
+  /**
+   * The kinds (`MessagePart.type`) of the parts it carried drawn, one per part, in order: what the
+   * platform shows of them, not their fallback in its text. Absent: none (a transport that draws none).
+   */
+  drawn?: readonly string[];
 }
 
 export interface ChannelConformanceOptions {
@@ -144,6 +161,15 @@ const HALT_NORMALIZE = "[halt at normalize]";
 const HALT_ROUTE = "[halt at route]";
 const DENY = "[deny]";
 const MOVE = "[move to another conversation]";
+/** Words in a message's text that make the suite's runtime answer it with a part too, or with a part alone. */
+const WITH_PART = "[answer with a part]";
+const ONLY_PART = "[answer with a part alone]";
+/** The fallback of the suite's part, a kind no channel draws (not one the contracts declare). */
+const PART_FALLBACK = "conformance: a part's fallback";
+const PART = { type: "conformance-part", fallback: PART_FALLBACK } as unknown as MessagePart;
+/** Words that make the suite's runtime answer with the fixture's drawn part `n` (`drawnParts[n]`) besides its text. */
+const WITH_DRAWN = (n: number) => `[answer with drawn part ${n}]`;
+const WITH_DRAWN_PATTERN = /\[answer with drawn part (\d+)\]/;
 
 /** How many admissions in a row fail in the case of a transient failure: more than a few quick tries survive. */
 const TRANSIENT_FAILURES = 3;
@@ -219,6 +245,40 @@ export function createChannelConformance(
       await s.fixture.deliver({ id: "m2", conversation: "beta", text: "two" });
       const both = await s.eventually(() => (s.dispatched.length >= 2 ? s.dispatched : undefined), "both messages to be dispatched");
       check(both[0]?.conversation.key !== both[1]?.conversation.key, `two conversation keys, got ${JSON.stringify(both.map((r) => r.conversation.key))}`);
+    }),
+
+    channelCase("an answer's part the channel does not draw reaches its sender as its fallback text, also in an answer of the part alone", async (s) => {
+      await s.fixture.deliver({ id: "m1", conversation: "alpha", text: `hello ${WITH_PART}` });
+      await s.fixture.deliver({ id: "m2", conversation: "beta", text: `hello ${ONLY_PART}` });
+      const told = (conversation: string, what: string) =>
+        s.eventually(async () => {
+          const lines = await s.fixture.told(conversation);
+          return lines.some((line) => line.includes(PART_FALLBACK)) ? lines : undefined;
+        }, what);
+      const alpha = await told("alpha", "the part's fallback with the answer's text");
+      check(
+        alpha.some((line) => line.includes(CONFORMANCE_ANSWER)),
+        `the answer's text too, told ${JSON.stringify(alpha)}`,
+      );
+      await told("beta", "the part's fallback, the answer's only content");
+    }),
+
+    channelCase("an answer's part of a kind the transport draws reaches the platform drawn, not dropped (each kind it draws)", async (s) => {
+      const parts = s.fixture.drawnParts ?? [];
+      // A transport that draws nothing: nothing to check.
+      if (parts.length === 0) return;
+      if (s.fixture.platform === undefined) throw new Error(`${GROUP}: the fixture has drawnParts but no platform, where the suite reads what was drawn`);
+      const platform = s.fixture.platform;
+      for (const [index, part] of parts.entries()) {
+        const before = (await platform.received("alpha")).length;
+        await s.fixture.deliver({ id: `drawn-${index}`, conversation: "alpha", text: `hello ${WITH_DRAWN(index)}` });
+        await s.eventually(
+          async () => ((await platform.received("alpha")).slice(before).some((piece) => piece.drawn?.includes(part.type) === true) ? true : undefined),
+          `the answer's "${part.type}" part to reach the platform drawn`,
+        );
+        // Its text too: one answer per message so far.
+        await toldExactly(s, "alpha", index + 1, "the answer's text with its drawn part");
+      }
     }),
 
     channelCase("a message delivered twice runs once", async (s) => {
@@ -447,6 +507,8 @@ interface Subject {
 
 /** What the suite's fakes keep across the restarts of a case: the runtime's records and the storage. */
 interface Durable {
+  /** The fixture's drawn parts (`drawnParts`), which a message's text asks the runtime to answer with. */
+  drawnParts: readonly MessagePart[];
   dispatched: AgentRequest[];
   started: number;
   /** Runs held, waiting for `settleHeld`. */
@@ -476,6 +538,7 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
   const errors: string[] = [];
   const logger: Logger = { ...silentLogger, error: (line) => void errors.push(line) };
   const durable: Durable = {
+    drawnParts: fixture.drawnParts ?? [],
     dispatched: [],
     started: 0,
     held: [],
@@ -583,6 +646,7 @@ async function settle(durable: Durable, result: AgentResult): Promise<void> {
     requestIds: result.requestIds,
     kind: result.kind,
     ...(result.text !== undefined && { text: result.text }),
+    ...(result.parts !== undefined && { parts: result.parts }),
     ...(result.error !== undefined && { error: result.error }),
   };
   // Every request the run took is settled by it.
@@ -733,12 +797,17 @@ async function dispatchFake(durable: Durable, request: AgentRequest): Promise<Ad
   for (const requestId of requestIds) {
     durable.statuses.set(`${request.conversation.conversationId}\u0000${requestId}`, { kind: "pending", conversation: request.conversation, requestId });
   }
+  const alone = request.prompt.includes(ONLY_PART);
+  const drawnIndex = WITH_DRAWN_PATTERN.exec(request.prompt)?.[1];
+  const drawn = drawnIndex === undefined ? undefined : durable.drawnParts[Number(drawnIndex)];
+  const parts = [...(alone || request.prompt.includes(WITH_PART) ? [PART] : []), ...(drawn !== undefined ? [drawn] : [])];
   const result: AgentResult & { kind: "completed" } = {
     conversation: request.conversation,
     requestId: requestIds[0] as string,
     requestIds,
     kind: "completed",
-    text: `${CONFORMANCE_ANSWER} (${number})`,
+    text: alone ? "" : `${CONFORMANCE_ANSWER} (${number})`,
+    ...(parts.length > 0 && { parts }),
     messages: [],
   };
   // After dispatch returns, as a run starts and ends after its admission.

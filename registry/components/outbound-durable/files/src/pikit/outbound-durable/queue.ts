@@ -24,7 +24,7 @@
  */
 
 import { type AppContext, type AppEvents, type Clock, type Logger } from "@pikit/core";
-import { type ChannelTransport, DeliveryError, type OutboundQueue, type Wakeups } from "@pikit/contracts";
+import { type ChannelTransport, DeliveryError, messagePieces, type OutboundQueue, type Wakeups } from "@pikit/contracts";
 import type { Piece, Store } from "./store.ts";
 
 const SECOND = 1_000;
@@ -91,11 +91,12 @@ export function createQueue(options: QueueOptions) {
     async enqueue(message) {
       const transport = transports.get(message.channel);
       if (transport === undefined) throw new Error(`outbound-durable: no transport is attached for the channel "${message.channel}"`);
-      const pieces = transport.split(message.text).map((text, index) => ({
+      // The parts the transport does not draw folded into the text before the split, the others on the last piece.
+      const pieces = messagePieces(transport, message).map((piece, index) => ({
         key: `${message.idempotencyKey}#${index}`,
         channel: message.channel,
         conversationKey: message.conversationKey,
-        text,
+        ...piece,
       }));
       if (pieces.length === 0) return;
       await store.add(pieces, clock.now());
@@ -133,7 +134,13 @@ export function createQueue(options: QueueOptions) {
     const attempts = piece.attempts + 1;
     try {
       const sent = await transport.send(
-        { key: piece.key, conversationKey: piece.conversationKey, text: piece.text, possibleDuplicate: piece.possibleDuplicate },
+        {
+          key: piece.key,
+          conversationKey: piece.conversationKey,
+          text: piece.text,
+          ...(piece.parts !== undefined && { parts: piece.parts }),
+          possibleDuplicate: piece.possibleDuplicate,
+        },
         controller.signal,
       );
       if (!(await store.markDelivered(piece, attempts, sent.platformMessageId, clock.now()))) return;

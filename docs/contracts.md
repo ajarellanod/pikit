@@ -22,27 +22,27 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 
 | Capability | Mode | Provided by | Used by (`?` = optional) | Suite |
 |---|---|---|---|---|
-| `agent.runtime` | single | runtime-pi | admin-api, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createAgentRuntimeConformance` |
+| `agent.runtime` | single | runtime-pi | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createAgentRuntimeConformance` |
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
-| `agent.submissions` | single | runtime-pi | channel-telegram, channel-telegram-webhook, channel-web, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
+| `agent.submissions` | single | runtime-pi | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
 | `agent.observe` | single | runtime-pi | admin-api, channel-web | `createAgentObserveConformance` |
 | `agent.definition` | keyed | the project | admin-api?, agents-live?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
-| `agent.tool` | keyed | tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
+| `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
-| `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createConversationRegistryConformance` |
-| `outbound.queue` | single | outbound-durable | admin-api?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
+| `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createConversationRegistryConformance` |
+| `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, outbound-durable, repo-github-app, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
-| `storage.kv` | single | storage-kv-sql | channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | mailbox-local, actors-do | admin-api, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | mailbox-local, actors-do | channel-telegram-webhook, repo-github-app, admin-api?, channel-web?, settings-store? | `createMailboxConformance` |
-| `wakeups` | single | actors-do, wakeups-timers | channel-telegram-webhook, outbound-durable, channel-web?, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, channel-web, repo-github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, channel-google-chat, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-web?, settings-store? | `createMailboxConformance` |
+| `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, outbound-durable, channel-web?, runtime-pi? | `createWakeupsConformance` |
+| `http.route` | keyed | admin-api, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, channel-web?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-workers, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
-| `settings` | single | settings-store | agents-live, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
+| `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
@@ -50,9 +50,9 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
-| `execution` | single | execution-do, execution-local | tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
+| `execution` | single | execution-do, execution-local | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-local | tool-bash | same |
-| `workspace` | single | workspace-local | runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
+| `workspace` | single | workspace-local | channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 
 Two more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web)
@@ -98,9 +98,18 @@ interface AgentRuntime {
   at its next tool round.
 - The answer is not returned. A run's end is the event `agent.settled` (completed or aborted) or
   `agent.failed`, with an `AgentResult` (`requestId` that started it, every `requestIds` it answered,
-  `text`, `messages`, `usage`, `error`), and is recorded in `agent.submissions.answers`. A run resumed
-  after a crash has no caller, which is why.
-- Events `agent.dispatched` (every admission) and `agent.started` (with `resumed`) are emitted too.
+  `text`, `parts`, `messages`, `usage`, `error`), and is recorded in `agent.submissions.answers`. A run
+  resumed after a crash has no caller, which is why.
+- `parts` are the parts the run's tools gave ([Parts](#parts)), in the order their results were
+  written. runtime-pi collects them from its tool results: a tool returns `withParts(result, parts)`
+  (`@pikit/pi-adapter/tools`), which checks each part and carries them in the result's `details`
+  (`pikit.parts`); a tool that ends the run (`control.terminate`) gives an answer of parts and no text.
+- Events `agent.dispatched` (every admission) and `agent.started` (with `resumed`) are emitted too, and
+  `agent.partial` (`{ conversation, requestId, text }`) while a run goes: the text so far of the response
+  the model is writing, for a preview (a placeholder a channel edits). runtime-pi re-emits it from
+  pi-durable's live state (`pi.live`'s `generation.message`), at most once per `partialEveryMs` (runtime-pi's
+  config, default 1 s) per conversation, and never after the run's end. A notice: one lost costs nothing; the answer is the
+  run's result. channel-google-chat writes it into its "Thinking…" placeholder.
 
 Provider: runtime-pi (on pi-durable, through `@pikit/pi-adapter`'s `createDurableRuntime`), the only
 one for good: Pi is the only agent runtime (SPEC §3.3), as for every runtime contract below.
@@ -247,16 +256,20 @@ Both use `agent.conversations`, so the runtime starts first.
 
 Not a capability: a function and two pipelines every channel shares. `admitInbound(ctx, message,
 { conversations, runtime, key, beforeDispatch? })` runs `inbound.normalize`, then `route.resolve`,
-then `conversations.resolve(key, agent)`, then `runtime.dispatch`, and returns an `InboundOutcome`:
+then `conversations.resolve(key, agent)`, then `beforeDispatch(conversation)` (awaited: a channel
+starts waiting for the run there, or writes the message's files to that conversation's workspace; a
+rejection dispatches nothing and is thrown, so the platform delivers the message again, and what it
+does must be harmless to repeat), then `runtime.dispatch`, and returns an `InboundOutcome`:
 `admitted`, `duplicate`, `halted` (a stage halted), `denied` (the router said deny) or `no_route` (no
 stage decided). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
 when a capability fails. A dispatch rejected with `AgentUnavailableError` (the conversation's agent
 is gone for good: removed, a live agent deleted) is not thrown: the key moves to a new conversation of
 the agent routed now and the message goes there, or, when routing names the gone agent, it is
 `denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text, images? }` (a
-field is added, optional, with the component that reads it); its `id` becomes the request id, its
-actor the request's sender, its `images` (channel-web's attachments, bounded by the channel) the
-request's `images`. A normalize stage keeps the images unless it means to change them. See [pipelines.md](pipelines.md).
+field is added, optional, with the component that reads it); its `id` becomes the request id, and its
+`images` (`AgentImage`, bounded by whoever builds the message: channel-google-chat's are a message's
+photos, 1 MB in all; channel-web's, the page's attachments) the request's `images`, as an `inbound.normalize` stage leaves them (it may drop
+them). See [pipelines.md](pipelines.md).
 
 Authentication is not here: each channel proves its senders its own way.
 
@@ -276,11 +289,12 @@ interface AgentSubmissions {
 }
 ```
 
-`RunSettlement` is an `AgentResult` without `messages` and `usage`. A message the runtime gives up on
+`RunSettlement` is an `AgentResult` without `messages` and `usage` (its `text` and `parts` are its answer). A message the runtime gives up on
 is settled `failed` with `error.code: "abandoned"`. runtime-pi keeps `answers` in `runtime_pi_answers`
 (`packages/pi-adapter/src/answers.ts`), appended once per run before `agent.settled`/`agent.failed`,
 kept `keepSettledDays` (7). Suites: `createSubmissionsConformance` (on the memory double and on
-runtime-pi over storage-sqlite and storage-do), `createFeedConformance` for `answers`.
+runtime-pi over storage-sqlite and storage-do; a settlement keeps the run's kind, text, error and
+parts, a completed run's parts given by a tool on runtime-pi), `createFeedConformance` for `answers`.
 
 ### `Feed<T>` ([feed.ts](../packages/contracts/src/feed.ts))
 
@@ -294,7 +308,7 @@ Stores an answer before sending it, and delivers it.
 
 ```ts
 interface OutboundQueue {
-  enqueue(message: OutboundMessage): Promise<void>;    // { idempotencyKey, channel, conversationKey, text }
+  enqueue(message: OutboundMessage): Promise<void>;    // { idempotencyKey, channel, conversationKey, text, parts? }
   attach(channel, transport: ChannelTransport): void;  // a channel hands its transport while it runs
   detach(channel, signal?): Promise<void>;
   readonly receipts: Feed<DeliveryReceipt>;           // every piece that settled
@@ -303,6 +317,8 @@ interface OutboundQueue {
 ```
 
 - The same `idempotencyKey` enqueued twice is stored once. Each conversation's pieces go in order.
+- A message is cut by `messagePieces` with its channel's transport ([Parts](#parts)): the parts it does
+  not draw folded into the text before the split, the ones it draws stored and sent with the last piece.
 - At-least-once: a piece whose send may have reached the platform goes again with
   `possibleDuplicate`.
 - A piece is abandoned at the provider's maximum age whatever the reason, also when its channel
@@ -312,13 +328,52 @@ interface OutboundQueue {
 - Transports attach rather than being a keyed capability, which would be a cycle (the queue would use
   the channels, the channels the queue).
 
-A **`ChannelTransport`** is the channel's: `{ idempotent, split(text), send(piece, signal) }`. A failed
+A **`ChannelTransport`** is the channel's: `{ idempotent, draws?, split(text), send(piece, signal) }`;
+`draws` lists the kinds of part it draws, which `send` receives on a message's last piece
+(`OutboundPiece.parts`). A failed
 send throws `DeliveryError(kind)`: `transient`, `rate_limited` (with `retryAfterMs`, not counted as a
 failure) or `permanent`, with `maybeSent`. `answerKey(conversation, requestId)` is
 `${conversationId}:${requestId}`, and piece keys are `${key}#${index}`.
 
 Provider: outbound-durable (on `storage.sql` and `wakeups`; gives up on `permanent` or after 24 h).
 Suite: `createOutboundQueueConformance`, and the convergence suite.
+
+### Parts ([parts.ts](../packages/contracts/src/parts.ts))
+
+What an answer carries besides its markdown text, for a channel to draw its platform's way (a
+question as buttons). A kind of part is declared by the component that introduces it, by declaration
+merging on `AppMessageParts`; the core declares none. A kind shared by components that must not
+know each other is vocabulary, declared in the contracts: `question` ([question.ts](../packages/contracts/src/question.ts),
+below). `MessagePart` is
+`{ type, fallback }` and the kind's fields. Every part has a `fallback` text. A transport draws the
+kinds in its `draws`; every other part is folded into the text as its fallback, after the text, a
+paragraph each, before the split, and the drawn ones go with the last piece. `messagePieces(transport,
+{ text, parts })` is the one place that does it (answer delivery's direct path and outbound-durable call
+it); a channel that answers in its response folds with `foldParts` (channel-http). channel-google-chat's
+transport draws `question` (`draws: ["question"]`); every other transport sends its fallback. What a platform draws
+from markdown (tables, images) is its transport's, not a part. Tests: `parts.test.ts`, the
+`outbound.queue` suite, and the channel suite (a part no channel draws reaches its sender as its
+fallback, also in an answer of the part alone; a part of each kind the transport draws, which the
+fixture gives in `drawnParts`, reaches the platform drawn, `ReceivedPiece.drawn`, never dropped:
+channel-google-chat's question).
+
+### The `question` part ([question.ts](../packages/contracts/src/question.ts))
+
+A question the agent asks the person it talks to: `{ type: "question", fallback, id, title,
+description?, fields }`, each field `{ kind, name, label, required?, options? }` of kind `confirm`,
+`select`, `multiselect` (with `options: { value, label }[]`), `text` or `date`. Declared in the
+contracts, not by a component: the tool that asks (`tool-ask-user`) and the channels that draw it
+must not know each other (features/approvals.md); the core declares no kind. Its protocol is here,
+once: `QUESTION_FIELD_NAME` (a field name's pattern, which an asker's schema states), `questionProblem` (the one check), `questionPart` (a question with its fallback, which lists the
+fields, their options and says to reply in text), `answerProblem` (an answer checked against its
+question) and `answerText` (the answer said in words, `Answer to "<title>" (question <id>):` and each field's value, the text of
+the message that brings it back). No field of `InboundMessage` carries an answer: what the model reads
+is its text, the same whether a button was clicked or the fallback answered in a message. How it is
+drawn and who may answer are the channel's: channel-google-chat draws one `confirm` or `select` field
+as buttons and anything else as a dialog's form, and takes the first answer of anyone it admits in the
+question's conversation, once, and none once that conversation was reset. Producer: tool-ask-user
+(`askUser`), whose model is told the outcome only (a form or its own words, later, as a new message),
+never how a channel draws it. Tests: `question.test.ts`, tool-ask-user's and channel-google-chat's.
 
 ### `startAnswerDelivery` ([delivery.ts](../packages/contracts/src/delivery.ts))
 
@@ -327,7 +382,11 @@ Not a capability: the outbound protocol every chat channel calls in `start`. The
 (answer)`, `queue?`, `wakeups?` and a `DeliveryPolicy` (`retryMs`, `blockedAfter`, `window`,
 `piecesPerRun`, `sendTimeoutMs`). It returns `{ wake(ctx), stop(signal) }`. What it guarantees: a
 cursor (`answers-cursor`) per channel, one lane per conversation, retries, idempotency keys, and a
-dashboard-only run never sent to a chat. Its header states the direct and queued guarantees and what
+dashboard-only run never sent to a chat. An answer is the channel's `text(answer)` and a completed
+run's `parts`, cut by `messagePieces` on both paths (the queue cuts it the same way); one with parts
+and no text is still delivered, one with neither is passed over: `answerContent(run, said)` is that
+rule, exported so a channel that acts on "nothing to send" (channel-google-chat deletes its
+placeholder) decides it as delivery does. Its header states the direct and queued guarantees and what
 survives a crash at each step. See [message-flow.md](message-flow.md). The dashboard's request ids
 start with `DASHBOARD_REQUEST_PREFIX` (`dashboard:`).
 

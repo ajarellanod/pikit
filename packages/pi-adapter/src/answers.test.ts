@@ -92,3 +92,17 @@ test("find: the first run that took the request, matched exactly, in its convers
   expect(await log.find("1", "m9")).toBeUndefined();
   expect((await log.find("2", "m9"))?.requestId).toBe("m9");
 });
+
+test("a run's parts are kept with it, in order, across a reopen; a run without parts has none", async () => {
+  const records = await opened();
+  cleanup.push(records.dispose);
+  const parts = [{ type: "test-card", fallback: "A card", options: ["yes", "no"] }, { type: "test-note", fallback: "A note" }] as unknown as RunSettlement["parts"];
+  const withParts: RunSettlement = { ...run(["r1"], ""), ...(parts !== undefined && { parts }) };
+  await records.log().append([{ key: "1:s1", run: withParts }, { key: "1:s2", run: run(["r2"]) }], Date.now());
+  await records.reopen();
+
+  const [first, second] = (await records.log().read(undefined, 10)).items.map((item) => item.fact);
+  expect(first).toEqual(withParts);
+  expect(second).not.toHaveProperty("parts");
+  expect(await records.log().find("1", "r1")).toEqual(withParts);
+});

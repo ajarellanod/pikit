@@ -191,9 +191,10 @@ component.
   that components never import Pi, not to make the runtime swappable, so they never wait for a second
   provider: their stability is decided here. *Why:* P1, Pi is the agent; a second loop would make
   every agent feature the lowest common denominator of two runtimes.
-- **A contracts helper is protocol, with the policy passed in.** `admitInbound` and
-  `startAnswerDelivery` are what every provider must do alike for a guarantee to hold (one admission
-  per message, a cursor per channel, a lane per conversation, idempotency keys). What may differ (the
+- **A contracts helper is protocol, with the policy passed in.** `admitInbound`,
+  `startAnswerDelivery` and `messagePieces` are what every provider must do alike for a guarantee to
+  hold (one admission per message, a cursor per channel, a lane per conversation, idempotency keys, a
+  part a transport does not draw folded into the text as its fallback before the split). What may differ (the
   route, the text, how to send, the backoff) is the calling component's, passed in. *Why:* a guarantee
   each component writes again is one each can break; a choice made inside the helper would be policy
   the user cannot edit (P3).
@@ -218,7 +219,9 @@ few that touch how code lives come one per runtime model and say so in their `ta
 `execution-local` (a process) and `execution-do` (C7), `storage-sqlite` and `storage-do`,
 `wakeups-timers` and `actors-do`. The required set (below) has a provider on each target
 for every capability it needs; a component outside it may exist for one target only (`channel-http`
-has no Cloudflare twin yet). Moving a project to the other target is swapping those components,
+has no Cloudflare twin yet). A channel whose platform posts to it may be one code on both instead,
+choosing by `actor.inbox`'s scope: `channel-google-chat` hands each event to its handler in process on
+a server, and from its Worker's half to the conversation's object on Cloudflare. Moving a project to the other target is swapping those components,
 never changing an agent, a route or a contract.
 
 **A target is a runtime model; a provider is a `deployment-*` component.** A target (`targets` in a

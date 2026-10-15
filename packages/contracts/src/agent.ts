@@ -20,6 +20,7 @@
 
 import type { AppContext } from "@pikit/core";
 import { isJsonObject } from "./json.ts";
+import type { MessagePart } from "./parts.ts";
 import { type AgentSkill, isSkillName, skillProblem } from "./skill.ts";
 
 /**
@@ -344,6 +345,13 @@ export interface AgentResult {
   kind: "completed" | "aborted" | "failed";
   /** The run's final answer, when it produced one. */
   text?: string;
+  /**
+   * The parts the run's tools gave (`parts.ts`), in the order their results were written: what its
+   * answer carries besides its text (a question to draw as buttons). Answer delivery sends a completed
+   * run's with its text, also when it has none. A tool gives them through its result (runtime-pi:
+   * `withParts`, `@pikit/pi-adapter/tools`). Absent: none.
+   */
+  parts?: readonly MessagePart[];
   /** What the run added to the transcript. */
   messages: AgentMessage[];
   usage?: Usage;
@@ -387,6 +395,14 @@ declare module "@pikit/core" {
     "agent.dispatched": { conversation: ConversationRef; admission: Admission };
     /** A run started, or a new worker resumed one. */
     "agent.started": { conversation: ConversationRef; requestId: string; resumed: boolean };
+    /**
+     * The answer as the model writes it: the text so far of the response it is writing now (each model
+     * call of the run starts again), while the run goes, at most once per the runtime's interval (its
+     * value). `requestId` is the run's, as in `agent.started`. A notice for a preview (a placeholder
+     * edited as the answer grows): one lost costs nothing, none comes after the run's end, and the
+     * answer itself is the run's result. Emitted in the run's context, never awaited by it.
+     */
+    "agent.partial": { conversation: ConversationRef; requestId: string; text: string };
     /** A run ended with an answer or was aborted, whether or not anyone waits for it. */
     "agent.settled": AgentResult & { kind: "completed" | "aborted" };
     /** A run failed. */

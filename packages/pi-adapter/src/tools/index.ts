@@ -12,6 +12,10 @@
  *
  * Neutral.
  *
+ * **Parts**: a tool gives its run's answer a part (a question to draw as buttons, `AppMessageParts`) by
+ * returning `withParts(result, parts)`: the runtime collects every successful result's parts, in order,
+ * into `AgentResult.parts`, and the channels deliver them with the answer.
+ *
  * **Replay**: pi-durable runs an interrupted call again on recovery only when its tool is `"safe"`; a
  * property of the tool, fixed for every call, recorded with the call's intent. pi-durable's own tools
  * declare none (so `"unsafe"`: the model gets an `interrupted` error result with the output so far).
@@ -20,6 +24,8 @@
  */
 
 export { defineExtension, defineTool, wrapTool } from "@earendil-works/pi-durable";
+// A tool's parts for its run's answer (`AgentResult.parts`): its result carries them.
+export { PARTS_DETAIL, withParts } from "../parts.ts";
 export { AGENT_DELEGATION, RESULT_REQUEST_PREFIX, resultPrompt } from "../delegation.ts";
 export type { AgentDelegation, DelegatedOutcome, DelegatedTask } from "../delegation.ts";
 export type { Extension, ToolDiagnostic, ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";

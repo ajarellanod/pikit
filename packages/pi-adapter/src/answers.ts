@@ -8,7 +8,7 @@
  * behind it learns it missed some (`gap`). What has been logged is the runtime's to remember
  * (`AdmissionsDoc`): a run pruned here is never appended again.
  *
- * - `runtime_pi_answers`: `seq` is the feed's cursor. `AUTOINCREMENT` never reuses a value, even once
+ * - `runtime_pi_answers`: `seq` is the feed's cursor; `parts` the run's parts as JSON, or `NULL` for none. `AUTOINCREMENT` never reuses a value, even once
  *   every row is pruned, and one writer at a time (SQLite) commits them in order.
  * - `runtime_pi_answers_meta`: `pruned_through`.
  *
@@ -16,7 +16,7 @@
  * storage is: the runtime runs on SQLite only (storage-sqlite, storage-do).
  */
 
-import type { FeedPage, RunSettlement, SqlDatabase, SqlRow } from "@pikit/contracts";
+import type { FeedPage, MessagePart, RunSettlement, SqlDatabase, SqlRow } from "@pikit/contracts";
 
 const TABLE = "runtime_pi_answers";
 const META = "runtime_pi_answers_meta";
@@ -30,6 +30,7 @@ interface AnswerRow extends SqlRow {
   request_ids: string;
   kind: string;
   text: string | null;
+  parts: string | null;
   error_code: string | null;
   error_message: string | null;
 }
@@ -66,6 +67,7 @@ export function createAnswerLog(db: SqlDatabase): AnswerLog {
         request_ids TEXT NOT NULL,
         kind TEXT NOT NULL,
         text TEXT,
+        parts TEXT,
         error_code TEXT,
         error_message TEXT,
         settled_at INTEGER NOT NULL
@@ -80,8 +82,8 @@ export function createAnswerLog(db: SqlDatabase): AnswerLog {
       await db.transaction(async (tx) => {
         for (const { key, run } of runs) {
           await tx.run(
-            `INSERT INTO ${TABLE} (run_key, conversation_id, conversation_key, agent, request_id, request_ids, kind, text, error_code, error_message, settled_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (run_key) DO NOTHING`,
+            `INSERT INTO ${TABLE} (run_key, conversation_id, conversation_key, agent, request_id, request_ids, kind, text, parts, error_code, error_message, settled_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (run_key) DO NOTHING`,
             [
               key,
               run.conversation.conversationId,
@@ -91,6 +93,7 @@ export function createAnswerLog(db: SqlDatabase): AnswerLog {
               JSON.stringify(run.requestIds),
               run.kind,
               run.text ?? null,
+              run.parts === undefined || run.parts.length === 0 ? null : JSON.stringify(run.parts),
               run.error?.code ?? null,
               run.error?.message ?? null,
               now,
@@ -146,6 +149,7 @@ function settlementOf(row: AnswerRow): RunSettlement {
     requestIds: JSON.parse(row.request_ids) as string[],
     kind: row.kind as RunSettlement["kind"],
     ...(row.text !== null && { text: row.text }),
+    ...(row.parts !== null && { parts: JSON.parse(row.parts) as MessagePart[] }),
     ...(row.error_code !== null && { error: { code: row.error_code, message: row.error_message ?? "" } }),
   };
 }

@@ -98,20 +98,24 @@ test("admitInbound: the sender is the actor a normalize stage leaves (it may res
   expect(e.dispatched[0]?.sender).toEqual({ channel: "test", id: "person:someone" });
 });
 
-test("admitInbound: a message's images are dispatched as the request's, in order, through a stage that rewrites its text; a stage may strip them; none, no images field", async () => {
-  const images = [
-    { mimeType: "image/png", data: "iVBORw0KGgo=" },
-    { mimeType: "image/jpeg", data: "/9j/4AAQ" },
-  ];
-  const e = ends();
-  const rewrites = await appWith((pikit) => pikit.pipeline("inbound.normalize", (m) => ({ ...m, text: m.text.toUpperCase() })));
-  await admitInbound(rewrites, { ...message, images }, { ...e, key: "test:c1" });
-  expect(e.dispatched[0]).toMatchObject({ prompt: "HELLO", images });
+test("admitInbound: the message's images are the request's, in order, as a normalize stage leaves them; none when it drops them", async () => {
+  const photo = { mimeType: "image/png", data: "iVBORw0KGgo=" };
+  const other = { mimeType: "image/jpeg", data: "/9j/4AAQ" };
+  const withImages: InboundMessage = { ...message, images: [photo, other] };
 
-  const strips = await appWith((pikit) => pikit.pipeline("inbound.normalize", ({ images: _dropped, ...m }) => m));
-  await admitInbound(strips, { ...message, id: "m2", images }, { ...e, key: "test:c1" });
-  await admitInbound(rewrites, { ...message, id: "m3", images: [] }, { ...e, key: "test:c1" });
-  expect(e.dispatched.slice(1).map((request) => "images" in request)).toEqual([false, false]);
+  const kept = ends();
+  await admitInbound(await appWith(() => {}), withImages, { ...kept, key: "test:c1" });
+  expect(kept.dispatched[0]?.images).toEqual([photo, other]);
+
+  const dropped = ends();
+  const ctx = await appWith((pikit) => pikit.pipeline("inbound.normalize", ({ images: _images, ...rest }) => rest));
+  await admitInbound(ctx, withImages, { ...dropped, key: "test:c1" });
+  expect(dropped.dispatched[0]).not.toHaveProperty("images");
+
+  // A message of text only dispatches no images at all, not an empty list.
+  const none = ends();
+  await admitInbound(await appWith(() => {}), { ...message, images: [] }, { ...none, key: "test:c1" });
+  expect(none.dispatched[0]).not.toHaveProperty("images");
 });
 
 test("admitInbound: a redelivered message is a duplicate, and runs once", async () => {
@@ -181,6 +185,31 @@ test("admitInbound: beforeDispatch sees the conversation after it resolves and b
   // The message's channel is the one the conversation is resolved with: the registry records it when the key is new.
   expect(e.steps).toEqual(["resolve test:c1 support test", "beforeDispatch", "dispatch m1"]);
   expect([seen?.conversationId, seen?.channel]).toEqual(["conversation-of-test:c1", "test"]);
+});
+
+test("admitInbound: a beforeDispatch that returns a promise is awaited before dispatch; one that rejects dispatches nothing and throws", async () => {
+  const e = ends();
+  const ctx = await appWith(() => {});
+  await admitInbound(ctx, message, {
+    ...e,
+    key: "test:c1",
+    beforeDispatch: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      e.steps.push("files written");
+    },
+  });
+  expect(e.steps).toEqual(["resolve test:c1 support test", "files written", "dispatch m1"]);
+
+  const failing = ends();
+  const rejected = admitInbound(ctx, { ...message, id: "m2" }, {
+    ...failing,
+    key: "test:c1",
+    beforeDispatch: async () => {
+      throw new Error("the disk is full");
+    },
+  });
+  await expect(rejected).rejects.toThrow("the disk is full");
+  expect(failing.dispatched).toEqual([]);
 });
 
 

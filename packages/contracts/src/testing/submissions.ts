@@ -16,7 +16,8 @@
  * through its messages and runs (runtime-pi's, `@pikit/pi-adapter`'s `submissions-conformance.test.ts`):
  * a request admitted to a conversation with no run going starts a run alone; those admitted while it
  * goes are taken together by the next run. Only those still waiting are abandoned (a run that took a
- * request settles it). A failed run's error is the code runtime-pi gives a model's failure.
+ * request settles it). A failed run's error is the code runtime-pi gives a model's failure. A
+ * completed run's `parts` are what its tools gave (a real runtime's fixture has a tool give them).
  *
  * `createMemorySubmissions` is the in-memory double: it passes this suite, and it stands in for a
  * provider in the tests of a runtime or a channel.
@@ -25,6 +26,7 @@
 import { type AppContext, defineApp, silentLogger } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
 import type { ConversationRef } from "../agent.ts";
+import type { MessagePart } from "../parts.ts";
 import type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "../submissions.ts";
 import { expecter } from "./assert.ts";
 import { createFeedConformance, createMemoryFeed } from "./feed.ts";
@@ -247,6 +249,21 @@ export function createSubmissionsConformance(
       for (const run of [failed, aborted, empty]) await s.settled(run, c);
 
       expect(await answers(f), [failed, aborted, empty], "answers");
+    }),
+
+    submissionsCase("a completed run's parts survive in its settlement and in answers, in order", async (f, c) => {
+      const s = f.submissions();
+      const parts = [
+        { type: "conformance-part", fallback: "the first part's fallback", detail: { n: 1, list: ["a", "b"] } },
+        { type: "conformance-part", fallback: "the second part's fallback" },
+      ] as unknown as MessagePart[];
+      const run: RunSettlement = { ...completed(conversation(1), ["r1"], "see below"), parts };
+      await s.admitted(conversation(1), "r1", c);
+
+      await s.settled(run, c);
+
+      expect(await answers(f), [run], "answers");
+      expect(await s.get(conversation(1), "r1", c), { kind: "settled", conversation: conversation(1), requestId: "r1", run }, "get");
     }),
   ];
 

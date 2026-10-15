@@ -12,7 +12,8 @@
  *   conversation ends as the settlement says: the model answers its `text`, or fails with its error's
  *   message (pi-durable's reason, `model_error`, is the code), or the run is aborted. Which requests it
  *   took is the runtime's to decide, not the suite's: the suite settles runs as the runtime groups
- *   them. A run already settled is redelivered instead (its first request dispatched again): what
+ *   them. A completed run with `parts` first calls the tool `giveParts`, which gives them
+ *   (`withParts`), then answers its text: the parts the runtime collects from the run's tools. A run already settled is redelivered instead (its first request dispatched again): what
  *   "settled again" is for the real runtime, which reconciles and appends nothing.
  * - `abandoned`: the runtime's own `abandon`, which gives up on the requests still queued.
  *
@@ -21,19 +22,22 @@
  * model (`gate/model`) holds each call until the fixture says how the run ends.
  */
 
-import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import { defineTool } from "@earendil-works/pi-durable";
 import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import {
   type AgentSubmissions,
   type ConversationRef,
   defineAgent,
   type FeedPage,
+  type MessagePart,
   type PendingConversation,
   type RunSettlement,
   type SubmissionStatus,
 } from "@pikit/contracts";
 import type { RecordingSubmissions, SubmissionsFixture } from "@pikit/contracts/testing";
 import { modelsFrom } from "../models.ts";
+import { withParts } from "../parts.ts";
 import { createDurableRuntime, type DurableRuntime } from "../runtime.ts";
 
 /** Where the fixture keeps what outlives a runtime: components providing `storage.sql` over the same records each time. */
@@ -50,7 +54,16 @@ const TIMEOUT_MS = 5_000;
 /** The model calls one provider answers. */
 const CALLS = 1_000;
 
-type Ending = { text: string } | { error: string };
+type Ending = { text: string; parts?: readonly MessagePart[] } | { error: string };
+
+/** The tool a run with parts calls first: its result gives them to the run's answer. */
+const PARTS_TOOL = "giveParts";
+const partsTool = defineTool({
+  name: PARTS_TOOL,
+  description: "Gives the run's answer its parts.",
+  parameters: Type.Object({ parts: Type.Array(Type.Any()) }),
+  execute: async (args) => withParts({ output: [{ type: "text", text: "given" }] }, args.parts as MessagePart[]),
+});
 
 async function until<T>(what: string, probe: () => Promise<T | undefined>): Promise<T> {
   const deadline = Date.now() + TIMEOUT_MS;
@@ -67,8 +80,9 @@ async function until<T>(what: string, probe: () => Promise<T | undefined>): Prom
  * word of the newest user message, the conversation's key) or the call is aborted.
  */
 function gateModel() {
-  /** Per conversation key, the call waiting for its run's ending. */
-  const waiting = new Map<string, (ending: Ending) => void>();
+  /** Per conversation key, the call waiting for its run's ending (or for a call of `giveParts`). */
+  type Reply = { text: string } | { error: string } | { toolCall: { parts: readonly MessagePart[] } };
+  const waiting = new Map<string, (reply: Reply) => void>();
   const faux = fauxProvider({ provider: "gate", models: [{ id: "model" }] });
   const step: FauxResponseFactory = (context, options) => {
       const newest = [...context.messages].reverse().find((message) => message.role === "user");
@@ -76,9 +90,10 @@ function gateModel() {
       const key = text.split(" ")[0] ?? "";
       return new Promise<ReturnType<typeof fauxAssistantMessage>>((resolve) => {
         const signal = options?.signal;
-        const end = (ending: Ending) => {
+        const end = (reply: Reply) => {
           waiting.delete(key);
-          resolve("text" in ending ? fauxAssistantMessage(ending.text) : fauxAssistantMessage("", { stopReason: "error", errorMessage: ending.error }));
+          if ("toolCall" in reply) resolve(fauxAssistantMessage(fauxToolCall(PARTS_TOOL, { parts: reply.toolCall.parts as never }), { stopReason: "toolUse" }));
+          else resolve("text" in reply ? fauxAssistantMessage(reply.text) : fauxAssistantMessage("", { stopReason: "error", errorMessage: reply.error }));
         };
         // Aborted: what it answers is dropped (pi-durable sees the abort). A call may begin aborted: a
         // closing Harness starts the next queued run with its signal already aborted.
@@ -93,7 +108,11 @@ function gateModel() {
     /** Waits for a call of `key`'s run, and ends it. */
     async end(key: string, ending: Ending): Promise<void> {
       const call = await until(`a model call in ${key}`, async () => waiting.get(key));
-      call(ending);
+      if (!("text" in ending) || ending.parts === undefined || ending.parts.length === 0) return call("text" in ending ? { text: ending.text } : ending);
+      // The parts first, from a tool; the text in the call after its result.
+      call({ toolCall: { parts: ending.parts } });
+      const next = await until(`the model call after ${PARTS_TOOL} in ${key}`, async () => waiting.get(key));
+      next({ text: ending.text });
     },
     /** Waits for a call of `key`'s run. */
     called: (key: string) => until(`a model call in ${key}`, async () => (waiting.has(key) ? true : undefined)),
@@ -103,7 +122,7 @@ function gateModel() {
 
 export function createPiSubmissionsFixture(records: SubmissionsFixtureRecords): SubmissionsFixture {
   const model = gateModel();
-  const agent = defineAgent({ name: AGENT, model: "gate/model" });
+  const agent = defineAgent({ name: AGENT, model: "gate/model", tools: [partsTool as never] });
   let runtime: DurableRuntime | undefined;
   let app: App | undefined;
 
@@ -212,7 +231,7 @@ export function createPiSubmissionsFixture(records: SubmissionsFixtureRecords): 
         await model.called(ref.key);
         await r.abort(ref, ctx);
       } else {
-        await model.end(ref.key, settlement.kind === "failed" ? { error: settlement.error?.message ?? "" } : { text: settlement.text ?? "" });
+        await model.end(ref.key, settlement.kind === "failed" ? { error: settlement.error?.message ?? "" } : { text: settlement.text ?? "", ...(settlement.parts !== undefined && { parts: settlement.parts }) });
       }
       // Until its run is logged in `answers`, where the suite reads it.
       await until(`the run of ${settlement.requestId} in answers`, async () =>

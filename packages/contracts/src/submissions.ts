@@ -18,8 +18,8 @@
  * runtime's own operation (runtime-pi's `abandon`), not this contract's: a settlement is appended to
  * `answers` like any other, `failed` with `error.code` `abandoned`.
  *
- * The runtime's conversation stays the source of truth. A settlement carries the run's final text, not its
- * transcript (`messages`) or usage: what a channel needs to deliver it after a restart, kept in
+ * The runtime's conversation stays the source of truth. A settlement carries the run's final text and
+ * its parts, not its transcript (`messages`) or usage: what a channel needs to deliver it after a restart, kept in
  * `answers` only as long as the provider's retention.
  *
  * The in-memory double of `@pikit/contracts/testing` (`createMemorySubmissions`) adds the writes a
@@ -31,10 +31,11 @@ import type { AgentResult, ConversationRef } from "./agent.ts";
 import type { Feed } from "./feed.ts";
 
 /**
- * How one run ended, as `answers` carries it: its `AgentResult` without the transcript and the usage.
- * The requests it took are settled with it; `answerKey(conversation, requestId)` names its answer.
+ * How one run ended, as `answers` carries it: its `AgentResult` without the transcript and the usage
+ * (its text and its parts are its answer). The requests it took are settled with it;
+ * `answerKey(conversation, requestId)` names its answer.
  */
-export type RunSettlement = Pick<AgentResult, "conversation" | "requestId" | "requestIds" | "kind" | "text" | "error">;
+export type RunSettlement = Pick<AgentResult, "conversation" | "requestId" | "requestIds" | "kind" | "text" | "parts" | "error">;
 
 /** Where one request is: admitted and waiting for its run's end, or settled by a run. */
 export type SubmissionStatus =

@@ -60,7 +60,7 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 `agent.submissions` (`submissions`, "Submissions" below), plus what a host uses: `createConversation`,
 `recover`, `abandon`, `holds`, `whenIdle`, `suspend`, `state`, `inspect`, `close`. The contracts and events are as consumers see them: `Admission` (`started`/`queued`/
 `duplicate`), `agent.dispatched`, `agent.started` (`resumed` for a run a previous worker left open),
-`agent.settled`/`agent.failed` with `AgentResult`.
+`agent.settled`/`agent.failed` with `AgentResult`, and `agent.partial` while a run streams (below).
 
 - **One Harness per storage**, opened at first use over `db` (`storage.sql`, `openDurableStorage`)
   and owned until `close`. Opening reconfigures every conversation with live work, resumes the scheduler (it is
@@ -92,12 +92,20 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   are placed all at once after the run's current tool round (`steeringMode: "all"`) and join that run
   (`pi.live.run.inputs`): no `agent.started`, and the run's result lists them after its inputs; a run
   that answers before another tool round leaves them to the next run, as follow-ups.
+- **The answer as it is written** (`agent.partial`). pi-durable commits the response being generated
+  to the conversation's `pi.live` (`generation.message`, throttled by `progress.partialIntervalMs`);
+  the runtime re-emits its text from those commits (`observe`), named after the run's first request,
+  at most once per `partialEveryMs` (`PARTIAL_EVERY_MS`, 1 s) and only when it changed. A commit with
+  no run ends it: an emit still on its way is dropped, so none comes after the run's end.
 - **Settlement.** Read from pi-durable's commits (`subscribeCommits`): a run's inputs settle in the
   commit that ends it, and are one result (`runsOf`); one an abort withdrew while queued is its own.
   `done` → `agent.settled` `completed` with the answer's text; `unanswered`/`aborted` → `agent.settled`
   `aborted`; any other reason (`model_error`, `no_model`, `faulted`, `orphaned`, `reset`) →
   `agent.failed` with `{ code: reason, message: detail }`. `messages` are the model messages from the
-  first input's `pi.user` entry to the answer (system entries excluded); `usage` sums their assistant
+  first input's `pi.user` entry to the answer (system entries excluded), and, when a tool ended the run
+  (`control.terminate`), the results of the calls that answer made, written after it; `parts` are
+  those its successful tool results carry (`withParts`, `parts.ts`: a tool's `details` under
+  `pikit.parts`), in order, kept in `answers` too; `usage` sums their assistant
   and tool-result usage, what pi-durable adds to `pi.usage`. A withdrawn input is logged aborted in
   `answers` and not announced. Events wait for the admissions' `agent.dispatched`/
   `agent.started`, so the order is kept. `recover(conversation, requestIds)` reconfigures and resumes

@@ -28,6 +28,7 @@
 import type { ConversationRef } from "./agent.ts";
 import type { Feed } from "./feed.ts";
 import type { Page, PageRequest } from "./page.ts";
+import type { MessagePart } from "./parts.ts";
 
 /**
  * The key of a run's answer: `${conversationId}:${requestId}`, where `requestId` is the request that started
@@ -50,7 +51,13 @@ export interface OutboundMessage {
   channel: string;
   /** The conversation it answers; only the channel that made the key reads it. */
   conversationKey: string;
+  /** Markdown; empty when the message is only parts. */
   text: string;
+  /**
+   * What it carries besides its text, in order (`parts.ts`): the parts its transport draws go with its
+   * last piece, every other one is folded into its text as its fallback (`messagePieces`).
+   */
+  parts?: readonly MessagePart[];
 }
 
 /** One piece of a message, as the transport sends it. */
@@ -58,7 +65,13 @@ export interface OutboundPiece {
   /** `${idempotencyKey}#${index}`: stable; an idempotent transport gives it to the platform as its key. */
   key: string;
   conversationKey: string;
+  /** Empty only on a piece that carries parts and no text (a message of drawn parts alone). */
   text: string;
+  /**
+   * The message's parts this transport draws (`ChannelTransport.draws`), on its last piece only; the
+   * others have none. The parts it does not draw are in the text, as their fallbacks.
+   */
+  parts?: readonly MessagePart[];
   /** It may have been sent before. A transport that is not idempotent marks it for the reader. */
   possibleDuplicate: boolean;
 }
@@ -67,6 +80,11 @@ export interface OutboundPiece {
 export interface ChannelTransport {
   /** The platform drops a repeated send with the same key (Google Chat's `requestId`). */
   readonly idempotent: boolean;
+  /**
+   * The kinds of part it draws (`MessagePart.type`), which its `send` receives on a message's last
+   * piece. Every other part reaches it folded into the text as its fallback. Absent: it draws none.
+   */
+  readonly draws?: readonly string[];
   /** `text` as pieces the platform accepts (length limits), in order. Never empty for a non-empty text. */
   split(text: string): string[];
   /**
@@ -108,9 +126,10 @@ export class DeliveryError extends Error {
 /** `outbound.queue`: stores answers before they are sent, and delivers them. */
 export interface OutboundQueue {
   /**
-   * Stores `message`, split by its channel's transport, and resolves once it is stored: delivery
-   * happens after. The same `idempotencyKey` again changes nothing. Rejects when no transport is
-   * attached for `message.channel`.
+   * Stores `message`, cut by its channel's transport as `messagePieces` cuts it (the parts it does not
+   * draw folded into the text before the split, the ones it draws kept with the last piece, and sent
+   * with it), and resolves once it is stored: delivery happens after. The same `idempotencyKey` again
+   * changes nothing. Rejects when no transport is attached for `message.channel`.
    */
   enqueue(message: OutboundMessage): Promise<void>;
   /** A channel hands its transport while it runs; pending pieces for that channel start moving. */

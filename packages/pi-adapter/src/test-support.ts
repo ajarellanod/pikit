@@ -101,9 +101,8 @@ export function scriptedAgent(tools: AgentDefinition["tools"] = []): AgentDefini
 }
 
 type Result = AppEvents["agent.settled"] | AppEvents["agent.failed"];
-type AgentEvent = { [K in "agent.dispatched" | "agent.started" | "agent.settled" | "agent.failed"]: { name: K; payload: AppEvents[K] } }[
-  "agent.dispatched" | "agent.started" | "agent.settled" | "agent.failed"
-];
+type AgentEventName = "agent.dispatched" | "agent.started" | "agent.partial" | "agent.settled" | "agent.failed";
+type AgentEvent = { [K in AgentEventName]: { name: K; payload: AppEvents[K] } }[AgentEventName];
 
 export interface WorkerOptions {
   agents?: AgentDefinition[];
@@ -113,6 +112,8 @@ export interface WorkerOptions {
   db?(db: SqlDatabase): SqlDatabase;
   logger?: Logger;
   runtime?: Partial<DurableRuntimeOptions>;
+  /** Record `agent.partial` in `events` too. */
+  partials?: boolean;
 }
 
 /** A temporary SQLite file, removed by `dispose`. */
@@ -134,6 +135,8 @@ export async function openWorker(path: string, options: WorkerOptions = {}) {
       };
       pikit.on("agent.dispatched", (payload) => record({ name: "agent.dispatched", payload }));
       pikit.on("agent.started", (payload) => record({ name: "agent.started", payload }));
+      // Only when asked: whether a fast run commits a partial answer is pi-durable's timing.
+      if (options.partials === true) pikit.on("agent.partial", (payload) => record({ name: "agent.partial", payload }));
       pikit.on("agent.settled", (payload) => record({ name: "agent.settled", payload }));
       pikit.on("agent.failed", (payload) => record({ name: "agent.failed", payload }));
     },

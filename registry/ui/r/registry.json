@@ -106,6 +106,12 @@
       "description": "agents-live's section of the Settings dialog: Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live. Its settings come with the component (pikit add agents-live), stored by settings-store."
     },
     {
+      "name": "channel-google-chat-settings",
+      "type": "registry:file",
+      "title": "channel-google-chat-settings",
+      "description": "channel-google-chat's section of the Settings dialog: A Google Chat app of your own (a Workspace add-on) answers in each message's thread: Thinking… written as the model writes, tables and code as cards, photos and files read, questions asked with buttons and forms. On a server or on Cloudflare. Its settings come with the component (pikit add channel-google-chat), stored by settings-store."
+    },
+    {
       "name": "channel-web-settings",
       "type": "registry:file",
       "title": "channel-web-settings",

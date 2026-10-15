@@ -36,6 +36,15 @@ there.
   `conversations.registry` (a key's runtime conversation, resolve and reset, and the channel the
   conversation belongs to for good: `ConversationRef.channel`, which every run sees), `outbound.queue` with
   `ChannelTransport` and `DeliveryError`, `Feed` (what must not be missed, read with a cursor, K3).
+- Rich content: `InboundMessage.images` (a message's photos, dispatched as `AgentRequest.images`; an
+  `inbound.normalize` stage may drop them); parts (`AppMessageParts` by declaration merging,
+  `MessagePart` with its `fallback`, `OutboundMessage.parts`, `ChannelTransport.draws`), folded in one
+  place, `messagePieces`, by both delivery paths and outbound-durable: a part a transport does not draw
+  is its fallback text, a drawn one goes with the last piece, and an answer of parts and no text is
+  still delivered (`AgentResult.parts`, `RunSettlement.parts`); the `question` part (`question.ts`:
+  `questionProblem`, `questionPart`, `answerProblem`, `answerText`), vocabulary between the tool that
+  asks and the channels that draw it; `AdmitOptions.beforeDispatch` may return a promise, awaited
+  before dispatch; the `agent.partial` event (the answer as it is written, a notice for previews).
 - Platform: `http.route` (fetch handlers by `"METHOD /path"`, parameters and prefix keys such as
   `GET /admin/*`), `admin.auth` (whether a request is an operator's), `secrets`, `storage.sql`,
   `storage.kv`, `actor.mailbox` / `actor.inbox` (C2: `send`, `call` answered by `answer`, and `stream`
@@ -98,6 +107,9 @@ there.
   through an environment's shell against a remote, with real git's meaning; given the remote's
   credential, that it appears nowhere the agent can read. execution-local (the machine's git) and
   execution-do (bun and workerd) pass it.
+- A tool gives its run's answer parts with `withParts` (`@pikit/pi-adapter/tools`), collected in order
+  into `AgentResult.parts`; runtime-pi re-emits pi-durable's partial answer as `agent.partial`, at most
+  once per `partialEveryMs` (its config, default a second) per conversation, never after the run's end.
 - `agent.extension` (keyed): a component adds agent behaviour as a pi-durable extension (system
   prompt sections, hooks, tool wraps, tasks), from `@pikit/pi-adapter/extensions`; agents select
   them by name.
@@ -128,7 +140,15 @@ there.
   `channel-telegram-webhook` (Cloudflare: a Worker half and an object half, bot password and `/login`,
   self-registering webhook); both deliver through `startAnswerDelivery`, run a redelivered command
   once, and share their identical files (held by a test). The poller tries a failing update for 15
-  minutes, never skipping past it, then tells its sender. Routing: `router-basic`, `router-rules`.
+  minutes, never skipping past it, then tells its sender. `channel-google-chat` (a Chat app of your
+  own, built as a Workspace add-on; one code on both targets: in process on a server, a Worker half and
+  each conversation's object on Cloudflare): Google's ID token checked with WebCrypto, an answer in
+  each message's thread, a conversation per thread or per chat (a setting with its dashboard section),
+  "Thinking…" written into the answer as the model writes it, markdown as Chat text with tables, code
+  and images as cards, photos to the model, text files in the text and other files in the workspace,
+  quoted messages, spaces allowed before they are answered, several apps as instances, and the
+  agent's questions as buttons and forms, answered once and closed by a reset. Routing:
+  `router-basic`, `router-rules`.
   Delivery: `outbound-durable` (on `wakeups` on both targets: a retry is a timer on a server and the
   object's alarm on Cloudflare; transient failures never abandon, only an age of 24 hours does, also for a removed channel's pieces,
   which no transport sends).
@@ -152,6 +172,9 @@ there.
   `storage-kv-sql`, `secrets-env`, `secrets-workers`, `mailbox-local`, `wakeups-timers`,
   `actors-do` (mailbox, inbox and wakeups over one alarm; a stream is one RPC whose byte
   stream beats every `streamBeatMs` while it waits, so one nobody reads closes).
+- `tool-ask-user`: the `askUser` tool asks one question (confirm, select, multiselect, text, date)
+  and ends the run with it as a `question` part, never waiting; a channel that draws it shows buttons
+  or a form, any other its fallback text, and the answer comes back as a message.
 - Tools and execution: `tool-read`, `tool-write`, `tool-edit`, `tool-bash` (Pi's own), `tool-fetch`
   and `tool-websearch-brave` (their source in the component: the references for writing a tool),
   `tool-mcp` (remote MCP servers, with a deploy-time seed); each tool's `replay` is in its own source

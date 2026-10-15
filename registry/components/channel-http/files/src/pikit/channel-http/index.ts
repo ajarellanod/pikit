@@ -19,7 +19,8 @@
  *    (`route.resolve`, or the router's deny); no router installed is `500 no_route`.
  *
  * The POST then waits for the answer, up to `replyTimeoutMs`:
- * - `200 { requestId, text }`: the run answered it.
+ * - `200 { requestId, text }`: the run answered it. The answer's parts (a question a tool asked) are
+ *   in `text`, as their fallbacks: this channel draws none (`foldParts`).
  * - `202 { requestId }`: no answer in time, or the server is stopping. The answer still lands in
  *   the conversation's session; nothing is lost.
  * - `502 { requestId, error }`: the run failed. `409 { error: "aborted" }`: it was stopped.
@@ -47,7 +48,7 @@
  */
 
 import { type AppContext, defineComponent, Halt } from "@pikit/core";
-import { admitInbound, type AgentResult, type InboundMessage, type RunSettlement } from "@pikit/contracts";
+import { admitInbound, type AgentResult, foldParts, type InboundMessage, type RunSettlement } from "@pikit/contracts";
 import Type from "typebox";
 import { bearerToken, type Digest, digest, matches, MIN_TOKEN_LENGTH, TOKEN_SECRET } from "./auth.ts";
 import { CONVERSATION_ID, MESSAGE_ID, readMessageBody } from "./body.ts";
@@ -92,8 +93,9 @@ function segment(raw: string | undefined): string {
 }
 
 /** What a run's end means for one of its messages, as HTTP: the POST's answer, and the GET's. */
-function outcome(requestId: string, run: Pick<RunSettlement, "kind" | "text" | "error">): Response {
-  if (run.kind === "completed") return json(200, { requestId, text: run.text ?? "" });
+function outcome(requestId: string, run: Pick<RunSettlement, "kind" | "text" | "parts" | "error">): Response {
+  // Its parts as their fallbacks, after its text: HTTP draws none.
+  if (run.kind === "completed") return json(200, { requestId, text: foldParts({ text: run.text ?? "", ...(run.parts !== undefined && { parts: run.parts }) }).text });
   if (run.kind === "aborted") return json(409, { requestId, error: "aborted" });
   return json(502, { requestId, error: run.error?.code ?? "failed" });
 }

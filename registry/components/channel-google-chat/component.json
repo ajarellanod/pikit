@@ -1,0 +1,116 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "channel-google-chat",
+  "version": "0.0.0",
+  "title": "Google Chat: chat with your agent in Google Chat spaces, group chats and DMs",
+  "description": "A Google Chat app of your own (a Workspace add-on) answers in each message's thread: Thinking… written as the model writes, tables and code as cards, photos and files read, questions asked with buttons and forms. On a server or on Cloudflare.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": [
+      "secrets",
+      "conversations.registry",
+      "agent.runtime",
+      "agent.submissions",
+      "storage.kv",
+      "wakeups",
+      "actor.mailbox"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "outbound.queue",
+      "settings",
+      "workspace",
+      "execution",
+      "actor.inbox"
+    ]
+  },
+  "provides": [
+    "http.route"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "secrets",
+        "conversations.registry",
+        "agent.runtime",
+        "agent.submissions",
+        "storage.kv",
+        "wakeups"
+      ],
+      "optional": [
+        "outbound.queue",
+        "settings",
+        "workspace",
+        "execution",
+        "actor.inbox",
+        "actor.mailbox"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "secrets",
+        "actor.mailbox"
+      ],
+      "optional": [
+        "settings"
+      ]
+    }
+  },
+  "hooks": {
+    "doctor": "doctor.ts"
+  },
+  "settings": "settings",
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "GOOGLE_CHAT_SERVICE_ACCOUNT",
+      "secret": true,
+      "required": true,
+      "description": "The Chat app's service account JSON key, whole (Google Cloud console, IAM, Service accounts, Keys). The app calls the Chat API as it. A named app reads GOOGLE_CHAT_<NAME>_SERVICE_ACCOUNT."
+    },
+    {
+      "name": "GOOGLE_CHAT_PROJECT_NUMBER",
+      "secret": false,
+      "required": true,
+      "description": "The number of the Chat app's Google Cloud project: Google signs every event as service-<number>@gcp-sa-gsuiteaddons.iam.gserviceaccount.com."
+    },
+    {
+      "name": "GOOGLE_CHAT_AUDIENCE",
+      "secret": false,
+      "required": true,
+      "description": "The endpoint URL exactly as the Chat API's configuration has it (https://<your host>/google-chat): every event's token is for it."
+    },
+    {
+      "name": "GOOGLE_CHAT_ALLOWED_SPACES",
+      "secret": false,
+      "required": false,
+      "description": "The spaces the app answers (spaces/AAA, or their ids), separated by commas. Any other space is told it is not allowed, with its id to add here. Empty or unset: none yet (the app runs and tells each space its id). A named app reads GOOGLE_CHAT_<NAME>_ALLOWED_SPACES."
+    }
+  ]
+}

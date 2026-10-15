@@ -1,7 +1,9 @@
 // Public surface of @pikit/contracts (SPEC §3): the vocabulary components share. Types, identities,
 // names of events and pipelines, capability interfaces, two protocol functions (`admitInbound` in,
-// `startAnswerDelivery` out: the paths every channel must get right, written and tested once), the
-// check of what the contracts take as a JSON object (`isJsonObject`), the grammar of `http.route`
+// `startAnswerDelivery` out: the paths every channel must get right, written and tested once, with
+// `answerContent`, delivery's rule of what a run's answer is, for a channel to read rather than copy), how a
+// message's parts fold into its text for a transport (`foldParts`, `messagePieces`), the `question` part
+// shared by who asks and who draws it (`questionPart`, `answerText`), the check of what the contracts take as a JSON object (`isJsonObject`), the grammar of `http.route`
 // keys (`parseHttpRouteKey`, `matchesHttpRoute`) and the envelopes of an actor's call and stream
 // (`answerCall`, `callResult`, `answerStream`, `streamResult`), so that no provider has its own. No policy: what a protocol waits, retries and says
 // is its caller's, passed in. Each contract has a stability level (SPEC K8); the capabilities'
@@ -109,5 +111,9 @@ export type {
   PendingPiece,
 } from "./outbound.ts";
 export { answerKey, DeliveryError } from "./outbound.ts";
+export type { AppMessageParts, MessageContent, MessagePart } from "./parts.ts";
+export { foldParts, messagePieces } from "./parts.ts";
+export type { Question, QuestionAnswer, QuestionField, QuestionOption, QuestionPart, QuestionValue } from "./question.ts";
+export { answerProblem, answerText, QUESTION_FIELD_KINDS, QUESTION_FIELD_NAME, questionPart, questionProblem } from "./question.ts";
 export type { AnswerDelivery, AnswerDeliveryOptions, DeliveryPolicy } from "./delivery.ts";
-export { answersOnlyTheDashboard, DASHBOARD_REQUEST_PREFIX, isDashboardRequest, startAnswerDelivery } from "./delivery.ts";
+export { answerContent, answersOnlyTheDashboard, DASHBOARD_REQUEST_PREFIX, isDashboardRequest, startAnswerDelivery } from "./delivery.ts";

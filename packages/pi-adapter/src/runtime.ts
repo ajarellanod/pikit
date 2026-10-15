@@ -32,6 +32,10 @@
  *   it (pi-durable's `InputEntry`): one commit with the input, in the transcript for good. A run's
  *   tools, sections and hooks read `RUN_REQUESTS`: the run's inputs (`pi.live.run.inputs`) as they are
  *   when asked, each with the sender its entry carries.
+ * - **The answer as it is written** (`agent.partial`): pi-durable commits the response being generated to
+ *   the conversation's `pi.live` (`generation.message`, itself throttled by `progress.partialIntervalMs`);
+ *   the runtime re-emits its text from those commits, at most once per `partialEveryMs`, while the run
+ *   goes, and never once the commit that ends it was seen.
  *
  * Steps that touch one conversation (admissions, aborts, recoveries, settlements) run in that
  * conversation's line, one at a time, so a duplicate check and the submit after it never interleave,
@@ -157,6 +161,11 @@ export interface DurableRuntimeOptions {
   /** The clock pi-durable and the answers log use (epoch ms); workerd freezes `Date.now()` between I/O. */
   now?: () => number;
   /**
+   * `agent.partial` is emitted at most once per this many ms per conversation (default
+   * `PARTIAL_EVERY_MS`); `0`: at each of pi-durable's commits of the partial answer.
+   */
+  partialEveryMs?: number;
+  /**
    * For a host that keeps running only while an event is in progress (a Durable Object): called by
    * `whenIdle` when nothing is driven but live work waits for a time (a model retry's backoff, a
    * deferred response's poll, a compaction's retry). Those waits are in-process sleeps that die with the
@@ -252,6 +261,12 @@ const LIVE = "pi.live";
 /** The kind of the write that starts a run for inputs a failed run left queued (README.md, "Gaps"). */
 export const INBOX_KICK = "pikit.inbox-kick";
 
+/** How often `agent.partial` is emitted at most, per conversation, by default: a preview's pace, not a stream's. */
+export const PARTIAL_EVERY_MS = 1_000;
+
+/** What the runtime reads of a `pi.live` commit: the run and the response being written. */
+type LiveValue = { run?: { inputs?: number[] }; generation?: { message?: { content?: readonly { type: string; text?: unknown }[] } } };
+
 const DAY = 24 * 60 * 60 * 1_000;
 /** The answers log is pruned when the Harness opens, and at most this often after, when a run is logged. */
 const PRUNE_EVERY_MS = 60 * 60 * 1_000;
@@ -269,6 +284,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   const logger = events.logger;
   const registry = createRegistry();
   const now = options.now ?? Date.now;
+  const partialEveryMs = Math.max(0, options.partialEveryMs ?? PARTIAL_EVERY_MS);
   const keepMs = Math.max(1, options.keepSettledDays ?? 7) * DAY;
   const log = createAnswerLog(options.db);
   /** The log's tables, created once (reading `answers` does not need the Harness). */
@@ -301,6 +317,10 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   const queued = new Set<number>();
   /** Per placed input, the first input of its run (`pi.live.run.inputs[0]`): the one a run is named after. */
   const leadOf = new Map<number, number>();
+  /** Per input submission queued or placed, its request id: what names a run in `agent.partial`. */
+  const requestOf = new Map<number, string>();
+  /** Per conversation with a run going, the last `agent.partial`: its run, when, and its text. */
+  const partials = new Map<ConversationId, { requestId: string; at: number; text: string }>();
   /** Per request key, the status a submission was created with (set while `dispatch` submits it). */
   const admitting = new Map<string, SubmissionRecord["status"] | undefined>();
   /** Per request key, its run's announcement. */
@@ -470,6 +490,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     storage = undefined;
     busy.clear();
     queued.clear();
+    requestOf.clear();
+    partials.clear();
     // `whenIdle` waiting for a commit: none comes from a failed Harness.
     const waiters = commitWaiters;
     commitWaiters = [];
@@ -503,6 +525,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     for (const submission of inspection.submissions) {
       live.add(submission.conversationId);
       if (submission.type !== "input" || submission.requestId === undefined) continue;
+      requestOf.set(submission.id, submission.requestId);
       if (submission.status === "queued") {
         queued.add(submission.id);
         waiting.add(submission.conversationId);
@@ -552,10 +575,13 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
    * the Harness.
    */
   const observe = (changes: readonly CommitChange[]) => {
+    /** This commit's `pi.live` documents: the answers being written. */
+    const lives: [ConversationId, LiveValue | null][] = [];
     // The runs that start in this commit, first: a run's inputs are placed in the commit that starts it.
     for (const change of changes) {
       if (change.type !== "document" || change.record.kind !== LIVE || change.conversationId === undefined) continue;
-      const value = change.value as { run?: { inputs?: number[] } } | null;
+      const value = change.value as LiveValue | null;
+      lives.push([change.conversationId, value]);
       if (value?.run !== undefined) busy.add(change.conversationId);
       else busy.delete(change.conversationId);
       const inputs = value?.run?.inputs ?? [];
@@ -569,6 +595,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       if (record.type !== "input" || record.requestId === undefined) continue;
       const key = keyOf(record.conversationId, record.requestId);
       if (admitting.has(key) && admitting.get(key) === undefined) admitting.set(key, record.status);
+      if (record.status === "queued" || record.status === "placed") requestOf.set(record.id, record.requestId);
       if (record.status === "queued") {
         queued.add(record.id);
       } else if (record.status === "placed") {
@@ -576,15 +603,46 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         if (queued.delete(record.id) && (leadOf.get(record.id) ?? record.id) === record.id) startedFromQueue(record.conversationId, record.requestId);
       } else if (isSettledInput(record)) {
         queued.delete(record.id);
+        requestOf.delete(record.id);
         settled.set(record.conversationId, [...(settled.get(record.conversationId) ?? []), record]);
       }
     }
     for (const [id, records] of settled) {
       void inLine(id, async () => settle(await harnessOf(events), id, runsOf(records), [])).catch(logFailure("a run ended but it could not be logged"));
     }
+    for (const [id, value] of lives) partial(id, value);
     const waiters = commitWaiters;
     commitWaiters = [];
     for (const wake of waiters) wake();
+  };
+
+  /**
+   * `agent.partial` from a commit of the conversation's `pi.live`: the text of the response being
+   * written, when it changed and `partialEveryMs` passed since the run's last one. A commit with no run
+   * ends the run's: an emit still on its way is dropped, so none follows the run's end (whose
+   * announcement comes after this commit). Never awaited by the run; a listener's failure is logged.
+   */
+  const partial = (id: ConversationId, value: LiveValue | null): void => {
+    const lead = value?.run?.inputs?.[0];
+    const requestId = lead === undefined ? undefined : requestOf.get(lead);
+    if (requestId === undefined) {
+      partials.delete(id);
+      return;
+    }
+    const content = value?.generation?.message?.content ?? [];
+    const text = content.flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : [])).join("");
+    const last = partials.get(id);
+    const at = now();
+    if (text === "" || (last?.requestId === requestId && (last.text === text || at - last.at < partialEveryMs))) return;
+    partials.set(id, { requestId, at, text });
+    const ctx = runs.get(keyOf(id, requestId))?.ctx ?? events;
+    void track(
+      refOf(id).then(async (ref) => {
+        // The run ended meanwhile: too late for a preview.
+        if (ref === undefined || partials.get(id)?.requestId !== requestId) return;
+        await emit(ctx, "agent.partial", { conversation: ref, requestId, text });
+      }),
+    ).catch(logFailure("agent.partial could not be emitted"));
   };
 
   /** A queued request's run started: `agent.started`, after the announcements of its admission. */
@@ -609,7 +667,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   };
 
   /** Emit, logging a listener's failure: an event never fails the run that announces it. */
-  const emit = async <K extends "agent.started" | "agent.settled" | "agent.failed">(ctx: AppContext, name: K, payload: AppEvents[K]): Promise<void> => {
+  const emit = async <K extends "agent.started" | "agent.partial" | "agent.settled" | "agent.failed">(ctx: AppContext, name: K, payload: AppEvents[K]): Promise<void> => {
     try {
       await ctx.emit(name, payload);
     } catch (error) {
@@ -1144,6 +1202,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         if (harness !== undefined) await harness.close(toChord(ctx));
         busy.clear();
         queued.clear();
+        requestOf.clear();
+        partials.clear();
       })();
       const done: Promise<void> = stopping
         .catch(() => {})

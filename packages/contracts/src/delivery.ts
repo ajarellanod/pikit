@@ -7,7 +7,10 @@
  *   belongs to, or `undefined` for another channel's;
  * - `transports`: each instance's `ChannelTransport` (split, send one piece with its key, classify a
  *   failure into a `DeliveryError`);
- * - `text(answer)`: what the user is told about a run, in the channel's words, or nothing;
+ * - `text(answer)`: what the user is told about a run, in the channel's words, or nothing; a
+ *   completed run's parts (`RunSettlement.parts`) go with it, folded into it as their fallbacks
+ *   where the transport does not draw them (`messagePieces`), so an answer of parts and no text is
+ *   still delivered;
  * - `policy`: its waits and budgets, as values in its own source (nothing here chooses them).
  *
  * What it gets, the same on every target:
@@ -74,6 +77,7 @@
 import { type AppContext, BACKGROUND_CONTEXT } from "@pikit/core";
 import type { Feed, FeedItem } from "./feed.ts";
 import { answerKey, type ChannelTransport, DeliveryError, type OutboundQueue } from "./outbound.ts";
+import { type MessageContent, messagePieces } from "./parts.ts";
 import type { KeyValueStore } from "./storage.ts";
 import type { RunSettlement } from "./submissions.ts";
 import type { Wakeups } from "./wakeups.ts";
@@ -124,7 +128,11 @@ export interface AnswerDeliveryOptions {
   transports: ReadonlyMap<string, ChannelTransport>;
   /** The instance whose conversation `conversationKey` is, or `undefined` when it is not this channel's. */
   route(conversationKey: string): string | undefined;
-  /** What the user is told about a run, or `undefined` to tell nothing (an aborted run, an empty answer). */
+  /**
+   * What the user is told about a run, or `undefined` to tell nothing (an aborted run, an empty answer).
+   * A completed run's parts are delivered with it, and also when it tells nothing: an answer is passed
+   * over only when it has neither.
+   */
   text(answer: RunSettlement): string | undefined;
   /** `outbound.queue`, when installed: answers are enqueued, and it sends them. */
   queue?: OutboundQueue | undefined;
@@ -183,19 +191,29 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
   const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
   /** Delivers one answer of `instance`: enqueued, or each piece sent. */
-  const deliverOne = async (fact: RunSettlement, instance: string, text: string, transport: ChannelTransport, budget: { left: number }, run: AppContext, signal: AbortSignal): Promise<Outcome> => {
+  const deliverOne = async (
+    fact: RunSettlement,
+    instance: string,
+    content: MessageContent,
+    transport: ChannelTransport,
+    budget: { left: number },
+    run: AppContext,
+    signal: AbortSignal,
+  ): Promise<Outcome> => {
     const key = answerKey(fact.conversation, fact.requestId);
     if ((await store.get(doneMark(key))) !== undefined) return { kind: "done" };
     if (queue !== undefined) {
       try {
-        await queue.enqueue({ idempotencyKey: key, channel: instance, conversationKey: fact.conversation.key, text });
+        // The queue cuts it with the same `messagePieces`, through the transport attached for `instance`.
+        await queue.enqueue({ idempotencyKey: key, channel: instance, conversationKey: fact.conversation.key, ...content });
       } catch (error) {
         return { kind: "failed", error };
       }
       await store.set(doneMark(key), 0);
       return { kind: "done" };
     }
-    const pieces = transport.split(text);
+    // The parts it does not draw folded into the text before the split; those it draws on the last piece.
+    const pieces = messagePieces(transport, content);
     for (const [index, piece] of pieces.entries()) {
       const mark = pieceMark(key, index);
       const state = await store.get<string>(mark);
@@ -209,7 +227,7 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
       const timer = setTimeout(() => timeout.abort(new DOMException(`the send took longer than ${policy.sendTimeoutMs} ms`, "TimeoutError")), policy.sendTimeoutMs);
       try {
         await transport.send(
-          { key: `${key}#${index}`, conversationKey: fact.conversation.key, text: piece, possibleDuplicate: state === SENDING },
+          { key: `${key}#${index}`, conversationKey: fact.conversation.key, ...piece, possibleDuplicate: state === SENDING },
           AbortSignal.any([signal, timeout.signal]),
         );
       } catch (error) {
@@ -263,17 +281,17 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
     const settled = items.map(() => false);
     /** Each conversation's answers in this window, in the feed's order: indexes into `items`. */
     const byConversation = new Map<string, number[]>();
-    const routed = new Map<number, { instance: string; text: string; transport: ChannelTransport }>();
+    const routed = new Map<number, { instance: string; content: MessageContent; transport: ChannelTransport }>();
     for (const [index, { fact }] of items.entries()) {
       const instance = answersOnlyTheDashboard(fact) ? undefined : options.route(fact.conversation.key);
       const transport = instance === undefined ? undefined : transports.get(instance);
-      const text = transport === undefined ? undefined : options.text(fact);
+      const content = transport === undefined ? undefined : answerContent(fact, options.text(fact));
       // The dashboard's run, another channel's conversation, a bot that does not run, or nothing to tell: passed over.
-      if (instance === undefined || transport === undefined || text === undefined) {
+      if (instance === undefined || transport === undefined || content === undefined) {
         settled[index] = true;
         continue;
       }
-      routed.set(index, { instance, text, transport });
+      routed.set(index, { instance, content, transport });
       byConversation.set(fact.conversation.key, [...(byConversation.get(fact.conversation.key) ?? []), index]);
     }
 
@@ -287,8 +305,8 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
         if (lane !== undefined && lane.notBefore > now) return void later(lane.notBefore);
         for (const index of indexes) {
           const { fact } = items[index] as FeedItem<RunSettlement>;
-          const { instance, text, transport } = routed.get(index) as { instance: string; text: string; transport: ChannelTransport };
-          const outcome = await deliverOne(fact, instance, text, transport, budget, run, signal);
+          const { instance, content, transport } = routed.get(index) as { instance: string; content: MessageContent; transport: ChannelTransport };
+          const outcome = await deliverOne(fact, instance, content, transport, budget, run, signal);
           if (outcome.kind === "cut") {
             cut = true;
             return;
@@ -380,6 +398,18 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
       for (const instance of transports.keys()) await queue?.detach(instance, signal);
     },
   };
+}
+
+/**
+ * What a run's answer is: the channel's text (`said`, `undefined` for nothing) and a completed run's
+ * parts; `undefined` when it has neither, and answer delivery sends nothing. A failed or aborted run's
+ * parts are not its answer. Exported so a channel that acts on "nothing to send" (deleting a
+ * placeholder) decides it as delivery does, never by a copy of this rule.
+ */
+export function answerContent(fact: Pick<RunSettlement, "kind" | "parts">, said: string | undefined): MessageContent | undefined {
+  const parts = fact.kind === "completed" ? (fact.parts ?? []) : [];
+  if (said === undefined && parts.length === 0) return undefined;
+  return { text: said ?? "", ...(parts.length > 0 && { parts }) };
 }
 
 /** How runs are asked for: `wakeups`, or a timer in this process. One request; a later `at` replaces it. */
