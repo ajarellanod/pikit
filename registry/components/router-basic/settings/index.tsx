@@ -6,8 +6,9 @@
  *
  * What runtime-pi's schema says is all it reads: the agents (its properties), each one's definition
  * (the `default`s), the models the installed providers have and the tools and skills the definition
- * names (the options). It stores only what differs from the definition, so "Use the definition" takes an override
- * away.
+ * names (the options). It stores only what differs from the definition, so "Use default" takes an override
+ * away. Each tool and skill says what it does in one line: `GET /admin/api/agents`' `tools` and `skills`
+ * (a tool's `summary`, written where its component provides it; a skill's description).
  */
 
 import { User } from "iconoir-react";
@@ -15,6 +16,7 @@ import { useState } from "react";
 import { Button } from "@/components/bui/Button";
 import { Switch } from "@/components/bui/Switch";
 import { ErrorNote } from "@/components/pikit/error-note";
+import { type ApiAgents, useApi } from "@/lib/api";
 import { PromptEditor, SelectControl, SettingsHeading, SettingsRow, storedOf } from "@/components/pikit/settings";
 import { assistantName } from "@/lib/names";
 import { choicesOf, defineSettings, type SettingsValue, useSettings } from "@/lib/settings";
@@ -22,11 +24,18 @@ import { choicesOf, defineSettings, type SettingsValue, useSettings } from "@/li
 /** One agent's override (runtime-pi's settings): absent, the definition's. */
 type Override = { systemPrompt?: string; model?: string; tools?: string[]; skills?: string[] };
 
+/** What `name` does, in one line (`ApiAgents.tools` or `skills`); `undefined` until read, or when it says nothing. */
+const summaryIn = (list: readonly { name: string; summary: string }[] | undefined, name: string) => {
+  const summary = list?.find((each) => each.name === name)?.summary;
+  return summary === undefined || summary === "" ? undefined : summary;
+};
+
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((each) => b.includes(each));
 
 function AgentSettings() {
   const router = useSettings("router-basic");
   const runtime = useSettings("runtime-pi");
+  const catalog = useApi<ApiAgents>("/agents").data;
   const [editing, setEditing] = useState<string>();
   const [failed, setFailed] = useState<Error>();
   const saving = (work: Promise<void>) => {
@@ -79,7 +88,7 @@ function AgentSettings() {
         </div>
       )}
       <SettingsHeading>Routing</SettingsHeading>
-      <SettingsRow label="Default agent" description="Answers every message no other rule routed. Its default is the config's defaultAgent." htmlFor="settings-default-agent">
+      <SettingsRow label="Default agent" description="Answers every message no Routing rule sends elsewhere." htmlFor="settings-default-agent">
         <SelectControl
           id="settings-default-agent"
           label="Default agent"
@@ -111,7 +120,7 @@ function AgentSettings() {
             aside={
               Object.keys(override).length > 0 && (
                 <Button size="sm" variant="quiet" disabled={runtime.saving} onClick={() => saving(saveOverride({}))}>
-                  Use the definition
+                  Use default
                 </Button>
               )
             }
@@ -137,7 +146,7 @@ function AgentSettings() {
               label="Model"
               value={override.model ?? definition.model}
               disabled={runtime.saving}
-              options={models.map((model) => ({ value: model, label: model === definition.model ? `${model} (the definition's)` : model }))}
+              options={models.map((model) => ({ value: model, label: model === definition.model ? `${model} (default)` : model }))}
               onChange={(model) => saving(saveOverride({ ...override, model }))}
             />
           </SettingsRow>
@@ -145,7 +154,7 @@ function AgentSettings() {
             <>
               <SettingsHeading>Tools</SettingsHeading>
               {toolOptions.map((tool) => (
-                <SettingsRow key={tool} label={tool} description={tools.includes(tool) ? "The agent may call it." : "Off: the agent does not have it."}>
+                <SettingsRow key={tool} label={tool} description={summaryIn(catalog?.tools, tool) ?? (tools.includes(tool) ? "The agent may call it." : "Off: the agent does not have it.")}>
                   <Switch
                     checked={tools.includes(tool)}
                     label={tool}
@@ -159,7 +168,7 @@ function AgentSettings() {
             <>
               <SettingsHeading>Skills</SettingsHeading>
               {skillOptions.map((skill) => (
-                <SettingsRow key={skill} label={skill} description={skills.includes(skill) ? "The agent knows it, and loads it when a task needs it." : "Off: the agent does not know it."}>
+                <SettingsRow key={skill} label={skill} description={summaryIn(catalog?.skills, skill) ?? (skills.includes(skill) ? "The agent knows it, and loads it when a task needs it." : "Off: the agent does not know it.")}>
                   <Switch
                     checked={skills.includes(skill)}
                     label={skill}

@@ -2,7 +2,8 @@
  * agents-live's section of the Settings dialog, Agents (features/settings.md, "Multi-agent"): the
  * agents an operator made (agents-live's settings: one key per agent), created, edited and removed
  * here, live; and the project's own agents (`src/agents/`), listed read-only, their prompt, model and
- * tools changed in Agent (router-basic's section).
+ * tools changed in Agent (router-basic's section). Each tool and skill says what it does in one line
+ * (`GET /admin/api/agents`' `tools` and `skills`).
  *
  * What agents-live's schema says is all it offers: the models the installed providers have, the
  * installed tools and extensions, the project's skills (each agent's `patternProperties`), and no code agent's name
@@ -14,6 +15,7 @@ import { useState } from "react";
 import { Button } from "@/components/bui/Button";
 import { Switch } from "@/components/bui/Switch";
 import { ErrorNote } from "@/components/pikit/error-note";
+import { type ApiAgents, type ApiSummary, useApi } from "@/lib/api";
 import { SelectControl, SettingsHeading, SettingsRow } from "@/components/pikit/settings";
 import { assistantName } from "@/lib/names";
 import { choicesOf, defineSettings, type JsonSchema, type SettingsValue, useOpenSettingsSection, useSettings } from "@/lib/settings";
@@ -30,7 +32,14 @@ type Draft = { original?: string; name: string; fields: Fields };
 
 const field = "h-8 w-full rounded-control bg-surface px-2.5 text-[13px] text-ink shadow-btn outline-none transition-shadow duration-100 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]";
 
+/** What `name` does, in one line (`ApiAgents.tools` or `skills`); `undefined` until read, or when it says nothing. */
+const summaryIn = (list: readonly ApiSummary[] | undefined, name: string) => {
+  const summary = list?.find((each) => each.name === name)?.summary;
+  return summary === undefined || summary === "" ? undefined : summary;
+};
+
 function Editor({ draft, schema, taken, saving, onSave, onCancel }: { draft: Draft; schema: JsonSchema; taken: readonly string[]; saving: boolean; onSave: (draft: Draft) => void; onCancel: () => void }) {
+  const catalog = useApi<ApiAgents>("/agents").data;
   const [name, setName] = useState(draft.name);
   const [fields, setFields] = useState<Fields>(draft.fields);
   const properties = schema.properties ?? {};
@@ -78,7 +87,7 @@ function Editor({ draft, schema, taken, saving, onSave, onCancel }: { draft: Dra
         <>
           <SettingsHeading>Tools</SettingsHeading>
           {tools.map((tool) => (
-            <SettingsRow key={tool} label={tool} description={fields.tools?.includes(tool) ? "The agent may call it." : "Off: the agent does not have it."}>
+            <SettingsRow key={tool} label={tool} description={summaryIn(catalog?.tools, tool) ?? (fields.tools?.includes(tool) ? "The agent may call it." : "Off: the agent does not have it.")}>
               <Switch checked={fields.tools?.includes(tool) === true} label={tool} onChange={(on) => set({ tools: toggle(fields.tools ?? [], tools, tool, on) })} />
             </SettingsRow>
           ))}
@@ -98,7 +107,7 @@ function Editor({ draft, schema, taken, saving, onSave, onCancel }: { draft: Dra
         <>
           <SettingsHeading>Skills</SettingsHeading>
           {skills.map((skill) => (
-            <SettingsRow key={skill} label={skill} description={fields.skills?.includes(skill) ? "The agent knows it, and loads it when a task needs it." : "Off: the agent does not know it."}>
+            <SettingsRow key={skill} label={skill} description={summaryIn(catalog?.skills, skill) ?? (fields.skills?.includes(skill) ? "The agent knows it, and loads it when a task needs it." : "Off: the agent does not know it.")}>
               <Switch checked={fields.skills?.includes(skill) === true} label={skill} onChange={(on) => set({ skills: toggle(fields.skills ?? [], skills, skill, on) })} />
             </SettingsRow>
           ))}

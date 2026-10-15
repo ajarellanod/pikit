@@ -40,8 +40,15 @@ It refuses to start when a rule names an agent that is not an `agent.definition`
 ## Rules from the dashboard
 
 With `settings` installed (settings-store, which comes with the dashboard), the rules are also a
-setting: an operator edits them in Settings, Routing (an ordered list: the match fields, then an agent
-or deny with a reason), and they apply from the next message, with no deploy. The config's `rules` are
+setting: an operator edits them in Settings, Routing, and they apply from the next message, with no
+deploy. Each rule reads as a sentence ("Messages from [web] in chat [...] from sender [...] go to
+[Researcher]", or "are refused", with a reason for the log): the channel one of the App's (its
+`channel-*` components and their accounts) or typed, the chat and the sender added only when wanted;
+rules are dragged or moved up and down; a fixed last line says where everything else goes (the
+default agent, set in Agent). Under a rule, what is wrong with it: no agent chosen, a rule an earlier
+one always takes first. Where the web chat lets users pick an assistant, its rules say that the
+pick wins. "Use default" goes back to the config's rules. The section's logic is `settings/rules.ts`,
+tested by the repository's `scripts/routing-settings.test.ts`. The config's `rules` are
 the default, what the project deploys with; the operator's replace them whole, validated as the
 config's are (a typo is refused). Settings that cannot be read leave the config's, logged.
 
