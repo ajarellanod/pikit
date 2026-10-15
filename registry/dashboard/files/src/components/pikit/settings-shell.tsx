@@ -83,14 +83,14 @@ export function SettingsNav<T extends SettingsEntry>({ choice, onChoose, classNa
   const groups = [...new Set(shown.map((section) => section.group))];
   return (
     <nav aria-label="Settings sections" className={`flex shrink-0 flex-col gap-1 overflow-y-auto border-b border-line bg-canvas p-3 sm:max-h-none sm:w-64 sm:border-r sm:border-b-0 ${className}`}>
-      <div className="flex h-9 shrink-0 items-center gap-2 rounded-control bg-surface px-2.5 shadow-btn focus-within:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]">
+      <div className="control flex shrink-0 items-center gap-2 pl-2.5">
         <Search width={15} height={15} strokeWidth={2} className="shrink-0 text-ink-3" />
         <input
           value={choice.query}
           onChange={(event) => choice.setQuery(event.target.value)}
           placeholder="Search"
           aria-label="Search the settings"
-          className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-ink-3"
+          className="h-full min-w-0 flex-1 bg-transparent text-ink outline-none"
         />
       </div>
       {groups.map((group) => (
@@ -155,7 +155,7 @@ export function SettingsPanels<T extends SettingsEntry>({
       type="button"
       aria-label={closeLabel}
       onClick={onClose}
-      className={`z-10 flex size-8 shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink ${className}`}
+      className={`btn btn-ghost btn-icon z-10 text-ink-3 hover:text-ink ${className}`}
     >
       <Xmark width={18} height={18} strokeWidth={2} />
     </button>
@@ -166,7 +166,7 @@ export function SettingsPanels<T extends SettingsEntry>({
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-canvas pr-2 pl-4 sm:hidden">
           <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{title}</span>
           {/* focused when the modal opens on a phone: shaded, not ringed (the page's ring is unlayered: `!`) */}
-          {close("focus-visible:rounded-full! focus-visible:outline-none! focus-visible:bg-hover-2 focus-visible:text-ink")}
+          {close("focus-visible:outline-none! focus-visible:bg-(--control-hover) focus-visible:text-ink")}
         </div>
       )}
       <SettingsNav choice={choice} onChoose={onChoose} className={navClassName} />

@@ -2,37 +2,30 @@ import type { ButtonHTMLAttributes } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-const filledShadow = "shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]";
-
-/* Pill-shaped by default: the app's core button style. Explicit symmetric
- * padding (not a fixed height) so the top/bottom spacing is always equal. */
-export const buttonVariants = cva(
-  `inline-flex items-center justify-center font-medium select-none
-   transition-[transform,background-color,opacity] duration-150 ease-out
-   active:scale-[0.96] disabled:opacity-50 disabled:pointer-events-none`,
-  {
-    variants: {
-      variant: {
-        /* disabled: a quiet well, not a dimmed slab (in dark mode half an ink fill reads as a heavy grey block) */
-        primary: `bg-ink text-canvas hover:opacity-90 dark:bg-ink dark:text-canvas ${filledShadow} disabled:bg-hover-2 disabled:text-ink-3 disabled:opacity-100 disabled:shadow-[inset_0_0_0_1px_var(--line)]`,
-        secondary: "bg-surface text-ink shadow-btn hover:bg-inset aria-expanded:bg-hover",
-        ghost: "bg-hover-2 text-ink hover:bg-line-strong",
-        accent: `bg-accent-blue text-white hover:bg-accent-ink ${filledShadow}`,
-        danger: `bg-red text-white hover:brightness-95 ${filledShadow}`,
-        /* transparent until hovered: for dense toolbars/action rows */
-        quiet: "text-ink hover:bg-hover",
-      },
-      size: {
-        /* compact toolbar pill: fixed height, lighter weight */
-        xs: "h-7 rounded-full px-2.5 text-[12px] font-normal leading-none gap-1",
-        /* canonical action pill: 27px tall, roomy sides */
-        sm: "h-[27px] px-3 text-[13px] leading-none rounded-full gap-1.5",
-        md: "px-4 py-[9px] text-sm leading-none rounded-full gap-2",
-      },
+/*
+ * A button on the shared `.btn` classes (index.css): the controls' height (32px, 36px on touch) and
+ * radius (8px), so a button beside an input is as tall as it. `primary` is ink, `secondary` an outline,
+ * `ghost` and `quiet` only a hover; `sm` is `md` (one height for every control), `xs` the dense one.
+ */
+export const buttonVariants = cva("btn", {
+  variants: {
+    variant: {
+      primary: "btn-primary",
+      secondary: "btn-outline",
+      ghost: "btn-ghost",
+      accent: "btn-accent",
+      danger: "btn-danger",
+      /* transparent until hovered, in the ink of the text around it: dense toolbars, a heading's aside */
+      quiet: "btn-ghost text-ink-2 hover:text-ink",
     },
-    defaultVariants: { variant: "secondary", size: "md" },
+    size: {
+      xs: "btn-xs",
+      sm: "",
+      md: "",
+    },
   },
-);
+  defaultVariants: { variant: "secondary", size: "md" },
+});
 
 export type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>;
 

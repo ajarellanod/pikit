@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
-import { StatusPill } from "@/components/bui/StatusPill";
+import { Badge } from "@/components/bui/Badge";
 import { ConversationView } from "@/components/pikit/conversation";
 import { ErrorNote } from "@/components/pikit/error-note";
 import type { ChatConversation } from "@/lib/chat-api";
@@ -77,12 +77,12 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
       actions={(contextButton) =>
         conversation !== undefined && (
           <TabActions>
-            {conversation.archived && <StatusPill tone="neutral">Archived</StatusPill>}
+            {conversation.archived && <Badge>Archived</Badge>}
             {contextButton}
             <ActionsMenu
               actions={menu(conversation, reloadSummary)}
               label="Conversation actions"
-              className="size-7 rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink aria-expanded:bg-hover-2 aria-expanded:text-ink"
+              className="btn btn-ghost btn-icon size-7 text-ink-3 hover:text-ink aria-expanded:text-ink"
             />
           </TabActions>
         )

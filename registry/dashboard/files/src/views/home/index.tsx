@@ -9,7 +9,7 @@
 
 import { ChatLines, Cloud, Cpu, Cube, Dashboard, Database, GitFork, Home, NavArrowRight, Sparks, Tools } from "iconoir-react";
 import { type ReactNode, useState } from "react";
-import { ValuePill } from "@/components/bui/Chip";
+import { Badge } from "@/components/bui/Badge";
 import EmptyState from "@/components/bui/EmptyState";
 import LoadingState from "@/components/bui/LoadingState";
 import { Page, PageLoading, Section } from "@/components/bui/Page";
@@ -46,12 +46,12 @@ function AgentCard({ agent }: { agent: ApiAgent }) {
         </span>
         {agent.steward && (
           <span title="The project's steward: it knows what the project is made of, and operators ask it to change it">
-            <ValuePill tone="accent">steward</ValuePill>
+            <Badge tone="accent">steward</Badge>
           </span>
         )}
         {agent.live === true && (
           <span title="Made in the dashboard: it is data, not the project's code">
-            <ValuePill>live</ValuePill>
+            <Badge>live</Badge>
           </span>
         )}
       </div>

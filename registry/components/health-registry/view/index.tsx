@@ -6,12 +6,12 @@
 
 import { Activity, Clock, Cube, InfoCircle, ShieldCheck } from "iconoir-react";
 import { useState } from "react";
-import { ValuePill } from "@/components/bui/Chip";
+import { Badge } from "@/components/bui/Badge";
 import EmptyState from "@/components/bui/EmptyState";
-import { FilterChips, type PillTone, StatePill } from "@/components/bui/FilterTable";
+import { FilterChips, type PillTone } from "@/components/bui/FilterTable";
 import { Page, PageLoading, Section } from "@/components/bui/Page";
 import RecordsTable, { type RecordColumn, RecordMark, RecordName } from "@/components/bui/RecordsTable";
-import { StatusPill } from "@/components/bui/StatusPill";
+import { StatusDot } from "@/components/bui/StatusDot";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { useApi } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
@@ -62,11 +62,11 @@ function HealthPage() {
         <>
           <RecordMark name={row.name} />
           <RecordName>{row.name}</RecordName>
-          {row.essential && <ValuePill className="ml-1.5 shrink-0">essential</ValuePill>}
+          {row.essential && <Badge className="ml-1.5">essential</Badge>}
         </>
       ),
     },
-    { key: "status", label: "Status", icon: <Activity />, width: 140, sort: (a, b) => RANK[a.status] - RANK[b.status], cell: (row) => <StatePill tone={TONE[row.status]}>{row.status}</StatePill> },
+    { key: "status", label: "Status", icon: <Activity />, width: 140, sort: (a, b) => RANK[a.status] - RANK[b.status], cell: (row) => <StatusDot tone={TONE[row.status]}>{row.status}</StatusDot> },
     { key: "reason", label: "Why", icon: <InfoCircle />, width: 360, muted: (row) => row.reason === undefined, title: (row) => row.reason, cell: (row) => row.reason ?? "—" },
     { key: "since", label: "Since", icon: <Clock />, width: 160, sort: (a, b) => a.since - b.since, cell: (row) => <span className="text-ink-2">{formatAgo(row.since, data.now)}</span> },
   ];
@@ -75,12 +75,12 @@ function HealthPage() {
     <Page
       eyebrow="Health"
       title={`The App is ${data.status}`}
-      aside={<StatusPill tone={data.status === "up" ? "green" : data.status === "degraded" ? "orange" : "red"}>{data.status}</StatusPill>}
+      aside={<StatusDot tone={data.status === "up" ? "green" : data.status === "degraded" ? "orange" : "red"} className="text-[14px]">{data.status}</StatusDot>}
       description={
         <>
           What each component reported last. An essential component (
-          {data.essential.length === 0 ? "none is" : data.essential.map((name) => <ValuePill key={name}>{name}</ValuePill>)}) down for{" "}
-          <ValuePill>{Math.round(data.graceMs / 1000)} s</ValuePill> makes the App down, and its <code className="font-mono text-[12.5px]">/health</code> fails so that the process is
+          {data.essential.length === 0 ? "none is" : data.essential.map((name) => <Badge key={name} className="mx-0.5">{name}</Badge>)}) down for{" "}
+          <Badge className="mx-0.5">{Math.round(data.graceMs / 1000)} s</Badge> makes the App down, and its <code className="font-mono text-[12.5px]">/health</code> fails so that the process is
           restarted; anything else down or degraded makes it degraded.
           {data.downVerdicts > 0 &&
             ` The App was found down ${data.downVerdicts} time(s) in a row and the restarts did not fix it: the grace grew, so an outage outside it restarts it less often.`}

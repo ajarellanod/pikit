@@ -107,7 +107,7 @@ function WebChatSettings() {
           !isDefault &&
           isSignUp(section.defaults.signUp) && (
             <Button size="sm" variant="quiet" disabled={settings.saving} onClick={() => save(section.defaults.signUp as SignUp)}>
-              Use the config's
+              Use default
             </Button>
           )
         }
@@ -136,9 +136,9 @@ function WebChatSettings() {
             rows={5}
             spellCheck={false}
             placeholder={"ana@example.com\n@example.com"}
-            className="min-h-28 w-full resize-y rounded-card bg-surface px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink shadow-btn outline-none transition-shadow duration-100 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
+            className="control min-h-28 w-full resize-y font-mono text-[12.5px] leading-relaxed"
           />
-          <div className="flex min-h-[27px] items-center gap-2">
+          <div className="flex min-h-(--control-h) items-center gap-2">
             <span className={`min-w-0 flex-1 truncate text-[12.5px] ${problem === undefined ? "text-ink-3" : "text-red"}`}>{problem ?? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}`}</span>
             {changed && (
               <>
@@ -160,7 +160,7 @@ function WebChatSettings() {
               JSON.stringify(visibility) !== JSON.stringify(section.defaults.visibility) &&
               isVisibility(section.defaults.visibility) && (
                 <Button size="sm" variant="quiet" disabled={settings.saving} onClick={() => store({ visibility: section.defaults.visibility })}>
-                  Use the config's
+                  Use default
                 </Button>
               )
             }
@@ -190,7 +190,7 @@ function WebChatSettings() {
               <Switch checked={picked.includes(agent.name)} label={agent.name} onChange={(on) => pick(agent.name, on)} />
             </SettingsRow>
           ))}
-          {choices.length > 0 && picked.length === 0 && <p className="pt-2 text-[12.5px] text-ink-3">None picked: users get no choice, and the router decides.</p>}
+          {choices.length > 0 && <p className="pt-2 text-[12.5px] text-ink-3">{picked.length === 0 ? "None picked: users get no choice, and Routing decides." : "A user's pick wins over Routing's rules."}</p>}
         </>
       )}
     </div>

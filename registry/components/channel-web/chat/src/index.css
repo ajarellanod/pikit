@@ -69,6 +69,19 @@
   --shadow-raised: 0 0 0 1px var(--line), var(--shadow-md);
   --shadow-overlay: 0 0 0 1px var(--line), var(--shadow-lg);
   --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.12);
+  /* a table's or a list's shell: its border is the line, this only lifts it a little */
+  --shadow-table: 0 1px 2px oklch(0 0 0 / 0.06);
+
+  /* controls (the `.control`, `.btn`, `.switch` and `.badge` classes below): one height, one radius */
+  --control-h: 32px;
+  --control-border: oklch(0.885 0.006 264);
+  --control-bg: var(--surface);
+  --control-hover: var(--hover);
+  --control-shadow: 0 1px 2px oklch(0 0 0 / 0.05);
+  --control-focus: var(--ink-3);
+  --control-ring: color-mix(in oklch, var(--ink-3) 26%, transparent);
+  --control-lift: inset 0 1px 0 oklch(1 0 0 / 0.16), 0 1px 2px oklch(0 0 0 / 0.14);
+  --switch-off: oklch(0.87 0.007 264);
 
   color-scheme: light;
 }
@@ -113,6 +126,16 @@
   --shadow-raised: 0 0 0 1px oklch(1 0 0 / 0.13), 0 2px 10px oklch(0 0 0 / 0.22);
   --shadow-overlay: 0 0 0 1px oklch(1 0 0 / 0.15), 0 8px 28px oklch(0 0 0 / 0.34);
   --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-table: 0 1px 2px oklch(0 0 0 / 0.16);
+
+  --control-border: oklch(0.355 0.007 264);
+  --control-bg: oklch(1 0 0 / 0.035);
+  --control-hover: oklch(1 0 0 / 0.07);
+  --control-shadow: 0 1px 2px oklch(0 0 0 / 0.24);
+  --control-focus: var(--ink-3);
+  --control-ring: color-mix(in oklch, var(--ink-3) 30%, transparent);
+  --control-lift: inset 0 1px 0 oklch(1 0 0 / 0.2), 0 1px 2px oklch(0 0 0 / 0.3);
+  --switch-off: oklch(0.42 0.008 264);
 
   color-scheme: dark;
 }
@@ -184,6 +207,7 @@
   --shadow-card: var(--shadow-card);
   --shadow-raised: var(--shadow-raised);
   --shadow-overlay: var(--shadow-overlay);
+  --shadow-table: var(--shadow-table);
 
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", monospace;
@@ -313,6 +337,301 @@ select:focus-visible,
   outline: none;
 }
 
+/* a focused control keeps its own radius (the ring above is unlayered: it would set 4px) */
+.btn:focus-visible,
+.control:focus-visible,
+.switch:focus-visible {
+  border-radius: revert-layer;
+}
+
+/* -- controls: inputs, buttons, switches, badges --------------------------------
+ * One set for the dashboard and the chat page (which copies this file): an input and a button side by
+ * side are the same height (`--control-h`: 32px, 36px on touch), the same 8px radius. Utilities still
+ * override them (`h-10`, `w-full`). */
+
+@layer components {
+  /* a field: an <input>, <select>, <textarea>, or a wrapper holding a bare input (a search box) */
+  .control {
+    height: var(--control-h);
+    border: 1px solid var(--control-border);
+    border-radius: 8px;
+    background-color: var(--control-bg);
+    box-shadow: var(--control-shadow);
+    padding: 0 11px;
+    color: var(--ink);
+    font-size: 14px;
+    outline: none;
+    transition:
+      border-color 120ms ease-out,
+      box-shadow 120ms ease-out;
+  }
+
+  .control::placeholder,
+  .control ::placeholder {
+    color: var(--ink-3);
+  }
+
+  .control:focus-within {
+    border-color: var(--control-focus);
+    box-shadow: 0 0 0 3px var(--control-ring);
+  }
+
+  .control[aria-invalid="true"],
+  .control:has([aria-invalid="true"]) {
+    border-color: color-mix(in oklch, var(--red) 55%, var(--control-border));
+  }
+
+  .control[aria-invalid="true"]:focus-within,
+  .control:has([aria-invalid="true"]):focus-within {
+    border-color: color-mix(in oklch, var(--red) 75%, var(--control-border));
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--red) 18%, transparent);
+  }
+
+  .control:disabled,
+  .control:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: 0.64;
+  }
+
+  textarea.control {
+    height: auto;
+    padding: 7px 11px;
+    line-height: 1.5;
+  }
+
+  select.control {
+    appearance: none;
+    padding-right: 32px;
+    cursor: pointer;
+  }
+
+  /* a label over a field */
+  .control-label {
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.15;
+  }
+
+  /* a button: `.btn` and one of `.btn-primary`, `.btn-outline`, `.btn-ghost`, `.btn-danger`, `.btn-accent` */
+  .btn {
+    display: inline-flex;
+    height: var(--control-h);
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0 11px;
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    user-select: none;
+    transition:
+      background-color 120ms ease-out,
+      border-color 120ms ease-out,
+      box-shadow 120ms ease-out,
+      color 120ms ease-out,
+      opacity 120ms ease-out;
+  }
+
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    pointer-events: none;
+    opacity: 0.64;
+  }
+
+  .btn svg {
+    flex-shrink: 0;
+  }
+
+  /* dense rows (a table's toolbar, a heading's aside) */
+  .btn-xs {
+    height: 24px;
+    gap: 4px;
+    border-radius: 6px;
+    padding: 0 7px;
+    font-size: 12.5px;
+  }
+
+  /* a square, for one icon */
+  .btn-icon {
+    width: var(--control-h);
+    padding: 0;
+  }
+
+  .btn-xs.btn-icon {
+    width: 24px;
+  }
+
+  .btn-primary {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--page);
+    box-shadow: var(--control-lift);
+  }
+
+  .btn-primary:hover {
+    background: color-mix(in oklch, var(--ink) 88%, var(--page));
+  }
+
+  .btn-primary:active {
+    box-shadow: inset 0 1px 0 oklch(0 0 0 / 0.08);
+  }
+
+  .btn-outline {
+    border-color: var(--control-border);
+    background: var(--control-bg);
+    box-shadow: var(--control-shadow);
+  }
+
+  .btn-outline:hover,
+  .btn-outline[aria-expanded="true"] {
+    background: var(--control-hover);
+  }
+
+  .btn-outline:active {
+    box-shadow: none;
+  }
+
+  .btn-ghost:hover,
+  .btn-ghost[aria-expanded="true"] {
+    background: var(--control-hover);
+  }
+
+  .btn-danger {
+    border-color: var(--red);
+    background: var(--red);
+    color: white;
+    box-shadow: var(--control-lift);
+  }
+
+  .btn-danger:hover {
+    background: color-mix(in oklch, var(--red) 90%, black);
+  }
+
+  .btn-accent {
+    border-color: var(--accent-blue);
+    background: var(--accent-blue);
+    color: white;
+    box-shadow: var(--control-lift);
+  }
+
+  .btn-accent:hover {
+    background: var(--accent-ink);
+  }
+
+  /* a switch (`bui/Switch`): ink when on, the field grey when off, the page's colour for its thumb */
+  .switch {
+    --thumb: 16px;
+    position: relative;
+    display: inline-flex;
+    width: calc(var(--thumb) * 2 - 2px);
+    height: calc(var(--thumb) + 2px);
+    flex-shrink: 0;
+    align-items: center;
+    border-radius: 999px;
+    padding: 1px;
+    background: var(--switch-off);
+    vertical-align: middle;
+    transition: background-color 200ms ease-out;
+  }
+
+  .switch-sm {
+    --thumb: 14px;
+  }
+
+  .switch[aria-checked="true"] {
+    background: var(--ink);
+  }
+
+  .switch-thumb {
+    width: var(--thumb);
+    height: var(--thumb);
+    border-radius: 999px;
+    background: var(--page);
+    box-shadow:
+      0 1px 2px oklch(0 0 0 / 0.22),
+      0 0 0 0.5px oklch(0 0 0 / 0.06);
+    transition: translate 160ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .switch[aria-checked="true"] .switch-thumb {
+    translate: calc(var(--thumb) - 4px) 0;
+  }
+
+  /* a badge: a small quiet tag (`.badge-outline`), or tinted from `--tag-base` (`.badge-tint`) */
+  .badge {
+    --tag-base: var(--ink-3);
+    display: inline-flex;
+    height: 18px;
+    max-width: 180px;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0 4px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badge-outline {
+    border-color: var(--control-border);
+    background: var(--control-bg);
+    color: var(--ink-2);
+  }
+
+  .badge-tint {
+    background: color-mix(in oklch, var(--tag-base) 13%, transparent);
+    color: color-mix(in oklch, var(--tag-base) 78%, var(--ink));
+  }
+
+  .dark .badge-tint {
+    background: color-mix(in oklch, var(--tag-base) 20%, transparent);
+    color: color-mix(in oklch, var(--tag-base) 80%, white);
+  }
+
+  .badge-green {
+    --tag-base: var(--green);
+  }
+  .badge-orange {
+    --tag-base: var(--orange);
+  }
+  .badge-red {
+    --tag-base: var(--red);
+  }
+  .badge-accent {
+    --tag-base: var(--accent-blue);
+  }
+}
+
+@media (pointer: coarse) {
+  :root {
+    --control-h: 36px;
+  }
+
+  /* 16px: a phone does not zoom into the field */
+  .control {
+    font-size: 16px;
+  }
+
+  .switch {
+    --thumb: 20px;
+  }
+
+  .switch-sm {
+    --thumb: 16px;
+  }
+}
+
 .animated-underline {
   position: relative;
   display: inline-block;
@@ -364,6 +683,28 @@ a:focus-visible .animated-underline::after {
   }
   to {
     opacity: 1;
+  }
+}
+
+/* a message of a conversation, as it mounts: brief, a few pixels */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise-in {
+  animation: rise-in 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in {
+    animation: none;
   }
 }
 
@@ -648,7 +989,7 @@ a:focus-visible .animated-underline::after {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 1px 2px oklch(0 0 0 / 0.06);
+  box-shadow: var(--shadow-table);
 }
 
 .records-scroll {
@@ -843,64 +1184,22 @@ button.records-header-button:hover {
   display: inline-flex;
 }
 
-/* a tag's colours come from one mid-lightness hue, mixed with the theme's tokens */
-.records-tag {
-  --tag-base: var(--ink-3);
-  display: inline-flex;
-  height: 23px;
-  max-width: 180px;
-  align-items: center;
-  flex-shrink: 0;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--tag-base) 32%, var(--surface));
-  border-radius: 8px;
-  padding: 0 7px;
-  color: color-mix(in srgb, var(--tag-base) 92%, var(--ink));
-  background: color-mix(in srgb, var(--tag-base) 18%, var(--surface));
-  font-size: 13px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/* a tag is a badge (`.badge`): quiet (outline) with no hue, tinted from its `--tag-base` with one */
 .records-more-tag {
   display: inline-flex;
-  height: 23px;
+  height: 18px;
   align-items: center;
   flex-shrink: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  padding: 0 7px;
+  border-radius: 4px;
+  padding: 0 4px;
   color: var(--ink-3);
-  background: var(--inset);
+  background: var(--field);
   font-size: 11px;
   font-weight: 500;
 }
 
 .records-muted {
   color: var(--ink-3);
-}
-
-.records-table tfoot td {
-  position: sticky;
-  z-index: 4;
-  bottom: 0;
-  height: 35px;
-  background: var(--inset);
-  color: var(--ink-2);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.records-table tfoot .records-sticky-cell {
-  z-index: 6;
-}
-
-.records-count {
-  margin-right: 3px;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
 }
 
 /* touch: :hover sticks after a tap */
@@ -913,38 +1212,6 @@ button.records-header-button:hover {
     background: transparent;
     color: var(--ink-2);
   }
-}
-
-/* -- FilterTable's electric status pills: the same hue-and-mix as a tag ----- */
-
-.filter-status-green {
-  --tag-base: oklch(0.652 0.131 162.865);
-}
-.filter-status-orange {
-  --tag-base: oklch(0.757 0.153 66.401);
-}
-.filter-status-blue {
-  --tag-base: oklch(0.671 0.118 219.351);
-}
-.filter-status-red {
-  --tag-base: oklch(0.64 0.19 27);
-}
-.filter-status-neutral {
-  --tag-base: var(--ink-3);
-}
-
-.filter-status {
-  border: 1px solid color-mix(in srgb, var(--tag-base) 34%, var(--surface));
-  color: color-mix(in srgb, var(--tag-base) 92%, var(--ink));
-  background: color-mix(in srgb, var(--tag-base) 20%, var(--surface));
-}
-
-/* dark: a richer same-hue fill, bright same-hue text, no visible border */
-.dark .records-tag,
-.dark .filter-status {
-  color: color-mix(in srgb, var(--tag-base) 86%, white);
-  background: color-mix(in srgb, var(--tag-base) 34%, var(--surface));
-  border-color: color-mix(in srgb, var(--tag-base) 34%, var(--surface));
 }
 
 /* -- scrollbars that do not show -------------------------------------------- */

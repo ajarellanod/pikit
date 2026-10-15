@@ -46,7 +46,7 @@ function SourceChip({ chunk }: { chunk: ContextChunk }) {
       )}
     </>
   );
-  const className = "inline-flex h-6 max-w-full items-center gap-1.5 rounded-full bg-inset px-2 text-[12px] font-medium text-ink-2 shadow-btn transition-[background-color] duration-300 hover:bg-hover";
+  const className = "inline-flex h-6 max-w-full items-center gap-1.5 rounded-chip bg-inset px-2 text-[12px] font-medium text-ink-2 shadow-btn transition-[background-color] duration-300 hover:bg-hover";
   return chunk.href === undefined ? (
     <span className={className}>{inner}</span>
   ) : (

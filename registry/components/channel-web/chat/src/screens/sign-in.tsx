@@ -29,7 +29,7 @@ export const maySignUp = (config: ChatConfig): boolean => config.signUp !== "inv
 
 function Submit({ busy, children, disabled = false }: { busy: boolean; children: string; disabled?: boolean }) {
   return (
-    <Button type="submit" variant="primary" className="mt-1 h-10 w-full gap-2 py-0" disabled={busy || disabled} aria-busy={busy}>
+    <Button type="submit" variant="primary" className="mt-1 w-full" disabled={busy || disabled} aria-busy={busy}>
       {busy ? <Spinner /> : null}
       {children}
       {busy ? null : <ArrowRight width={15} height={15} strokeWidth={2} aria-hidden />}
@@ -46,7 +46,7 @@ function Providers({ config, onError }: { config: ChatConfig; onError: (error: E
       {providers.map((provider) => (
         <Button
           key={provider.id}
-          className="h-10 w-full gap-2 py-0"
+          className="w-full"
           disabled={leaving !== undefined}
           aria-busy={leaving === provider.id}
           onClick={() => {
@@ -111,7 +111,7 @@ export function SignInScreen({ config, onSignedIn, landing }: SignedOutProps) {
   if (linkSent) {
     return (
       <AuthCard name={config.name} title="Check your email" lead={<>We sent a sign-in link to {email.trim()}. It works once, for a few minutes.</>}>
-        <Button className="h-10 w-full" onClick={() => setLinkSent(false)}>
+        <Button className="w-full" onClick={() => setLinkSent(false)}>
           Back
         </Button>
       </AuthCard>
@@ -163,7 +163,7 @@ export function SignInScreen({ config, onSignedIn, landing }: SignedOutProps) {
           )}
           <Submit busy={busy === (withPassword ? "password" : "link")}>{withPassword ? "Sign in" : "Email me a link"}</Submit>
           {withPassword && withLink && (
-            <Button className="h-10 w-full gap-2 py-0" disabled={busy !== undefined} aria-busy={busy === "link"} onClick={() => void emailLink()}>
+            <Button className="w-full" disabled={busy !== undefined} aria-busy={busy === "link"} onClick={() => void emailLink()}>
               {busy === "link" && <Spinner />}
               Email me a sign-in link instead
             </Button>

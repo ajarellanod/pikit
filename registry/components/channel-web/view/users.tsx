@@ -13,12 +13,12 @@ import { Calendar, Clock, Group, KeyBack, LogIn, Mail, Prohibition, Trash, Undo,
 import { type FormEvent, useState } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
-import { ValuePill } from "@/components/bui/Chip";
 import EmptyState from "@/components/bui/EmptyState";
-import { FilterChips, type PillTone, StatePill } from "@/components/bui/FilterTable";
+import { FilterChips, type PillTone } from "@/components/bui/FilterTable";
 import { Page, PageLoading } from "@/components/bui/Page";
 import RecordsTable, { type RecordColumn, RecordMark, RecordName, RecordTag, TagList } from "@/components/bui/RecordsTable";
 import SearchField from "@/components/bui/SearchField";
+import { StatusDot } from "@/components/bui/StatusDot";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { every } from "@/lib/activity";
@@ -44,7 +44,7 @@ type Dialog =
   | { kind: "link"; title: string; what: string; link: AdminChatLink }
   | { kind: "ban" | "remove"; user: AdminChatUser };
 
-const fieldClass = "h-9 w-full rounded-lg bg-field px-3 text-[13px] text-ink shadow-[var(--shadow-hairline)] outline-none placeholder:text-ink-3 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]";
+const fieldClass = "control w-full";
 
 /** Every dialog of the view is this wide: the invitation, a link, a confirmation. */
 const DIALOG = "data-[size=default]:sm:max-w-[600px]";
@@ -159,7 +159,7 @@ export function UsersPage() {
       width: 140,
       cell: (row) => <TagList tags={row.methods} empty="nothing yet" render={(method) => <RecordTag>{method}</RecordTag>} />,
     },
-    { key: "state", label: "State", icon: <Prohibition />, width: 100, sort: (a, b) => stateOf(a).localeCompare(stateOf(b)), cell: (row) => <StatePill tone={TONE[stateOf(row)]}>{stateOf(row)}</StatePill> },
+    { key: "state", label: "State", icon: <Prohibition />, width: 100, sort: (a, b) => stateOf(a).localeCompare(stateOf(b)), cell: (row) => <StatusDot tone={TONE[stateOf(row)]}>{stateOf(row)}</StatusDot> },
     {
       key: "created",
       label: "Created",
@@ -186,7 +186,7 @@ export function UsersPage() {
       cell: (row) => (
         <ActionsMenu
           label={`Actions for ${nameOf(row)}`}
-          className="size-7 rounded-full text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50 aria-expanded:bg-hover aria-expanded:text-ink"
+          className="btn btn-ghost btn-xs btn-icon size-7 text-ink-2 hover:text-ink aria-expanded:text-ink"
           actions={[
             stateOf(row) === "invited"
               ? { key: "invite", label: "Invite again", icon: <UserPlus />, onSelect: () => setDialog({ kind: "invite", email: row.email, name: row.name }) }
@@ -229,9 +229,9 @@ export function UsersPage() {
             ]}
           />
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <ValuePill className="mx-0 h-[27px] px-2.5 text-[12.5px] tabular-nums">{total}</ValuePill>
-            <Button variant="primary" size="sm" onClick={() => setDialog({ kind: "invite" })}>
-              <UserPlus width={14} height={14} strokeWidth={1.8} /> Invite
+            <span className="text-[13px] text-ink-3 tabular-nums">{total}</span>
+            <Button variant="primary" onClick={() => setDialog({ kind: "invite" })}>
+              <UserPlus width={15} height={15} strokeWidth={1.8} /> Invite
             </Button>
           </div>
         </div>
@@ -240,7 +240,6 @@ export function UsersPage() {
           columns={columns}
           rows={rows}
           rowKey={(row) => row.id}
-          footer={false}
           empty={
             users.length === 0 ? (
               <EmptyState icon={<Group />} title="No users yet" hint="Invite someone to get started." />

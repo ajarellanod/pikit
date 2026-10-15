@@ -3,7 +3,7 @@
  * What it edits (instance.ts `settingsSchemaOf`): per instance (`googlechat`, `googlechat:ops`), its
  * `conversations`: `default` (each thread a conversation, or the whole chat one) and `chats`, the spaces
  * that differ (`spaces/AAA` → `"thread"` or `"chat"`). Its defaults are the config's `conversations`;
- * "Use the config's" takes an app's changes away. A change applies to the next message: a conversation
+ * "Use default" takes an app's changes away. A change applies to the next message: a conversation
  * already going keeps its key.
  *
  * Each change saves at once (the default, a chat's mode, a chat added or removed), the component's
@@ -25,8 +25,7 @@ const MODES = [
   { value: "chat" as const, label: "The whole chat" },
 ];
 
-const input =
-  "h-8 w-full min-w-0 rounded-control bg-surface px-2.5 text-[13px] text-ink shadow-btn outline-none transition-shadow duration-100 placeholder:text-ink-3 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]";
+const input = "control w-full min-w-0";
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -68,7 +67,7 @@ function AppConversations({ instance, conversations, defaults, saving, onSave }:
         aside={
           !same(conversations, defaults) && (
             <Button size="sm" variant="quiet" disabled={saving} onClick={() => onSave(defaults)}>
-              Use the config's
+              Use default
             </Button>
           )
         }

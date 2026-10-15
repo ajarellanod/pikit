@@ -1,5 +1,5 @@
 /**
- * A labelled field in the sign-in card's look (an inset well that lifts when focused), saying what is
+ * A labelled field on the shared `.control` look (index.css: the dashboard's inputs), saying what is
  * wrong under it. A password's can be shown.
  */
 
@@ -43,12 +43,10 @@ export function TextField({
   const described = problem !== undefined ? `${id}-problem` : help !== undefined ? `${id}-help` : undefined;
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-[12.5px] font-medium text-ink-2">
+      <label htmlFor={id} className="control-label">
         {label}
       </label>
-      <div
-        className={`flex h-11 items-center gap-2 rounded-[12px] bg-inset pr-1.5 pl-3 shadow-inset-field ring-1 transition-[box-shadow,background-color] duration-150 focus-within:bg-surface focus-within:ring-2 ${problem === undefined ? "ring-line focus-within:ring-line-strong" : "ring-red/50 focus-within:ring-red/60"}`}
-      >
+      <div className={`control flex items-center gap-2 ${type === "password" ? "pr-0.5" : ""}`}>
         <input
           id={id}
           type={type === "password" && shown ? "text" : type}
@@ -65,7 +63,7 @@ export function TextField({
           spellCheck={false}
           aria-invalid={problem !== undefined}
           aria-describedby={described}
-          className="h-full min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3 disabled:opacity-60 read-only:text-ink-2"
+          className="h-full min-w-0 flex-1 bg-transparent text-ink outline-none read-only:text-ink-2"
         />
         {type === "password" && (
           <button
@@ -73,7 +71,7 @@ export function TextField({
             aria-label={shown ? "Hide the password" : "Show the password"}
             aria-pressed={shown}
             onClick={() => setShown((current) => !current)}
-            className="flex size-8 shrink-0 items-center justify-center rounded-[8px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink"
+            className="flex size-7 shrink-0 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-(--control-hover) hover:text-ink"
           >
             {shown ? <EyeClosed width={16} height={16} strokeWidth={1.9} /> : <Eye width={16} height={16} strokeWidth={1.9} />}
           </button>

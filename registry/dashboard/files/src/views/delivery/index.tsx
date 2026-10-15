@@ -7,9 +7,10 @@
 import { Activity, Antenna, ChatBubble, CheckCircle, Clock, DeliveryTruck, Hashtag, Repeat, SendDiagonal, Timer, WarningTriangle } from "iconoir-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import EmptyState from "@/components/bui/EmptyState";
-import { FilterChips, type PillTone, StatePill } from "@/components/bui/FilterTable";
+import { FilterChips, type PillTone } from "@/components/bui/FilterTable";
 import { Page, Section } from "@/components/bui/Page";
 import RecordsTable, { type RecordColumn, RecordMark, RecordName, RecordTag } from "@/components/bui/RecordsTable";
+import { StatusDot } from "@/components/bui/StatusDot";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { usePolling } from "@/lib/activity";
 import { api, type ApiPage, type ApiPendingPiece, type ApiReceipt, type ApiReceiptsPage, useApi } from "@/lib/api";
@@ -115,10 +116,10 @@ function DeliveryPage() {
       width: 170,
       sort: (a, b) => a.state.localeCompare(b.state),
       cell: (piece) => (
-        <StatePill tone={PENDING_TONE[piece.state]} title={piece.possibleDuplicate ? "Its next send may repeat one that reached the platform" : undefined}>
+        <StatusDot tone={PENDING_TONE[piece.state]} title={piece.possibleDuplicate ? "Its next send may repeat one that reached the platform" : undefined}>
           {piece.state}
           {piece.possibleDuplicate && " · may repeat"}
-        </StatePill>
+        </StatusDot>
       ),
     },
     { key: "attempts", label: "Attempts", icon: <Repeat />, width: 110, end: true, cell: (piece) => piece.attempts },
@@ -142,7 +143,7 @@ function DeliveryPage() {
       label: "Outcome",
       icon: <CheckCircle />,
       width: 150,
-      cell: (receipt) => <StatePill tone={OUTCOME[outcomeOf(receipt)].tone}>{OUTCOME[outcomeOf(receipt)].label}</StatePill>,
+      cell: (receipt) => <StatusDot tone={OUTCOME[outcomeOf(receipt)].tone}>{OUTCOME[outcomeOf(receipt)].label}</StatusDot>,
     },
     { key: "attempts", label: "Attempts", icon: <Repeat />, width: 110, end: true, cell: (receipt) => receipt.attempts },
     {

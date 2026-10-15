@@ -25,7 +25,7 @@ export function Dialog({ open, title, description, onClose, children }: { open: 
       aria-labelledby={titleId}
       onClose={onClose}
       onClick={(event) => event.target === ref.current && onClose()}
-      className="m-auto w-[calc(100%-2rem)] max-w-[420px] rounded-[18px] bg-surface p-0 text-ink shadow-overlay backdrop:bg-black/40"
+      className="m-auto w-[calc(100%-2rem)] max-w-[420px] rounded-[14px] bg-surface p-0 text-ink shadow-overlay backdrop:bg-black/40"
     >
       {open && (
         <div className="flex flex-col gap-4 p-5" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both" }}>
@@ -79,10 +79,10 @@ export function RenameDialog({ open, title, max, onClose, onRename }: { open: bo
       >
         <TextField label="Title" value={value} onChange={setValue} maxLength={max} autoFocus problem={problem} />
         <div className="flex justify-end gap-2">
-          <Button size="sm" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" type="submit" variant="primary" disabled={value.trim() === "" || saving} aria-busy={saving}>
+          <Button type="submit" variant="primary" disabled={value.trim() === "" || saving} aria-busy={saving}>
             Rename
           </Button>
         </div>
@@ -110,11 +110,10 @@ export function ConfirmDialog({
   return (
     <Dialog open={open} title={title} description={description} onClose={onClose}>
       <div className="flex justify-end gap-2">
-        <Button size="sm" onClick={onClose} autoFocus>
+        <Button variant="ghost" onClick={onClose} autoFocus>
           Cancel
         </Button>
         <Button
-          size="sm"
           variant="danger"
           onClick={() => {
             onConfirm();

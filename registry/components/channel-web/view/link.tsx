@@ -37,9 +37,9 @@ export function LinkShown({ link, what }: { link: AdminChatLink; what: string })
           onFocus={(event) => event.currentTarget.select()}
           aria-label={`The ${what}`}
           spellCheck={false}
-          className="h-9 min-w-0 flex-1 truncate rounded-lg bg-field px-3 font-mono text-[12px] text-ink shadow-[var(--shadow-hairline)] outline-none focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
+          className="control min-w-0 flex-1 truncate font-mono text-[12.5px]"
         />
-        <Button size="sm" variant="secondary" autoFocus aria-label={`Copy the ${what}`} onClick={copy} className={`h-9 w-[92px] shrink-0 ${copied ? "text-green" : ""}`}>
+        <Button size="sm" variant="secondary" autoFocus aria-label={`Copy the ${what}`} onClick={copy} className={`w-[92px] ${copied ? "text-green" : ""}`}>
           {copied ? <Check width={14} height={14} strokeWidth={2.2} /> : <Copy width={14} height={14} strokeWidth={1.8} />}
           {copied ? "Copied" : "Copy"}
         </Button>

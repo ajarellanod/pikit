@@ -11,10 +11,10 @@
 import { Activity, ArrowLeft, Check, Collapse, Expand, GitBranch, GitPullRequest, InfoCircle, NavArrowRight, OpenNewWindow, Xmark } from "iconoir-react";
 import { type ReactNode, useState } from "react";
 import { Button } from "@/components/bui/Button";
-import { ValuePill } from "@/components/bui/Chip";
 import EmptyState from "@/components/bui/EmptyState";
 import { Page, PageLoading, Section } from "@/components/bui/Page";
 import RecordsTable, { type RecordColumn, RecordName, RecordTag } from "@/components/bui/RecordsTable";
+import { StatusDot } from "@/components/bui/StatusDot";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Markdown } from "@/components/pikit/markdown";
 import {
@@ -199,7 +199,7 @@ const checkColumns: RecordColumn<ProposalCheck>[] = [
     label: "State",
     icon: <Activity />,
     width: 130,
-    cell: (check) => <ValuePill tone={CHECK_TONE[check.state]}>{check.state}</ValuePill>,
+    cell: (check) => <StatusDot tone={CHECK_TONE[check.state]}>{check.state}</StatusDot>,
   },
   { key: "detail", label: "Detail", icon: <InfoCircle />, width: 300, title: (check) => check.detail, cell: (check) => check.detail },
 ];
@@ -385,7 +385,7 @@ function Proposal({ id }: { id: string }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className={passing ? undefined : "bg-red text-white hover:bg-red/90"} onClick={() => void act("approve")}>
+            <AlertDialogAction variant={passing ? "default" : "destructive"} onClick={() => void act("approve")}>
               {after ? "Approve" : passing ? "Approve and merge" : "Approve anyway"}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -405,11 +405,11 @@ function Proposal({ id }: { id: string }) {
             rows={3}
             placeholder="Why (optional)"
             aria-label="A comment for the agent (optional)"
-            className="w-full resize-y rounded-lg bg-field px-3 py-2 text-[13px] text-ink shadow-[var(--shadow-hairline)] outline-none placeholder:text-ink-3"
+            className="control w-full resize-y"
           />
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-red text-white hover:bg-red/90" onClick={() => void act("reject")}>
+            <AlertDialogAction variant="destructive" onClick={() => void act("reject")}>
               Reject
             </AlertDialogAction>
           </AlertDialogFooter>

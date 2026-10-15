@@ -63,7 +63,7 @@ export function WiringSection({ app }: { app: ApiApp }) {
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="flex h-7 items-center gap-1 rounded-[7px] px-2 text-[12.5px] font-medium text-ink-2 shadow-btn transition-colors duration-100 hover:bg-hover hover:text-ink"
+          className="btn btn-outline btn-xs text-ink-2 hover:text-ink"
         >
           {open ? "Hide" : "Show"}
           <NavArrowDown width={13} height={13} strokeWidth={2.2} className="transition-transform duration-300" style={{ transform: open ? "rotate(180deg)" : undefined }} />

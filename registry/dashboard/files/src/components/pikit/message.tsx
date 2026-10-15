@@ -11,9 +11,9 @@
  * single message the same way.
  */
 
-import { createContext, type ReactNode, useContext } from "react";
+import { createContext, type ReactNode, useContext, useState } from "react";
+import { Badge } from "@/components/bui/Badge";
 import LoadingState from "@/components/bui/LoadingState";
-import { StatusPill } from "@/components/bui/StatusPill";
 import ThinkingState from "@/components/bui/ThinkingState";
 import ToolChips, { type ToolStatus, type ToolStep } from "@/components/bui/ToolChips";
 import { Markdown } from "@/components/pikit/markdown";
@@ -86,14 +86,25 @@ export function turnsOf(messages: Message[], live: Live): Turn[] {
     return reply;
   };
 
+  // A turn's key is its first message's timestamp (its index without one): the same across a page of older
+  // messages read before it, and from the live answer to the stored one (same timestamp), so a turn mounts once.
+  const keys = new Set<string>();
+  const keyOf = (prefix: string, message: Message, i: number) => {
+    const base = message.timestamp === undefined ? `${prefix}${i}` : `${prefix}@${message.timestamp}`;
+    let key = base;
+    for (let n = 1; keys.has(key); n++) key = `${base}#${n}`;
+    keys.add(key);
+    return key;
+  };
+
   for (const [i, message] of all.entries()) {
     if (message.role === "system") continue;
     if (message.role === "user") {
       reply = undefined;
-      turns.push({ kind: "user", key: `u${i}`, message });
+      turns.push({ kind: "user", key: keyOf("u", message, i), message });
       continue;
     }
-    const target = replyFor(`r${i}`, message.timestamp);
+    const target = reply ?? replyFor(keyOf("r", message, i), message.timestamp);
     if (message.role === "toolResult") {
       // Its call is on an older page: shown on its own.
       if (!seen.has(message.toolCallId)) addCall(target, call(message.toolCallId, message.toolName, {}, undefined));
@@ -228,13 +239,15 @@ export function userText(message: UserMessage): { text: string; operator: boolea
 }
 
 /**
- * A person's message, at the right, its images inline or by URL. `from` names who wrote it when it was not the operator; `animate`
- * rises it in (the one just sent: the transcript's, which takes its place, does not move).
+ * A person's message, at the right, its images inline or by URL. `from` names who wrote it when it was not the operator. It rises
+ * in when it mounts, as a reply does, unless `animate` is false then (the transcript's copy of a message just sent, taking the
+ * sent bubble's place, must not move): read once, a later change never starts it.
  */
-export function UserBubble({ message, from, animate = false }: { message: UserMessage; from?: string; animate?: boolean }) {
+export function UserBubble({ message, from, animate = true }: { message: UserMessage; from?: string; animate?: boolean }) {
   const { text, operator, images } = userText(message);
+  const [rise] = useState(animate);
   return (
-    <div className="flex flex-col items-end gap-1 pl-10 sm:pl-24" style={animate ? { animation: "fade-up 200ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}>
+    <div className={`flex flex-col items-end gap-1 pl-10 sm:pl-24 ${rise ? "rise-in" : ""}`}>
       {!operator && from !== undefined && <span className="px-1 chat-text-11.5 font-medium text-ink-3">{from}</span>}
       {images.length > 0 && (
         <div className="flex max-w-full flex-wrap justify-end gap-2">
@@ -283,16 +296,16 @@ export function Reply({
       case "aborted":
         return (
           <div key={i}>
-            <StatusPill tone="neutral">Stopped</StatusPill>
+            <Badge>Stopped</Badge>
           </div>
         );
     }
   });
   return (
-    <article className="flex min-w-0 flex-col gap-4" style={{ animation: "fade-up 450ms cubic-bezier(0.23,1,0.32,1) both" }}>
+    <article className="rise-in flex min-w-0 flex-col gap-4">
       {blocks}
       {waiting === true && (
-        <div className="flex min-h-6 items-center" style={{ animation: "fade-in 200ms ease-out both" }}>
+        <div className="flex min-h-6 items-center" style={{ animation: "fade-in 150ms ease-out both" }}>
           <LoadingState label={activity} variant="Dots" since={since} />
         </div>
       )}

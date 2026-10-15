@@ -355,6 +355,9 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
   useEffect(() => {
     for (const each of arrived.split(",")) if (each !== "") updateSent(id, Number(each), "gone");
   }, [arrived, id, updateSent]);
+  // The texts of the messages sent the thread has just shown (in the render that swaps the sent bubble
+  // for its own, before the effect above lets them go): that bubble mounts still, the sent one rose in.
+  const arrivedTexts = new Set(allSent.filter((each) => !sentShown.includes(each)).map((each) => each.text));
 
   // The first words written in it, once its start is read.
   const firstText = transcript.hasOlder ? undefined : turns.map((turn) => (turn.kind === "user" ? userText(turn.message).text.trim() : "")).find((text) => text !== "");
@@ -456,7 +459,7 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
         <div className="flex flex-col gap-8 px-4 pt-8 sm:px-8 lg:px-12" style={{ paddingBottom: composerH + 56 }}>
           {transcript.hasOlder && (
             <div className="mx-auto w-full max-w-[720px]">
-              <button type="button" onClick={() => void transcript.loadOlder()} className="mx-auto flex h-7 items-center rounded-full px-3 chat-text-12.5 font-medium text-ink-2 shadow-btn transition-colors duration-100 hover:bg-hover">
+              <button type="button" onClick={() => void transcript.loadOlder()} className="btn btn-outline btn-xs mx-auto flex chat-text-12.5 text-ink-2 hover:text-ink">
                 Earlier messages
               </button>
             </div>
@@ -474,7 +477,7 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
           {turns.map((turn, i) => (
             <div key={turn.key} className="mx-auto flex w-full max-w-[720px] flex-col gap-8">
               {turn.kind === "user" && notesBefore(i, turn.message.timestamp).map((each) => <Fragment key={each.key}>{each.node}</Fragment>)}
-              {turn.kind === "user" ? <UserBubble message={turn.message} {...(from !== undefined && { from })} /> : <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />}
+              {turn.kind === "user" ? <UserBubble message={turn.message} animate={!arrivedTexts.has(userText(turn.message).text.trim())} {...(from !== undefined && { from })} /> : <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />}
             </div>
           ))}
           {notes
@@ -486,13 +489,13 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
             ))}
           {sentShown.map((each) => (
             <div key={`sent-${each.id}`} className={`mx-auto flex w-full max-w-[720px] flex-col items-end gap-1 transition-opacity duration-200 ${each.queued ? "opacity-60" : ""}`}>
-              <UserBubble message={sentMessage(each)} animate />
+              <UserBubble message={sentMessage(each)} />
               {each.queued && <span className="px-1 chat-text-11.5 text-ink-3">Queued: it runs once the run going ends</span>}
             </div>
           ))}
           {/* one line at the end, whatever comes before it: it stays put, and never mounts again as the thread grows */}
           {waiting && activity !== undefined && (
-            <div key="activity" className="mx-auto -mt-4 flex min-h-6 w-full max-w-[720px] items-center" style={{ animation: "fade-in 200ms ease-out both" }}>
+            <div key="activity" className="mx-auto -mt-4 flex min-h-6 w-full max-w-[720px] items-center" style={{ animation: "fade-in 150ms ease-out both" }}>
               <LoadingState label={activity} variant="Dots" since={since} />
             </div>
           )}

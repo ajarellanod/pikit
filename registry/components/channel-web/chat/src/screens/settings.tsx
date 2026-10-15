@@ -14,9 +14,10 @@
 
 import { Computer, HalfMoon, Key, Laptop, Link as LinkIcon, Palette, SunLight, User } from "iconoir-react";
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { Badge } from "@/components/bui/Badge";
 import { Button } from "@/components/bui/Button";
 import { LoaderGrid } from "@/components/bui/LoadingState";
-import { StatusPill } from "@/components/bui/StatusPill";
+import { StatusDot } from "@/components/bui/StatusDot";
 import { Dialog } from "@/components/chat/dialog";
 import { FormNote, Spinner, TextField } from "@/components/chat/field";
 import { ErrorNote } from "@/components/pikit/error-note";
@@ -107,7 +108,7 @@ function ProfileSection() {
             autoComplete="name"
             maxLength={100}
             spellCheck={false}
-            className="h-8 w-44 rounded-control bg-surface px-2.5 text-[13px] text-ink shadow-btn outline-none transition-shadow duration-100 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)] sm:w-56"
+            className="control w-44 sm:w-56"
           />
           <Button size="sm" type="submit" variant="primary" disabled={!changed || busy} aria-busy={busy}>
             {busy && <Spinner />}
@@ -173,7 +174,7 @@ function ChangePasswordDialog({ open, onClose, onChanged }: { open: boolean; onC
         <TextField label="The new one again" type="password" value={again} onChange={setAgain} autoComplete="new-password" required minLength={8} maxLength={128} />
         {problem !== undefined && <FormNote>{problem}</FormNote>}
         <div className="mt-1 flex justify-end gap-2">
-          <Button size="sm" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button size="sm" type="submit" variant="primary" disabled={busy} aria-busy={busy}>
@@ -288,7 +289,7 @@ function AccountsSection() {
           return (
             <SettingsRow key={provider.id} label={providerName(config, provider.id)} description={`Connected ${formatAgo(Date.parse(account.createdAt))}${only ? ": your only way to sign in" : ""}`}>
               <div className="flex items-center gap-2">
-                <StatusPill tone="green">Connected</StatusPill>
+                <StatusDot tone="green">Connected</StatusDot>
                 {!only && (
                   <Button size="sm" disabled={busy !== undefined} aria-busy={busy === account.id} onClick={() => void unlink(account)}>
                     Disconnect
@@ -349,7 +350,7 @@ function SessionsSection() {
             .filter((session) => session.id === mine)
             .map((session) => (
               <SettingsRow key={session.id} label={browserOf(session.userAgent)} description={detail(session)}>
-                <StatusPill tone="accent">This device</StatusPill>
+                <Badge tone="accent">This device</Badge>
               </SettingsRow>
             ))}
           <SettingsHeading

@@ -45,7 +45,7 @@ export function SetPasswordScreen({ config, onSignedIn, link }: SignedOutProps &
   if (done) {
     return (
       <AuthCard name={config.name} title="Your password is set" lead="Sign in with your email and it." footer={undefined}>
-        <Button variant="primary" className="h-10 w-full gap-2 py-0" onClick={() => go("/sign-in", true)}>
+        <Button variant="primary" className="w-full" onClick={() => go("/sign-in", true)}>
           Sign in
           <ArrowRight width={15} height={15} strokeWidth={2} aria-hidden />
         </Button>
@@ -101,7 +101,7 @@ export function SetPasswordScreen({ config, onSignedIn, link }: SignedOutProps &
           {providers.map((provider) => (
             <Button
               key={provider.id}
-              className="h-10 w-full py-0"
+              className="w-full"
               onClick={() => signInWithProvider(provider.id).catch((error: unknown) => setProblem(asError(error).message))}
             >
               Continue with {provider.name}
@@ -124,7 +124,7 @@ export function SetPasswordScreen({ config, onSignedIn, link }: SignedOutProps &
         )}
         <TextField label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" required minLength={8} maxLength={128} autoFocus help="At least 8 characters." />
         <TextField label="The same again" type="password" value={again} onChange={setAgain} autoComplete="new-password" required minLength={8} maxLength={128} />
-        <Button type="submit" variant="primary" className="mt-1 h-10 w-full gap-2 py-0" disabled={busy} aria-busy={busy}>
+        <Button type="submit" variant="primary" className="mt-1 w-full" disabled={busy} aria-busy={busy}>
           {busy && <Spinner />}
           Set the password
         </Button>
@@ -167,7 +167,7 @@ export function VerifyScreen({ config, email, again }: SignedOutProps & { email:
       {problem !== undefined && <FormNote>{problem}</FormNote>}
       {sent && <FormNote tone="done">A new link is on its way. It may take a minute; look in spam too.</FormNote>}
       {address !== "" && (
-        <Button className="h-10 w-full gap-2 py-0" disabled={busy} aria-busy={busy} onClick={() => void resend()}>
+        <Button className="w-full" disabled={busy} aria-busy={busy} onClick={() => void resend()}>
           {busy && <Spinner />}
           Send the link again
         </Button>

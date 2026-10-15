@@ -4,9 +4,9 @@ import { type CSSProperties, type ReactNode, useLayoutEffect, useMemo, useRef, u
  * RECORDS TABLE
  * Beautiful UI's records grid, fed by the app: columns with
  * a glyph each, sorted from their header, a numbered gutter,
- * a first column that stays while the grid scrolls both ways,
- * and a footer with the count. The rows and what each cell
- * shows are the caller's; nothing is invented.
+ * a first column that stays while the grid scrolls both ways.
+ * Its count is the page's (a section's figure, its chips').
+ * The rows and what each cell shows are the caller's.
  * --------------------------------------------------------- */
 
 export type RecordColumn<T> = {
@@ -70,10 +70,10 @@ export function tagHue(text: string): string {
   return TAG_PALETTE[hash % TAG_PALETTE.length] as string;
 }
 
-/** A tag, its colours mixed from one hue (`base`, any CSS colour; quiet when absent). */
+/** A tag, a badge: tinted from one hue (`base`, any CSS colour), quiet (an outline) when absent. */
 export function RecordTag({ children, base, title, mono = false }: { children: ReactNode; base?: string; title?: string; mono?: boolean }) {
   return (
-    <span className={`records-tag ${mono ? "font-mono text-[12px]" : ""}`} title={title} style={base === undefined ? undefined : ({ "--tag-base": base } as CSSProperties)}>
+    <span className={`badge ${base === undefined ? "badge-outline" : "badge-tint"} ${mono ? "font-mono text-[11.5px]" : ""}`} title={title} style={base === undefined ? undefined : ({ "--tag-base": base } as CSSProperties)}>
       {children}
     </span>
   );
@@ -146,7 +146,6 @@ export default function RecordsTable<T>({
   initialSort,
   maxHeight = 520,
   className = "",
-  footer = true,
 }: {
   /** what the table holds, for assistive technology */
   label: string;
@@ -159,8 +158,6 @@ export default function RecordsTable<T>({
   /** px before the grid scrolls under its sticky header */
   maxHeight?: number;
   className?: string;
-  /** the footer with the count; off when the page says the count already */
-  footer?: boolean;
 }) {
   const [sort, setSort] = useState(initialSort);
 
@@ -236,20 +233,6 @@ export default function RecordsTable<T>({
               </tr>
             ))}
           </tbody>
-          {footer && rows.length > 0 && (
-            <tfoot>
-              <tr>
-                <td className="records-cell records-sticky-cell">
-                  <span className="inline-flex h-[35px] items-center text-ink-2">
-                    <span className="records-count">{rows.length}</span> count
-                  </span>
-                </td>
-                {columns.slice(1).map((column) => (
-                  <td key={column.key} className="records-cell" />
-                ))}
-              </tr>
-            </tfoot>
-          )}
         </table>
       </div>
       {rows.length === 0 && empty}

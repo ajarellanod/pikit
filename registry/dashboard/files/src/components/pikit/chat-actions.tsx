@@ -79,7 +79,7 @@ export function useChatActions({ shown, onLeft }: { shown: string | undefined; o
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red text-white hover:bg-red/90"
+              variant="destructive"
               onClick={() => {
                 if (deleting !== undefined) put(deleting.id, "delete");
                 setDeleting(undefined);
@@ -139,7 +139,7 @@ function RenameDialog({ chat, onClose, rename }: { chat: { id: string; title: st
             onFocus={(event) => event.currentTarget.select()}
             placeholder="A title"
             aria-label="The chat's title"
-            className="h-9 w-full rounded-lg bg-field px-3 text-[13px] text-ink shadow-[var(--shadow-hairline)] outline-none placeholder:text-ink-3 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
+            className="control w-full"
           />
           {failed !== undefined && <ErrorNote error={failed} title="Not renamed" />}
           <AlertDialogFooter>

@@ -9,7 +9,8 @@
 
 import { GitPullRequest, Refresh } from "iconoir-react";
 import { Button } from "@/components/bui/Button";
-import { type PillTone, StatePill } from "@/components/bui/FilterTable";
+import type { PillTone } from "@/components/bui/FilterTable";
+import { StatusDot } from "@/components/bui/StatusDot";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { SettingsHeading, SettingsRow } from "@/components/pikit/settings";
 import { useApi } from "@/lib/api";
@@ -76,7 +77,7 @@ function SelfImprovementSettings() {
       ) : (
         known?.checks.map((check) => (
           <SettingsRow key={check.id} label={check.label} description={check.message}>
-            <StatePill tone={TONE[check.state]}>{LABEL[check.state]}</StatePill>
+            <StatusDot tone={TONE[check.state]}>{LABEL[check.state]}</StatusDot>
           </SettingsRow>
         ))
       )}

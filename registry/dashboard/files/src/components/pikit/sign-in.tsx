@@ -58,7 +58,7 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
             </div>
 
             {/* what happens to the token, quietly, before anything is asked */}
-            <div className="mt-5 inline-flex max-w-full items-center gap-1.5 rounded-full bg-inset px-2.5 py-1 text-[11.5px] leading-4 text-ink-3 shadow-hairline" style={rise(2)}>
+            <div className="mt-5 inline-flex max-w-full items-center gap-1.5 rounded-md bg-inset px-2 py-1 text-[11.5px] leading-4 text-ink-3 shadow-hairline" style={rise(2)}>
               <span className="size-1.5 shrink-0 rounded-full bg-green" aria-hidden />
               <span className="truncate">Sent once; this browser keeps a session, never the token.</span>
             </div>
@@ -78,12 +78,10 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
                 void submit();
               }}
             >
-              <label htmlFor="operator-token" className="text-[12.5px] font-medium text-ink-2">
+              <label htmlFor="operator-token" className="control-label">
                 Pikit token
               </label>
-              <div
-                className={`group flex h-11 items-center gap-2 rounded-[12px] bg-inset pr-1.5 pl-3 shadow-inset-field ring-1 transition-[box-shadow,background-color] duration-150 focus-within:bg-surface focus-within:ring-2 ${problem === undefined ? "ring-line focus-within:ring-line-strong" : "ring-red/50 focus-within:ring-red/60"}`}
-              >
+              <div className="control group flex items-center gap-2 pr-0.5 pl-2.5">
                 <Lock width={15} height={15} strokeWidth={1.9} className="shrink-0 text-ink-3" aria-hidden />
                 <input
                   id="operator-token"
@@ -100,7 +98,7 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
                     if (problem !== undefined) setProblem(undefined);
                   }}
                   autoFocus
-                  className="h-full min-w-0 flex-1 bg-transparent font-mono text-[13.5px] tracking-[0.01em] text-ink outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-ink-3"
+                  className="h-full min-w-0 flex-1 bg-transparent font-mono text-[13.5px] tracking-[0.01em] text-ink outline-none placeholder:font-sans placeholder:tracking-normal"
                 />
                 <button
                   type="button"
@@ -110,7 +108,7 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
                     setShown((current) => !current);
                     field.current?.focus();
                   }}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-[8px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-(--control-hover) hover:text-ink"
                 >
                   {shown ? <EyeClosed width={16} height={16} strokeWidth={1.9} /> : <Eye width={16} height={16} strokeWidth={1.9} />}
                 </button>
@@ -127,7 +125,7 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
                 </p>
               )}
 
-              <Button type="submit" variant="primary" className="mt-2 h-10 w-full gap-2 py-0" disabled={checking || value.trim() === ""} aria-busy={checking}>
+              <Button type="submit" variant="primary" className="mt-2 w-full" disabled={checking || value.trim() === ""} aria-busy={checking}>
                 {checking ? (
                   <>
                     <span className="size-3.5 rounded-full border-[1.5px] border-current border-t-transparent" style={{ animation: "spin 700ms linear infinite" }} aria-hidden />

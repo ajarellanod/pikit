@@ -7,7 +7,7 @@
 
 export default function SearchField({ value, onChange, placeholder, label, className = "" }: { value: string; onChange: (value: string) => void; placeholder: string; label: string; className?: string }) {
   return (
-    <div className={`flex h-8 items-center gap-2 rounded-control bg-surface px-2.5 shadow-btn transition-colors duration-100 focus-within:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)] ${className}`}>
+    <div className={`control flex items-center gap-2 pl-2.5 ${className}`}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="2" strokeLinecap="round" className="shrink-0" aria-hidden>
         <circle cx="11" cy="11" r="7" />
         <path d="M21 21l-4.3-4.3" />
@@ -18,14 +18,14 @@ export default function SearchField({ value, onChange, placeholder, label, class
         onKeyDown={(event) => event.key === "Escape" && onChange("")}
         placeholder={placeholder}
         aria-label={label}
-        className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
+        className="h-full min-w-0 flex-1 bg-transparent text-ink outline-none"
       />
       {value !== "" && (
         <button
           aria-label="Clear search"
           type="button"
           onClick={() => onChange("")}
-          className="-mr-1 flex size-6 items-center justify-center rounded-full text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink"
+          className="-mr-1.5 flex size-6 items-center justify-center rounded-md text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink"
           style={{ animation: "fade-in 150ms ease-out both" }}
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>

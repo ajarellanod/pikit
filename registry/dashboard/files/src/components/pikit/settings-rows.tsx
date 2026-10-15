@@ -1,13 +1,13 @@
 /**
  * The rows and controls of a settings dialog (the dashboard's Settings, channel-web's chat page's): a
  * heading, a row (a label, one line saying what it does, its control on the right), and the controls:
- * a segmented choice, a select, a text, a prompt editor (`bui/Switch` is the switch). Everything by
+ * a segmented choice, a select (`bui/Combobox`), a text, a prompt editor (`bui/Switch` is the switch). Everything by
  * props: no admin client (`scripts/ui-shared.ts`).
  */
 
-import { NavArrowDown } from "iconoir-react";
 import { type ComponentType, type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/bui/Button";
+import { Combobox, type ComboboxOption } from "@/components/bui/Combobox";
 
 /** A heading over a few rows of a section. */
 export function SettingsHeading({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
@@ -40,7 +40,7 @@ export function SettingsRow({
 }) {
   const text = (
     <div className={`min-w-0 flex-1 ${wrap ? "max-sm:basis-48" : ""}`}>
-      <label htmlFor={htmlFor} className="block text-[14px] text-ink">
+      <label htmlFor={htmlFor} className="control-label block">
         {label}
       </label>
       {description !== undefined && <p className="mt-0.5 text-[13px] leading-snug text-ink-3">{description}</p>}
@@ -71,7 +71,7 @@ export interface Choice<T extends string> {
 /** A segmented choice: a few options side by side, the chosen one raised. An option with an icon shows only its icon. */
 export function Segmented<T extends string>({ value, options, onChange, label, disabled = false }: { value: T; options: Choice<T>[]; onChange: (value: T) => void; label: string; disabled?: boolean }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex h-8 items-center gap-0.5 rounded-control bg-field p-0.5">
+    <div role="radiogroup" aria-label={label} className="inline-flex h-(--control-h) items-center gap-0.5 rounded-control bg-field p-0.5">
       {options.map((option) => {
         const Icon = option.icon;
         const chosen = option.value === value;
@@ -85,7 +85,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, d
             title={Icon === undefined ? undefined : option.label}
             disabled={disabled}
             onClick={() => !chosen && onChange(option.value)}
-            className={`flex h-7 items-center justify-center rounded-[6px] text-[13px] transition-[background-color,color,box-shadow] duration-150 disabled:opacity-50 ${Icon === undefined ? "px-3" : "w-8"} ${chosen ? "bg-surface text-ink shadow-btn" : "text-ink-2 hover:text-ink"}`}
+            className={`flex h-full items-center justify-center rounded-[6px] text-[13px] font-medium transition-[background-color,color,box-shadow] duration-150 disabled:opacity-50 ${Icon === undefined ? "px-3" : "w-8"} ${chosen ? "bg-surface text-ink shadow-btn" : "text-ink-2 hover:text-ink"}`}
           >
             {Icon === undefined ? option.label : <Icon width={15} height={15} strokeWidth={1.8} />}
           </button>
@@ -95,27 +95,9 @@ export function Segmented<T extends string>({ value, options, onChange, label, d
   );
 }
 
-/** A select: the chosen option and a chevron; the browser's own list. */
-export function SelectControl({ value, options, onChange, label, disabled = false, id }: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; label: string; disabled?: boolean; id?: string }) {
-  return (
-    <div className="relative">
-      <select
-        id={id}
-        aria-label={label}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-8 max-w-72 min-w-36 cursor-pointer appearance-none truncate rounded-control bg-surface py-0 pr-8 pl-2.5 text-[13px] text-ink shadow-btn outline-none transition-shadow duration-100 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)] disabled:opacity-50"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <NavArrowDown width={14} height={14} strokeWidth={2} className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-ink-3" />
-    </div>
-  );
+/** A select: the chosen option and a chevron, its list our own (`bui/Combobox`: searchable when long). */
+export function SelectControl({ value, options, onChange, label, disabled = false, id }: { value: string; options: ComboboxOption[]; onChange: (value: string) => void; label: string; disabled?: boolean; id?: string }) {
+  return <Combobox value={value} options={options} onChange={onChange} label={label} disabled={disabled} {...(id !== undefined && { id })} className="max-w-72 min-w-36" />;
 }
 
 /** A one-line text, saved with Enter or when it loses focus, if it changed. */
@@ -136,7 +118,7 @@ export function TextControl({ value, onSave, label, type = "text", disabled = fa
         if (event.key === "Enter") commit();
         if (event.key === "Escape") setDraft(value);
       }}
-      className="h-8 w-56 rounded-control bg-surface px-2.5 text-[13px] text-ink shadow-btn outline-none transition-shadow duration-100 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)] disabled:opacity-50"
+      className="control w-56"
     />
   );
 }
@@ -175,13 +157,13 @@ export function PromptEditor({
         onChange={(event) => setDraft(event.target.value)}
         rows={8}
         spellCheck
-        className="min-h-40 w-full resize-y rounded-card bg-surface px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink shadow-btn outline-none transition-shadow duration-100 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
+        className="control min-h-40 w-full resize-y font-mono text-[12.5px] leading-relaxed"
       />
-      <div className="flex min-h-[27px] items-center gap-2">
+      <div className="flex min-h-(--control-h) items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">{value === undefined ? "The definition's" : "Changed from the dashboard"}</span>
         {value !== undefined && onReset !== undefined && !changed && (
           <Button size="sm" variant="quiet" disabled={saving} onClick={() => void onReset()}>
-            Use the definition's
+            Use default
           </Button>
         )}
         {changed && (

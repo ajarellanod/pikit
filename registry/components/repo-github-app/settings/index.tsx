@@ -18,7 +18,8 @@
 import { Github, OpenNewWindow, Refresh } from "iconoir-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/bui/Button";
-import { type PillTone, StatePill } from "@/components/bui/FilterTable";
+import type { PillTone } from "@/components/bui/FilterTable";
+import { StatusDot } from "@/components/bui/StatusDot";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { SelectControl, SettingsHeading, SettingsRow } from "@/components/pikit/settings";
 import { api, post } from "@/lib/api";
@@ -150,7 +151,7 @@ function GitHubSettings() {
         GitHub
       </SettingsHeading>
       <SettingsRow label="Status" description={status.connected ? `Tokens are made for ${status.repository}.` : app === undefined ? "Not connected." : installation === undefined ? "Created on GitHub, not installed yet." : "Installed: choose the repository."}>
-        <StatePill tone={tone}>{status.connected ? "connected" : app === undefined ? "off" : "not finished"}</StatePill>
+        <StatusDot tone={tone}>{status.connected ? "connected" : app === undefined ? "off" : "not finished"}</StatusDot>
       </SettingsRow>
 
       {app === undefined ? (
@@ -166,7 +167,7 @@ function GitHubSettings() {
               value={organization}
               onChange={(event) => setOrganization(event.target.value)}
               placeholder="your account"
-              className="h-8 w-56 rounded-control bg-surface px-2.5 text-[13px] text-ink shadow-btn outline-none placeholder:text-ink-3 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
+              className="control w-56"
             />
           </SettingsRow>
           <SettingsRow label="Connect" description="Opens GitHub: click Create GitHub App, then install it on the bot's repository only (the one the Deploy to Cloudflare button made). You come back here.">
@@ -207,7 +208,7 @@ function GitHubSettings() {
           )}
           {status.lastToken !== undefined && (
             <SettingsRow label="Last token" description={status.lastToken.ok ? `Made ${formatAgo(status.lastToken.at)}.` : `Failed ${formatAgo(status.lastToken.at)}: ${status.lastToken.error ?? "GitHub refused"}.`}>
-              <StatePill tone={status.lastToken.ok ? "green" : "red"}>{status.lastToken.ok ? "ok" : "failing"}</StatePill>
+              <StatusDot tone={status.lastToken.ok ? "green" : "red"}>{status.lastToken.ok ? "ok" : "failing"}</StatusDot>
             </SettingsRow>
           )}
           <SettingsRow label="Disconnect" description="Forgets the App here: the agent can no longer push, and proposals can no longer be read. Then delete the App on GitHub.">

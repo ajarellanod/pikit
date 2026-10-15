@@ -98,13 +98,16 @@ export default defineView({
 - Build it from Beautiful UI's primitives in `src/components/bui/` (the dashboard's look). An
   operator's page is `Page` / `Section` (`bui/Page`, the page `fill: true`): the view's name over what
   it says now, then sections with `FilterChips` (a dot and a count each), a `RecordsTable` (columns
-  with a glyph, sorting, a numbered gutter, a count; `RecordMark`, `RecordTag`, `TagList` in its
-  cells), `StatePill` for a state in a cell, `EmptyState` when nothing shows, `SearchField`,
+  with a glyph, sorting, a numbered gutter; its count is the section's figure or its chips'; `RecordMark`,
+  `RecordTag`, `TagList` in its cells), `StatusDot` for a state (a dot and the label in ink, never a filled pill), `EmptyState` when nothing shows, `SearchField`,
   `CodeBlock` for JSON; health-registry's and the base `delivery` and `home` views are
-  examples. Also `StatusPill`, `Chip`, `ValuePill`, `Button`, `ContextCards` (a card per
+  examples. Also `Badge` (a small quiet tag, or tinted), `Chip`, `Button`, `Switch`, `ContextCards` (a card per
   source: title, figure, text, a chip that opens it), `ToolChips`, `LoadingState`. shadcn's in `src/components/ui/` (in the same
   colours), and the pieces in `src/components/pikit/` (`ErrorNote`, `MessageView`). Use the tokens'
-  classes (`bg-surface`, `text-ink-2`, `shadow-card`, `rounded-card`), not raw colours. Need another primitive: `bunx shadcn@latest add <name>` in
+  classes (`bg-surface`, `text-ink-2`, `shadow-card`, `rounded-card`), not raw colours.
+  A field (`<input>`, `<select>`, `<textarea>`, a search box's wrapper) takes the `control` class and a
+  button is bui's `Button` (or `btn` with `btn-primary`, `btn-outline`, `btn-ghost`): index.css gives
+  them one height and radius, the same in the dashboard and the chat page; `control-label` for a label. Need another primitive: `bunx shadcn@latest add <name>` in
   `src/dashboard/`. A component's view may use only primitives the base dashboard ships, or say in its
   README which ones to add.
 - Import with `@/…`; relative imports only inside the view's own folder.

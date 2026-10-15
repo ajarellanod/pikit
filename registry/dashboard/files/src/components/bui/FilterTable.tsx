@@ -1,10 +1,8 @@
-import type { ReactNode } from "react";
-
 /* ---------------------------------------------------------
  * FILTER TABLE
- * Beautiful UI's filter chips and status pills, fed by the
- * app: chips with a dot and a count that pick what a table
- * shows, and the electric pills a state shows as in a cell.
+ * Beautiful UI's filter chips, fed by the app: chips with a
+ * dot and a count that pick what a table shows. A state in a
+ * cell is a `StatusDot`, the same dot beside its label.
  * --------------------------------------------------------- */
 
 export type PillTone = "green" | "orange" | "blue" | "red" | "neutral";
@@ -32,7 +30,7 @@ export function FilterChips<K extends string>({ filters, value, onChange, label 
             type="button"
             aria-pressed={active}
             onClick={() => onChange(filter.key)}
-            className={`flex h-6.5 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-[background-color,box-shadow,color] duration-200 ${active ? "bg-surface text-ink shadow-btn" : "text-ink-2 hover:bg-hover"}`}
+            className={`flex h-6.5 shrink-0 items-center gap-1.5 rounded-chip px-2.5 text-[12px] font-medium transition-[background-color,box-shadow,color] duration-200 ${active ? "bg-surface text-ink shadow-btn" : "text-ink-2 hover:bg-hover"}`}
           >
             {filter.tone !== undefined && <span className="size-1.5 rounded-full" style={{ background: TONE_DOT[filter.tone] }} />}
             {filter.label}
@@ -41,14 +39,5 @@ export function FilterChips<K extends string>({ filters, value, onChange, label 
         );
       })}
     </div>
-  );
-}
-
-/** A state in a table's cell: the filter table's pill, its colours mixed from the tone's hue. */
-export function StatePill({ tone, children, title }: { tone: PillTone; children: ReactNode; title?: string }) {
-  return (
-    <span title={title} className={`filter-status filter-status-${tone} inline-flex h-[23px] shrink-0 items-center whitespace-nowrap rounded-[8px] px-[7px] text-[13px] font-medium`}>
-      {children}
-    </span>
   );
 }

@@ -7,7 +7,7 @@
  * - `ADMIN_CLIENT` (`@pikit/admin-client`): the rest of `src/lib/`, the admin API's client and the
  *   dashboard's shell. Every file of `src/lib/` is in exactly one of the two.
  * - `SHARED_UI_FILES`: the lib-ui files, Beautiful UI's primitives (`src/components/bui/`, its
- *   `ActionsMenu` too) and the pieces that take everything by props and never fetch (`message`,
+ *   `ActionsMenu` and `Combobox` too: every file of the folder) and the pieces that take everything by props and never fetch (`message`,
  *   `error-note`, `markdown`, `markdown-engine`, a settings dialog's frame and rows: `settings-shell`,
  *   `settings-rows`; and a conversation's view over a source each app implements, features/completed/chat-parity.md:
  *   `conversation`, `context-panel`, `tab-bar`), as paths from the dashboard's root.
