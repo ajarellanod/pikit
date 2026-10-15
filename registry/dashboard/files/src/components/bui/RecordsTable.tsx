@@ -171,7 +171,7 @@ export default function RecordsTable<T>({
   initialSort?: { key: string; dir: 1 | -1 };
   /** px before the grid scrolls under its sticky header */
   maxHeight?: number;
-  /** the rows are one page of more: a footer with the range shown, the total and the pages */
+  /** the rows are one page of more: a footer with the range shown, the total and the pages; the table then grows to its page (no `maxHeight`) */
   paging?: RecordsPaging;
   className?: string;
 }) {
@@ -189,7 +189,8 @@ export default function RecordsTable<T>({
 
   return (
     <div className={`records-shell ${className}`}>
-      <div className="records-scroll" tabIndex={0} role="region" aria-label={label} style={{ maxHeight }}>
+      {/* a paged table shows its whole page: the page scrolls, not the table */}
+      <div className="records-scroll" tabIndex={0} role="region" aria-label={label} style={paging === undefined ? { maxHeight } : undefined}>
         <table className="records-table" style={{ minWidth: width }}>
           <colgroup>
             {columns.map((column) => (
