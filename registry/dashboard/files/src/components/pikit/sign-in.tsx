@@ -1,6 +1,7 @@
-import { ArrowRight, Eye, EyeClosed, Lock, WarningCircle } from "iconoir-react";
+import { ArrowRight, Eye, EyeClosed, Lock } from "iconoir-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/bui/Button";
+import { Field } from "@/components/bui/Field";
 import { ApiFailure, signIn } from "@/lib/api";
 import { usePageTitle } from "@/lib/shell";
 import { Mark } from "./mark";
@@ -78,52 +79,50 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
                 void submit();
               }}
             >
-              <label htmlFor="operator-token" className="control-label">
-                Pikit token
-              </label>
-              <div className="control group flex items-center gap-2 pr-0.5 pl-2.5">
-                <Lock width={15} height={15} strokeWidth={1.9} className="shrink-0 text-ink-3" aria-hidden />
-                <input
-                  id="operator-token"
-                  ref={field}
-                  type={shown ? "text" : "password"}
-                  autoComplete="current-password"
-                  spellCheck={false}
-                  placeholder="Paste the token"
-                  aria-invalid={problem !== undefined}
-                  aria-describedby={problem === undefined ? "operator-token-help" : "operator-token-problem"}
-                  value={value}
-                  onChange={(event) => {
-                    setValue(event.target.value);
-                    if (problem !== undefined) setProblem(undefined);
-                  }}
-                  autoFocus
-                  className="h-full min-w-0 flex-1 bg-transparent font-mono text-[13.5px] tracking-[0.01em] text-ink outline-none placeholder:font-sans placeholder:tracking-normal"
-                />
-                <button
-                  type="button"
-                  aria-label={shown ? "Hide the token" : "Show the token"}
-                  aria-pressed={shown}
-                  onClick={() => {
-                    setShown((current) => !current);
-                    field.current?.focus();
-                  }}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-(--control-hover) hover:text-ink"
-                >
-                  {shown ? <EyeClosed width={16} height={16} strokeWidth={1.9} /> : <Eye width={16} height={16} strokeWidth={1.9} />}
-                </button>
-              </div>
-
-              {problem === undefined ? (
-                <p id="operator-token-help" className="text-[12px] leading-[1.5] text-ink-3">
-                  It is <span className="font-mono text-[11.5px] text-ink-2">PIKIT_ADMIN_TOKEN</span> in the service's environment.
-                </p>
-              ) : (
-                <p id="operator-token-problem" role="alert" className="flex items-start gap-1.5 text-[12.5px] leading-[1.5] text-red" style={{ animation: "fade-in 160ms ease both" }}>
-                  <WarningCircle width={15} height={15} strokeWidth={1.9} className="mt-[1.5px] shrink-0" aria-hidden />
-                  {problem}
-                </p>
-              )}
+              <Field
+                id="operator-token"
+                label="Pikit token"
+                required
+                error={problem}
+                hint={
+                  <>
+                    It is <span className="font-mono text-[11.5px] text-ink-2">PIKIT_ADMIN_TOKEN</span> in the service's environment.
+                  </>
+                }
+              >
+                {(control) => (
+                  <div className="control group flex items-center gap-2 pr-0.5 pl-2.5">
+                    <Lock width={15} height={15} strokeWidth={1.9} className="shrink-0 text-ink-3" aria-hidden />
+                    <input
+                      {...control}
+                      ref={field}
+                      type={shown ? "text" : "password"}
+                      autoComplete="current-password"
+                      spellCheck={false}
+                      placeholder="Paste the token"
+                      value={value}
+                      onChange={(event) => {
+                        setValue(event.target.value);
+                        if (problem !== undefined) setProblem(undefined);
+                      }}
+                      autoFocus
+                      className="h-full min-w-0 flex-1 bg-transparent font-mono text-[13.5px] tracking-[0.01em] text-ink outline-none placeholder:font-sans placeholder:tracking-normal"
+                    />
+                    <button
+                      type="button"
+                      aria-label={shown ? "Hide the token" : "Show the token"}
+                      aria-pressed={shown}
+                      onClick={() => {
+                        setShown((current) => !current);
+                        field.current?.focus();
+                      }}
+                      className="flex size-7 shrink-0 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-(--control-hover) hover:text-ink"
+                    >
+                      {shown ? <EyeClosed width={16} height={16} strokeWidth={1.9} /> : <Eye width={16} height={16} strokeWidth={1.9} />}
+                    </button>
+                  </div>
+                )}
+              </Field>
 
               <Button type="submit" variant="primary" className="mt-2 w-full" disabled={checking || value.trim() === ""} aria-busy={checking}>
                 {checking ? (

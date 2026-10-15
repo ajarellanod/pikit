@@ -9,6 +9,7 @@ import { Archive, EditPencil, Trash, Undo } from "iconoir-react";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { ActionsMenuItem } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
+import { Field } from "@/components/bui/Field";
 import { ErrorNote } from "@/components/pikit/error-note";
 import {
   AlertDialog,
@@ -129,18 +130,21 @@ function RenameDialog({ chat, onClose, rename }: { chat: { id: string; title: st
             <AlertDialogTitle>Rename this chat</AlertDialogTitle>
             <AlertDialogDescription>The title the sidebar and its tab show.</AlertDialogDescription>
           </AlertDialogHeader>
-          <input
-            type="text"
-            required
-            autoFocus
-            maxLength={TITLE_MAX}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            onFocus={(event) => event.currentTarget.select()}
-            placeholder="A title"
-            aria-label="The chat's title"
-            className="control w-full"
-          />
+          <Field label="Title" required>
+            {(control) => (
+              <input
+                {...control}
+                type="text"
+                autoFocus
+                maxLength={TITLE_MAX}
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                onFocus={(event) => event.currentTarget.select()}
+                placeholder="Deploy checklist"
+                className="control w-full"
+              />
+            )}
+          </Field>
           {failed !== undefined && <ErrorNote error={failed} title="Not renamed" />}
           <AlertDialogFooter>
             <Button size="sm" variant="ghost" onClick={onClose}>

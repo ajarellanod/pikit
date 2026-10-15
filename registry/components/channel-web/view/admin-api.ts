@@ -4,7 +4,7 @@
  *
  * | Route | Answer |
  * |---|---|
- * | `GET /admin/api/channel-web/users?limit&cursor` | `AdminChatUsersPage`, newest first |
+ * | `GET /admin/api/channel-web/users?limit&offset&state&q` | `AdminChatUsersPage`: `limit` (1-100, 50) users from `offset` (0), newest first, of those in `state` (`active`, `invited`, `banned`; all when absent) whose name, email or id holds `q` |
  * | `POST /admin/api/channel-web/invitations` | `AdminChatInviteRequest` → `201 AdminChatInvitation` |
  * | `POST /admin/api/channel-web/users/:id/ban` | `200 AdminChatUserState`: banned, every session revoked |
  * | `POST /admin/api/channel-web/users/:id/unban` | `200 AdminChatUserState` |
@@ -32,9 +32,15 @@ export interface AdminChatUser {
   banned: boolean;
 }
 
+/** A user's state: `banned`; `invited` (not banned, no way to sign in yet, never seen); else `active`. */
+export type AdminChatUserStateName = "active" | "invited" | "banned";
+
 export interface AdminChatUsersPage {
   items: AdminChatUser[];
-  next?: string;
+  /** The users `state` and `q` select: what the pages cover. */
+  total: number;
+  /** The users `q` selects, by state (`all`: every state), whatever `state` is. */
+  counts: Record<"all" | AdminChatUserStateName, number>;
 }
 
 export interface AdminChatInviteRequest {

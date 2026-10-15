@@ -887,9 +887,9 @@ test("the operator's routes: absent without admin.auth (404); with it 401 withou
   const c = await chat({ admin: true });
   const { id } = await start(c, "ben", "hello");
   expect((await c.served.fetch("/admin/api/channel-web/users")).status).toBe(401);
-  const listed = (await (await c.served.fetch("/admin/api/channel-web/users?limit=1", { headers: OPERATOR })).json()) as { items: { id: string }[]; next?: string };
+  const listed = (await (await c.served.fetch("/admin/api/channel-web/users?limit=1", { headers: OPERATOR })).json()) as { items: { id: string }[]; total: number };
   expect(listed.items.map((each) => each.id)).toEqual(["ben"]);
-  expect(listed.next).toBe("1");
+  expect(listed.total).toBe(2);
 
   // Without PIKIT_PUBLIC_URL a server makes links only for a loopback host: any other Host (a client
   // writes it) is 400, and nothing is made.

@@ -102,6 +102,8 @@ export type JsonSchema = {
   minimum?: number;
   maximum?: number;
   maxLength?: number;
+  /** values that fit: the first is a text field's placeholder */
+  examples?: unknown[];
   [keyword: string]: unknown;
 };
 

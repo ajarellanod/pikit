@@ -118,12 +118,12 @@ export function SetPasswordScreen({ config, onSignedIn, link }: SignedOutProps &
         }}
       >
         {link.email === undefined ? (
-          <TextField label="Your email" type="email" value={email} onChange={setEmail} autoComplete="username" help="To sign you in right after. Leave it empty to sign in later." />
+          <TextField label="Your email" type="email" value={email} onChange={setEmail} autoComplete="username" placeholder="you@example.com" required={false} help="To sign you in right after. Leave it empty to sign in later." />
         ) : (
           <TextField label="Your email" type="email" value={link.email} onChange={() => undefined} autoComplete="username" readOnly />
         )}
-        <TextField label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" required minLength={8} maxLength={128} autoFocus help="At least 8 characters." />
-        <TextField label="The same again" type="password" value={again} onChange={setAgain} autoComplete="new-password" required minLength={8} maxLength={128} />
+        <TextField label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" placeholder="At least 8 characters" required minLength={8} maxLength={128} autoFocus />
+        <TextField label="The same again" type="password" value={again} onChange={setAgain} autoComplete="new-password" placeholder="Repeat the new password" required minLength={8} maxLength={128} />
         <Button type="submit" variant="primary" className="mt-1 w-full" disabled={busy} aria-busy={busy}>
           {busy && <Spinner />}
           Set the password

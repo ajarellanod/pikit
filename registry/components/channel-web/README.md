@@ -97,7 +97,10 @@ installed (`admin-auth-token`). Three ways in, the same routes behind each:
   when the project has a UI; shown while `admin.auth` is provided): every user (name, email, how they
   sign in, created, last seen, state: active, invited, banned; last seen is the user's own, written at
   each sign-in and at most once per `sessionCacheSeconds` of use, so a ban or "sign out everywhere" keeps
-  it, and someone who came once is never "invited" again), a search and filters, and each row's actions
+  it, and someone who came once is never "invited" again), 20 a page with "Showing 1–20 of 57" and the
+  pages under the table, a search (name, email or id) and filters by state, each with its count; the
+  search, the filter and the counts are the server's (`GET /admin/api/channel-web/users?limit&offset&state&q`
+  answers the page, `total` and `counts`), so they cover every user, not a page. Each row's actions
   (its "..." menu, `ActionsMenu`):
   Invite (an email, a name if you like), a password-reset link (an invited user who never came: a new
   invitation instead), Ban / Unban, Remove (behind a confirmation; a ban's latency is under "Ban

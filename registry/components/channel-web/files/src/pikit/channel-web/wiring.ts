@@ -18,7 +18,7 @@
  * | `channel-web.auth.handle` | `ForwardedRequest` (under `/chat/api/auth/`) | `ForwardedResponse` |
  * | `channel-web.auth.user` | `{ url, cookie }` | `AccountSession` (the user, the renewed cookies) or `null` |
  * | `channel-web.auth.methods` | `{ userId }` | `string[]` |
- * | `channel-web.auth.list` | `{ limit, cursor? }` | `AccountsPage` |
+ * | `channel-web.auth.list` | `{ limit, offset, state?, q? }` (`accountsQuery`) | `AccountsPage` |
  * | `channel-web.auth.invite` | `{ email, name?, origin }` | `AccountLink & { userId }` |
  * | `channel-web.auth.reset` | `{ userId, origin }` | `AccountLink` |
  * | `channel-web.auth.ban` | `{ userId, banned }` | `{}` |
@@ -30,7 +30,7 @@ import { ActorCallError, type ActorInbox, type ActorMailbox, CLIENT_ADDRESS_HEAD
 import { checkForwardedRequest, checkForwardedResponse, forwardRequest, forwardResponse, requestOf, responseOf, TooLarge } from "./accounts/forward.ts";
 import { createLocalAccounts } from "./accounts/local.ts";
 import { cachedUser } from "./accounts/session.ts";
-import type { AccountLink, AccountSession, AccountsPage, Accounts } from "./accounts/types.ts";
+import { type AccountLink, type AccountSession, type AccountsPage, type Accounts, accountsQuery } from "./accounts/types.ts";
 import { ACCOUNTS_KEY, accountsOnly } from "./calls.ts";
 import type { AccountSecrets, ChannelWebConfig, SignUpSettings } from "./config.ts";
 
@@ -189,10 +189,7 @@ export const BETTER_AUTH: AccountsWiring = {
     });
     inbox.answer(AUTH_CALL.methods, async (_key, message, ctx) => json(await (await accountsOf(ctx)).methods(text(fieldsOf(message), "userId", 200), ctx)));
     inbox.answer(AUTH_CALL.list, async (_key, message, ctx) => {
-      const { limit, cursor } = fieldsOf(message);
-      if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100) throw invalid('"limit" is an integer from 1 to 100');
-      if (cursor !== undefined && typeof cursor !== "string") throw invalid('"cursor" is a string');
-      return json(await (await accountsOf(ctx)).list({ limit, ...(cursor !== undefined && { cursor }) }, ctx));
+      return json(await (await accountsOf(ctx)).list(accountsQuery(fieldsOf(message)), ctx));
     });
     inbox.answer(AUTH_CALL.invite, async (_key, message, ctx) => {
       const fields = fieldsOf(message);

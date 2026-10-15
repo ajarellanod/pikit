@@ -166,7 +166,7 @@ function GitHubSettings() {
               aria-label="Organization"
               value={organization}
               onChange={(event) => setOrganization(event.target.value)}
-              placeholder="your account"
+              placeholder="acme (empty: your account)"
               className="control w-56"
             />
           </SettingsRow>

@@ -12,6 +12,7 @@ import { Activity, ArrowLeft, Check, Collapse, Expand, GitBranch, GitPullRequest
 import { type ReactNode, useState } from "react";
 import { Button } from "@/components/bui/Button";
 import EmptyState from "@/components/bui/EmptyState";
+import { Field } from "@/components/bui/Field";
 import { Page, PageLoading, Section } from "@/components/bui/Page";
 import RecordsTable, { type RecordColumn, RecordName, RecordTag } from "@/components/bui/RecordsTable";
 import { StatusDot } from "@/components/bui/StatusDot";
@@ -398,15 +399,19 @@ function Proposal({ id }: { id: string }) {
             <AlertDialogTitle>Reject {name}?</AlertDialogTitle>
             <AlertDialogDescription>It is closed, never deployed. A comment, if you write one, is kept with it for the agent to read.</AlertDialogDescription>
           </AlertDialogHeader>
-          <textarea
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-            maxLength={10_000}
-            rows={3}
-            placeholder="Why (optional)"
-            aria-label="A comment for the agent (optional)"
-            className="control w-full resize-y"
-          />
+          <Field label="Comment for the agent" required={false}>
+            {(control) => (
+              <textarea
+                {...control}
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                maxLength={10_000}
+                rows={3}
+                placeholder="Why it is rejected, what to do instead"
+                className="control w-full resize-y"
+              />
+            )}
+          </Field>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={() => void act("reject")}>

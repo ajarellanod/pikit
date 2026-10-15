@@ -186,7 +186,7 @@ A view appears in the sidebar with its icon (iconoir, MIT; never a paid set) and
 pane, padded and scrolling (`fill: true` on a page: it fills the pane and scrolls itself, as the chat
 does). Build it from `src/components/bui/` (Beautiful UI's look) or `src/components/ui/` (shadcn's,
 in the same colours). An operator's page as the base views are (`delivery`, `home`): `Page`
-and `Section` (`fill: true`), `FilterChips`, a `RecordsTable`, `StatusDot`, `EmptyState`, `CodeBlock`.
+and `Section` (`fill: true`), `FilterChips`, a `RecordsTable` (paged with `paging`: its footer and `Pagination`), `StatusDot`, `EmptyState`, `CodeBlock`; a form's fields in `Field` (label, required or optional mark, hint, error).
 
 Its data comes from admin routes its component registers through `http.route` (`GET
 /admin/api/memory/…`, asking `admin.auth`), read with `useApi` / `api` from `@/lib/api` (they send

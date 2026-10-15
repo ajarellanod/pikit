@@ -1,11 +1,15 @@
 import { type CSSProperties, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Pagination from "./Pagination";
 
 /* ---------------------------------------------------------
  * RECORDS TABLE
  * Beautiful UI's records grid, fed by the app: columns with
  * a glyph each, sorted from their header, a numbered gutter,
  * a first column that stays while the grid scrolls both ways.
- * Its count is the page's (a section's figure, its chips').
+ * Its count is the page's (a section's figure, its chips');
+ * paged, a footer says which rows show of how many, with
+ * the pages on its right (`paging`: the rows are that page,
+ * numbered on from the pages before).
  * The rows and what each cell shows are the caller's.
  * --------------------------------------------------------- */
 
@@ -137,6 +141,15 @@ export function TagList({ tags, render, empty = "—" }: { tags: string[]; rende
   );
 }
 
+/** A table's paging: `rows` are page `page` (from 1) of `total` rows, `pageSize` a page. */
+export type RecordsPaging = { page: number; pageSize: number; total: number; onPageChange: (page: number) => void };
+
+/** "Showing 21–40 of 57": the rows a page shows, of all. */
+export function showingText(paging: RecordsPaging, shown: number): string {
+  const from = (paging.page - 1) * paging.pageSize;
+  return `Showing ${from + 1}–${from + shown} of ${paging.total}`;
+}
+
 export default function RecordsTable<T>({
   label,
   columns,
@@ -145,6 +158,7 @@ export default function RecordsTable<T>({
   empty,
   initialSort,
   maxHeight = 520,
+  paging,
   className = "",
 }: {
   /** what the table holds, for assistive technology */
@@ -157,8 +171,11 @@ export default function RecordsTable<T>({
   initialSort?: { key: string; dir: 1 | -1 };
   /** px before the grid scrolls under its sticky header */
   maxHeight?: number;
+  /** the rows are one page of more: a footer with the range shown, the total and the pages */
+  paging?: RecordsPaging;
   className?: string;
 }) {
+  const firstNumber = paging === undefined ? 1 : (paging.page - 1) * paging.pageSize + 1;
   const [sort, setSort] = useState(initialSort);
 
   const sorted = useMemo(() => {
@@ -221,7 +238,7 @@ export default function RecordsTable<T>({
                     <td key={column.key} className={classes} title={column.title?.(row)}>
                       {at === 0 ? (
                         <div className="records-first">
-                          <span className="records-rownum">{index + 1}</span>
+                          <span className="records-rownum">{firstNumber + index}</span>
                           {column.cell(row)}
                         </div>
                       ) : (
@@ -236,6 +253,12 @@ export default function RecordsTable<T>({
         </table>
       </div>
       {rows.length === 0 && empty}
+      {paging !== undefined && rows.length > 0 && (
+        <div className="records-footer">
+          <span className="tabular-nums">{showingText(paging, rows.length)}</span>
+          <Pagination page={paging.page} pages={Math.ceil(paging.total / paging.pageSize)} onChange={paging.onPageChange} label={`Pages of ${label.toLowerCase()}`} className="ml-auto" />
+        </div>
+      )}
     </div>
   );
 }

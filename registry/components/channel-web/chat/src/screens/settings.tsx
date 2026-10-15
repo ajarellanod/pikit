@@ -106,6 +106,7 @@ function ProfileSection() {
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => event.key === "Escape" && name !== me.user.name && (event.preventDefault(), setName(me.user.name))}
             autoComplete="name"
+            placeholder="Ana López"
             maxLength={100}
             spellCheck={false}
             className="control w-44 sm:w-56"
@@ -169,9 +170,9 @@ function ChangePasswordDialog({ open, onClose, onChanged }: { open: boolean; onC
           void change();
         }}
       >
-        <TextField label="Current password" type="password" value={current} onChange={setCurrent} autoComplete="current-password" autoFocus required />
-        <TextField label="New password" type="password" value={next} onChange={setNext} autoComplete="new-password" required minLength={8} maxLength={128} help="At least 8 characters." />
-        <TextField label="The new one again" type="password" value={again} onChange={setAgain} autoComplete="new-password" required minLength={8} maxLength={128} />
+        <TextField label="Current password" type="password" value={current} onChange={setCurrent} autoComplete="current-password" placeholder="Your password now" autoFocus required />
+        <TextField label="New password" type="password" value={next} onChange={setNext} autoComplete="new-password" placeholder="At least 8 characters" required minLength={8} maxLength={128} />
+        <TextField label="The new one again" type="password" value={again} onChange={setAgain} autoComplete="new-password" placeholder="Repeat the new password" required minLength={8} maxLength={128} />
         {problem !== undefined && <FormNote>{problem}</FormNote>}
         <div className="mt-1 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>

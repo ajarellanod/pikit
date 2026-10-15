@@ -55,7 +55,7 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { ACCOUNT_TABLE, MODEL_NAMES, migrate, SESSION_TABLE, sqlAdapter, USER_TABLE } from "./adapter.ts";
 import { MAX_AUTH_BODY } from "./forward.ts";
 import { AUTH_BASE_PATH, linkOrigin, PUBLIC_URL_REQUIRED, setPasswordLink } from "./links.ts";
-import type { AccountLink, AccountSession, AccountSummary, AccountsPage, AccountUser, Accounts } from "./types.ts";
+import { ACCOUNT_STATES, type AccountLink, type AccountSession, type AccountState, type AccountSummary, type AccountsPage, type AccountUser, type Accounts } from "./types.ts";
 
 /** The cookies' name prefix: `pikit_chat.session_token`, `pikit_chat.session_data`. */
 export const COOKIE_PREFIX = "pikit_chat";
@@ -312,8 +312,14 @@ type UserRow = {
   lastSeenAt: string | null;
 };
 
-/** A cursor of `list`: the last item's creation time and id. */
-const CURSOR = /^(\d{4}-\d\d-\d\dT[\d:.]+Z)\|(.{1,200})$/;
+/** `list`'s states, in SQL over a user row (the same as `stateOf` in the view and the command). */
+const NOT_BANNED = `COALESCE("banned", 0) != 1`;
+const HAS_WAY_IN = `("lastSeenAt" IS NOT NULL OR EXISTS (SELECT 1 FROM ${ACCOUNT_TABLE} WHERE ${ACCOUNT_TABLE}."userId" = ${USER_TABLE}."id"))`;
+const STATE_SQL: Record<AccountState, string> = {
+  banned: `"banned" = 1`,
+  invited: `${NOT_BANNED} AND NOT ${HAS_WAY_IN}`,
+  active: `${NOT_BANNED} AND ${HAS_WAY_IN}`,
+};
 
 export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
   if (options.secret.length < 32) throw new Error("channel-web: the accounts' secret is at least 32 characters");
@@ -402,22 +408,28 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
       return methodsOf(rows.map((r) => r.providerId));
     },
 
-    async list(page) {
-      const limit = Math.min(Math.max(Math.trunc(page.limit), 1), 100);
-      const params: (string | number)[] = [];
-      let after = "";
-      if (page.cursor !== undefined) {
-        const m = CURSOR.exec(page.cursor);
-        if (m === null) throw refusal("invalid_request", "the cursor is not one this API gave");
-        after = ` WHERE "createdAt" < ? OR ("createdAt" = ? AND "id" < ?)`;
-        params.push(m[1] as string, m[1] as string, m[2] as string);
-      }
+    async list(query) {
+      const limit = Math.min(Math.max(Math.trunc(query.limit), 1), 100);
+      const offset = Math.max(Math.trunc(query.offset), 0);
+      if (query.state !== undefined && !ACCOUNT_STATES.includes(query.state)) throw refusal("invalid_request", "the state is active, invited or banned");
+      // ASCII case aside, as SQLite's lower(): the search is a substring of the name, the email or the id.
+      const needle = query.q?.trim().toLowerCase() ?? "";
+      const search = needle === "" ? "1 = 1" : `(instr(lower("name"), ?) > 0 OR instr(lower("email"), ?) > 0 OR instr(lower("id"), ?) > 0)`;
+      const searched = needle === "" ? [] : [needle, needle, needle];
       const db = await ready();
-      const rows = await db.query<UserRow>(
-        `SELECT "id", "name", "email", "emailVerified", "image", "createdAt", "banned", "lastSeenAt" FROM ${USER_TABLE}${after} ORDER BY "createdAt" DESC, "id" DESC LIMIT ?`,
-        [...params, limit + 1],
+      const [tally] = await db.query<{ all: number; banned: number | null; invited: number | null }>(
+        `SELECT COUNT(*) AS "all", SUM(CASE WHEN ${STATE_SQL.banned} THEN 1 ELSE 0 END) AS "banned", SUM(CASE WHEN ${STATE_SQL.invited} THEN 1 ELSE 0 END) AS "invited" FROM ${USER_TABLE} WHERE ${search}`,
+        searched,
       );
-      const shown = rows.slice(0, limit);
+      const all = Number(tally?.all ?? 0);
+      const banned = Number(tally?.banned ?? 0);
+      const invited = Number(tally?.invited ?? 0);
+      const counts = { all, active: all - banned - invited, invited, banned };
+      const where = query.state === undefined ? search : `${search} AND ${STATE_SQL[query.state]}`;
+      const shown = await db.query<UserRow>(
+        `SELECT "id", "name", "email", "emailVerified", "image", "createdAt", "banned", "lastSeenAt" FROM ${USER_TABLE} WHERE ${where} ORDER BY "createdAt" DESC, "id" DESC LIMIT ? OFFSET ?`,
+        [...searched, limit, offset],
+      );
       const ids = shown.map((r) => r.id);
       const marks = ids.map(() => "?").join(", ");
       const accounts =
@@ -431,8 +443,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
           banned: row.banned === 1,
         }),
       );
-      const last = shown.at(-1);
-      return { items, ...(rows.length > limit && last !== undefined && { next: `${last.createdAt}|${last.id}` }) } satisfies AccountsPage;
+      return { items, total: counts[query.state ?? "all"], counts } satisfies AccountsPage;
     },
 
     async invite(person, origin, ctx) {

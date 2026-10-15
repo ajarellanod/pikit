@@ -77,7 +77,7 @@ export function RenameDialog({ open, title, max, onClose, onRename }: { open: bo
           void save();
         }}
       >
-        <TextField label="Title" value={value} onChange={setValue} maxLength={max} autoFocus problem={problem} />
+        <TextField label="Title" value={value} onChange={setValue} maxLength={max} placeholder="Trip to Lisbon" required autoFocus problem={problem} />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Cancel

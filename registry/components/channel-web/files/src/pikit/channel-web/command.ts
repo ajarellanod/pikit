@@ -181,13 +181,13 @@ class Client {
   /** Every user, page by page, newest first. */
   async users(): Promise<AdminChatUser[]> {
     const all: AdminChatUser[] = [];
-    let cursor: string | undefined;
-    do {
-      const page = await this.send<AdminChatUsersPage>("GET", `/users?limit=${PAGE}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`);
+    for (;;) {
+      const page = await this.send<AdminChatUsersPage>("GET", `/users?limit=${PAGE}&offset=${all.length}`);
       all.push(...page.items);
-      cursor = page.next;
-    } while (cursor !== undefined);
-    return all;
+      // A user who came meanwhile shifts the pages: one may then show twice, never one missed.
+      if (page.items.length === 0 || all.length >= page.total) break;
+    }
+    return [...new Map(all.map((user) => [user.id, user])).values()];
   }
 
   /** The user `who` names: an id, or an email (looked up in the list). */

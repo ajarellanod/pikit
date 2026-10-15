@@ -100,8 +100,24 @@ export function SelectControl({ value, options, onChange, label, disabled = fals
   return <Combobox value={value} options={options} onChange={onChange} label={label} disabled={disabled} {...(id !== undefined && { id })} className="max-w-72 min-w-36" />;
 }
 
-/** A one-line text, saved with Enter or when it loses focus, if it changed. */
-export function TextControl({ value, onSave, label, type = "text", disabled = false, id }: { value: string; onSave: (value: string) => void; label: string; type?: "text" | "number"; disabled?: boolean; id?: string }) {
+/** A one-line text, saved with Enter or when it loses focus, if it changed; `placeholder` says what fits. */
+export function TextControl({
+  value,
+  onSave,
+  label,
+  placeholder,
+  type = "text",
+  disabled = false,
+  id,
+}: {
+  value: string;
+  onSave: (value: string) => void;
+  label: string;
+  placeholder: string;
+  type?: "text" | "number";
+  disabled?: boolean;
+  id?: string;
+}) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const commit = () => draft !== value && onSave(draft);
@@ -111,6 +127,7 @@ export function TextControl({ value, onSave, label, type = "text", disabled = fa
       aria-label={label}
       type={type}
       value={draft}
+      placeholder={placeholder}
       disabled={disabled}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
@@ -125,7 +142,7 @@ export function TextControl({ value, onSave, label, type = "text", disabled = fa
 
 /**
  * A multi-line prompt: edited freely, saved with its button. `fallback` is what applies with no value
- * of its own (an agent's definition), shown as the placeholder; `onReset` goes back to it.
+ * of its own (an agent's definition), shown until changed; `placeholder` is what an empty one shows; `onReset` goes back to it.
  */
 export function PromptEditor({
   value,
@@ -133,11 +150,13 @@ export function PromptEditor({
   onSave,
   onReset,
   label,
+  placeholder = "Write it here: plain text, Markdown welcome",
   saving = false,
   id,
 }: {
   value: string | undefined;
   fallback?: string;
+  placeholder?: string;
   onSave: (value: string) => Promise<void> | void;
   onReset?: () => Promise<void> | void;
   label: string;
@@ -156,6 +175,7 @@ export function PromptEditor({
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         rows={8}
+        placeholder={placeholder}
         spellCheck
         className="control min-h-40 w-full resize-y font-mono text-[12.5px] leading-relaxed"
       />

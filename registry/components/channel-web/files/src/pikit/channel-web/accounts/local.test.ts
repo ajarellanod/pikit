@@ -213,7 +213,7 @@ test("a sign-up cannot mark itself invited (invitedAt is not an input)", async (
     json: { email: "eve@example.com", password: PASSWORD, name: "Eve", invitedAt: new Date().toISOString() },
   });
   expect(response.status).toBeGreaterThanOrEqual(400);
-  expect((await f.accounts.list({ limit: 10 }, f.ctx)).items).toEqual([]);
+  expect((await f.accounts.list({ limit: 10, offset: 0 }, f.ctx)).items).toEqual([]);
 });
 
 test("invite: a link that sets a password, then signs in; emailed; exists once in use", async () => {
@@ -400,7 +400,7 @@ test("ban: sessions revoked, sign-in refused; lifted, sign-in works", async () =
   const refused = await signIn(f.browser(), "ana@example.com");
   expect(refused.status).toBe(403);
   expect(await codeOf(refused)).toBe("BANNED");
-  expect((await f.accounts.list({ limit: 10 }, f.ctx)).items[0]?.banned).toBe(true);
+  expect((await f.accounts.list({ limit: 10, offset: 0 }, f.ctx)).items[0]?.banned).toBe(true);
 
   await f.accounts.ban(id, false, f.ctx);
   expect((await signIn(b, "ana@example.com")).status).toBe(200);
@@ -423,7 +423,7 @@ test("remove: the user, their sessions and accounts are gone", async () => {
   expect(await refusedWith(f.accounts.remove(id, f.ctx))).toBe("not_found");
 });
 
-test("list: newest first, paged by cursor, with methods, last seen and bans", async () => {
+test("list: newest first, paged by offset, with methods, last seen and bans; filtered by state and search, the total and the counts the filter's", async () => {
   const f = make({ withEmail: false, mode: "invite" });
   const ids: string[] = [];
   for (const email of ["a@example.com", "b@example.com", "c@example.com"]) {
@@ -435,17 +435,28 @@ test("list: newest first, paged by cursor, with methods, last seen and bans", as
   await signUp(b, "d@example.com");
   const d = (await b.user())?.id ?? "";
 
-  const first = await f.accounts.list({ limit: 2 }, f.ctx);
+  const first = await f.accounts.list({ limit: 2, offset: 0 }, f.ctx);
   const [a, bb, c] = ids as [string, string, string];
   expect(first.items.map((u) => u.id)).toEqual([d, c]);
   expect(first.items[0]).toMatchObject({ email: "d@example.com", methods: ["password"], banned: false });
   expect(first.items[0]?.lastSeenAt).toBeGreaterThan(0);
   expect(first.items[1]?.lastSeenAt).toBeUndefined();
   expect(first.items[1]?.methods).toEqual([]);
-  const second = await f.accounts.list({ limit: 2, ...(first.next !== undefined && { cursor: first.next }) }, f.ctx);
+  expect([first.total, first.counts]).toEqual([4, { all: 4, active: 1, invited: 3, banned: 0 }]);
+  const second = await f.accounts.list({ limit: 2, offset: 2 }, f.ctx);
   expect(second.items.map((u) => u.id)).toEqual([bb, a]);
-  expect(second.next).toBeUndefined();
-  expect(await refusedWith(f.accounts.list({ limit: 2, cursor: "garbage" }, f.ctx))).toBe("invalid_request");
+  expect((await f.accounts.list({ limit: 2, offset: 4 }, f.ctx)).items).toEqual([]);
+
+  // A banned invitee is banned, not invited; the counts follow the search, the total the state too.
+  await f.accounts.ban(a, true, f.ctx);
+  const invited = await f.accounts.list({ limit: 10, offset: 0, state: "invited" }, f.ctx);
+  expect(invited.items.map((u) => u.id)).toEqual([c, bb]);
+  expect([invited.total, invited.counts]).toEqual([2, { all: 4, active: 1, invited: 2, banned: 1 }]);
+  expect((await f.accounts.list({ limit: 10, offset: 0, state: "banned" }, f.ctx)).items.map((u) => u.id)).toEqual([a]);
+  expect((await f.accounts.list({ limit: 10, offset: 0, state: "active" }, f.ctx)).items.map((u) => u.id)).toEqual([d]);
+  const searched = await f.accounts.list({ limit: 10, offset: 0, q: "B@EXAMPLE" }, f.ctx);
+  expect([searched.items.map((u) => u.id), searched.total, searched.counts]).toEqual([[bb], 1, { all: 1, active: 0, invited: 1, banned: 0 }]);
+  expect((await f.accounts.list({ limit: 10, offset: 0, q: "nobody", state: "active" }, f.ctx)).total).toBe(0);
 });
 
 test("last seen is the user's: kept through a ban and every session gone; a database read writes it at most once a while", async () => {
@@ -453,7 +464,7 @@ test("last seen is the user's: kept through a ban and every session gone; a data
   const b = f.browser();
   await signUp(b, "ana@example.com");
   const id = (await b.user())?.id ?? "";
-  const seen = async () => (await f.accounts.list({ limit: 10 }, f.ctx)).items.find((u) => u.id === id)?.lastSeenAt;
+  const seen = async () => (await f.accounts.list({ limit: 10, offset: 0 }, f.ctx)).items.find((u) => u.id === id)?.lastSeenAt;
   const first = await seen();
   expect(first).toBeGreaterThan(0);
 
@@ -489,7 +500,7 @@ test("a magic link's user (no account row) signed out everywhere is not invited 
   await b.send(linkIn(f.emails[0]?.message.text ?? ""));
   const id = (await b.user())?.id ?? "";
   await f.sql.run(`DELETE FROM channel_web_session WHERE "userId" = ?`, [id]);
-  const [listed] = (await f.accounts.list({ limit: 10 }, f.ctx)).items;
+  const [listed] = (await f.accounts.list({ limit: 10, offset: 0 }, f.ctx)).items;
   expect(listed).toMatchObject({ id, methods: [] });
   expect(listed?.lastSeenAt).toBeGreaterThan(0);
   expect(await refusedWith(f.accounts.invite({ email: "ana@example.com" }, ORIGIN, f.ctx))).toBe("exists");

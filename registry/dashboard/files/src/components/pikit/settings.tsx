@@ -50,6 +50,8 @@ export function SchemaSettings({ component, title }: { component: string; title?
     const id = `${base}-${key}`;
     const common = { label, description: schema.description };
     const choices = choicesOf(schema);
+    // A text's placeholder: the schema's first example, else its default.
+    const example = [schema.examples?.[0], schema.default].map((each) => (typeof each === "string" && each !== "" ? each : typeof each === "number" ? String(each) : undefined)).find((each) => each !== undefined);
     if (schema.type === "boolean") {
       return [
         <SettingsRow key={key} {...common}>
@@ -74,7 +76,7 @@ export function SchemaSettings({ component, title }: { component: string; title?
     if (schema.type === "string" && (schema.format === "multiline" || (schema.maxLength ?? 0) > 200)) {
       return [
         <SettingsRow key={key} {...common} stacked htmlFor={id}>
-          <PromptEditor id={id} label={label} value={typeof value === "string" ? value : undefined} onSave={(next) => save(key, next)} saving={settings.saving} />
+          <PromptEditor id={id} label={label} value={typeof value === "string" ? value : undefined} {...(example !== undefined && { placeholder: example })} onSave={(next) => save(key, next)} saving={settings.saving} />
         </SettingsRow>,
       ];
     }
@@ -82,7 +84,7 @@ export function SchemaSettings({ component, title }: { component: string; title?
       const numeric = schema.type !== "string";
       return [
         <SettingsRow key={key} {...common} htmlFor={id}>
-          <TextControl id={id} label={label} type={numeric ? "number" : "text"} value={value === undefined ? "" : String(value)} onSave={(next) => save(key, numeric ? Number(next) : next)} disabled={settings.saving} />
+          <TextControl id={id} label={label} placeholder={example ?? (numeric ? "A number" : "Not set")} type={numeric ? "number" : "text"} value={value === undefined ? "" : String(value)} onSave={(next) => save(key, numeric ? Number(next) : next)} disabled={settings.saving} />
         </SettingsRow>,
       ];
     }

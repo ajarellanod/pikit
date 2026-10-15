@@ -22,7 +22,7 @@ import {
   type Usage,
 } from "@pikit/contracts";
 import { createMemoryKeyValueStorage, createMemorySubmissions } from "@pikit/contracts/testing";
-import type { AccountLink, AccountSession, AccountSummary, AccountUser, Accounts } from "./accounts/types.ts";
+import type { AccountLink, AccountSession, AccountState, AccountSummary, AccountsPage, AccountsQuery, AccountUser, Accounts } from "./accounts/types.ts";
 import type { AccountsWiring } from "./wiring.ts";
 
 export const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as unknown as Usage;
@@ -105,11 +105,14 @@ export class FakeAccounts implements Accounts {
     return this.users.get(userId)?.methods ?? [];
   }
 
-  async list(page: { limit: number; cursor?: string }) {
-    const all = [...this.users.values()].sort((a, b) => b.createdAt - a.createdAt);
-    const from = page.cursor === undefined ? 0 : Number(page.cursor);
-    const items = all.slice(from, from + page.limit);
-    return { items, ...(from + page.limit < all.length && { next: String(from + page.limit) }) };
+  async list(query: AccountsQuery): Promise<AccountsPage> {
+    const stateOf = (user: AccountSummary): AccountState => (user.banned ? "banned" : user.methods.length === 0 && user.lastSeenAt === undefined ? "invited" : "active");
+    const needle = query.q?.toLowerCase() ?? "";
+    const searched = [...this.users.values()].filter((user) => `${user.name} ${user.email} ${user.id}`.toLowerCase().includes(needle)).sort((a, b) => b.createdAt - a.createdAt);
+    const count = (state: AccountState) => searched.filter((user) => stateOf(user) === state).length;
+    const counts = { all: searched.length, active: count("active"), invited: count("invited"), banned: count("banned") };
+    const chosen = searched.filter((user) => query.state === undefined || stateOf(user) === query.state);
+    return { items: chosen.slice(query.offset, query.offset + query.limit), total: chosen.length, counts };
   }
 
   async invite(person: { email: string; name?: string }, origin: string): Promise<AccountLink & { userId: string }> {

@@ -4,14 +4,16 @@
  */
 
 import { Check, Copy } from "iconoir-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/bui/Button";
+import { FieldLabel } from "@/components/bui/Field";
 import { formatAgo } from "@/lib/format";
 import type { AdminChatLink } from "./admin-api";
 
-/** The link on one line, a copy button, and one line on what became of it: emailed or not, until when it works. */
+/** Its label, the link on one line, a copy button, and one line on what became of it: emailed or not, until when it works. */
 export function LinkShown({ link, what }: { link: AdminChatLink; what: string }) {
   const field = useRef<HTMLInputElement>(null);
+  const id = useId();
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -28,14 +30,15 @@ export function LinkShown({ link, what }: { link: AdminChatLink; what: string })
     else navigator.clipboard.writeText(link.link).then(() => setCopied(true), selected);
   };
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <FieldLabel htmlFor={id}>{what.charAt(0).toUpperCase() + what.slice(1)}</FieldLabel>
       <div className="flex min-w-0 items-center gap-2">
         <input
           ref={field}
+          id={id}
           readOnly
           value={link.link}
           onFocus={(event) => event.currentTarget.select()}
-          aria-label={`The ${what}`}
           spellCheck={false}
           className="control min-w-0 flex-1 truncate font-mono text-[12.5px]"
         />

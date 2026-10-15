@@ -42,6 +42,7 @@ const SettingsSchema = Type.Object(
     repository: Type.String({
       pattern: REPOSITORY,
       title: "Repository",
+      examples: ["acme/assistant"],
       description: "The project's repository on GitHub, owner/name: where the agent pushes its pikit/self/ branches. Empty: GitHub is not connected.",
     }),
   },

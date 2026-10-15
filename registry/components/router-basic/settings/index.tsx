@@ -131,6 +131,7 @@ function AgentSettings() {
             <PromptEditor
               id="settings-system-prompt"
               label="System prompt"
+              placeholder="You are a helpful assistant: answer briefly, ask when unsure."
               value={override.systemPrompt}
               fallback={definition.systemPrompt}
               saving={runtime.saving}

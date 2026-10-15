@@ -15,7 +15,7 @@
 
 import type { AppContext, Handle, Pikit } from "@pikit/core";
 import type { AdminAuth, Operator } from "@pikit/contracts";
-import type { Accounts } from "./accounts/types.ts";
+import { type Accounts, accountsQuery } from "./accounts/types.ts";
 import type { AdminChatInvitation, AdminChatLink, AdminChatUsersPage, AdminChatUserState } from "./admin-api.ts";
 import type { ChatBackend } from "./backend.ts";
 import { PUBLIC_URL_REQUIRED } from "./accounts/links.ts";
@@ -23,12 +23,11 @@ import { failure } from "./routes.ts";
 
 export const ADMIN = "/admin/api/channel-web";
 
-const MAX_LIMIT = 100;
 const MAX_BODY = 8 * 1024;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** The status of each refusal of the accounts; any other failure is `503`. */
-const STATUS: Record<string, number> = { not_found: 404, exists: 409, invalid_request: 400, invalid_cursor: 400 };
+const STATUS: Record<string, number> = { not_found: 404, exists: 409, invalid_request: 400 };
 
 const json = <T>(status: number, body: T): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
@@ -105,11 +104,13 @@ export function provideAdminRoutes(pikit: Pikit, options: AdminRouteOptions): vo
 
   admin(`GET ${ADMIN}/users`, async (request, ctx) => {
     const params = new URL(request.url).searchParams;
-    const raw = params.get("limit");
-    const limit = raw === null ? 50 : Number(raw);
-    if (raw !== null && (!/^[0-9]+$/.test(raw) || limit < 1 || limit > MAX_LIMIT)) throw new Refused(400, "invalid_request", `limit is an integer from 1 to ${MAX_LIMIT}`);
-    const cursor = params.get("cursor");
-    const page = await accounts().list({ limit, ...(cursor !== null && { cursor }) }, ctx);
+    // A number's parameter is digits only (`Number("")` and `Number("1e2")` are numbers too): else it is checked as the text it is.
+    const number = (name: string, absent: number): unknown => {
+      const raw = params.get(name);
+      return raw === null ? absent : /^[0-9]{1,7}$/.test(raw) ? Number(raw) : raw;
+    };
+    const query = accountsQuery({ limit: number("limit", 50), offset: number("offset", 0), state: params.get("state") ?? undefined, q: params.get("q") ?? undefined });
+    const page = await accounts().list(query, ctx);
     return json<AdminChatUsersPage>(200, page);
   });
 

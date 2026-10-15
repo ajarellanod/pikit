@@ -143,7 +143,7 @@ export function SignInScreen({ config, onSignedIn, landing }: SignedOutProps) {
             void (withPassword ? signIn() : emailLink());
           }}
         >
-          <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required autoFocus={!hasProviders} />
+          <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" placeholder="you@example.com" required autoFocus={!hasProviders} />
           {withPassword && (
             <TextField
               label="Password"
@@ -151,6 +151,7 @@ export function SignInScreen({ config, onSignedIn, landing }: SignedOutProps) {
               value={password}
               onChange={setPassword}
               autoComplete="current-password"
+              placeholder="Your password"
               required
               help={
                 config.email ? (
@@ -225,12 +226,12 @@ export function SignUpScreen({ config, onSignedIn }: SignedOutProps) {
           void submit();
         }}
       >
-        <TextField label="Your name" value={name} onChange={setName} autoComplete="name" required autoFocus maxLength={100} />
-        <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required />
+        <TextField label="Your name" value={name} onChange={setName} autoComplete="name" placeholder="Ana López" required autoFocus maxLength={100} />
+        <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" placeholder="you@example.com" required />
         {config.email ? (
           <p className="text-[12.5px] leading-[1.5] text-ink-3">We email you a link: open it to choose your password.</p>
         ) : (
-          <TextField label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" required minLength={8} maxLength={128} help="At least 8 characters." />
+          <TextField label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" placeholder="At least 8 characters" required minLength={8} maxLength={128} />
         )}
         <Submit busy={busy}>Make the account</Submit>
       </form>
@@ -281,7 +282,7 @@ export function ForgotScreen({ config, initialEmail }: SignedOutProps & { initia
           }}
         >
           {problem !== undefined && <FormNote>{problem}</FormNote>}
-          <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required autoFocus />
+          <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" placeholder="you@example.com" required autoFocus />
           <Submit busy={busy}>Email me a link</Submit>
         </form>
       )}

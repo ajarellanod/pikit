@@ -38,10 +38,10 @@ const server = Bun.serve({
     const parts = url.pathname.split("/").slice(4); // after /admin/api/channel-web
     if (!url.pathname.startsWith("/admin/api/channel-web/")) return Response.json({ error: "not_found" }, { status: 404 });
     if (request.method === "GET" && parts[0] === "users" && parts.length === 1) {
-      // Two a page, to make the command follow the cursor.
-      const from = Number(url.searchParams.get("cursor") ?? 0);
+      // Two a page, to make the command read on.
+      const from = Number(url.searchParams.get("offset") ?? 0);
       const items = users.slice(from, from + 2);
-      return Response.json({ items, ...(from + 2 < users.length && { next: String(from + 2) }) });
+      return Response.json({ items, total: users.length, counts: { all: users.length, active: 0, invited: 0, banned: 0 } });
     }
     if (request.method === "POST" && parts[0] === "invitations") {
       const { email } = body as { email: string };
@@ -82,7 +82,7 @@ test("users lists every user, page after page, with the operator's token", async
   const { problems, said } = await run(["users"]);
 
   expect(problems).toEqual([]);
-  expect(calls.map((call) => call.path)).toEqual(["/admin/api/channel-web/users?limit=100", "/admin/api/channel-web/users?limit=100&cursor=2"]);
+  expect(calls.map((call) => call.path)).toEqual(["/admin/api/channel-web/users?limit=100&offset=0", "/admin/api/channel-web/users?limit=100&offset=2"]);
   expect(said[0]).toMatch(/^ID +EMAIL +NAME +SIGNS IN WITH +CREATED +LAST SEEN +STATE$/);
   expect(said[1]).toMatch(/^ana +ana@example\.com +ANA +password +2026-01-01 00:00 +2026-01-03 09:30 +active$/);
   expect(said[2]).toMatch(/ben@example\.com .* never +banned$/);

@@ -381,6 +381,9 @@ it("an invitation's link sets a password and signs in; a ban takes effect once t
   const users = (await (await admin("/users")).json()) as { items: { email: string; banned: boolean }[] };
   // The accounts actor's storage is the file's: users of the tests before are there too.
   expect(users.items.map((each) => each.email)).toEqual(expect.arrayContaining(["cleo@example.com", "dan@example.com"]));
+  // Filtered and counted in the actor's database (the SQL of `list` on Durable Objects' SQLite).
+  const found = (await (await admin("/users?limit=5&state=active&q=CLEO@")).json()) as { items: { email: string }[]; total: number; counts: Record<string, number> };
+  expect([found.items.map((each) => each.email), found.total, found.counts.all, found.counts.invited]).toEqual([["cleo@example.com"], 1, 1, 0]);
 
   // Banned: the actor deletes her sessions; the signed cookie cache still vouches in the Worker until it expires.
   expect((await admin(`/users/${invitation.userId}/ban`, { method: "POST" })).status).toBe(200);

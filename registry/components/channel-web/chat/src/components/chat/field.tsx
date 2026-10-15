@@ -1,10 +1,12 @@
 /**
- * A labelled field on the shared `.control` look (index.css: the dashboard's inputs), saying what is
- * wrong under it. A password's can be shown.
+ * A labelled field on the shared `.control` look (index.css: the dashboard's inputs) and the shared
+ * `bui/Field` (its label, required or optional mark, hint, error), saying what is wrong under it. A
+ * password's can be shown.
  */
 
 import { Eye, EyeClosed, WarningCircle } from "iconoir-react";
-import { type HTMLInputAutoCompleteAttribute, type ReactNode, useId, useState } from "react";
+import { type HTMLInputAutoCompleteAttribute, type ReactNode, useState } from "react";
+import { Field } from "@/components/bui/Field";
 
 export function TextField({
   label,
@@ -13,7 +15,7 @@ export function TextField({
   type = "text",
   autoComplete,
   autoFocus = false,
-  required = false,
+  required,
   minLength,
   maxLength,
   placeholder,
@@ -28,9 +30,11 @@ export function TextField({
   type?: "text" | "email" | "password";
   autoComplete?: HTMLInputAutoCompleteAttribute;
   autoFocus?: boolean;
+  /** true: marked required; false: marked optional; absent: neither (a field shown, not filled). */
   required?: boolean;
   minLength?: number;
   maxLength?: number;
+  /** What to type: every field the user fills has one. */
   placeholder?: string;
   help?: ReactNode;
   problem?: string;
@@ -38,58 +42,40 @@ export function TextField({
   /** Shown, not to be changed (an email a link names). */
   readOnly?: boolean;
 }) {
-  const id = useId();
   const [shown, setShown] = useState(false);
-  const described = problem !== undefined ? `${id}-problem` : help !== undefined ? `${id}-help` : undefined;
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="control-label">
-        {label}
-      </label>
-      <div className={`control flex items-center gap-2 ${type === "password" ? "pr-0.5" : ""}`}>
-        <input
-          id={id}
-          type={type === "password" && shown ? "text" : type}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          autoComplete={autoComplete}
-          autoFocus={autoFocus}
-          required={required}
-          minLength={minLength}
-          maxLength={maxLength}
-          placeholder={placeholder}
-          disabled={disabled}
-          readOnly={readOnly}
-          spellCheck={false}
-          aria-invalid={problem !== undefined}
-          aria-describedby={described}
-          className="h-full min-w-0 flex-1 bg-transparent text-ink outline-none read-only:text-ink-2"
-        />
-        {type === "password" && (
-          <button
-            type="button"
-            aria-label={shown ? "Hide the password" : "Show the password"}
-            aria-pressed={shown}
-            onClick={() => setShown((current) => !current)}
-            className="flex size-7 shrink-0 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-(--control-hover) hover:text-ink"
-          >
-            {shown ? <EyeClosed width={16} height={16} strokeWidth={1.9} /> : <Eye width={16} height={16} strokeWidth={1.9} />}
-          </button>
-        )}
-      </div>
-      {problem !== undefined ? (
-        <p id={`${id}-problem`} role="alert" className="flex items-start gap-1.5 text-[12.5px] leading-[1.5] text-red">
-          <WarningCircle width={15} height={15} strokeWidth={1.9} className="mt-[1.5px] shrink-0" aria-hidden />
-          {problem}
-        </p>
-      ) : (
-        help !== undefined && (
-          <p id={`${id}-help`} className="text-[12px] leading-[1.5] text-ink-3">
-            {help}
-          </p>
-        )
+    <Field label={label} required={required} hint={help} error={problem}>
+      {(control) => (
+        <div className={`control flex items-center gap-2 ${type === "password" ? "pr-0.5" : ""}`}>
+          <input
+            {...control}
+            type={type === "password" && shown ? "text" : type}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            autoComplete={autoComplete}
+            autoFocus={autoFocus}
+            minLength={minLength}
+            maxLength={maxLength}
+            placeholder={placeholder}
+            disabled={disabled}
+            readOnly={readOnly}
+            spellCheck={false}
+            className="h-full min-w-0 flex-1 bg-transparent text-ink outline-none read-only:text-ink-2"
+          />
+          {type === "password" && (
+            <button
+              type="button"
+              aria-label={shown ? "Hide the password" : "Show the password"}
+              aria-pressed={shown}
+              onClick={() => setShown((current) => !current)}
+              className="flex size-7 shrink-0 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-(--control-hover) hover:text-ink"
+            >
+              {shown ? <EyeClosed width={16} height={16} strokeWidth={1.9} /> : <Eye width={16} height={16} strokeWidth={1.9} />}
+            </button>
+          )}
+        </div>
       )}
-    </div>
+    </Field>
   );
 }
 

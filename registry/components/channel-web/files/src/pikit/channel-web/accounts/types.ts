@@ -12,6 +12,7 @@
  * What crosses an actor is JSON: these types are `type` aliases, checked on arrival.
  */
 
+import { ActorCallError } from "@pikit/contracts";
 import type { AppContext } from "@pikit/core";
 
 /** A user, as the channel knows them. */
@@ -43,7 +44,30 @@ export type AccountSummary = AccountUser & {
 /** A link the operator hands over (an invitation, a password reset), and whether it was emailed too. */
 export type AccountLink = { link: string; expiresAt: number; emailed: boolean };
 
-export type AccountsPage = { items: AccountSummary[]; next?: string };
+/** A user's state, as the operator filters them: `banned`; `invited` (not banned, no way to sign in, never seen); else `active`. */
+export type AccountState = "active" | "invited" | "banned";
+export const ACCOUNT_STATES: readonly AccountState[] = ["active", "invited", "banned"];
+
+/** A page of `list`: `limit` users from `offset`, of those in `state` (all when absent) whose name, email or id holds `q`. */
+export type AccountsQuery = { limit: number; offset: number; state?: AccountState; q?: string };
+
+/**
+ * A query as it arrives (the admin route's parameters, the accounts actor's message), checked: `limit`
+ * an integer from 1 to 100, `offset` from 0, `state` one of `ACCOUNT_STATES`, `q` at most 200
+ * characters (blank is none). Else `invalid_request`.
+ */
+export function accountsQuery(fields: { limit?: unknown; offset?: unknown; state?: unknown; q?: unknown }): AccountsQuery {
+  const { limit, offset = 0, state, q } = fields;
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100) throw new ActorCallError("invalid_request", "limit is an integer from 1 to 100");
+  if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > 1_000_000) throw new ActorCallError("invalid_request", "offset is an integer from 0");
+  if (state !== undefined && !ACCOUNT_STATES.includes(state as AccountState)) throw new ActorCallError("invalid_request", `state is one of ${ACCOUNT_STATES.join(", ")}`);
+  if (q !== undefined && (typeof q !== "string" || q.length > 200)) throw new ActorCallError("invalid_request", "q is at most 200 characters");
+  const needle = typeof q === "string" ? q.trim() : "";
+  return { limit, offset, ...(state !== undefined && { state: state as AccountState }), ...(needle !== "" && { q: needle }) };
+}
+
+/** `total`: the users `state` and `q` select (what the pages cover); `counts`: those `q` selects, by state. */
+export type AccountsPage = { items: AccountSummary[]; total: number; counts: Record<"all" | AccountState, number> };
 
 /** Why an operator's action was refused: the admin routes answer with its code. */
 export type AccountsRefusal = "not_found" | "exists" | "invalid_request";
@@ -57,7 +81,7 @@ export interface Accounts {
   methods(userId: string, ctx: AppContext): Promise<string[]>;
 
   /** The operator's (behind `admin.auth`). Newest first. */
-  list(page: { limit: number; cursor?: string }, ctx: AppContext): Promise<AccountsPage>;
+  list(query: AccountsQuery, ctx: AppContext): Promise<AccountsPage>;
   /** Makes the user (or finds one not signed in yet) and a link that lets them in; `exists` when they already have an account in use. */
   invite(person: { email: string; name?: string }, origin: string, ctx: AppContext): Promise<AccountLink & { userId: string }>;
   /** A link that sets a new password; `not_found`. */

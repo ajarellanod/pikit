@@ -30,7 +30,7 @@ type Fields = { description?: string; model: string; systemPrompt?: string; tool
 /** The agent being edited: `name` undefined while it is new and unnamed. */
 type Draft = { original?: string; name: string; fields: Fields };
 
-const field = "h-8 w-full rounded-control bg-surface px-2.5 text-[13px] text-ink shadow-btn outline-none transition-shadow duration-100 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]";
+const field = "control w-full";
 
 /** What `name` does, in one line (`ApiAgents.tools` or `skills`); `undefined` until read, or when it says nothing. */
 const summaryIn = (list: readonly ApiSummary[] | undefined, name: string) => {
@@ -63,11 +63,11 @@ function Editor({ draft, schema, taken, saving, onSave, onCancel }: { draft: Dra
   return (
     <div className="mt-2 rounded-card bg-canvas px-4 py-2 shadow-btn">
       <SettingsRow label="Name" description={isNew ? "How routing rules and conversations name it; it cannot change once made." : "It cannot change: routing rules and conversations name it."} htmlFor="agent-name">
-        <input id="agent-name" aria-label="Name" value={name} disabled={!isNew} onChange={(event) => setName(event.target.value.trim())} placeholder="support" className={`${field} w-56 disabled:opacity-60`} />
+        <input id="agent-name" aria-label="Name" value={name} disabled={!isNew} onChange={(event) => setName(event.target.value.trim())} placeholder="support" className={`${field} w-56`} />
       </SettingsRow>
       {nameProblem !== undefined && name !== "" && <p className="pb-2 text-[12.5px] text-red">{nameProblem}</p>}
       <SettingsRow label="Description" description="One line: what it is for." htmlFor="agent-description">
-        <input id="agent-description" aria-label="Description" value={fields.description ?? ""} maxLength={300} onChange={(event) => set({ description: event.target.value })} className={`${field} w-72`} />
+        <input id="agent-description" aria-label="Description" value={fields.description ?? ""} maxLength={300} onChange={(event) => set({ description: event.target.value })} placeholder="Answers billing questions" className={`${field} w-72`} />
       </SettingsRow>
       <SettingsRow label="Model" description="The model that answers, among the installed providers'." htmlFor="agent-model">
         <SelectControl id="agent-model" label="Model" value={fields.model} options={models.map((model) => ({ value: model, label: model }))} onChange={(model) => set({ model })} />
@@ -80,7 +80,8 @@ function Editor({ draft, schema, taken, saving, onSave, onCancel }: { draft: Dra
           onChange={(event) => set({ systemPrompt: event.target.value })}
           rows={8}
           spellCheck
-          className="min-h-40 w-full resize-y rounded-card bg-surface px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink shadow-btn outline-none transition-shadow duration-100 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
+          placeholder="You answer billing questions for Acme's customers, briefly and kindly."
+          className="control min-h-40 w-full resize-y font-mono text-[12.5px] leading-relaxed"
         />
       </SettingsRow>
       {tools.length > 0 && (

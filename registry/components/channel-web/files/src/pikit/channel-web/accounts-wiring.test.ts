@@ -83,7 +83,7 @@ test("only the accounts actor answers the accounts' calls: any other object refu
     [AUTH_CALL.handle]: { method: "GET", url: "http://localhost:3000/chat/api/auth/get-session", headers: [] },
     [AUTH_CALL.user]: { url: "http://localhost:3000/chat/api/me", cookie: "x=1" },
     [AUTH_CALL.methods]: { userId: "ana" },
-    [AUTH_CALL.list]: { limit: 10 },
+    [AUTH_CALL.list]: { limit: 10, offset: 0 },
     [AUTH_CALL.invite]: { email: "eve@example.com", origin: "http://localhost:3000" },
     [AUTH_CALL.reset]: { userId: "ana", origin: "http://localhost:3000" },
     [AUTH_CALL.ban]: { userId: "ana", banned: true },
@@ -101,7 +101,7 @@ test("only the accounts actor answers the accounts' calls: any other object refu
   // In the accounts actor the same handler reaches the accounts.
   const list = answers.get(AUTH_CALL.list) as ActorCallHandler;
   const reached = await Promise.resolve()
-    .then(() => answerCall(list, "channel-web:accounts", { limit: 10 }, app.context()))
+    .then(() => answerCall(list, "channel-web:accounts", { limit: 10, offset: 0 }, app.context()))
     .then(callResult)
     .catch((error: unknown) => error);
   expect([made, String(reached)]).toEqual([1, expect.stringContaining("not made here")]);
@@ -125,6 +125,7 @@ test("on a server: a person signs up through /chat/api/auth (better-auth), then 
   expect((await app.fetch("/chat/api/me", { headers: OPERATOR })).status).toBe(401);
   const users = (await (await app.fetch("/admin/api/channel-web/users", { headers: OPERATOR })).json()) as { items: { id: string; email: string }[] };
   expect(users.items.map((each) => each.email)).toEqual(["ana@example.com"]);
+  await pagedOnTheRoute(app.fetch);
 
   // Past the cookie cache, the session is read from the database, and the route renews the cache.
   ana.jar.delete("pikit_chat.session_data");
@@ -210,8 +211,37 @@ test("on Cloudflare: auth is forwarded to the accounts actor (every set-cookie k
 
   const users = (await (await worker.fetch("/admin/api/channel-web/users", { headers: OPERATOR })).json()) as { items: { email: string }[] };
   expect(users.items.map((each) => each.email)).toEqual(["ana@example.com"]);
+  calls.length = 0;
+  await pagedOnTheRoute(worker.fetch);
+  expect(new Set(calls)).toEqual(new Set([`channel-web:accounts ${AUTH_CALL.list}`, `channel-web:accounts ${AUTH_CALL.invite}`]));
   expect((await worker.fetch("/chat/api/me", { headers: OPERATOR })).status).toBe(401);
 });
+
+/**
+ * The operator's list on the route, with Ana signed up (active): two invited, paged by offset, filtered by
+ * state and search, the total and the counts the filter's; a parameter out of range is `400`.
+ */
+async function pagedOnTheRoute(fetch: (path: string, init?: RequestInit) => Promise<Response>) {
+  for (const email of ["ben@example.com", "cy@example.com"]) {
+    expect((await fetch("/admin/api/channel-web/invitations", { method: "POST", headers: { ...OPERATOR, "content-type": "application/json" }, body: JSON.stringify({ email }) })).status).toBe(201);
+  }
+  type Page = { items: { email: string }[]; total: number; counts: Record<string, number> };
+  const page = async (query: string): Promise<Page> => {
+    const response = await fetch(`/admin/api/channel-web/users?${query}`, { headers: OPERATOR });
+    expect(response.status).toBe(200);
+    return (await response.json()) as Page;
+  };
+  const all = await page("limit=2&offset=0");
+  expect([all.items.length, all.total, all.counts]).toEqual([2, 3, { all: 3, active: 1, invited: 2, banned: 0 }]);
+  expect((await page("limit=2&offset=2")).items.length).toBe(1);
+  const invited = await page("limit=10&state=invited");
+  expect([invited.items.map((each) => each.email).sort(), invited.total]).toEqual([["ben@example.com", "cy@example.com"], 2]);
+  const searched = await page("limit=10&q=ANA");
+  expect([searched.items.map((each) => each.email), searched.total, searched.counts.all]).toEqual([["ana@example.com"], 1, 1]);
+  for (const query of ["limit=0", "limit=101", "limit=1e1", "offset=-1", "offset=x", "state=gone", `q=${"a".repeat(201)}`]) {
+    expect([query, (await fetch(`/admin/api/channel-web/users?${query}`, { headers: OPERATOR })).status]).toEqual([query, 400]);
+  }
+}
 
 // Every better-auth route the page uses (chat/src/lib/auth.ts, sign-in.tsx, set-password.tsx), on both
 // targets: reachable through GET|POST /chat/api/auth/*, the headers better-auth reads kept on the way,
