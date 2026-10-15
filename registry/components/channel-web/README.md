@@ -68,9 +68,11 @@ installed (`admin-auth-token`). Three ways in, the same routes behind each:
   when the project has a UI; shown while `admin.auth` is provided): every user (name, email, how they
   sign in, created, last seen, state: active, invited, banned; last seen is the user's own, written at
   each sign-in and at most once per `sessionCacheSeconds` of use, so a ban or "sign out everywhere" keeps
-  it, and someone who came once is never "invited" again), a search and filters, and the actions:
+  it, and someone who came once is never "invited" again), a search and filters, and each row's actions
+  (its "..." menu, `ActionsMenu`):
   Invite (an email, a name if you like), a password-reset link (an invited user who never came: a new
-  invitation instead), Ban / Unban, Remove (behind a confirmation). It uses only the primitives the
+  invitation instead), Ban / Unban, Remove (behind a confirmation; a ban's latency is under "Ban
+  latency" below). A link is shown once, on one line with a Copy button. It uses only the primitives the
   base dashboard ships. `view/admin-api.ts` is an identical copy of the component's (a test checks).
 - **Settings, Web chat** (`settings/`, while `settings` is provided): who may make an account
   (`signUp.mode`: invited only, an allow list, anyone) and the allow list (`ana@example.com`, or

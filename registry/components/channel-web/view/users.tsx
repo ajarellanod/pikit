@@ -11,14 +11,16 @@
 
 import { Calendar, Clock, Group, KeyBack, LogIn, Mail, Prohibition, Trash, Undo, User, UserPlus } from "iconoir-react";
 import { type FormEvent, useState } from "react";
+import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
+import { ValuePill } from "@/components/bui/Chip";
 import EmptyState from "@/components/bui/EmptyState";
 import { FilterChips, type PillTone, StatePill } from "@/components/bui/FilterTable";
-import { Page, PageLoading, Section } from "@/components/bui/Page";
+import { Page, PageLoading } from "@/components/bui/Page";
 import RecordsTable, { type RecordColumn, RecordMark, RecordName, RecordTag, TagList, tagHue } from "@/components/bui/RecordsTable";
 import SearchField from "@/components/bui/SearchField";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { every } from "@/lib/activity";
 import { api, ApiFailure, post, useApi } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
@@ -44,6 +46,9 @@ type Dialog =
 
 const fieldClass = "h-9 w-full rounded-lg bg-field px-3 text-[13px] text-ink shadow-[var(--shadow-hairline)] outline-none placeholder:text-ink-3 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]";
 
+/** Every dialog of the view is this wide: the invitation, a link, a confirmation. */
+const DIALOG = "data-[size=default]:sm:max-w-[600px]";
+
 const asError = (thrown: unknown): Error => (thrown instanceof Error ? thrown : new Error(String(thrown)));
 
 /** What a refusal of an action means to the operator; anything else as the API said it. */
@@ -61,7 +66,6 @@ export function UsersPage() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [dialog, setDialog] = useState<Dialog>();
-  const [busy, setBusy] = useState<string>();
   const [failed, setFailed] = useState<Error>();
 
   if (first.error !== undefined && first.data === undefined) {
@@ -98,31 +102,28 @@ export function UsersPage() {
       setReading(false);
     }
   };
-  const act = async (user: AdminChatUser, work: () => Promise<void>) => {
-    setBusy(user.id);
+  const act = async (work: () => Promise<void>) => {
     setFailed(undefined);
     try {
       await work();
     } catch (thrown) {
       setFailed(refusal(thrown));
-    } finally {
-      setBusy(undefined);
     }
   };
   const path = (user: AdminChatUser, action?: string) => `${BASE}/users/${encodeURIComponent(user.id)}${action === undefined ? "" : `/${action}`}`;
 
   const resetLink = (user: AdminChatUser) =>
-    act(user, async () => {
+    act(async () => {
       const link = await post<AdminChatLink>(path(user, "password-reset"));
-      setDialog({ kind: "link", title: `A password-reset link for ${nameOf(user)}`, what: "password-reset link", link });
+      setDialog({ kind: "link", title: `Password-reset link for ${nameOf(user)}`, what: "password-reset link", link });
     });
   const setBanned = (user: AdminChatUser, banned: boolean) =>
-    act(user, async () => {
+    act(async () => {
       await post<AdminChatUserState>(path(user, banned ? "ban" : "unban"));
       refresh();
     });
   const remove = (user: AdminChatUser) =>
-    act(user, async () => {
+    act(async () => {
       await api<unknown>(path(user), { method: "DELETE" });
       refresh();
     });
@@ -132,7 +133,7 @@ export function UsersPage() {
       key: "name",
       label: "User",
       icon: <User />,
-      width: 220,
+      width: 190,
       sort: (a, b) => nameOf(a).localeCompare(nameOf(b)),
       title: (row) => `${row.name} (${row.id})`,
       cell: (row) => (
@@ -146,7 +147,7 @@ export function UsersPage() {
       key: "email",
       label: "Email",
       icon: <Mail />,
-      width: 240,
+      width: 220,
       sort: (a, b) => a.email.localeCompare(b.email),
       title: (row) => (row.emailVerified ? `${row.email} (verified)` : `${row.email} (not verified)`),
       cell: (row) => <span className="truncate text-ink-2">{row.email}</span>,
@@ -155,10 +156,10 @@ export function UsersPage() {
       key: "methods",
       label: "Signs in with",
       icon: <LogIn />,
-      width: 170,
+      width: 140,
       cell: (row) => <TagList tags={row.methods} empty="nothing yet" render={(method) => <RecordTag base={tagHue(method)}>{method}</RecordTag>} />,
     },
-    { key: "state", label: "State", icon: <Prohibition />, width: 110, sort: (a, b) => stateOf(a).localeCompare(stateOf(b)), cell: (row) => <StatePill tone={TONE[stateOf(row)]}>{stateOf(row)}</StatePill> },
+    { key: "state", label: "State", icon: <Prohibition />, width: 100, sort: (a, b) => stateOf(a).localeCompare(stateOf(b)), cell: (row) => <StatePill tone={TONE[stateOf(row)]}>{stateOf(row)}</StatePill> },
     {
       key: "created",
       label: "Created",
@@ -172,7 +173,7 @@ export function UsersPage() {
       key: "seen",
       label: "Last seen",
       icon: <Clock />,
-      width: 130,
+      width: 120,
       sort: (a, b) => (a.lastSeenAt ?? 0) - (b.lastSeenAt ?? 0),
       muted: (row) => row.lastSeenAt === undefined,
       title: (row) => (row.lastSeenAt === undefined ? undefined : new Date(row.lastSeenAt).toLocaleString()),
@@ -181,78 +182,59 @@ export function UsersPage() {
     {
       key: "actions",
       label: "",
-      width: 290,
-      cell: (row) => {
-        const disabled = busy !== undefined;
-        return (
-          <span className="flex items-center gap-1">
-            {stateOf(row) === "invited" ? (
-              <Button size="xs" variant="quiet" disabled={disabled} onClick={() => setDialog({ kind: "invite", email: row.email, name: row.name })} title="A new invitation link">
-                <UserPlus width={13} height={13} strokeWidth={1.8} /> Invite again
-              </Button>
-            ) : (
-              <Button size="xs" variant="quiet" disabled={disabled} onClick={() => void resetLink(row)} title="A link that sets a new password">
-                <KeyBack width={13} height={13} strokeWidth={1.8} /> Reset link
-              </Button>
-            )}
-            {row.banned ? (
-              <Button size="xs" variant="quiet" disabled={disabled} onClick={() => void setBanned(row, false)}>
-                <Undo width={13} height={13} strokeWidth={1.8} /> Unban
-              </Button>
-            ) : (
-              <Button size="xs" variant="quiet" disabled={disabled} onClick={() => setDialog({ kind: "ban", user: row })}>
-                <Prohibition width={13} height={13} strokeWidth={1.8} /> Ban
-              </Button>
-            )}
-            <Button size="xs" variant="quiet" disabled={disabled} className="text-red" onClick={() => setDialog({ kind: "remove", user: row })}>
-              <Trash width={13} height={13} strokeWidth={1.8} /> Remove
-            </Button>
-          </span>
-        );
-      },
+      width: 48,
+      cell: (row) => (
+        <ActionsMenu
+          label={`Actions for ${nameOf(row)}`}
+          className="size-7 rounded-full text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50 aria-expanded:bg-hover aria-expanded:text-ink"
+          actions={[
+            stateOf(row) === "invited"
+              ? { key: "invite", label: "Invite again", icon: <UserPlus />, onSelect: () => setDialog({ kind: "invite", email: row.email, name: row.name }) }
+              : { key: "reset", label: "Reset link", icon: <KeyBack />, onSelect: () => void resetLink(row) },
+            row.banned
+              ? { key: "unban", label: "Unban", icon: <Undo />, onSelect: () => void setBanned(row, false) }
+              : { key: "ban", label: "Ban", icon: <Prohibition />, onSelect: () => setDialog({ kind: "ban", user: row }) },
+            { key: "remove", label: "Remove", icon: <Trash />, danger: true, onSelect: () => setDialog({ kind: "remove", user: row }) },
+          ]}
+        />
+      ),
     },
   ];
 
-  const banned = count("banned");
+  const total = `${users.length}${next === undefined ? "" : "+"} ${users.length === 1 ? "user" : "users"}`;
   return (
     <Page
       eyebrow="Web users"
-      title={users.length === 0 ? "Nobody has an account yet" : `${users.length}${next === undefined ? "" : "+"} ${users.length === 1 ? "person" : "people"} with an account`}
-      aside={
-        <Button variant="primary" size="sm" onClick={() => setDialog({ kind: "invite" })}>
-          <UserPlus width={14} height={14} strokeWidth={1.8} /> Invite
-        </Button>
-      }
+      title={users.length === 0 ? "Nobody has an account yet" : "Who has an account"}
       description={
         <>
-          The people who talk to the assistant from the chat page (<code className="font-mono text-[12.5px]">/chat/</code>), each in conversations only they see. Invite someone with a link;
-          ban or remove anyone. A ban or a removal revokes their sessions at once, but a session its signed cookie vouches for stays good for at most a few minutes (the component's{" "}
-          <code className="font-mono text-[12.5px]">sessionCacheSeconds</code>). Who may make an account themselves is in Settings, Web chat.
+          People who use the chat page at <code className="font-mono text-[12.5px]">/chat/</code>.
         </>
       }
     >
       {first.error !== undefined && <ErrorNote error={first.error} title="Not read again" />}
       {failed !== undefined && <ErrorNote error={failed} title="Not done" />}
-      <Section
-        title="Users"
-        meta={users.length}
-        tools={
-          <>
-            <SearchField value={query} onChange={setQuery} placeholder="Name, email or id" label="Search the users" className="w-56" />
-            <FilterChips
-              label="Show the users who are"
-              value={filter}
-              onChange={setFilter}
-              filters={[
-                { key: "all", label: "All", count: users.length },
-                { key: "active", label: "Active", tone: "green", count: count("active") },
-                { key: "invited", label: "Invited", tone: "blue", count: count("invited") },
-                { key: "banned", label: "Banned", tone: "red", count: banned },
-              ]}
-            />
-          </>
-        }
-      >
+      <section className="flex min-w-0 flex-col gap-2.5" aria-label="The chat's users">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <SearchField value={query} onChange={setQuery} placeholder="Name, email or id" label="Search the users" className="w-60" />
+          <FilterChips
+            label="Show the users who are"
+            value={filter}
+            onChange={setFilter}
+            filters={[
+              { key: "all", label: "All", count: users.length },
+              { key: "active", label: "Active", tone: "green", count: count("active") },
+              { key: "invited", label: "Invited", tone: "blue", count: count("invited") },
+              { key: "banned", label: "Banned", tone: "red", count: count("banned") },
+            ]}
+          />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <ValuePill className="mx-0 h-[27px] px-2.5 text-[12.5px] tabular-nums">{total}</ValuePill>
+            <Button variant="primary" size="sm" onClick={() => setDialog({ kind: "invite" })}>
+              <UserPlus width={14} height={14} strokeWidth={1.8} /> Invite
+            </Button>
+          </div>
+        </div>
         <RecordsTable
           label="The chat's users"
           columns={columns}
@@ -260,9 +242,9 @@ export function UsersPage() {
           rowKey={(row) => row.id}
           empty={
             users.length === 0 ? (
-              <EmptyState icon={<Group />} title="No user yet" hint="Invite someone (Invite, above), or let people sign up: Settings, Web chat." />
+              <EmptyState icon={<Group />} title="No users yet" hint="Invite someone to get started." />
             ) : (
-              <EmptyState icon={<Group />} title="Nobody matches" hint={next === undefined ? "Clear the search or pick another filter." : "Clear the search, pick another filter, or show more users."} />
+              <EmptyState icon={<Group />} title="Nobody matches" hint={next === undefined ? "Try another search or filter." : "Try another search or filter, or show more."} />
             )
           }
         />
@@ -273,16 +255,17 @@ export function UsersPage() {
             </Button>
           </div>
         )}
-      </Section>
+      </section>
 
       <AlertDialog open={dialog !== undefined} onOpenChange={(open) => !open && setDialog(undefined)}>
-        <AlertDialogContent>
+        <AlertDialogContent className={DIALOG}>
           {dialog?.kind === "invite" && (
             <InviteForm
               initial={dialog}
-              onDone={(invitation) => {
+              onCancel={() => setDialog(undefined)}
+              onDone={(invitation, email) => {
                 refresh();
-                setDialog({ kind: "link", title: "Invited", what: "invitation link", link: invitation });
+                setDialog({ kind: "link", title: `Invitation link for ${email}`, what: "invitation link", link: invitation });
               }}
             />
           )}
@@ -290,11 +273,13 @@ export function UsersPage() {
             <>
               <AlertDialogHeader>
                 <AlertDialogTitle>{dialog.title}</AlertDialogTitle>
-                <AlertDialogDescription>Copy it now: it is not shown again. Anyone with it can set the password.</AlertDialogDescription>
+                <AlertDialogDescription>Copy it now: it is shown only once, and anyone with it can set the password.</AlertDialogDescription>
               </AlertDialogHeader>
               <LinkShown link={dialog.link} what={dialog.what} />
               <AlertDialogFooter>
-                <AlertDialogCancel>Done</AlertDialogCancel>
+                <Button size="sm" variant="primary" onClick={() => setDialog(undefined)}>
+                  Done
+                </Button>
               </AlertDialogFooter>
             </>
           )}
@@ -309,7 +294,9 @@ export function UsersPage() {
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <Button size="sm" variant="ghost" onClick={() => setDialog(undefined)}>
+                  Cancel
+                </Button>
                 <Button
                   size="sm"
                   variant="danger"
@@ -331,7 +318,7 @@ export function UsersPage() {
 }
 
 /** The invitation: an email and an optional name; on success, the link (shown by the caller). */
-function InviteForm({ initial, onDone }: { initial: { email?: string; name?: string }; onDone: (invitation: AdminChatInvitation) => void }) {
+function InviteForm({ initial, onCancel, onDone }: { initial: { email?: string; name?: string }; onCancel: () => void; onDone: (invitation: AdminChatInvitation, email: string) => void }) {
   const [email, setEmail] = useState(initial.email ?? "");
   const [name, setName] = useState(initial.name ?? "");
   const [sending, setSending] = useState(false);
@@ -341,7 +328,7 @@ function InviteForm({ initial, onDone }: { initial: { email?: string; name?: str
     setSending(true);
     setFailed(undefined);
     try {
-      onDone(await post<AdminChatInvitation>(`${BASE}/invitations`, { email: email.trim(), ...(name.trim() !== "" && { name: name.trim() }) }));
+      onDone(await post<AdminChatInvitation>(`${BASE}/invitations`, { email: email.trim(), ...(name.trim() !== "" && { name: name.trim() }) }), email.trim());
     } catch (thrown) {
       setFailed(refusal(thrown));
       setSending(false);
@@ -350,8 +337,8 @@ function InviteForm({ initial, onDone }: { initial: { email?: string; name?: str
   return (
     <form onSubmit={(event) => void submit(event)} className="contents">
       <AlertDialogHeader>
-        <AlertDialogTitle>Invite someone</AlertDialogTitle>
-        <AlertDialogDescription>They get a link that sets their password (or lets them sign in with a provider). You see it once, to send it yourself; it is emailed too when an email sender is installed.</AlertDialogDescription>
+        <AlertDialogTitle>{initial.email === undefined ? "Invite someone" : "Invite again"}</AlertDialogTitle>
+        <AlertDialogDescription>They get a link to set their password, shown to you once and emailed when an email sender is installed.</AlertDialogDescription>
       </AlertDialogHeader>
       <div className="flex flex-col gap-2">
         <input type="email" required maxLength={254} autoFocus value={email} onChange={(event) => setEmail(event.target.value)} placeholder="ana@example.com" aria-label="Their email" className={fieldClass} />
@@ -359,7 +346,9 @@ function InviteForm({ initial, onDone }: { initial: { email?: string; name?: str
       </div>
       {failed !== undefined && <ErrorNote error={failed} title="Not invited" />}
       <AlertDialogFooter>
-        <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
         <Button type="submit" size="sm" variant="primary" disabled={sending || email.trim() === ""}>
           {sending ? "Inviting" : "Invite"}
         </Button>

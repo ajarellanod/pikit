@@ -4,37 +4,48 @@
  */
 
 import { Check, Copy } from "iconoir-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/bui/Button";
 import { formatAgo } from "@/lib/format";
 import type { AdminChatLink } from "./admin-api";
 
-/** The link, a copy button, and what became of it: emailed or not, and until when it works. */
+/** The link on one line, a copy button, and one line on what became of it: emailed or not, until when it works. */
 export function LinkShown({ link, what }: { link: AdminChatLink; what: string }) {
+  const field = useRef<HTMLInputElement>(null);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
+  // The clipboard API is a secure context's only (a dashboard over plain http has none): then the field's text, selected.
   const copy = () => {
-    navigator.clipboard?.writeText(link.link).then(
-      () => setCopied(true),
-      () => undefined,
-    );
+    const selected = () => {
+      field.current?.select();
+      if (document.execCommand("copy")) setCopied(true);
+    };
+    if (navigator.clipboard === undefined) selected();
+    else navigator.clipboard.writeText(link.link).then(() => setCopied(true), selected);
   };
   return (
-    <div className="flex min-w-0 flex-col gap-2.5">
-      <div className="flex min-w-0 items-start gap-2 rounded-lg bg-field px-3 py-2 shadow-[var(--shadow-hairline)]">
-        <code className="min-w-0 flex-1 font-mono text-[12px] leading-relaxed break-all text-ink select-all">{link.link}</code>
-        <Button size="xs" variant="quiet" aria-label={`Copy the ${what}`} onClick={copy} className={copied ? "text-green" : undefined}>
-          {copied ? <Check width={13} height={13} strokeWidth={2.2} /> : <Copy width={13} height={13} strokeWidth={1.8} />}
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <input
+          ref={field}
+          readOnly
+          value={link.link}
+          onFocus={(event) => event.currentTarget.select()}
+          aria-label={`The ${what}`}
+          spellCheck={false}
+          className="h-9 min-w-0 flex-1 truncate rounded-lg bg-field px-3 font-mono text-[12px] text-ink shadow-[var(--shadow-hairline)] outline-none focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
+        />
+        <Button size="sm" variant="secondary" autoFocus aria-label={`Copy the ${what}`} onClick={copy} className={`h-9 w-[92px] shrink-0 ${copied ? "text-green" : ""}`}>
+          {copied ? <Check width={14} height={14} strokeWidth={2.2} /> : <Copy width={14} height={14} strokeWidth={1.8} />}
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <p className="text-[12.5px] leading-snug text-ink-3">
-        {link.emailed ? "It was also emailed to them. " : "It was not emailed (no email sender is installed): send it to them yourself. "}
-        It works until {new Date(link.expiresAt).toLocaleString()} ({formatAgo(link.expiresAt)}), and is shown only now.
+      <p className="text-[12px] text-ink-3" title={new Date(link.expiresAt).toLocaleString()}>
+        {link.emailed ? "Emailed to them" : "Not emailed (no email sender): send it yourself"} · Expires {formatAgo(link.expiresAt)}
       </p>
     </div>
   );
