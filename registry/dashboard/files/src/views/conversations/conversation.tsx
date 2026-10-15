@@ -109,7 +109,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
             <ActionsMenu
               actions={conversationActions(conversation, archived)}
               label="Conversation actions"
-              // Archived or not: read when the menu opens, as the sidebar's Archived section does.
+              // Archived or not: the archived ones are read when the menu opens.
               onOpenChange={(open) => open && chats.archived === undefined && chats.loadArchived()}
               className="size-7 rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink aria-expanded:bg-hover-2 aria-expanded:text-ink"
             />

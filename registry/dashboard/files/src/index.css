@@ -41,6 +41,8 @@
   --line: oklch(0.946 0.003 264.542);
   --line-strong: oklch(0.912 0.005 258.326);
   --line-soft: oklch(0.966 0.002 264.542);
+  /* a scrollbar's thumb: quiet, seen against the page */
+  --scrollbar-thumb: color-mix(in oklch, var(--ink-3) 45%, transparent);
   --grid-line: color-mix(in srgb, var(--line) 78%, transparent);
   --field: oklch(0.961 0.001 286.375);
 
@@ -101,6 +103,7 @@
   --line: oklch(0.308 0.006 258.354);
   --line-strong: oklch(0.356 0.007 264.474);
   --line-soft: oklch(0.278 0.006 258.354);
+  --scrollbar-thumb: color-mix(in oklch, var(--ink-3) 55%, transparent);
   --field: oklch(0.293 0.006 271.223);
 
   --accent-blue: oklch(0.68 0.173 253.301);
@@ -269,6 +272,41 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+
+  /* Scrollbars, everywhere: thin and quiet, seen while the pointer is over what scrolls (or it has
+     the focus). A class (`no-scrollbar`, `records-scroll`) overrides them. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  *:hover,
+  *:focus-within {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  /* Safari, which has no scrollbar-color: the same, drawn */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background-clip: padding-box;
+    background-color: transparent;
+  }
+
+  :hover::-webkit-scrollbar-thumb,
+  :focus-within::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }
 
@@ -451,6 +489,12 @@ select:focus-visible,
 
   .btn svg {
     flex-shrink: 0;
+  }
+
+  /* a leading icon sits closer to the button's edge: its glyph has room of its own (an iconoir "+"
+     is 25% blank on each side), so the edge looks as far from it as the label's end from the other */
+  .btn:not(.btn-icon) > svg:first-child {
+    margin-left: -3px;
   }
 
   /* dense rows (a table's toolbar, a heading's aside) */
@@ -765,6 +809,15 @@ a:focus-visible .animated-underline::after {
   will-change: opacity, transform, filter;
 }
 
+/* -- a busy spinner (a run going): a ring whose top turns ------------------ */
+
+.spinner {
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--ink-2);
+  border-radius: 9999px;
+  animation: spin 700ms linear infinite;
+}
+
 /* -- SidebarNav: one 224px tree clipped by a 52px shell when collapsed ----- */
 
 .sidebar-row {
@@ -846,6 +899,11 @@ a:focus-visible .animated-underline::after {
 [data-sidebar-collapsed="true"] .sidebar-glide-highlight {
   right: auto;
   width: 36px;
+}
+
+/* the chats fill the width their scroller leaves (a scrollbar takes some): never wider, never a horizontal scroll */
+.sidebar-chats .sidebar-chat-row {
+  width: auto;
 }
 
 /* -- the chat's type: 10% larger than the rest of the dashboard -------------

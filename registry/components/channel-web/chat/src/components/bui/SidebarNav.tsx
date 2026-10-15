@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import { NavArrowDown, Search, Settings, SidebarCollapse, Xmark } from "iconoir-react";
+import { NavArrowDown, NavArrowRight, Search, Settings, SidebarCollapse, Xmark } from "iconoir-react";
 import { ActionsMenu, type ActionsMenuItem, MenuPopover } from "./ActionsMenu";
 import GlideMenu from "./GlideMenu";
 
@@ -9,10 +9,13 @@ export { MenuRow, MenuSeparator } from "./ActionsMenu";
  * SIDEBAR NAV
  * Beautiful UI's harness sidebar, fed by the app: the workspace
  * (its mark and name), primary navigation, a searchable list of
- * chats (each with its actions menu, `ActionsMenu`, archived ones apart), a menu
+ * the most recent chats (at most `SIDEBAR_CHATS`, each with its
+ * actions menu, `ActionsMenu`; "View all" below them when there
+ * are more: the app's page of every chat, archived ones too), a menu
  * at the foot (Settings, or the caller's label and icon; none
  * without `menu`), and a collapse that keeps every icon in place.
- * Icons: iconoir.
+ * The chats scroll vertically only (titles truncate), with the
+ * thin scrollbar of the whole app (`index.css`). Icons: iconoir.
  * --------------------------------------------------------- */
 
 export type SidebarItem = {
@@ -39,6 +42,9 @@ export type SidebarChat = {
   /** its row's "…" menu; none, no menu */
   actions?: SidebarChatAction[];
 };
+
+/** The most chats the sidebar lists: the most recent; the rest are on the app's page of them ("View all"). */
+export const SIDEBAR_CHATS = 20;
 
 const SIDEBAR_MOTION = {
   expandedWidth: 224,
@@ -96,8 +102,7 @@ export default function SidebarNav({
   items,
   chats,
   onPickChat,
-  chatsFooter,
-  archived,
+  viewAll,
   chatsEmpty = "No chats yet",
   defaultCollapsed = false,
   className = "",
@@ -109,13 +114,12 @@ export default function SidebarNav({
   menuLabel?: string;
   /** the foot button's icon (a gear) */
   menuIcon?: ReactNode;
-  /** the chats put away: listed apart, read when opened (`onOpen`); `undefined` until read */
-  archived?: { chats: SidebarChat[] | undefined; onOpen: () => void };
   items: SidebarItem[];
+  /** the most recent first: the first `SIDEBAR_CHATS` are listed */
   chats: SidebarChat[];
   onPickChat: (id: string) => void;
-  /** after the chats: "older" */
-  chatsFooter?: ReactNode;
+  /** "View all" under the chats, to the app's page of them: given only when there are more than those listed */
+  viewAll?: { href?: string; onSelect: () => void; label?: string };
   chatsEmpty?: string;
   defaultCollapsed?: boolean;
   className?: string;
@@ -124,7 +128,6 @@ export default function SidebarNav({
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePosition, setWorkspacePosition] = useState<{ top?: number; bottom?: number; left: number }>({ left: 0 });
   const [chatsOpen, setChatsOpen] = useState(true);
-  const [archivedOpen, setArchivedOpen] = useState(false);
   /** The chat whose "…" menu is open: one at a time. */
   const [rowMenu, setRowMenu] = useState<string>();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -133,7 +136,7 @@ export default function SidebarNav({
   const searchRef = useRef<HTMLInputElement>(null);
 
   const needle = query.trim().toLowerCase();
-  const visibleChats = chats.filter((chat) => chat.label.toLowerCase().includes(needle));
+  const visibleChats = chats.slice(0, SIDEBAR_CHATS).filter((chat) => chat.label.toLowerCase().includes(needle));
 
   useEffect(() => {
     if (!workspaceOpen) return;
@@ -214,7 +217,7 @@ export default function SidebarNav({
         </GlideGroup>
 
         {/* collapsed, the chats have no icon to keep: they go, with the active one's highlight */}
-        <div className="sidebar-chats mt-3 min-h-0 flex-1 overflow-y-auto" inert={collapsed}>
+        <div className="sidebar-chats mt-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain" inert={collapsed}>
           <div className="sidebar-copy relative mx-2 mb-1 h-8">
             <button
               type="button"
@@ -286,34 +289,18 @@ export default function SidebarNav({
                 <ChatRow key={chat.id} chat={chat} menuOpen={rowMenu === chat.id} onPick={onPickChat} onMenu={(open) => setRowMenu(open ? chat.id : undefined)} />
               ))}
               {visibleChats.length === 0 && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">{needle === "" ? chatsEmpty : "No chats found"}</div>}
-              {chatsFooter}
-            </GlideGroup>
-          )}
-
-          {archived !== undefined && (
-            <div className="mt-3">
-              <button
-                type="button"
-                aria-expanded={archivedOpen}
-                onClick={() => {
-                  if (!archivedOpen) archived.onOpen();
-                  setArchivedOpen((open) => !open);
-                }}
-                className="sidebar-copy mx-2 flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12.5px] font-medium text-ink-3 transition-colors hover:text-ink-2"
-              >
-                <NavArrowDown width={16} height={16} strokeWidth={2} className="transition-transform duration-200" style={{ transform: archivedOpen ? "rotate(0deg)" : "rotate(-90deg)" }} />
-                <span>Archived</span>
-              </button>
-              {archivedOpen && (
-                <GlideGroup>
-                  {(archived.chats ?? []).map((chat) => (
-                    <ChatRow key={chat.id} chat={chat} menuOpen={rowMenu === chat.id} onPick={onPickChat} onMenu={(open) => setRowMenu(open ? chat.id : undefined)} />
-                  ))}
-                  {archived.chats !== undefined && archived.chats.length === 0 && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">No archived chats</div>}
-                  {archived.chats === undefined && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">Loading</div>}
-                </GlideGroup>
+              {viewAll !== undefined && (
+                <a
+                  data-row
+                  href={viewAll.href}
+                  onClick={(event) => follow(event, viewAll.onSelect)}
+                  className="sidebar-row sidebar-chat-row relative z-10 mx-2 flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[13px] font-medium text-ink-3 transition-colors duration-150 hover:text-ink"
+                >
+                  <span className="sidebar-copy min-w-0 flex-1 truncate">{viewAll.label ?? "View all"}</span>
+                  <NavArrowRight width={14} height={14} strokeWidth={2} className="sidebar-copy shrink-0" aria-hidden />
+                </a>
               )}
-            </div>
+            </GlideGroup>
           )}
         </div>
 
@@ -359,12 +346,11 @@ function ChatRow({ chat, menuOpen, onPick, onMenu }: { chat: SidebarChat; menuOp
         title={chat.label}
         aria-current={chat.active ? "page" : undefined}
         onClick={(event) => follow(event, () => onPick(chat.id))}
-        className={`sidebar-row relative z-10 mx-2 flex h-8 items-center gap-2 rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${chat.active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""} ${withMenu ? "pr-8" : ""}`}
+        className={`sidebar-row sidebar-chat-row relative z-10 mx-2 flex h-8 items-center gap-2 rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${chat.active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""} ${withMenu ? "pr-8" : ""}`}
       >
         <span className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] font-medium ${chat.active ? "text-ink" : "text-ink-2"}`}>{chat.label}</span>
-        {chat.busy === true && (
-          <span aria-label="Running" className="sidebar-copy size-3 shrink-0 rounded-full border-[1.5px] border-line-strong border-t-ink-2" style={{ animation: "spin 700ms linear infinite" }} />
-        )}
+        {/* never `sidebar-copy`: its transform and transition would hold the spin still (the whole list fades when collapsed) */}
+        {chat.busy === true && <span aria-label="Running" className="spinner size-3 shrink-0" />}
       </a>
       {withMenu && (
         <div className="sidebar-copy absolute top-1 right-3 z-20">

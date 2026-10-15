@@ -1,10 +1,9 @@
 /**
- * The user's conversations (`GET /chat/api/conversations`), newest activity first, for the sidebar and
- * the list: the first page read again every `every(20 s)` while the person is here (busy flags, new
- * titles), older pages on demand; renaming, archiving and deleting change the list at once. The
- * archived ones (`?archived=1`) are read when asked (`loadArchived`: the sidebar's Archived opened),
- * and again after one is archived or restored, and at each `reload` (a message lists an archived one
- * again).
+ * The user's latest conversations (`GET /chat/api/conversations`), newest activity first, for the
+ * sidebar and the tabs: the first `PAGE` (the sidebar's `SIDEBAR_CHATS`), read again every `every(20 s)`
+ * while the person is here (busy flags, new titles), never more (every one, and the archived ones, are
+ * on the Conversations page, `screens/chats.tsx`); renaming, archiving and deleting change it at once,
+ * and move `changed`, which that page follows.
  *
  * Also what the pages share: the messages sent and not shown yet (`SentMessages`, the shared
  * conversation view's: New chat's first message shows in the conversation it opens), and the tabs, the
@@ -16,12 +15,11 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 import { type SentMessages, useSentMessages } from "@/components/pikit/conversation";
 import { every } from "./activity.ts";
 import type { ChatConversation, ChatPage } from "./chat-api.ts";
-import { get, request, useGet } from "./client.ts";
+import { request, useGet } from "./client.ts";
 import { conversationsPath } from "./source.ts";
 
-const PAGE = 30;
-/** The archived ones read at once: the API's largest page. */
-const ARCHIVED_PAGE = 100;
+/** The conversations read: the sidebar's (`SIDEBAR_CHATS`). */
+const PAGE = 20;
 const POLL_MS = 20_000;
 /** Tabs kept. */
 const KEPT_TABS = 12;
@@ -46,16 +44,15 @@ function loadTabs(userId: string): Tab[] {
 export interface Conversations extends SentMessages {
   items: ChatConversation[] | undefined;
   error: Error | undefined;
-  hasOlder: boolean;
-  loadOlder(): Promise<void>;
+  /** Whether there are more than `items`: the sidebar's "View all". */
+  hasMore: boolean;
   reload(): void;
+  /** Moves at each conversation renamed, archived, restored or deleted here: a list of its own reads again. */
+  changed: number;
   rename(id: string, title: string): Promise<ChatConversation>;
   /** Archives it (listed apart) or restores it (`archived` false). */
   archive(id: string, archived: boolean): Promise<ChatConversation>;
   remove(id: string): Promise<void>;
-  /** The archived ones, newest activity first; `undefined` until `loadArchived` read them. */
-  archived: ChatConversation[] | undefined;
-  loadArchived(): void;
   tabs: Tab[];
   /** A tab's title: its conversation's, as the lists have it now. */
   tabTitle(tab: Tab): string;
@@ -67,20 +64,10 @@ export interface Conversations extends SentMessages {
 
 const Context = createContext<Conversations | undefined>(undefined);
 
-/** `first`'s items, then those of `older` it does not have. */
-const merged = (first: ChatConversation[], older: ChatConversation[]): ChatConversation[] => {
-  const ids = new Set(first.map((each) => each.id));
-  return [...first, ...older.filter((each) => !ids.has(each.id))];
-};
-
 export function ConversationsProvider({ userId, children }: { userId: string; children: ReactNode }) {
   const latest = useGet<ChatPage<ChatConversation>>(conversationsPath({ limit: PAGE }), every(POLL_MS));
-  const [older, setOlder] = useState<ChatConversation[]>([]);
-  const [cursor, setCursor] = useState<string | null>();
   const [changed, setChanged] = useState<Map<string, ChatConversation | null>>(new Map());
-  const [archived, setArchived] = useState<ChatConversation[]>();
-  /** Whether the archived ones were asked for: read again after each change. */
-  const [archivedAsked, setArchivedAsked] = useState(false);
+  const [changes, setChanges] = useState(0);
   const [tabs, setTabs] = useState<Tab[]>(() => loadTabs(userId));
   const { sentOf, addSent, updateSent, lastSentAt } = useSentMessages();
   const { reload: reloadLatest } = latest;
@@ -88,44 +75,21 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
   // A newer read of the first page knows better than what was changed here.
   useEffect(() => setChanged(new Map()), [latest.data]);
 
-  const next = cursor === undefined ? latest.data?.next : (cursor ?? undefined);
-  const loadOlder = useCallback(async () => {
-    if (next === undefined) return;
-    const page = await get<ChatPage<ChatConversation>>(conversationsPath({ limit: PAGE, cursor: next }));
-    setOlder((items) => merged(items, page.items));
-    setCursor(page.next ?? null);
-  }, [next]);
-
   const rename = useCallback(async (id: string, title: string) => {
     const renamed = await request<ChatConversation>("PATCH", `/conversations/${encodeURIComponent(id)}`, { title });
     setChanged((current) => new Map(current).set(id, renamed));
-    setArchived((items) => items?.map((each) => (each.id === id ? renamed : each)));
+    setChanges((n) => n + 1);
     return renamed;
   }, []);
 
-  const readArchived = useCallback(() => {
-    get<ChatPage<ChatConversation>>(conversationsPath({ limit: ARCHIVED_PAGE, archived: true })).then(
-      (page) => setArchived(page.items),
-      () => setArchived((current) => current ?? []),
-    );
-  }, []);
-  const loadArchived = useCallback(() => {
-    setArchivedAsked(true);
-    readArchived();
-  }, [readArchived]);
-
-  const reload = useCallback(() => {
-    reloadLatest();
-    if (archivedAsked) readArchived();
-  }, [reloadLatest, archivedAsked, readArchived]);
+  const reload = reloadLatest;
 
   const archive = useCallback(
     async (id: string, archive: boolean) => {
       const now = await request<ChatConversation>("POST", `/conversations/${encodeURIComponent(id)}/${archive ? "archive" : "unarchive"}`, {});
       setChanged((current) => new Map(current).set(id, now));
-      setArchived((items) => items?.filter((each) => each.id !== id));
-      if (archive) setOlder((items) => items.filter((each) => each.id !== id));
-      // Where it goes now: the first page (restored), the archived ones (archived).
+      setChanges((n) => n + 1);
+      // Restored, it may be among the latest again.
       reload();
       return now;
     },
@@ -135,8 +99,7 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
   const remove = useCallback(async (id: string) => {
     await request<void>("DELETE", `/conversations/${encodeURIComponent(id)}`);
     setChanged((current) => new Map(current).set(id, null));
-    setOlder((items) => items.filter((each) => each.id !== id));
-    setArchived((items) => items?.filter((each) => each.id !== id));
+    setChanges((n) => n + 1);
     setTabs((all) => all.filter((tab) => tab.id !== id));
   }, []);
 
@@ -168,14 +131,14 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
 
   const items = useMemo(() => {
     if (latest.data === undefined) return undefined;
-    return merged(latest.data.items, older).flatMap((each) => {
+    return latest.data.items.flatMap((each) => {
       const now = changed.get(each.id);
       return now === null || now?.archived === true ? [] : [now ?? each];
     });
-  }, [latest.data, older, changed]);
+  }, [latest.data, changed]);
 
-  // The lists' titles, by conversation: a tab shows its conversation's as it is now.
-  const titled = useMemo(() => new Map([...(archived ?? []), ...(items ?? [])].map((each) => [each.id, each.title])), [items, archived]);
+  // The list's titles, by conversation: a tab shows its conversation's as it is now.
+  const titled = useMemo(() => new Map((items ?? []).map((each) => [each.id, each.title])), [items]);
   const tabTitle = useCallback((tab: Tab): string => titled.get(tab.id) ?? tab.title, [titled]);
 
   const value = useMemo<Conversations>(
@@ -186,20 +149,18 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
       lastSentAt,
       items,
       error: latest.data === undefined ? latest.error : undefined,
-      hasOlder: next !== undefined,
-      loadOlder,
+      hasMore: latest.data?.next !== undefined,
       reload,
+      changed: changes,
       rename,
       archive,
       remove,
-      archived,
-      loadArchived,
       tabs,
       tabTitle,
       openTab,
       closeTab,
     }),
-    [sentOf, addSent, updateSent, lastSentAt, items, latest.data, latest.error, next, loadOlder, reload, rename, archive, remove, archived, loadArchived, tabs, tabTitle, openTab, closeTab],
+    [sentOf, addSent, updateSent, lastSentAt, items, latest.data, latest.error, reload, changes, rename, archive, remove, tabs, tabTitle, openTab, closeTab],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

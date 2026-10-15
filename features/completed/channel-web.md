@@ -249,8 +249,8 @@ A Vite + React + Tailwind v4 project of its own (section 3), built from the shar
   link by email), sign-up when allowed, forgot password and the verification / reset / invitation
   landing pages better-auth's links lead to.
 - The user's conversations (newest first; one menu, `ActionsMenu`, on the sidebar's rows, the list's
-  and the conversation's header: rename, archive or restore, delete; the archived ones apart in the
-  sidebar), one conversation (messages, the answer as written, the tool running, stop), a new one,
+  and the conversation's header: rename, archive or restore, delete; the sidebar lists the latest 20,
+  Conversations every one and the archived ones), one conversation (messages, the answer as written, the tool running, stop), a new one,
   the composer with images.
 - Settings (a modal from the user's menu at the sidebar's foot, the dashboard's settings dialog's
   frame and rows, `settings-shell`, `settings-rows`): profile (name), password, connected accounts

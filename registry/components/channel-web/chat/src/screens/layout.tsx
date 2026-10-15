@@ -1,7 +1,7 @@
 /**
  * The signed-in page, in the dashboard's harness: Beautiful UI's sidebar (the assistant's name; New
- * chat, Conversations; the user's conversations, each with its menu, and the archived ones apart; at
- * its foot the user's name, opening Settings, the theme and Sign out), and the screen in a window
+ * chat, Conversations; the user's latest conversations, each with its menu, and "View all" to
+ * Conversations when there are more: the archived ones are there only; at its foot the user's name, opening Settings, the theme and Sign out), and the screen in a window
  * beside it. On a narrow screen the sidebar starts folded to its icons, and Conversations lists them
  * full width.
  *
@@ -71,7 +71,7 @@ export function SidePanel({ children }: { children: ReactNode }) {
 /** The tabs over `useConversations`: the conversations opened, then New chat's while it shows. */
 function ChatTabs({ route, onActions, onNewChat }: { route: Route; onActions: (element: HTMLDivElement | null) => void; onNewChat: () => void }) {
   const conversations = useConversations();
-  const busy = new Map([...(conversations.archived ?? []), ...(conversations.items ?? [])].map((each) => [each.id, each.busy]));
+  const busy = new Map((conversations.items ?? []).map((each) => [each.id, each.busy]));
   const shown = chatIdOf(route.path);
   const active = conversations.tabs.some((tab) => tab.id === shown) ? shown : undefined;
 
@@ -189,20 +189,9 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
           workspace={{ name: config.name, logo: <AssistantBadge name={config.name} size={20} /> }}
           items={items}
           chats={(conversations.items ?? []).map(rowOf)}
-          archived={{ chats: conversations.archived?.map(rowOf), onOpen: conversations.loadArchived }}
           chatsEmpty={conversations.error !== undefined ? "The conversations cannot be read" : conversations.items === undefined ? "Loading" : "No conversations yet"}
           onPickChat={(id) => go(chatPath(id))}
-          chatsFooter={
-            conversations.hasOlder ? (
-              <button
-                type="button"
-                onClick={() => void conversations.loadOlder().catch((error: unknown) => setProblem(asError(error)))}
-                className="sidebar-copy mx-2 px-2 py-2 text-left text-[12.5px] font-medium text-ink-3 transition-colors duration-100 hover:text-ink"
-              >
-                Older conversations
-              </button>
-            ) : undefined
-          }
+          {...(conversations.hasMore && { viewAll: { href: href("/chats"), onSelect: () => go("/chats") } })}
           menuLabel={me.user.name.trim() === "" ? me.user.email : me.user.name}
           menuIcon={<User width={17} height={17} strokeWidth={1.8} className="shrink-0" />}
           menu={(close) => (

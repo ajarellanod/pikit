@@ -6,8 +6,9 @@ reset, the cost, and what the App is made of (**Home**). It is yours: a shadcn/u
 v4) whose source you change like any other file of the project.
 
 It looks like [Beautiful UI](https://www.beautifului.dev/harness)'s harness: a sidebar (the App's menu
-with **Settings**, the theme, the interaction sounds and sign out; **New chat**; the views, **Home** first; every
-conversation by its name, searchable), the conversations you opened as tabs (New chat's too: each one
+with **Settings**, the theme, the interaction sounds and sign out; **New chat**; **Conversations**; the views,
+**Home** first; the 20 latest conversations by their names, searchable, then **View all** when there are
+more), the conversations you opened as tabs (New chat's too: each one
 closes, and closing the last leaves a fresh New chat), a chat (the transcript, the answer streaming in as
 markdown through [Comark](https://comark.dev), the model's thinking and tool calls folded together
 between two texts, a message shown the moment it is sent) and its composer, and a **Context** panel.
@@ -129,7 +130,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/components/ui/` | shadcn/ui primitives, copied and yours (`shadcn add` puts more here), in the same tokens |
 | `src/components/pikit/` | pieces the views share: a transcript (`turnsOf`, `Reply`, `UserBubble`, `MessageView`), an error, the sign-in |
 | `src/components/pikit/conversation.tsx`, `context-panel.tsx`, `tab-bar.tsx` | a conversation's view over a `ConversationSource` (its transcript, live events, send, stop: `ConversationView`, `useLive`, `useTranscript`, `useSentMessages`), the Context panel, the tabs: by props only, shared with channel-web's chat page |
-| `src/components/pikit/chat-actions.tsx` | a conversation's menu (Rename, Archive or Restore, Delete) and its dialogs, for the sidebar's rows and the conversation's header |
+| `src/components/pikit/chat-actions.tsx` | a conversation's menu (Rename, Archive or Restore, Delete) and its dialogs, for the sidebar's rows, the Conversations rows and the conversation's header |
 | `src/index.css` | the one stylesheet: Beautiful UI's tokens (light and dark), shadcn's variables mapped onto them |
 | `src/lib/api.ts` | calls to the admin API (the session), `signIn` / `signOut`, `useApi`, live events (`follow`) |
 | `src/lib/activity.ts` | whether you are there: `useActive`, `usePolling`, `every` (slower on Cloudflare) |
@@ -140,9 +141,9 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General, and `SchemaSettings`; `settings.tsx` re-exports the rows and controls |
 | `src/components/pikit/settings-shell.tsx`, `settings-rows.tsx` | a settings dialog's frame and navigation (`SettingsPanels`, `useSettingsChoice`), its rows and controls (`SettingsHeading`, `SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`): by props only, shared with channel-web's chat page |
 | `src/lib/router.tsx` | the pages under `/admin` |
-| `src/views/conversations/` | New chat (`new-chat.tsx`), a conversation (the shared view over the admin API, `source.ts`, with its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names) |
+| `src/views/conversations/` | New chat (`new-chat.tsx`), Conversations (`list.tsx`, `/conversations/all`: every conversation, a page at a time, a search by title or key, the archived ones), a conversation (the shared view over the admin API, `source.ts`, with its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names) |
 | `src/views/home/` | Home: where the App runs and talks, its agents, its components by what they are for (`overview.ts`), one at the side (`panel.tsx`: what it provides and needs, its config), and the wiring, folded (`wiring.tsx`) |
-| `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles (the API's: a key's, shared by the conversations a reset left behind), the commands' notes (`useChats`, `agentsOf`) |
+| `src/lib/chats.tsx` | the conversations the sidebar lists (the 20 latest), the tabs, the titles (the API's: a key's, shared by the conversations a reset left behind), the commands' notes (`useChats`, `agentsOf`) |
 | `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, its commands, the views, `newChat`, a conversation's menu (`conversationActions`), `TabActions`, `SidePanel` |
 | `src/lib/transcript.ts`, `sources.ts` | a conversation's JSON (`TranscriptEntry`, `LiveEvent`) and its live state (`reduce`); what the Context panel reads of a transcript |
 | `src/lib/theme.ts`, `public/theme.js` | light, dark or the system's, before the first paint |

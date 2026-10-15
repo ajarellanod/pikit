@@ -1,13 +1,14 @@
 /**
  * The dashboard's shell, in Beautiful UI's harness layout: the operator signs in with the token once
- * (a session cookie, `lib/api.ts`), then a sidebar (the App's menu, New chat, the views the App's
- * composition allows, Home first, every conversation), a main pane with the conversations opened as
+ * (a session cookie, `lib/api.ts`), then a sidebar (the App's menu, New chat, Conversations, the views
+ * the App's composition allows, Home first, the latest conversations and "View all" when there are
+ * more), a main pane with the conversations opened as
  * tabs (and New chat's while it shows; each one closes), and a side panel a page may fill (a
  * conversation's Context). A page that loads with a session still open goes straight in, and `/` opens
  * New chat.
  */
 
-import { EditPencil, LogOut, Settings, SoundHigh, SoundOff } from "iconoir-react";
+import { ChatLines, EditPencil, LogOut, Settings, SoundHigh, SoundOff } from "iconoir-react";
 import { useCallback, useEffect, useState } from "react";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem } from "@/components/bui/SidebarNav";
@@ -21,12 +22,13 @@ import { SignIn } from "@/components/pikit/sign-in";
 import { TabBar } from "@/components/pikit/tab-bar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setTarget } from "@/lib/activity";
-import { api, type ApiAgents, type ApiApp, type ApiCommands, type ApiConversation, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
+import { api, type ApiAgents, type ApiApp, type ApiCommands, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
 import { ChatsProvider, useChats } from "@/lib/chats";
 import { BASE, match, navigate, pagePath, usePath } from "@/lib/router";
 import { appName, ShellContext, usePageTitle } from "@/lib/shell";
 import { setSounds, useSounds } from "@/lib/sounds";
 import { visibleViews } from "@/lib/views";
+import { CONVERSATIONS_PATH } from "@/views/conversations/list";
 
 const OPERATOR = "pikit-operator";
 const CHAT = "/conversations";
@@ -113,8 +115,11 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const openId = found?.page.path === `${CHAT}/:id` ? found.params?.id : undefined;
   const openTab = openId === undefined ? undefined : chats.tabs.find((tab) => tab.id === openId);
   const openChat = openId === undefined ? undefined : (chats.items ?? []).find((conversation) => conversation.conversationId === openId);
+  const listing = found?.page.path === CONVERSATIONS_PATH;
   const pageTitle =
-    openId !== undefined
+    listing
+      ? "Conversations"
+      : openId !== undefined
       ? openTab !== undefined
         ? chats.tabTitle(openTab)
         : openChat !== undefined
@@ -133,6 +138,9 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       href: `${BASE}${newChatPath}`,
       onSelect: () => newChat(),
     },
+    ...(chatView === undefined
+      ? []
+      : [{ key: "conversations", label: "Conversations", icon: <ChatLines />, active: listing, href: `${BASE}${CONVERSATIONS_PATH}`, onSelect: () => navigate(CONVERSATIONS_PATH) } satisfies SidebarItem]),
     ...views
       .filter((view) => view.id !== "conversations")
       .map((view): SidebarItem => {
@@ -143,7 +151,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   ];
 
   const chatActions = useChatActions({ shown: openId, onLeft: () => newChat() });
-  const rowOf = (conversation: ApiConversation, archived: boolean): SidebarChat => {
+  const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation): SidebarChat => {
     const id = conversation.conversationId;
     return {
       id,
@@ -151,10 +159,9 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       busy: conversation.busy,
       active: path === pagePath(CHAT, id),
       href: `${BASE}${pagePath(CHAT, id)}`,
-      actions: chatActions.actionsOf(conversation, archived),
+      actions: chatActions.actionsOf(conversation, false),
     };
-  };
-  const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation) => rowOf(conversation, false));
+  });
 
   const Page = found?.page.component;
   const page =
@@ -181,16 +188,9 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           workspace={{ name, logo: <Mark size={20} /> }}
           items={items}
           chats={sidebarChats}
-          archived={{ chats: chats.archived?.map((conversation) => rowOf(conversation, true)), onOpen: chats.loadArchived }}
           chatsEmpty={chats.error !== undefined ? "The chats cannot be read" : chats.items === undefined ? "Loading" : "No chats yet"}
           onPickChat={(id) => navigate(pagePath(CHAT, id))}
-          chatsFooter={
-            chats.hasOlder ? (
-              <button type="button" onClick={() => void chats.loadOlder()} className="sidebar-copy mx-2 px-2 py-2 text-left text-[12.5px] font-medium text-ink-3 transition-colors duration-100 hover:text-ink">
-                Older chats
-              </button>
-            ) : undefined
-          }
+          {...(chats.hasMore && chatView !== undefined && { viewAll: { href: `${BASE}${CONVERSATIONS_PATH}`, onSelect: () => navigate(CONVERSATIONS_PATH) } })}
           menu={(close) => (
             <>
               <MenuRow

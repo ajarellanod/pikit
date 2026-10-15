@@ -137,7 +137,7 @@ App's composition (`visibleViews`, read from `GET /admin/api/app`).
 
 | View | `requires` | Where |
 |---|---|---|
-| `conversations` | `agent.observe` | the dashboard (the chat, not a sidebar item) |
+| `conversations` | `agent.observe` | the dashboard: New chat, each conversation, and Conversations (`/conversations/all`: every one, paged, searched, the archived ones), which the sidebar links (Conversations; "View all" under its 20 latest) |
 | `home` | none | the dashboard: Home, what the App is made of (first in the sidebar; `/admin/` opens New chat) |
 | `delivery` | `outbound.queue` | the dashboard |
 | `health-registry` | `health` | health-registry's `view/` |
