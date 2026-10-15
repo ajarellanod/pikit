@@ -28,7 +28,7 @@ import LoadingState, { LoaderGrid } from "@/components/bui/LoadingState";
 import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ContextButton, ContextPanel } from "@/components/pikit/context-panel";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { type Message, Reply, turnsOf, UserBubble, type UserMessage, userText } from "@/components/pikit/message";
+import { type Message, Reply, ToolDetailsContext, turnsOf, UserBubble, type UserMessage, userText } from "@/components/pikit/message";
 import { useActive } from "@/lib/activity";
 import { imagesOf, sourcesOf } from "@/lib/sources";
 import { INITIAL, type LiveEvent, type LiveState, reduce, type TranscriptEntry, type TranscriptPage } from "@/lib/transcript";
@@ -301,6 +301,8 @@ export interface ConversationViewProps {
   closed?: ReactNode;
   /** Whether the Context panel may show (the dashboard: always; the chat: as the operator's policy says). */
   context?: boolean;
+  /** Whether a tool call opens to what it returned (`ToolDetailsContext`); off where results are withheld. Default on. */
+  toolDetails?: boolean;
   /** The header's actions, given the Context button when there is context to show: the app puts them where it wants. */
   actions?: (contextButton: ReactNode) => ReactNode;
   /** Where the Context panel goes (the dashboard: its side panel). Absent, right where the view is. */
@@ -314,7 +316,7 @@ export interface ConversationViewProps {
 }
 
 /** The thread, the activity line, the floating composer and the Context panel of one conversation. */
-export function ConversationView({ source, sent, from, composer = {}, closed, context = true, actions, side, notes = [], onChange, onFirstText }: ConversationViewProps) {
+export function ConversationView({ source, sent, from, composer = {}, closed, context = true, toolDetails = true, actions, side, notes = [], onChange, onFirstText }: ConversationViewProps) {
   const id = source.id;
   const live = useLive(source);
   const transcript = useTranscript(source, live.changes);
@@ -445,6 +447,7 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
     notes.filter((each) => each.at <= (at ?? 0) && !turns.slice(0, i).some((before) => before.kind === "user" && each.at <= (before.message.timestamp ?? 0)));
 
   return (
+    <ToolDetailsContext.Provider value={toolDetails}>
     <div className="chat relative flex min-h-0 flex-1 flex-col">
       {actions?.(hasContext ? <ContextButton open={contextOpen} onToggle={() => setContextOpen(!contextOpen)} /> : undefined)}
 
@@ -523,5 +526,6 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
 
       {panel !== undefined && (side === undefined ? panel : side(panel))}
     </div>
+    </ToolDetailsContext.Provider>
   );
 }

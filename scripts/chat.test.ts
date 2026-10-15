@@ -357,6 +357,21 @@ describe("the composer", () => {
     expect(render({ webSearch: { available: true } })).toContain('aria-label="Web search"');
     expect(render({})).not.toContain("aria-expanded");
   });
+
+  // With the default policy (tools: "names") a call's result is withheld: it opened to "(no output)".
+  test.skipIf(!installed)("a tool call opens to its result only where results are shown: the chat with tools withheld shows the name alone", async () => {
+    const { default: ToolChips } = await import(join(CHAT, "src/components/bui/ToolChips.tsx"));
+    const { createElement } = await import(join(CHAT, "node_modules/react/index.js"));
+    const { renderToStaticMarkup } = await import(join(CHAT, "node_modules/react-dom/server.js"));
+    const steps = [{ id: "c1", icon: "tool", label: "fetch", mono: true, status: "done" }];
+    const render = (props: Record<string, unknown>) => renderToStaticMarkup(createElement(ToolChips, { steps, ...props })) as string;
+    expect(render({})).toContain("aria-expanded");
+    expect(render({})).toContain("(no output)");
+    const withheld = render({ details: false });
+    expect(withheld).toContain("fetch");
+    expect(withheld).not.toContain("aria-expanded");
+    expect(withheld).not.toContain("(no output)");
+  });
 });
 
 describe("images", () => {

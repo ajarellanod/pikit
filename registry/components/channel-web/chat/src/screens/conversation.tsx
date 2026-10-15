@@ -68,6 +68,7 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
       source={source}
       sent={conversations}
       context={config.visibility.context}
+      toolDetails={config.visibility.tools === "full"}
       // Its busy flag, its title and where it is listed (a message lists an archived one again) follow.
       onChange={() => {
         reloadSummary();

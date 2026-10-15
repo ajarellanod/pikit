@@ -53,7 +53,7 @@ function Spinner() {
   return <span aria-label="Running" className="size-3 shrink-0 rounded-full border-[1.5px] border-line-strong border-t-ink-2" style={{ animation: "spin 700ms linear infinite" }} />;
 }
 
-export default function ToolChips({ steps, header, className }: { steps: ToolStep[]; header?: string; className?: string }) {
+export default function ToolChips({ steps, header, className, details = true }: { steps: ToolStep[]; header?: string; className?: string; /** whether a row opens to what the tool returned: off where it is withheld (a chat page's policy) */ details?: boolean }) {
   const [expanded, setExpanded] = useState(true);
   const open = header === undefined || expanded;
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
@@ -89,20 +89,20 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
         <div className="-mx-1 overflow-hidden px-1.5 pb-1">
           <div className={`flex flex-col gap-1 ${header === undefined ? "" : "mt-1.5"}`}>
             {steps.map((row) => {
-              const rowOpen = openRows.has(row.id);
+              const rowOpen = details && openRows.has(row.id);
               const failed = row.status === "failed";
               return (
                 <div key={row.id} style={{ animation: "fade-up 300ms cubic-bezier(0.23,1,0.32,1) both" }}>
                   <button
                     type="button"
-                    aria-expanded={rowOpen}
-                    onClick={() => toggleRow(row.id)}
+                    {...(details && { "aria-expanded": rowOpen })}
+                    onClick={details ? () => toggleRow(row.id) : undefined}
                     title={row.chip}
                     className="group/row -mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2"
                   >
                     <span className={`relative flex size-4 shrink-0 items-center justify-center ${failed ? "text-red" : "text-ink-3"}`}>
                       {row.status === "running" ? (
-                        <span className={`flex transition-opacity duration-100 group-hover/row:opacity-0 ${rowOpen ? "opacity-0" : ""}`}>
+                        <span className={`flex transition-opacity duration-100 ${details ? "group-hover/row:opacity-0" : ""} ${rowOpen ? "opacity-0" : ""}`}>
                           <Spinner />
                         </span>
                       ) : (
@@ -112,7 +112,7 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
                           viewBox="0 0 24 24"
                           fill={row.icon === "think" ? "currentColor" : "none"}
                           stroke="currentColor"
-                          className={`transition-opacity duration-100 group-hover/row:opacity-0 ${rowOpen ? "opacity-0" : ""}`}
+                          className={`transition-opacity duration-100 ${details ? "group-hover/row:opacity-0" : ""} ${rowOpen ? "opacity-0" : ""}`}
                           aria-hidden
                         >
                           {Icons[row.icon]}
@@ -127,7 +127,7 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
                         strokeWidth="2.2"
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        className={`absolute transition-[opacity,transform] duration-150 group-hover/row:opacity-100 ${rowOpen ? "opacity-100" : "opacity-0"}`}
+                        className={`absolute transition-[opacity,transform] duration-150 ${details ? "group-hover/row:opacity-100" : ""} ${rowOpen ? "opacity-100" : "opacity-0"}`}
                         style={{ transform: rowOpen ? "rotate(0deg)" : "rotate(-90deg)" }}
                         aria-hidden
                       >
@@ -145,6 +145,7 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
                   </button>
 
                   {/* expanded detail */}
+                  {details && (
                   <div
                     className="grid transition-[grid-template-rows,opacity] duration-300"
                     style={{ gridTemplateRows: rowOpen ? "1fr" : "0fr", opacity: rowOpen ? 1 : 0, transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)" }}
@@ -159,6 +160,7 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
                       </div>
                     </div>
                   </div>
+                  )}
                 </div>
               );
             })}

@@ -11,7 +11,7 @@
  * single message the same way.
  */
 
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import LoadingState from "@/components/bui/LoadingState";
 import { StatusPill } from "@/components/bui/StatusPill";
 import ThinkingState from "@/components/bui/ThinkingState";
@@ -191,14 +191,21 @@ export function stepsHeader(steps: Step[]): { working: boolean; active: string; 
   };
 }
 
+/**
+ * Whether a tool call opens to what it returned: on by default (the dashboard); a page that withholds
+ * tools' results (channel-web's chat, by its operator's policy) turns it off, so a call shows its name only.
+ */
+export const ToolDetailsContext = createContext(true);
+
 /** The thinking and the calls between two texts: one fold; `going` while the run goes on after them (the model's next step). */
 function Steps({ steps, going = false }: { steps: Step[]; going?: boolean }) {
+  const details = useContext(ToolDetailsContext);
   const { working, active, done } = stepsHeader(steps);
   return (
     <ThinkingState working={working || going} active={working ? active : "Thinking"} done={done} openWhileWorking={false}>
       {steps.map((step, i) =>
         step.kind === "tools" ? (
-          <ToolChips key={i} steps={step.calls.map((each) => ({ id: each.id, ...describeCall(each.name, each.arguments), status: each.status, detail: each.output }))} />
+          <ToolChips key={i} details={details} steps={step.calls.map((each) => ({ id: each.id, ...describeCall(each.name, each.arguments), status: each.status, detail: each.output }))} />
         ) : step.redacted ? (
           <p key={i} className="px-1.5 chat-text-12.5 text-ink-3">
             Thinking redacted by the provider
