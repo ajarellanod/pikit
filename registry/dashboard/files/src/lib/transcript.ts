@@ -1,11 +1,39 @@
 /**
- * What a conversation's live view knows (`live.ts` follows the stream into it): `reduce` folds each
- * event of `GET /admin/api/conversations/:id/events` into a `LiveState`. Pure: no React, no request.
+ * A conversation's JSON, as whatever serves it gives it (the dashboard's admin API, channel-web's chat
+ * API): its transcript's entries (`TranscriptEntry`, pi-durable's, newest first, paged) and its live
+ * events (`LiveEvent`, pi-durable's, a `snapshot` first); and what its live view knows of them:
+ * `reduce` folds each event into a `LiveState`. Pure: no React, no request.
+ *
+ * The stream starts with a `snapshot` and a client that fell behind gets a new one, so the state is
+ * rebuilt from each snapshot, never from a count of events. What is written for good (entries) is read
+ * from the transcript again: `changes` counts the times it changed. Until it is, `entries` holds the
+ * ones the stream announced (a message ended, an entry appended), as the transcript gives them. An
+ * answer that ended between two snapshots (a reconnect, a client that fell behind) is in `ended` (its
+ * last partial) until the transcript has it.
  */
 
 // Relative, not `@/`: scripts/dashboard.test.ts imports this module from outside the dashboard.
-import type { ApiEvent, ApiTranscriptEntry } from "../../lib/admin-api.ts";
-import type { AssistantMessage as Assistant, Message, RunningTool } from "../../lib/messages.ts";
+import type { AssistantMessage as Assistant, Message, RunningTool } from "./messages.ts";
+
+/** One entry of a conversation's history: its messages in pi-ai's JSON (admin-api's `ApiTranscriptEntry`). */
+export interface TranscriptEntry {
+  id: string;
+  /** `message`, `pi.reset`, …: the runtime's words. */
+  kind: string;
+  messages: unknown[];
+}
+
+/** One page of a transcript, newest first, and the cursor of the next (absent on the last page). */
+export interface TranscriptPage {
+  items: TranscriptEntry[];
+  next?: string;
+}
+
+/** One live event of a conversation, in the runtime's JSON (admin-api's `ApiEvent`): a `snapshot` first. */
+export interface LiveEvent {
+  type: string;
+  [field: string]: unknown;
+}
 
 export interface LiveState {
   connected: boolean;
@@ -14,7 +42,7 @@ export interface LiveState {
   partial?: Assistant | undefined;
   tools: RunningTool[];
   /** The entries the stream announced, oldest first: the transcript's newest, maybe not read yet. */
-  entries: ApiTranscriptEntry[];
+  entries: TranscriptEntry[];
   /** Answers whose partial a snapshot no longer had (written for good meanwhile), as last seen, oldest first. */
   ended: Assistant[];
   /** Bumped whenever the transcript or the cost changed: read them again. */
@@ -26,10 +54,10 @@ export const INITIAL: LiveState = { connected: false, busy: false, tools: [], en
 /** Answers ended kept: the transcript has the older ones by now. */
 const KEPT_ENDED = 5;
 
-export type Action = { type: "reset" } | { type: "connected" } | { type: "disconnected" } | { type: "event"; event: ApiEvent };
+export type Action = { type: "reset" } | { type: "connected" } | { type: "disconnected" } | { type: "event"; event: LiveEvent };
 
-/** An entry as the transcript gives it (`GET …/transcript`): pi-durable's, its model messages. */
-function entryOf(value: unknown): ApiTranscriptEntry | undefined {
+/** An entry as the transcript gives it: pi-durable's, its model messages. */
+function entryOf(value: unknown): TranscriptEntry | undefined {
   const entry = value as { id?: unknown; kind?: unknown; model?: unknown } | undefined;
   if (entry?.id === undefined) return undefined;
   return { id: String(entry.id), kind: String(entry.kind), messages: Array.isArray(entry.model) ? entry.model : [] };
@@ -37,7 +65,7 @@ function entryOf(value: unknown): ApiTranscriptEntry | undefined {
 
 /** The ones announced, the most recent kept: older ones are in the transcript read since. */
 const KEPT_ENTRIES = 50;
-const withEntry = (entries: ApiTranscriptEntry[], value: unknown): ApiTranscriptEntry[] => {
+const withEntry = (entries: TranscriptEntry[], value: unknown): TranscriptEntry[] => {
   const entry = entryOf(value);
   return entry === undefined || entries.some((each) => each.id === entry.id) ? entries : [...entries, entry].slice(-KEPT_ENTRIES);
 };

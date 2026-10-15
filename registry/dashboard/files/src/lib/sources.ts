@@ -1,5 +1,5 @@
 /**
- * What the Context panel shows of a transcript (`context.tsx`), read from pi-ai's JSON as it comes
+ * What the Context panel shows of a transcript (`components/pikit/context-panel.tsx`), read from pi-ai's JSON as it comes
  * (`unknown`): the images sent in it (`imagesOf`), and its sources (`sourcesOf`): what the web search
  * tool (`websearch`) and the fetch tool (`fetch`) returned, a card each (`ContextCards`' chunks). The
  * tools' text is read as they write it today (tool-websearch-brave, tool-fetch), defensively: what
@@ -8,8 +8,9 @@
 
 export interface SentImage {
   key: string;
-  mimeType: string;
-  data: string;
+  /** What an `<img>` shows: its URL, or its bytes as a `data:` URL. */
+  src: string;
+  mimeType?: string;
   /** Epoch ms of its message. */
   at?: number;
 }
@@ -30,15 +31,18 @@ type Fields = Record<string, unknown>;
 const fields = (value: unknown): Fields => (typeof value === "object" && value !== null ? (value as Fields) : {});
 const parts = (content: unknown): Fields[] => (Array.isArray(content) ? content.map(fields) : []);
 
-/** The images of the person's messages, oldest first. */
+/** The images of the person's messages (inline, or by URL), oldest first. */
 export function imagesOf(messages: readonly unknown[]): SentImage[] {
   return messages.flatMap((each, i) => {
     const message = fields(each);
     if (message.role !== "user") return [];
     const at = typeof message.timestamp === "number" ? { at: message.timestamp } : {};
-    return parts(message.content).flatMap((part, j) =>
-      part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string" ? [{ key: `${i}:${j}`, mimeType: part.mimeType, data: part.data, ...at }] : [],
-    );
+    return parts(message.content).flatMap((part, j) => {
+      if (part.type !== "image") return [];
+      const mimeType = typeof part.mimeType === "string" ? { mimeType: part.mimeType } : {};
+      if (typeof part.url === "string") return [{ key: `${i}:${j}`, src: part.url, ...mimeType, ...at }];
+      return typeof part.data === "string" && typeof part.mimeType === "string" ? [{ key: `${i}:${j}`, src: `data:${part.mimeType};base64,${part.data}`, ...mimeType, ...at }] : [];
+    });
   });
 }
 

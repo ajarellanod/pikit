@@ -19,6 +19,7 @@
  */
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { type SentMessages, useSentMessages } from "@/components/pikit/conversation";
 import { every, usePolling } from "./activity.ts";
 import { cleanTitle, isDashboardKey } from "./admin-api.ts";
 import { type ApiAgent, api, type ApiApp, type ApiConversation, type ApiPage, type ApiRenameRequest, post } from "./api.ts";
@@ -40,21 +41,6 @@ export interface CommandNote {
 }
 
 let nextNote = 0;
-
-/** A message sent from here, shown in its conversation until the transcript has it. */
-export interface SentMessage {
-  id: number;
-  text: string;
-  images: { mimeType: string; data: string }[];
-  /** Messages of the same text the conversation showed when it was sent: one more is this one. */
-  before: number;
-  /** It waits for the run going (`admission: "queued"`). */
-  queued: boolean;
-  /** Epoch ms: when it was sent. */
-  at: number;
-}
-
-let nextSent = 0;
 
 export interface Tab {
   id: string;
@@ -93,7 +79,8 @@ export function defaultAgentOf(app: ApiApp | undefined): string | undefined {
   return typeof named === "string" && agents.includes(named) ? named : agents[0];
 }
 
-export interface Chats {
+/** With the messages sent from here and not shown yet (`SentMessages`, the shared conversation view's). */
+export interface Chats extends SentMessages {
   /** Undefined until the first page is read. */
   items: ApiConversation[] | undefined;
   error: Error | undefined;
@@ -110,14 +97,6 @@ export interface Chats {
   notesOf(id: string): CommandNote[];
   /** A command's answer in conversation `id`. */
   addNote(id: string, command: string, text: string): void;
-  /** The messages sent to conversation `id` it does not show yet, oldest first. */
-  sentOf(id: string): SentMessage[];
-  /** A message sent to conversation `id`; answers its id. */
-  addSent(id: string, message: Omit<SentMessage, "id" | "queued" | "at">): number;
-  /** What became of one: queued, or gone (refused, a duplicate, or in the transcript now). */
-  updateSent(id: string, sent: number, change: "queued" | "gone"): void;
-  /** Epoch ms of the last message sent to conversation `id` from this page, if one was. */
-  lastSentAt(id: string): number | undefined;
   tabs: Tab[];
   /** Opens (or refreshes) the tab of `conversation`. */
   openTab(conversation: ApiConversation): void;
@@ -201,23 +180,7 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     setFirsts((all) => (all[id] !== undefined ? all : { ...all, [id]: title }));
   }, []);
 
-  const [sent, setSent] = useState<Record<string, SentMessage[]>>({});
-  const sentOf = useCallback((id: string): SentMessage[] => sent[id] ?? [], [sent]);
-  const [lastSent, setLastSent] = useState<Record<string, number>>({});
-  const lastSentAt = useCallback((id: string): number | undefined => lastSent[id], [lastSent]);
-  const addSent = useCallback((id: string, message: Omit<SentMessage, "id" | "queued" | "at">) => {
-    const each = { ...message, id: nextSent++, queued: false, at: Date.now() };
-    setSent((all) => ({ ...all, [id]: [...(all[id] ?? []), each] }));
-    setLastSent((all) => ({ ...all, [id]: each.at }));
-    return each.id;
-  }, []);
-  const updateSent = useCallback((id: string, which: number, change: "queued" | "gone") => {
-    setSent((all) => {
-      const list = all[id] ?? [];
-      if (!list.some((each) => each.id === which)) return all;
-      return { ...all, [id]: change === "gone" ? list.filter((each) => each.id !== which) : list.map((each) => (each.id === which ? { ...each, queued: true } : each)) };
-    });
-  }, []);
+  const sent = useSentMessages();
 
   const notesOf = useCallback((id: string): CommandNote[] => notes[id] ?? [], [notes]);
   const addNote = useCallback((id: string, command: string, text: string) => {
@@ -295,6 +258,6 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     if (back.length > 0) setGone((all) => new Map([...all].filter(([id]) => !back.includes(id))));
   }, [first, gone]);
 
-  const value: Chats = { items, error, hasOlder: cursor !== undefined, loadOlder, reload, titleOf, tabTitle, setFirstMessage, notesOf, addNote, sentOf, addSent, updateSent, lastSentAt, tabs, openTab, closeTab, replaced, archived, loadArchived, hide, rename };
+  const value: Chats = { items, error, hasOlder: cursor !== undefined, loadOlder, reload, titleOf, tabTitle, setFirstMessage, notesOf, addNote, ...sent, tabs, openTab, closeTab, replaced, archived, loadArchived, hide, rename };
   return <ChatsContext.Provider value={value}>{children}</ChatsContext.Provider>;
 }

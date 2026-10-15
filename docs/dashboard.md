@@ -151,12 +151,17 @@ component's view in it.
 
 | Item | Files | Who depends on it |
 |---|---|---|
-| `@pikit/lib-ui` | `activity`, `format`, `messages`, `names`, `sounds`, `theme` (and shadcn's own `utils`, not in the item): no admin API | the pieces that use a helper (`bui`, `message`), the views |
+| `@pikit/lib-ui` | `activity`, `format`, `messages`, `names`, `sounds`, `sources`, `theme`, `transcript` (and shadcn's own `utils`, not in the item): no admin API | the pieces that use a helper (`bui`, `message`, `conversation`), the views |
 | `@pikit/admin-client` | `api`, `admin-api`, `chats`, `settings`, `views`, `router`, `shell`: the admin API's client and the shell | the views, the Settings dialog and its sections |
 
-The shared pieces (`bui`, `message`, `error-note`, `markdown`, `markdown-engine`, with `lib-ui`) take
-everything by props and never fetch, so a UI project other than the dashboard (channel-web's chat
-page) carries them without the admin client. `scripts/ui-shared.test.ts` fails when one of them
+The shared pieces (`bui`, `message`, `error-note`, `markdown`, `markdown-engine`, `conversation`,
+`context-panel`, `tab-bar`, with `lib-ui`) take everything by props and never fetch, so a UI project
+other than the dashboard (channel-web's chat page) carries them without the admin client. A
+conversation's view (`ConversationView`, features/chat-parity.md) reads through a
+`ConversationSource` each app implements (the dashboard's: `views/conversations/source.ts`, over
+`/admin/api/conversations/:id/...`): its transcript's entries, its live events (`lib/transcript.ts`
+folds them), a message and a stop; the app fills its slots (the header's actions, the side panel, its
+notes, what replaces the composer). `scripts/ui-shared.test.ts` fails when one of them
 reaches `@/lib/api`, `@/lib/admin-api`, `@/lib/chats`, `@/lib/settings`, `@/lib/views`,
 `@/lib/router`, `@/lib/shell` or any other file that is not shared. `ErrorNote` takes any
 `{ message, status? }` (an `ApiFailure` is one), and `messages.ts` keeps its own `OPERATOR_NOTE`, the

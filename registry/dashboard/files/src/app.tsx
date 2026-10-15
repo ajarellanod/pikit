@@ -7,32 +7,22 @@
  * New chat.
  */
 
-import { Archive, EditPencil, LogOut, Settings, SoundHigh, SoundOff, Trash, Undo } from "iconoir-react";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { Button } from "@/components/bui/Button";
+import { EditPencil, LogOut, Settings, SoundHigh, SoundOff } from "iconoir-react";
+import { useCallback, useEffect, useState } from "react";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem } from "@/components/bui/SidebarNav";
 import { Switch } from "@/components/bui/Switch";
 import { ThemeToggle } from "@/components/bui/ThemeToggle";
+import { useChatActions } from "@/components/pikit/chat-actions";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Mark } from "@/components/pikit/mark";
 import { SettingsDialog } from "@/components/pikit/settings-dialog";
 import { SignIn } from "@/components/pikit/sign-in";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { TabBar } from "@/components/pikit/tab-bar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setTarget } from "@/lib/activity";
-import { TITLE_MAX } from "@/lib/admin-api";
 import { api, type ApiAgents, type ApiApp, type ApiCommands, type ApiConversation, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
-import { ChatsProvider, NEW_CHAT, useChats } from "@/lib/chats";
+import { ChatsProvider, useChats } from "@/lib/chats";
 import { BASE, match, navigate, pagePath, usePath } from "@/lib/router";
 import { appName, ShellContext, usePageTitle } from "@/lib/shell";
 import { setSounds, useSounds } from "@/lib/sounds";
@@ -41,33 +31,19 @@ import { visibleViews } from "@/lib/views";
 const OPERATOR = "pikit-operator";
 const CHAT = "/conversations";
 
-function CloseTab({ onClose }: { onClose: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-label="Close tab"
-      onClick={onClose}
-      className="-my-1 flex size-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 transition-[background-color,color] duration-100 hover:bg-hover-2 hover:text-ink"
-    >
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-        <path d="M18 6L6 18M6 6l12 12" />
-      </svg>
-    </button>
-  );
-}
-
 /**
- * The tabs: the conversations opened, then New chat while it shows. Each one closes: the active one
- * gives way to its neighbour, and closing the last one leaves a fresh New chat (`onNewChat`).
+ * The tabs (the shared `TabBar`) over `useChats`: the conversations opened, then New chat while it
+ * shows. Each one closes: the active one gives way to its neighbour, and closing the last one leaves a
+ * fresh New chat (`onNewChat`).
  */
-function TabBar({ path, newChatPath, onActions, onNewChat }: { path: string; newChatPath: string; onActions: (element: HTMLDivElement | null) => void; onNewChat: () => void }) {
+function ChatTabs({ path, newChatPath, onActions, onNewChat }: { path: string; newChatPath: string; onActions: (element: HTMLDivElement | null) => void; onNewChat: () => void }) {
   const chats = useChats();
   const busy = new Map((chats.items ?? []).map((conversation) => [conversation.conversationId, conversation.busy]));
-  const newChatShown = path === newChatPath;
+  const active = chats.tabs.find((tab) => path === pagePath(CHAT, tab.id))?.id;
 
-  const close = (id: string, active: boolean) => {
+  const close = (id: string, shown: boolean) => {
     const next = chats.closeTab(id);
-    if (!active) return;
+    if (!shown) return;
     if (next === undefined) onNewChat();
     else navigate(pagePath(CHAT, next.id));
   };
@@ -78,45 +54,15 @@ function TabBar({ path, newChatPath, onActions, onNewChat }: { path: string; new
   };
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-2">
-      <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-        {chats.tabs.map((tab) => {
-          const active = path === pagePath(CHAT, tab.id);
-          return (
-            <div
-              key={tab.id}
-              /* fixed width: every close button sits in the same spot */
-              className={`group/tab flex h-7 w-36 shrink-0 items-center gap-0.5 rounded-[7px] pr-0.5 pl-2.5 text-[12.5px] font-medium transition-colors duration-100 ${active ? "bg-hover-2 text-ink" : "text-ink-2 hover:bg-hover hover:text-ink"}`}
-            >
-              <button type="button" aria-pressed={active} onClick={() => navigate(pagePath(CHAT, tab.id))} title={chats.tabTitle(tab)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-                {busy.get(tab.id) === true && <span aria-label="Running" className="size-2.5 shrink-0 rounded-full border-[1.5px] border-line-strong border-t-ink-2" style={{ animation: "spin 700ms linear infinite" }} />}
-                <span className="block truncate">{chats.tabTitle(tab)}</span>
-              </button>
-              <CloseTab onClose={() => close(tab.id, active)} />
-            </div>
-          );
-        })}
-        {newChatShown && (
-          <div className="flex h-7 w-36 shrink-0 items-center gap-0.5 rounded-[7px] bg-hover-2 pr-0.5 pl-2.5 text-[12.5px] font-medium text-ink">
-            <span aria-current="page" className="block min-w-0 flex-1 truncate">
-              New chat
-            </span>
-            <CloseTab onClose={closeNewChat} />
-          </div>
-        )}
-        <button
-          type="button"
-          aria-label="New chat"
-          onClick={onNewChat}
-          className="ml-0.5 flex size-7 shrink-0 items-center justify-center rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-      </div>
-      <div ref={onActions} className="flex shrink-0 items-center gap-1" />
-    </div>
+    <TabBar
+      tabs={chats.tabs.map((tab) => ({ id: tab.id, title: chats.tabTitle(tab), busy: busy.get(tab.id) === true }))}
+      active={active}
+      newChat={path === newChatPath ? { onClose: closeNewChat } : undefined}
+      onSelect={(id) => navigate(pagePath(CHAT, id))}
+      onClose={close}
+      onNewChat={onNewChat}
+      actionsRef={onActions}
+    />
   );
 }
 
@@ -196,35 +142,16 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       }),
   ];
 
-  /** The conversation the operator asked to delete: confirmed first. */
-  const [deleting, setDeleting] = useState<{ id: string; title: string }>();
-  /** The conversation the operator is renaming, with the title the field starts with. */
-  const [renaming, setRenaming] = useState<{ id: string; title: string }>();
-  const [hideError, setHideError] = useState<Error>();
-  const put = (id: string, action: "archive" | "unarchive" | "delete") => {
-    setHideError(undefined);
-    const leaving = action !== "unarchive" && path === pagePath(CHAT, id);
-    chats.hide(id, action).then(
-      () => leaving && newChat(),
-      (thrown: unknown) => setHideError(thrown instanceof Error ? thrown : new Error(String(thrown))),
-    );
-  };
+  const chatActions = useChatActions({ shown: openId, onLeft: () => newChat() });
   const rowOf = (conversation: ApiConversation, archived: boolean): SidebarChat => {
     const id = conversation.conversationId;
-    const title = chats.titleOf(conversation);
     return {
       id,
-      label: title,
+      label: chats.titleOf(conversation),
       busy: conversation.busy,
       active: path === pagePath(CHAT, id),
       href: `${BASE}${pagePath(CHAT, id)}`,
-      actions: [
-        { key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenaming({ id, title: title === NEW_CHAT ? "" : title }) },
-        archived
-          ? { key: "unarchive", label: "Restore", icon: <Undo />, onSelect: () => put(id, "unarchive") }
-          : { key: "archive", label: "Archive", icon: <Archive />, onSelect: () => put(id, "archive") },
-        { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeleting({ id, title }) },
-      ],
+      actions: chatActions.actionsOf(conversation, archived),
     };
   };
   const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation) => rowOf(conversation, false));
@@ -246,7 +173,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
 
   return (
     <ShellContext.Provider
-      value={{ app, ...(agents.data !== undefined && { agents: agents.data.items }), reloadAgents: agents.reload, ...(commands.data !== undefined && { commands: commands.data.items }), newChat, views, operator, slots: { actions, side } }}
+      value={{ app, ...(agents.data !== undefined && { agents: agents.data.items }), reloadAgents: agents.reload, ...(commands.data !== undefined && { commands: commands.data.items }), newChat, conversationActions: chatActions.actionsOf, views, operator, slots: { actions, side } }}
     >
       <main className="flex h-[100dvh] gap-0 bg-canvas p-2.5 pl-0 text-ink">
         <SidebarNav
@@ -307,104 +234,22 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
 
         <SettingsDialog app={app} open={settingsOpen} onOpenChange={(open) => (setSettingsOpen(open), !open && setSettingsSection(undefined))} section={settingsSection} />
 
-        <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
-              <AlertDialogDescription>
-                “{deleting?.title}” leaves the list for good. If its person writes again, it comes back with the new message.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-red text-white hover:bg-red/90"
-                onClick={() => {
-                  if (deleting !== undefined) put(deleting.id, "delete");
-                  setDeleting(undefined);
-                }}
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        <RenameDialog chat={renaming} onClose={() => setRenaming(undefined)} rename={chats.rename} />
+        {chatActions.dialogs}
 
         <div className="flex min-w-0 flex-1 gap-2.5">
           <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-window border border-line bg-page">
-            {hideError !== undefined && (
+            {chatActions.error !== undefined && (
               <div className="border-b border-line px-3 py-2">
-                <ErrorNote error={hideError} title="The chat could not be changed" />
+                <ErrorNote error={chatActions.error} title="The chat could not be changed" />
               </div>
             )}
-            <TabBar path={path} newChatPath={newChatPath} onActions={setActions} onNewChat={() => newChat()} />
+            <ChatTabs path={path} newChatPath={newChatPath} onActions={setActions} onNewChat={() => newChat()} />
             <div className="flex min-h-0 flex-1 flex-col">{page}</div>
           </section>
           <div ref={setSide} className="contents" />
         </div>
       </main>
     </ShellContext.Provider>
-  );
-}
-
-/** A chat's new title, the operator's: the field starts with its title, Enter saves (the API cleans it, as `/name` does). */
-function RenameDialog({ chat, onClose, rename }: { chat: { id: string; title: string } | undefined; onClose: () => void; rename: (id: string, title: string) => Promise<void> }) {
-  const [value, setValue] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState<Error>();
-  useEffect(() => {
-    if (chat === undefined) return;
-    setValue(chat.title);
-    setSaving(false);
-    setFailed(undefined);
-  }, [chat]);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (chat === undefined || value.trim() === "") return;
-    setSaving(true);
-    setFailed(undefined);
-    try {
-      await rename(chat.id, value.trim());
-      onClose();
-    } catch (thrown) {
-      setFailed(thrown instanceof Error ? thrown : new Error(String(thrown)));
-      setSaving(false);
-    }
-  };
-  return (
-    <AlertDialog open={chat !== undefined} onOpenChange={(open) => !open && onClose()}>
-      <AlertDialogContent className="data-[size=default]:sm:max-w-[420px]">
-        <form onSubmit={(event) => void submit(event)} className="contents">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Rename this chat</AlertDialogTitle>
-            <AlertDialogDescription>The title the sidebar and its tab show.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <input
-            type="text"
-            required
-            autoFocus
-            maxLength={TITLE_MAX}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            onFocus={(event) => event.currentTarget.select()}
-            placeholder="A title"
-            aria-label="The chat's title"
-            className="h-9 w-full rounded-lg bg-field px-3 text-[13px] text-ink shadow-[var(--shadow-hairline)] outline-none placeholder:text-ink-3 focus-visible:shadow-[0_0_0_1px_var(--line-strong),0_0_0_3px_var(--accent-tint)]"
-          />
-          {failed !== undefined && <ErrorNote error={failed} title="Not renamed" />}
-          <AlertDialogFooter>
-            <Button size="sm" variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" variant="primary" disabled={saving || value.trim() === ""}>
-              {saving ? "Saving" : "Save"}
-            </Button>
-          </AlertDialogFooter>
-        </form>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 

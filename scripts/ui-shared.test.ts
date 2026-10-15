@@ -28,6 +28,10 @@ test("no shared piece reaches the admin client, or any file of the dashboard tha
   expect(SHARED_UI_FILES).toContain("src/components/pikit/error-note.tsx");
   expect(SHARED_UI_FILES).toContain("src/components/bui/PromptBar.tsx");
   expect(SHARED_UI_FILES).toContain("src/lib/messages.ts");
+  // The conversation's view, its live state, its Context panel and the tabs (features/chat-parity.md).
+  for (const file of ["src/components/pikit/conversation.tsx", "src/components/pikit/context-panel.tsx", "src/components/pikit/tab-bar.tsx", "src/lib/transcript.ts", "src/lib/sources.ts"]) {
+    expect(SHARED_UI_FILES).toContain(file);
+  }
   expect(sharedUiViolations()).toEqual([]);
 });
 
@@ -38,9 +42,11 @@ test("a shared piece that reaches the admin client is caught, by @/ or by a rela
   appendFileSync(join(root, "src/components/bui/Button.tsx"), '\nexport { useChats } from "../../lib/chats.tsx";\n');
   appendFileSync(join(root, "src/lib/format.ts"), '\nexport type { ApiUsage } from "./admin-api.ts";\n');
   appendFileSync(join(root, "src/components/pikit/message.tsx"), '\nexport { Segmented } from "@/components/pikit/settings";\n');
+  appendFileSync(join(root, "src/components/pikit/conversation.tsx"), '\nexport { adminSource } from "@/views/conversations/source";\n');
 
   expect(sharedUiViolations(root)).toEqual([
     { file: "src/components/bui/Button.tsx", specifier: "../../lib/chats.tsx" },
+    { file: "src/components/pikit/conversation.tsx", specifier: "@/views/conversations/source" },
     { file: "src/components/pikit/error-note.tsx", specifier: "@/lib/api" },
     { file: "src/components/pikit/message.tsx", specifier: "@/components/pikit/settings" },
     { file: "src/lib/format.ts", specifier: "./admin-api.ts" },

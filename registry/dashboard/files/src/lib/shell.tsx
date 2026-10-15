@@ -1,13 +1,15 @@
 /**
  * What the shell (`app.tsx`) gives the pages: the App's composition, its agents, its slash commands, the views it shows,
- * the operator, a new chat (`newChat`), and two places a page can fill: the tab bar's right end
+ * the operator, a new chat (`newChat`), a conversation's menu (`conversationActions`: the sidebar's rows'
+ * and the conversation's header's), and two places a page can fill: the tab bar's right end
  * (`TabActions`: a conversation's Context button and its menu) and the side panel next to the main pane
  * (`SidePanel`: a conversation's Context).
  */
 
 import { createContext, type ReactNode, useContext, useEffect } from "react";
 import { createPortal } from "react-dom";
-import type { ApiAgent, ApiApp, ApiCommand } from "./api.ts";
+import type { ActionsMenuItem } from "@/components/bui/ActionsMenu";
+import type { ApiAgent, ApiApp, ApiCommand, ApiConversation } from "./api.ts";
 import type { View } from "./views.ts";
 
 export interface ShellState {
@@ -20,6 +22,8 @@ export interface ShellState {
   commands?: ApiCommand[];
   /** Opens a new chat (New chat, its draft empty), with `agent` chosen when given. */
   newChat(agent?: string): void;
+  /** A conversation's menu (Rename, Archive or Restore when `archived`, Delete), as its sidebar row has it. */
+  conversationActions(conversation: ApiConversation, archived: boolean): ActionsMenuItem[];
   /** The views the App's composition allows, in sidebar order. */
   views: View[];
   /** The signed-in operator's id, when this browser signed in (`ApiSession.operator`). */

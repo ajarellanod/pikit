@@ -17,7 +17,7 @@ import { StatusPill } from "@/components/bui/StatusPill";
 import ThinkingState from "@/components/bui/ThinkingState";
 import ToolChips, { type ToolStatus, type ToolStep } from "@/components/bui/ToolChips";
 import { Markdown } from "@/components/pikit/markdown";
-import { type AssistantMessage, type Image, type Message, OPERATOR_NOTE, type RunningTool, type Text, type ToolResultMessage, type UserMessage } from "@/lib/messages";
+import { type AssistantMessage, type Image, imageSrc, type Message, OPERATOR_NOTE, type RunningTool, type Text, type ToolResultMessage, type UserMessage } from "@/lib/messages";
 
 export type { AssistantMessage, Message, RunningTool, ToolResultMessage, UserMessage };
 
@@ -50,7 +50,7 @@ export interface Live {
   tools: RunningTool[];
 }
 
-const textOf = (content: (Text | Image)[]): string => content.map((part) => (part.type === "text" ? part.text : `[image ${part.mimeType}]`)).join("\n");
+const textOf = (content: (Text | Image)[]): string => content.map((part) => (part.type === "text" ? part.text : part.mimeType === undefined ? "[image]" : `[image ${part.mimeType}]`)).join("\n");
 
 /**
  * The turns of `messages` (oldest first) and what is live: the partial answer joins the last reply,
@@ -221,7 +221,7 @@ export function userText(message: UserMessage): { text: string; operator: boolea
 }
 
 /**
- * A person's message, at the right. `from` names who wrote it when it was not the operator; `animate`
+ * A person's message, at the right, its images inline or by URL. `from` names who wrote it when it was not the operator; `animate`
  * rises it in (the one just sent: the transcript's, which takes its place, does not move).
  */
 export function UserBubble({ message, from, animate = false }: { message: UserMessage; from?: string; animate?: boolean }) {
@@ -232,7 +232,7 @@ export function UserBubble({ message, from, animate = false }: { message: UserMe
       {images.length > 0 && (
         <div className="flex max-w-full flex-wrap justify-end gap-2">
           {images.map((image, i) => (
-            <img key={i} className="max-h-56 max-w-[min(100%,320px)] rounded-xl object-contain shadow-hairline" alt={`Image ${i + 1}`} src={`data:${image.mimeType};base64,${image.data}`} />
+            <img key={i} className="max-h-56 max-w-[min(100%,320px)] rounded-xl object-contain shadow-hairline" alt={`Image ${i + 1}`} src={imageSrc(image)} loading="lazy" />
           ))}
         </div>
       )}

@@ -128,6 +128,8 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/components/bui/` | Beautiful UI's primitives (the sidebar, a row's or a header's "…" menu `ActionsMenu`, the composer with its "+", "/" and assistant menus, thinking, tool chips, context cards, pills; an operator's page, records tables, filter chips, a code block), fed by real data |
 | `src/components/ui/` | shadcn/ui primitives, copied and yours (`shadcn add` puts more here), in the same tokens |
 | `src/components/pikit/` | pieces the views share: a transcript (`turnsOf`, `Reply`, `UserBubble`, `MessageView`), an error, the sign-in |
+| `src/components/pikit/conversation.tsx`, `context-panel.tsx`, `tab-bar.tsx` | a conversation's view over a `ConversationSource` (its transcript, live events, send, stop: `ConversationView`, `useLive`, `useTranscript`, `useSentMessages`), the Context panel, the tabs: by props only, shared with channel-web's chat page |
+| `src/components/pikit/chat-actions.tsx` | a conversation's menu (Rename, Archive or Restore, Delete) and its dialogs, for the sidebar's rows and the conversation's header |
 | `src/index.css` | the one stylesheet: Beautiful UI's tokens (light and dark), shadcn's variables mapped onto them |
 | `src/lib/api.ts` | calls to the admin API (the session), `signIn` / `signOut`, `useApi`, live events (`follow`) |
 | `src/lib/activity.ts` | whether you are there: `useActive`, `usePolling`, `every` (slower on Cloudflare) |
@@ -138,18 +140,20 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General, and `SchemaSettings`; `settings.tsx` re-exports the rows and controls |
 | `src/components/pikit/settings-shell.tsx`, `settings-rows.tsx` | a settings dialog's frame and navigation (`SettingsPanels`, `useSettingsChoice`), its rows and controls (`SettingsHeading`, `SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`): by props only, shared with channel-web's chat page |
 | `src/lib/router.tsx` | the pages under `/admin` |
-| `src/views/conversations/` | New chat (`new-chat.tsx`), a conversation (its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
+| `src/views/conversations/` | New chat (`new-chat.tsx`), a conversation (the shared view over the admin API, `source.ts`, with its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names) |
 | `src/views/home/` | Home: where the App runs and talks, its agents, its components by what they are for (`overview.ts`), one at the side (`panel.tsx`: what it provides and needs, its config), and the wiring, folded (`wiring.tsx`) |
 | `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles (the API's: a key's, shared by the conversations a reset left behind), the commands' notes (`useChats`, `agentsOf`) |
-| `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, its commands, the views, `newChat`, `TabActions`, `SidePanel` |
+| `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, its commands, the views, `newChat`, a conversation's menu (`conversationActions`), `TabActions`, `SidePanel` |
+| `src/lib/transcript.ts`, `sources.ts` | a conversation's JSON (`TranscriptEntry`, `LiveEvent`) and its live state (`reduce`); what the Context panel reads of a transcript |
 | `src/lib/theme.ts`, `public/theme.js` | light, dark or the system's, before the first paint |
 | `src/lib/sounds.ts` | the interaction sounds, and their switch |
 | `src/app.tsx` | sign-in, the sidebar, the tabs and the page the path names |
 
 `src/lib/` is two shadcn items: `@pikit/lib-ui` (`activity`, `format`, `messages`, `names`, `sounds`,
-`theme`: no admin API) and `@pikit/admin-client` (`api`, `admin-api`, `chats`, `settings`, `views`,
-`router`, `shell`). Beautiful UI's primitives and the pieces `message`, `error-note` and `markdown`
-import only `lib-ui` and take their data by props, so another UI project can carry them.
+`sources`, `theme`, `transcript`: no admin API) and `@pikit/admin-client` (`api`, `admin-api`, `chats`,
+`settings`, `views`, `router`, `shell`). Beautiful UI's primitives and the pieces `message`,
+`error-note`, `markdown`, `conversation`, `context-panel` and `tab-bar` import only `lib-ui` and take
+their data by props, so another UI project can carry them.
 
 ## Add a view
 
@@ -157,7 +161,8 @@ A view is a folder of `src/views/`, found when the dashboard is built. **Prefer 
 editing a base one** (`conversations`, `home`, `delivery`): `pikit upgrade` merges the kit's
 changes into the base views, and a file you did not touch never conflicts. To show something more
 about conversations, add a view of your own (`src/views/my-conversations/`) that reuses the base
-pieces they export (`useLive` from `views/conversations/live.ts`, `turnsOf`, `Reply`, `MessageView`
+pieces they export (`useLive` from `components/pikit/conversation.tsx` over `adminSource(id)` from
+`views/conversations/source.ts`, `turnsOf`, `Reply`, `MessageView`
 and `ErrorNote` from `components/pikit/`, `useChats` and `agentsOf` from `lib/chats.tsx`) and the
 client in `src/lib/`;
 change a base view only for what a view of your own cannot do, and keep that change small.

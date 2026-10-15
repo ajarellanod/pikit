@@ -10,8 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAssets, type DashboardFiles } from "../registry/components/admin-api/files/src/pikit/admin-api/assets.ts";
 import { assistantName } from "../registry/dashboard/files/src/lib/names.ts";
-import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/views/conversations/sources.ts";
-import { INITIAL, type LiveState, reduce } from "../registry/dashboard/files/src/views/conversations/live-state.ts";
+import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/lib/sources.ts";
+import { INITIAL, type LiveState, reduce } from "../registry/dashboard/files/src/lib/transcript.ts";
 import { groupsOf, providersOf, summaryOf, usersOf, wiringOf } from "../registry/dashboard/files/src/views/home/overview.ts";
 import { generated, OUTPUT } from "./ui-registry.ts";
 
@@ -171,6 +171,8 @@ test("the Context panel reads a transcript's sources as the websearch and fetch 
   const page = "HTTP 200 OK \u00b7 text/html; charset=utf-8 \u00b7 https://example.com/\n\n# Example Domain\n\nThis domain is for examples.\n\nLinks:\n- More: https://iana.org/";
   const messages = [
     { role: "user", content: [{ type: "text", text: "look" }, { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }], timestamp: 5 },
+    // An image served by URL (channel-web's chat), and one with neither bytes nor a URL: left out.
+    { role: "user", content: [{ type: "image", url: "/chat/api/images/a1" }, { type: "image", mimeType: "image/png" }] },
     { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "websearch", arguments: { query: "bun" } }, { type: "toolCall", id: "c2", name: "fetch", arguments: { url: "https://example.com" } }] },
     { role: "toolResult", toolCallId: "c1", toolName: "websearch", content: [{ type: "text", text: search }] },
     { role: "toolResult", toolCallId: "c2", toolName: "fetch", content: [{ type: "text", text: page }] },
@@ -181,7 +183,10 @@ test("the Context panel reads a transcript's sources as the websearch and fetch 
     { role: "toolResult", toolCallId: "c6", toolName: "websearch", content: "not a list" },
   ];
 
-  expect(imagesOf(messages)).toEqual([{ key: "0:1", mimeType: "image/png", data: "iVBORw0KGgo=", at: 5 }]);
+  expect(imagesOf(messages)).toEqual([
+    { key: "0:1", src: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png", at: 5 },
+    { key: "1:0", src: "/chat/api/images/a1" },
+  ]);
   expect(sourcesOf(messages).map(({ title, href, body, badge, meta }) => ({ title, href, body, badge, meta }))).toEqual([
     { title: "Bun \u2014 a fast runtime (2 days ago)", href: "https://bun.sh/", body: "Bun is a fast JavaScript runtime.", badge: "WEB", meta: "result 1" },
     { title: "Cloudflare Durable Objects", href: "https://developers.cloudflare.com/durable-objects/", body: "", badge: "WEB", meta: "result 3" },
@@ -200,7 +205,8 @@ test('the "/" menu lists only the commands the App registered; titles are the AP
   // No command of the dashboard's own: its actions are buttons.
   expect(composer).not.toContain("composerCommands");
   expect(promptBar).not.toMatch(/control\?: "image"/);
-  for (const page of ["src/views/conversations/new-chat.tsx", "src/views/conversations/conversation.tsx"]) expect(read(page)).toContain("commands={commands ?? []}");
+  expect(read("src/views/conversations/new-chat.tsx")).toContain("commands={commands ?? []}");
+  expect(read("src/views/conversations/conversation.tsx")).toContain("commands: commands ?? []");
   expect(read("src/app.tsx")).toContain('useApi<ApiCommands>("/commands")');
   expect(promptBar).toContain('"No commands"');
   // Titles: the API's, no localStorage of them, no transcript read to name a chat.

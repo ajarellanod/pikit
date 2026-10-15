@@ -27,9 +27,9 @@ actions) and `home` (one read, tabs: what the App is made of). Read `src/dashboa
 **Add a view; do not edit a base one.** `pikit upgrade` merges the kit's changes into the base views
 (`conversations`, `home`, `delivery`) and the files of `src/lib/` and `src/components/`; every
 file you edit is a file that can conflict. To show more about conversations, write a new view that
-imports what the base views export (`Status`, `DashboardBadge`, `agentsOf` from
-`@/views/conversations/list`, `useLive` from `@/views/conversations/live`, `MessageView`,
-`ErrorNote`) rather than changing theirs. Edit a base file only for what a new view cannot do, keep
+imports what the base views and pieces export (`agentsOf` from `@/lib/chats`, `useLive` from
+`@/components/pikit/conversation` over `adminSource(id)` from `@/views/conversations/source`,
+`MessageView`, `ErrorNote`) rather than changing theirs. Edit a base file only for what a new view cannot do, keep
 the change small, and say so to the user.
 
 ## 1. Decide where it lives
@@ -122,7 +122,7 @@ under the component's name; in the pikit repository, `bun scripts/ui-registry.ts
 it as the shadcn item `@pikit/<component>`, which depends on `@pikit/admin-client` (the admin API's
 client, `src/lib/api.ts` and the rest of the admin's `src/lib/`) and `@pikit/lib-ui` (the generic
 helpers: `format`, `theme`, `activity`...). A piece meant for any UI project (in `src/components/bui/`,
-or `message`, `error-note`, `markdown`) takes its data by props and imports only `lib-ui`
+or `message`, `error-note`, `markdown`, `conversation`) takes its data by props and imports only `lib-ui`
 (`scripts/ui-shared.ts`, checked by `scripts/ui-shared.test.ts`).
 
 Done means: the routes' tests pass (401 first), the dashboard builds, the view appears only while

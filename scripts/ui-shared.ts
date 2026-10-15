@@ -8,8 +8,9 @@
  *   dashboard's shell. Every file of `src/lib/` is in exactly one of the two.
  * - `SHARED_UI_FILES`: the lib-ui files, Beautiful UI's primitives (`src/components/bui/`, its
  *   `ActionsMenu` too) and the pieces that take everything by props and never fetch (`message`,
- *   `error-note`, `markdown`, `markdown-engine`, and a settings dialog's frame and rows:
- *   `settings-shell`, `settings-rows`), as paths from the dashboard's root.
+ *   `error-note`, `markdown`, `markdown-engine`, a settings dialog's frame and rows: `settings-shell`,
+ *   `settings-rows`; and a conversation's view over a source each app implements, features/chat-parity.md:
+ *   `conversation`, `context-panel`, `tab-bar`), as paths from the dashboard's root.
  *
  * `sharedUiViolations` keeps them so: a shared file reaches (by `@/` or a relative path) only other
  * shared files, never the admin client. `scripts/ui-shared.test.ts` runs it on the template.
@@ -22,14 +23,24 @@ import { isRelative, scanImports } from "../packages/cli/src/registry/imports.ts
 export const DASHBOARD = join(import.meta.dir, "../registry/dashboard/files");
 
 /** `src/lib/` files of `@pikit/lib-ui` (`utils.ts` is shadcn's: shared, not in the item). */
-export const LIB_UI: readonly string[] = ["activity.ts", "format.ts", "messages.ts", "names.ts", "sounds.ts", "theme.ts"];
+export const LIB_UI: readonly string[] = ["activity.ts", "format.ts", "messages.ts", "names.ts", "sounds.ts", "sources.ts", "theme.ts", "transcript.ts"];
 /** `src/lib/` files of `@pikit/admin-client`. */
 export const ADMIN_CLIENT: readonly string[] = ["admin-api.ts", "api.ts", "chats.tsx", "router.tsx", "settings.ts", "shell.tsx", "views.ts"];
 /** shadcn's own `src/lib/` file: in neither item. */
 export const SHADCN_UTILS = "utils.ts";
 
 /** The pieces of `src/components/pikit/` that need lib-ui only. */
-const SHARED_PIECES = ["error-note.tsx", "markdown-engine.tsx", "markdown.tsx", "message.tsx", "settings-rows.tsx", "settings-shell.tsx"];
+const SHARED_PIECES = [
+  "context-panel.tsx",
+  "conversation.tsx",
+  "error-note.tsx",
+  "markdown-engine.tsx",
+  "markdown.tsx",
+  "message.tsx",
+  "settings-rows.tsx",
+  "settings-shell.tsx",
+  "tab-bar.tsx",
+];
 
 /** The shared files, from the dashboard's root `root`, sorted. */
 export function sharedUiFiles(root = DASHBOARD): string[] {

@@ -1,13 +1,30 @@
 /**
- * The Context panel (Beautiful UI's right-hand pane, as its harness shows retrieved chunks): what this
- * conversation's transcript holds besides its words, as far as it is read here: the images sent in it
- * and its sources (`sources.ts`), or an empty state.
+ * The Context panel (Beautiful UI's right-hand pane, as its harness shows retrieved chunks): what a
+ * conversation's transcript holds besides its words, as far as it is read: the images sent in it and
+ * its sources (`lib/sources.ts`), or an empty state. And the button that opens it (`ContextButton`),
+ * which a page puts in its header. By props only: the dashboard and channel-web's chat show it alike.
  */
 
-import { MediaImage, Xmark } from "iconoir-react";
+import { MediaImage, SidebarExpand, Xmark } from "iconoir-react";
 import ContextCards, { ContextHeader } from "@/components/bui/ContextCards";
 import EmptyState from "@/components/bui/EmptyState";
-import type { SentImage, Source } from "./sources";
+import type { SentImage, Source } from "@/lib/sources";
+
+/** Opens or closes the Context panel (wide screens only, as the panel). */
+export function ContextButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Context"
+      aria-pressed={open}
+      title="Context: the images sent here, and what its web searches and fetches found"
+      onClick={onToggle}
+      className={`hidden size-7 items-center justify-center rounded-[7px] transition-colors duration-100 lg:flex ${open ? "bg-hover-2 text-ink" : "text-ink-3 hover:bg-hover hover:text-ink"}`}
+    >
+      <SidebarExpand width={16} height={16} strokeWidth={1.9} />
+    </button>
+  );
+}
 
 export function ContextPanel({ images, sources, onClose }: { images: SentImage[]; sources: Source[]; onClose: () => void }) {
   return (
@@ -30,9 +47,9 @@ export function ContextPanel({ images, sources, onClose }: { images: SentImage[]
                   {images.map((image, i) => (
                     <img
                       key={image.key}
-                      src={`data:${image.mimeType};base64,${image.data}`}
+                      src={image.src}
                       alt={`Image ${i + 1}`}
-                      title={image.at === undefined ? image.mimeType : `${image.mimeType}, sent ${new Date(image.at).toLocaleString()}`}
+                      title={[image.mimeType, image.at === undefined ? undefined : `sent ${new Date(image.at).toLocaleString()}`].filter((part) => part !== undefined).join(", ")}
                       className="aspect-square w-full rounded-card bg-inset object-cover shadow-card"
                       style={{ animation: `fade-up 400ms cubic-bezier(0.23,1,0.32,1) ${Math.min(i, 8) * 60}ms both` }}
                     />
