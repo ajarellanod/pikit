@@ -41,10 +41,18 @@ export interface Workspace {
   env: ExecutionEnv;
 }
 
+/**
+ * A tool as `agent.tool` holds it: pi-durable's `ToolRegistration`, and `summary`, one short plain line
+ * for an operator ("Reads a web page or an API at a URL, as text"), which the component that provides
+ * it writes. The dashboard shows it next to the tool (admin-api's `GET /admin/api/agents`); the model
+ * never reads it (it reads `description`). Absent, an operator reads the description's first sentence.
+ */
+export type InstalledTool = ToolRegistration & { readonly summary?: string };
+
 declare module "@pikit/contracts" {
   interface AgentPayloads {
     message: DurableMessage;
-    tool: ToolRegistration;
+    tool: InstalledTool;
     usage: DurableUsage;
   }
 }

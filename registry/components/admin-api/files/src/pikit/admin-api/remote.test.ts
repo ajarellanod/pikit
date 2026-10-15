@@ -347,6 +347,8 @@ test("the agents on the Worker are the index object's App's, one call", async ()
       { name: "assistant", model: "test/model", tools: [], steward: true },
       { name: "searcher", model: "test/search", tools: ["websearch", "lookup"], steward: false },
     ],
+    tools: [{ name: "lookup", summary: "" }],
+    skills: [],
   });
   expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.agents`]);
 });

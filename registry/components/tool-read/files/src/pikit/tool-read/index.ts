@@ -21,8 +21,9 @@ export default defineComponent({
     // Required to install, not read: the runtime gives each call its environment.
     pikit.use("execution");
     pikit.useOptional("workspace");
-    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
+    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match. Its
+    // `summary` is what an operator reads next to it in the dashboard (the model reads its description).
     // Replay "safe": it only reads, so a call a crash interrupted is run again when the run resumes.
-    pikit.provideKeyed("agent.tool", "read", { ...createReadTool(), replay: "safe" });
+    pikit.provideKeyed("agent.tool", "read", { ...createReadTool(), replay: "safe", summary: "Reads a file of the workspace, text or image" });
   },
 });

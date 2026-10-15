@@ -15,7 +15,7 @@
  * | Route | Answer |
  * |---|---|
  * | `GET /admin/api/app` | `ApiApp`: the composition (`APP_DESCRIPTION`, no secrets) |
- * | `GET /admin/api/agents` | `ApiAgents`: the App's agents (the code's, then the live ones), their model and tools, and which is the steward |
+ * | `GET /admin/api/agents` | `ApiAgents`: the App's agents (the code's, then the live ones), their model and tools, and which is the steward; every tool and skill an agent may have, each with its one line |
  * | `POST /admin/api/session` | the credential once → `200 ApiSession` and a session cookie (a browser's) |
  * | `DELETE /admin/api/session` | `204`: the session cookie cleared |
  * | `GET /admin/api/conversations?limit&cursor&archived` | `ApiPage<ApiConversation>`, the most recently active first: those listed, or with `archived=1` those archived |
@@ -212,7 +212,28 @@ export interface ApiAgent {
 export interface ApiAgents {
   /** By name: the code's, then the live ones. */
   items: ApiAgent[];
+  /**
+   * Every tool an agent may have, by name: the installed ones (`agent.tool`), then those a code agent's
+   * definition holds itself. What the Agent sections show next to each tool's switch.
+   */
+  tools: ApiSummary[];
+  /** Every skill an agent may have, by name: the project's (`agent.skill`), then those a code agent's definition holds itself. */
+  skills: ApiSummary[];
 }
+
+/** A tool or a skill, and what it does in one short line, for an operator. */
+export interface ApiSummary {
+  name: string;
+  /**
+   * A tool's `summary`, the line its component wrote for an operator; else (a skill, or a tool without
+   * one) its description's first sentence; at most `SUMMARY_MAX` characters (cut at a word, with an
+   * ellipsis). Empty when it has no description.
+   */
+  summary: string;
+}
+
+/** The longest `ApiSummary.summary`. */
+export const SUMMARY_MAX = 90;
 
 /** An image attached to a message: the model reads it with the text, and the transcript keeps it. */
 export interface ApiImageAttachment {

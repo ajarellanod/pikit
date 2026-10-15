@@ -27,7 +27,8 @@ export { createFetchTool, FETCH_MAX_BYTES, FETCH_MAX_OUTPUT, FETCH_METHODS, FETC
 export default defineComponent({
   name: "tool-fetch",
   setup(pikit) {
-    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
-    pikit.provideKeyed("agent.tool", "fetch", createFetchTool());
+    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match. Its
+    // `summary` is what an operator reads next to it in the dashboard (the model reads its description).
+    pikit.provideKeyed("agent.tool", "fetch", { ...createFetchTool(), summary: "Reads a web page or an API at a URL, as text" });
   },
 });

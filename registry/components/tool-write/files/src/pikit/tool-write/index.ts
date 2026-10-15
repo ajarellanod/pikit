@@ -21,10 +21,11 @@ export default defineComponent({
     // Required to install, not read: the runtime gives each call its environment.
     pikit.use("execution");
     pikit.useOptional("workspace");
-    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
+    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match. Its
+    // `summary` is what an operator reads next to it in the dashboard (the model reads its description).
     // Replay "unsafe": it changes files: running it again could undo a change made since, so after a
     // crash the call is not run again: the model gets an `interrupted` result and decides whether to
     // write again.
-    pikit.provideKeyed("agent.tool", "write", { ...createWriteTool(), replay: "unsafe" });
+    pikit.provideKeyed("agent.tool", "write", { ...createWriteTool(), replay: "unsafe", summary: "Creates or overwrites a file of the workspace" });
   },
 });

@@ -21,6 +21,14 @@ the call (`harnessEnv`: the conversation's `workspace` when one is installed, ot
 So a component never binds an environment to a tool: it provides the tool, by name, as it is, and
 `use`s what it needs installed (`tool-bash`: `execution.shell`).
 
+## Summary
+
+What `agent.tool` holds is `InstalledTool`: the `ToolRegistration` and an optional `summary`, one
+short plain line for an operator, which the component writes where it provides the tool
+(`{ ...createFetchTool(), summary: "Reads a web page or an API at a URL, as text" }`). The dashboard
+shows it next to the tool's switch (admin-api's `GET /admin/api/agents`); absent, the first sentence
+of `description`. The model never reads it: `description` is for the model.
+
 ## Replay
 
 A tool's replay is one value for all its calls, recorded with the call's intent before `execute`.

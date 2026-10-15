@@ -16,6 +16,10 @@
  * returning `withParts(result, parts)`: the runtime collects every successful result's parts, in order,
  * into `AgentResult.parts`, and the channels deliver them with the answer.
  *
+ * **Summary**: a component provides its tool with `summary`, one short plain line for an operator
+ * (`{ ...createReadTool(), summary: "Reads a file of the workspace" }`): the dashboard shows it next
+ * to the tool's name. The model reads `description`, never `summary`.
+ *
  * **Replay**: pi-durable runs an interrupted call again on recovery only when its tool is `"safe"`; a
  * property of the tool, fixed for every call, recorded with the call's intent. pi-durable's own tools
  * declare none (so `"unsafe"`: the model gets an `interrupted` error result with the output so far).
@@ -29,6 +33,8 @@ export { PARTS_DETAIL, withParts } from "../parts.ts";
 export { AGENT_DELEGATION, RESULT_REQUEST_PREFIX, resultPrompt } from "../delegation.ts";
 export type { AgentDelegation, DelegatedOutcome, DelegatedTask } from "../delegation.ts";
 export type { Extension, ToolDiagnostic, ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
+// What `agent.tool` holds: a `ToolRegistration` and the operator's one line about it (`summary`).
+export type { InstalledTool } from "../types.ts";
 export {
   type BashExecution,
   type BashPrepare,

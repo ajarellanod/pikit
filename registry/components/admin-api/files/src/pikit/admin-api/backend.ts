@@ -58,11 +58,13 @@ import {
   type ApiResetResponse,
   type ApiSendResponse,
   type ApiStartResponse,
+  type ApiSummary,
   type ApiTranscriptEntry,
   type ApiUsage,
   cleanTitle,
   isDashboardKey,
   operatorPrompt,
+  SUMMARY_MAX,
   WEB_SEARCH_TOOL,
 } from "./api.ts";
 import type { ConversationIndex, Hidden } from "./conversation-index.ts";
@@ -191,6 +193,53 @@ export interface LocalContracts {
   agents(ctx: AppContext): Promise<ApiAgent[]>;
   /** The App's slash commands (`agent.command`). */
   commands(): CommandLookup;
+  /** Every tool and skill an agent may have, each with its one line (`summariesOf`). */
+  summaries(): Pick<ApiAgents, "tools" | "skills">;
+}
+
+/**
+ * `text`'s first sentence, as an operator reads it in one line: its spaces collapsed, without a final
+ * period, at most `SUMMARY_MAX` characters (cut at a word, with an ellipsis). "" when it is no text.
+ */
+export function summaryOf(text: unknown): string {
+  if (typeof text !== "string") return "";
+  const flat = text.replace(/\s+/g, " ").trim();
+  const end = flat.search(/[.!?](?:\s|$)/);
+  const sentence = (end === -1 ? flat : flat.slice(0, end + 1)).replace(/\.$/, "");
+  if (sentence.length <= SUMMARY_MAX) return sentence;
+  const cut = sentence.slice(0, SUMMARY_MAX - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space >= SUMMARY_MAX / 2 ? cut.slice(0, space) : cut).replace(/[.,;:\s]+$/u, "")}…`;
+}
+
+/** Something named, an object: a tool or a skill an agent's definition holds itself (not a name). */
+const named = (value: unknown): value is { name: string; summary?: unknown; description?: unknown } =>
+  typeof value === "object" && value !== null && typeof (value as { name?: unknown }).name === "string";
+
+/**
+ * The tools and skills agents may have (`ApiAgents.tools`, `skills`): the installed ones (`agent.tool`,
+ * `agent.skill`) by name, then those the code's definitions hold themselves, each name once. A tool's
+ * line is its `summary` (the one its component wrote for an operator), else its description's first
+ * sentence; a skill's, its description's (`summaryOf` both).
+ */
+export function summariesOf(
+  installed: { tools: readonly (readonly [string, unknown])[]; skills: readonly (readonly [string, unknown])[] },
+  definitions: readonly ({ tools?: readonly unknown[]; skills?: readonly unknown[] } | undefined)[],
+): Pick<ApiAgents, "tools" | "skills"> {
+  const toolLine = (tool: unknown) => {
+    const own = named(tool) ? summaryOf(tool.summary) : "";
+    return own !== "" ? own : named(tool) ? summaryOf(tool.description) : "";
+  };
+  const skillLine = (skill: unknown) => (named(skill) ? summaryOf(skill.description) : "");
+  const list = (entries: readonly (readonly [string, unknown])[], own: unknown[], line: (each: unknown) => string): ApiSummary[] => {
+    const seen = new Set<string>();
+    const all = [...[...entries].sort(([a], [b]) => a.localeCompare(b)), ...own.filter(named).map((each) => [each.name, each] as const).sort(([a], [b]) => a.localeCompare(b))];
+    return all.flatMap(([name, each]) => (seen.has(name) ? [] : (seen.add(name), [{ name, summary: line(each) }])));
+  };
+  return {
+    tools: list(installed.tools, definitions.flatMap((each) => [...(each?.tools ?? [])]), toolLine),
+    skills: list(installed.skills, definitions.flatMap((each) => [...(each?.skills ?? [])]), skillLine),
+  };
 }
 
 /** An agent definition as the API says it: its name, its model, the names of the tools it is defined with, whether it is the steward. */
@@ -295,7 +344,7 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       return { ...description, config: redactSecrets(description.config) };
     },
 
-    agents: async (ctx) => ({ items: await contracts.agents(ctx) }),
+    agents: async (ctx) => ({ items: await contracts.agents(ctx), ...contracts.summaries() }),
 
     async conversations(page, ctx, archived = false) {
       const listed = await contracts.index().list({ limit: page.limit ?? 50, archived, ...(page.cursor !== undefined && { cursor: page.cursor }) });

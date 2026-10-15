@@ -55,7 +55,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     name: "admin-api",
     provides: ["http.route", "agent.command"],
     requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry", "storage.sql"],
-    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "agent.definition", "agent.directory", "agent.command", "model.complete"],
+    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "agent.definition", "agent.directory", "agent.tool", "agent.skill", "agent.command", "model.complete"],
   });
 });
 
@@ -383,7 +383,40 @@ test("GET /admin/api/agents: the App's agents by name, their model, the names of
       { name: "assistant", model: "test/model", tools: [], steward: true },
       { name: "searcher", model: "test/search", tools: ["websearch", "lookup"], steward: false },
     ],
+    // No agent.tool or agent.skill installed: only the tool object searcher holds, with no description.
+    tools: [{ name: "lookup", summary: "" }],
+    skills: [],
   });
+});
+
+test("GET /admin/api/agents: every tool and skill an agent may have, each with its one line (a tool's summary, else its description's first sentence)", async () => {
+  const installed = defineComponent({
+    name: "catalog-test",
+    setup(pikit) {
+      pikit.provideKeyed("agent.tool", "fetch", { name: "fetch", summary: "Reads a web page or an API at a URL, as text", description: "Makes one HTTP(S) request. Long text for the model." } as never);
+      pikit.provideKeyed("agent.tool", "bash", { name: "bash", description: "Execute a bash command in the current working directory. Returns stdout." } as never);
+      pikit.provideKeyed("agent.tool", "websearch", { name: "websearch", summary: "   ", description: "Searches the web\n  with Brave" } as never);
+      pikit.provideKeyed("agent.skill", "email-writer", {
+        name: "email-writer",
+        description: "Writes a clear, friendly email from a few notes, in the tone the person asks for, ready to send to anyone at all. Use when asked to draft an email.",
+        instructions: "",
+      });
+    },
+  });
+  const s = await started({}, [installed]);
+
+  const read = (await (await s.fetch("/admin/api/agents", { headers: AUTH })).json()) as { tools: unknown; skills: unknown };
+
+  expect(read.tools).toEqual([
+    // The installed ones by name, then the tool object searcher holds itself.
+    { name: "bash", summary: "Execute a bash command in the current working directory" },
+    { name: "fetch", summary: "Reads a web page or an API at a URL, as text" },
+    { name: "websearch", summary: "Searches the web with Brave" },
+    { name: "lookup", summary: "" },
+  ]);
+  // A long first sentence is cut at a word, with an ellipsis, under 90 characters.
+  expect(read.skills).toEqual([{ name: "email-writer", summary: "Writes a clear, friendly email from a few notes, in the tone the person asks for, ready…" }]);
+  expect(((read.skills as { summary: string }[])[0]?.summary.length ?? 0) <= 90).toBe(true);
 });
 
 test("GET /admin/api/agents with agent.directory: the live agents after the code's, marked, with their description; one starts a conversation", async () => {
@@ -402,6 +435,8 @@ test("GET /admin/api/agents with agent.directory: the live agents after the code
       { name: "searcher", model: "test/search", tools: ["websearch", "lookup"], steward: false },
       { name: "support", live: true, description: "Answers customers", model: "test/model", tools: ["lookup"], steward: false },
     ],
+    tools: [{ name: "lookup", summary: "" }],
+    skills: [],
   });
   const response = await s.fetch("/admin/api/conversations", post({ agent: "support", text: "hello" }));
   expect(response.status).toBe(201);

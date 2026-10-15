@@ -9,7 +9,8 @@ installed; it also stands on its own, for a script or an agent that reads the se
 - **Requires:** `admin.auth` (who is an operator; `admin-auth-token`), `agent.observe` (runtime-pi),
   `agent.runtime`, `conversations.registry`, `storage.sql` (the conversation index); optionally
   `agent.definition` (the agents it lists), `agent.directory` (the live ones, agents-live's: listed
-  after them), `agent.command` (the commands it lists and runs: its own,
+  after them), `agent.tool` and `agent.skill` (the tools and skills agents may have, each with its one
+  line), `agent.command` (the commands it lists and runs: its own,
   runtime-pi's `/compact`, yours) and `model.complete` (runtime-pi's: the model that titles
   conversations; without it, none is titled). A server (such as `server-bun`) serves the routes. On Cloudflare, also `actor.inbox` and `actor.mailbox`
   (actors-do).
@@ -32,7 +33,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | Route | Answer |
 |---|---|
 | `GET /admin/api/app` | the composition: components, capabilities and providers, pipelines, config (`APP_DESCRIPTION`; a value that looks like a secret is `[redacted]`) |
-| `GET /admin/api/agents` | `{ items: [{ name, live?, description?, model, tools, steward }] }`: the App's agents (`agent.definition`), then the live ones (`agent.directory`, `live: true`, never the steward), the names of the tools each is defined with, and whether it is the steward |
+| `GET /admin/api/agents` | `{ items: [{ name, live?, description?, model, tools, steward }] }`: the App's agents (`agent.definition`), then the live ones (`agent.directory`, `live: true`, never the steward), the names of the tools each is defined with, and whether it is the steward; `tools` and `skills`, `[{ name, summary }]`: every tool an agent may have (`agent.tool`, then the tool objects a definition holds) and every skill (`agent.skill`, then a definition's own), `summary` one line for an operator (a tool's own `summary`, else its description's first sentence, at most 90 characters) |
 | `POST /admin/api/session` | the credential once → `200 { operator }` and a session cookie |
 | `DELETE /admin/api/session` | `204`, the session cookie cleared |
 | `GET /admin/api/conversations?limit&cursor` | a page of conversations, the most recently active first: key, agent, busy, last activity, cost, and `current` (whether its key points to it now) |

@@ -56,7 +56,7 @@ import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal }
 import { type ActorInbox, type ActorMailbox, type AgentCommand, type AgentObserver, type ConversationRef, isCommandName } from "@pikit/contracts";
 import { type ApiAgent, cleanTitle } from "./api.ts";
 import { createAssets } from "./assets.ts";
-import { agentOf, createLocalBackend } from "./backend.ts";
+import { agentOf, createLocalBackend, summariesOf } from "./backend.ts";
 import { answerCalls, SEEN } from "./calls.ts";
 import { Config } from "./config.ts";
 import { createConversationIndex, INDEX_KEY, type IndexedConversation } from "./conversation-index.ts";
@@ -102,6 +102,9 @@ export default defineComponent({
     const definitions = pikit.useKeyed("agent.definition");
     // The live agents, made in the dashboard (agents-live), listed after the code's.
     const directory = pikit.useOptional("agent.directory");
+    // The tools and skills agents may have, each with its one line: what the Agent sections show.
+    const tools = pikit.useKeyed("agent.tool");
+    const skills = pikit.useKeyed("agent.skill");
     // The slash commands the dashboard lists and runs: its own two below, runtime-pi's, yours.
     const commands = pikit.useKeyed("agent.command");
     // Titles: a model's text, through the runtime's models.
@@ -126,6 +129,11 @@ export default defineComponent({
         })),
       ],
       commands: () => ({ keys: () => commands.keys().filter(isCommandName), get: (name: string) => commands.get(name) }),
+      summaries: () =>
+        summariesOf(
+          { tools: tools.keys().map((name) => [name, tools.get(name)] as const), skills: skills.keys().map((name) => [name, skills.get(name)] as const) },
+          definitions.keys().map((name) => definitions.get(name)),
+        ),
     };
     // A server's: a conversation no message reached yet is its key's by the index's row (a reset's new one).
     const backend = createLocalBackend({ ...contracts, keyOf: (conversationId) => index.keyOf(conversationId) });

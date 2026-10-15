@@ -97,7 +97,8 @@ export function createAskUserTool(): ToolRegistration {
 export default defineComponent({
   name: "tool-ask-user",
   setup(pikit) {
-    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
-    pikit.provideKeyed("agent.tool", ASK_USER_TOOL, createAskUserTool());
+    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match. Its
+    // `summary` is what an operator reads next to it in the dashboard (the model reads its description).
+    pikit.provideKeyed("agent.tool", ASK_USER_TOOL, { ...createAskUserTool(), summary: "Asks the person a question, with choices or a form, and ends its turn" });
   },
 });

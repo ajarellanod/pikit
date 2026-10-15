@@ -26,6 +26,8 @@
       "actor.inbox",
       "agent.definition",
       "agent.directory",
+      "agent.tool",
+      "agent.skill",
       "agent.command",
       "model.complete"
     ]
@@ -56,6 +58,8 @@
         "actor.mailbox",
         "agent.definition",
         "agent.directory",
+        "agent.tool",
+        "agent.skill",
         "agent.command",
         "model.complete"
       ]

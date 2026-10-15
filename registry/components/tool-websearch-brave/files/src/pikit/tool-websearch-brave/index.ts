@@ -35,7 +35,8 @@ export default defineComponent({
     const secrets = pikit.use("secrets");
     // The key is read at each call, in start or later: `secrets.get()` throws during setup.
     const tool = createBraveSearchTool({ apiKey: () => secrets.get().get(BRAVE_KEY_SECRET), apiBase: config.apiBase });
-    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
-    pikit.provideKeyed("agent.tool", "websearch", tool);
+    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match. Its
+    // `summary` is what an operator reads next to it in the dashboard (the model reads its description).
+    pikit.provideKeyed("agent.tool", "websearch", { ...tool, summary: "Searches the web (Brave Search) and lists what it finds" });
   },
 });

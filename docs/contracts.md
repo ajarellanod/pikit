@@ -28,8 +28,8 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.observe` | single | runtime-pi | admin-api, channel-web | `createAgentObserveConformance` |
 | `agent.definition` | keyed | the project | admin-api?, agents-live?, channel-web?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
-| `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
-| `agent.skill` | keyed | the project | agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
+| `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | admin-api?, agents-live?, runtime-pi? | none |
+| `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createConversationRegistryConformance` |
@@ -192,7 +192,10 @@ pikit.provideKeyed("agent.skill", skill.name, skill);
 
 One tool per name the model calls it by: pi-durable's `ToolRegistration` (`defineTool` from
 `@pikit/pi-adapter/tools`), with its `replay` (`safe`: an interrupted call runs again on recovery;
-`unsafe`: the model gets an interrupted result). `component.json`'s `replay.tools` records it. A tool
+`unsafe`: the model gets an interrupted result). `component.json`'s `replay.tools` records it. It may
+carry a `summary` (`InstalledTool`): one short plain line for an operator, which the dashboard shows
+next to the tool (admin-api's `GET /admin/api/agents`; absent, the description's first sentence); the
+model never reads it. The kit's tools each write one where they are provided. A tool
 that works on `api.env` must use `execution` or `execution.shell`. Registry tools: `read` (safe),
 `write`, `edit`, `bash`, `fetch` (unsafe), `websearch` (safe), `delegate` (safe), and tool-mcp's
 `<server>_<tool>`.

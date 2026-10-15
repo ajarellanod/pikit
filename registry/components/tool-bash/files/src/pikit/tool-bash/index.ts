@@ -25,9 +25,10 @@ export default defineComponent({
     // Required to install, not read: the runtime gives each call its environment.
     pikit.use("execution.shell");
     pikit.useOptional("workspace");
-    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
+    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match. Its
+    // `summary` is what an operator reads next to it in the dashboard (the model reads its description).
     // Replay "unsafe": a command can do anything, so after a crash the call is not run again: the
     // model gets an `interrupted` result with the output so far, and decides whether to run it again.
-    pikit.provideKeyed("agent.tool", "bash", { ...createBashTool(), replay: "unsafe" });
+    pikit.provideKeyed("agent.tool", "bash", { ...createBashTool(), replay: "unsafe", summary: "Runs a shell command in the workspace" });
   },
 });

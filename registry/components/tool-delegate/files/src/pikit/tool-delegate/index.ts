@@ -116,8 +116,9 @@ export default defineComponent({
   config: Config,
   setup(pikit, config) {
     const agents = pikit.useKeyed("agent.definition");
-    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
-    pikit.provideKeyed("agent.tool", DELEGATE_TOOL, createDelegateTool(config));
+    // Under the name the model calls it by: agents name it, and runtime-pi checks the two match. Its
+    // `summary` is what an operator reads next to it in the dashboard (the model reads its description).
+    pikit.provideKeyed("agent.tool", DELEGATE_TOOL, { ...createDelegateTool(config), summary: "Hands a task to another agent of the project, and gets its answer" });
     return {
       start() {
         const missing = config.agents.map((agent) => agent.name).filter((name) => agents.get(name) === undefined);
