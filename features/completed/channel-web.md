@@ -292,6 +292,14 @@ sessions to a browser with authentication again, re-check whether the live part 
   end by hand in a browser (sign-up, sign-in, links, a conversation live, the operator's actions);
   their pure logic is in `scripts/chat.test.ts`.
 - Rate limits and the per-user message count are in memory: a restart or an eviction forgets them.
+- **Next: an Email section in the dashboard's Settings.** Today nothing in `/admin/` says how email is
+  sent. Each `email.send` provider (`email-ses`, `email-resend`) ships a `settings/` section showing:
+  the provider installed, its sender (`EMAIL_FROM`), whether each of its variables is set or missing
+  (never a value), and a "Send test email" button (an admin route of the provider, behind
+  `admin.auth`, sending to an address the operator types; logged without the address's body). The
+  credentials stay where they are (`.env`, Cloudflare's secrets, `pikit configure`): settings never
+  hold a secret (features/settings.md). Tests: the route's `401` first, a sent and a refused email
+  against the provider's fake, no secret in any answer.
 
 ## Not in it
 - One person across channels (a web user and their Telegram chat as one actor): keys stay per channel.
