@@ -16,6 +16,24 @@
       "description": "The dashboard's client of pikit's admin API (the session, useApi, live events), its conversations, views, settings, router and shell."
     },
     {
+      "name": "chat-actions",
+      "type": "registry:file",
+      "title": "chat-actions",
+      "description": "pikit's chat-actions piece of the dashboard."
+    },
+    {
+      "name": "context-panel",
+      "type": "registry:file",
+      "title": "context-panel",
+      "description": "pikit's context-panel piece of the dashboard."
+    },
+    {
+      "name": "conversation",
+      "type": "registry:file",
+      "title": "conversation",
+      "description": "pikit's conversation piece of the dashboard."
+    },
+    {
       "name": "error-note",
       "type": "registry:file",
       "title": "error-note",
@@ -62,6 +80,12 @@
       "type": "registry:file",
       "title": "settings",
       "description": "pikit's settings piece of the dashboard."
+    },
+    {
+      "name": "tab-bar",
+      "type": "registry:file",
+      "title": "tab-bar",
+      "description": "pikit's tab-bar piece of the dashboard."
     },
     {
       "name": "bui",
