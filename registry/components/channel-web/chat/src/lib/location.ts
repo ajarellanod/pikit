@@ -7,7 +7,7 @@
  * | `#/` | a new conversation |
  * | `#/c/<chat id>` | a conversation |
  * | `#/chats` | the conversations |
- * | `#/account` | the account |
+ * | `#/settings[/<section>]` | opens Settings (a modal) at a section: `profile`, `password`, `accounts`, `sessions`, `appearance` |
  * | `#/sign-in`, `#/sign-up`, `#/forgot` | signing in |
  * | `#/set-password?token=…&email=…[&invite=1]` | an invitation's, a confirmation's or a reset's landing |
  * | `#/verify?email=…` | "confirm your email" |

@@ -3,7 +3,7 @@
  * offers (`GET /chat/api/config`) and who is signed in (`GET /chat/api/me`, a `401` when nobody is),
  * then shows the signed-out screens (sign in, make an account, forgot password, an invitation's or a
  * reset's landing, "confirm your email") or the signed-in page (a new chat, a conversation, the
- * conversations, the account). A session that ends meanwhile (a `401`) shows the sign-in again.
+ * conversations; Settings is a modal over it, `#/settings/<section>` opening it). A session that ends meanwhile (a `401`) shows the sign-in again.
  * Each signed-out screen starts anew on another route (`screenKey`), and while nobody is signed in
  * the config is read again whenever the tab comes back (`onVisibleAgain`): a sign-up mode changed
  * meanwhile shows.
@@ -21,10 +21,9 @@ import { get, onUnauthorized } from "@/lib/client";
 import { ConversationsProvider } from "@/lib/conversations";
 import { asError, ChatFailure, landingText } from "@/lib/errors";
 import { chatIdOf, go, takeLandingError, useRoute } from "@/lib/location";
-import { screenKey, setPasswordOf } from "@/lib/routes";
+import { screenKey, setPasswordOf, settingsSectionOf } from "@/lib/routes";
 import { type ChatSession, SessionContext } from "@/lib/session";
 import { onVisibleAgain } from "@/lib/visible";
-import { AccountScreen } from "./screens/account";
 import { ChatsScreen } from "./screens/chats";
 import { ConversationScreen } from "./screens/conversation";
 import { Layout } from "./screens/layout";
@@ -141,12 +140,10 @@ export function App() {
   const screen =
     chatId !== undefined ? (
       <ConversationScreen key={chatId} chatId={chatId} />
-    ) : route.path === "/" || SIGNED_OUT.has(route.path) ? (
+    ) : route.path === "/" || SIGNED_OUT.has(route.path) || settingsSectionOf(route.path) !== undefined ? (
       <NewChatScreen />
     ) : route.path === "/chats" ? (
       <ChatsScreen />
-    ) : route.path === "/account" ? (
-      <AccountScreen />
     ) : (
       <div className="p-8 text-[13.5px] text-ink-3">
         No page here. <a href="#/" className="font-medium text-ink underline underline-offset-2">Start a new chat</a>

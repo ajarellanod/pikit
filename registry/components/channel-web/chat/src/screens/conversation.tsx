@@ -1,5 +1,6 @@
 /**
- * One conversation, live: its messages (newest at the bottom, older pages on demand), the answer as
+ * One conversation, live: under its header (its title, "Archived" when it is, its menu: the sidebar
+ * row's own, `useConversationMenu`), its messages (newest at the bottom, older pages on demand), the answer as
  * it is written (`partial` events, markdown), the tool running now (its name), a stop button while a
  * run goes, and the composer (text and images).
  *
@@ -10,10 +11,11 @@
  * without a stream.
  */
 
-import { EditPencil, Trash } from "iconoir-react";
 import { type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import LoadingState, { LoaderGrid } from "@/components/bui/LoadingState";
 import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
+import { StatusPill } from "@/components/bui/StatusPill";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Reply, UserBubble, type UserMessage } from "@/components/pikit/message";
 import { every, usePolling } from "@/lib/activity";
@@ -26,7 +28,7 @@ import { useLive } from "@/lib/live";
 import { liveTexts } from "@/lib/live-state";
 import { discard, type Outgoing, sendTo, settle, useOutbox } from "@/lib/outbox";
 import { usePageTitle, useSession } from "@/lib/session";
-import { titleOf, useChatActions } from "./layout";
+import { titleOf, useConversationMenu } from "./layout";
 
 const PAGE = 50;
 /** Without a live stream, how often the messages are read while an answer is awaited. */
@@ -184,7 +186,7 @@ function OutgoingRow({ chatId, item, onSent }: { chatId: string; item: Outgoing;
 export function ConversationScreen({ chatId }: { chatId: string }) {
   const { config } = useSession();
   const conversations = useConversations();
-  const actions = useChatActions();
+  const menu = useConversationMenu();
   const live = useLive(chatId);
   const summary = useGet<ChatConversation>(`/conversations/${encodeURIComponent(chatId)}`);
   const { dispatch } = live;
@@ -283,24 +285,12 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
         <h1 className="min-w-0 flex-1 truncate chat-text-13.5 font-medium text-ink">{conversation === undefined ? "" : titleOf(conversation)}</h1>
         {conversation !== undefined && (
           <>
-            <button
-              type="button"
-              aria-label="Rename the conversation"
-              title="Rename"
-              onClick={() => actions.rename(conversation)}
-              className="flex size-8 items-center justify-center rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink"
-            >
-              <EditPencil width={16} height={16} strokeWidth={1.9} />
-            </button>
-            <button
-              type="button"
-              aria-label="Delete the conversation"
-              title="Delete"
-              onClick={() => actions.remove(conversation)}
-              className="flex size-8 items-center justify-center rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-red"
-            >
-              <Trash width={16} height={16} strokeWidth={1.9} />
-            </button>
+            {conversation.archived && <StatusPill tone="neutral">Archived</StatusPill>}
+            <ActionsMenu
+              actions={menu(conversation, reloadSummary)}
+              label="Conversation actions"
+              className="size-8 rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink aria-expanded:bg-hover aria-expanded:text-ink"
+            />
           </>
         )}
       </header>

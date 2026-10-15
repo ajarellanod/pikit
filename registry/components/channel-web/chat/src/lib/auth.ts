@@ -5,7 +5,7 @@
  *
  * - a sign-in by a provider or a magic link comes back to `/chat/` (`callbackURL`), or to the sign-in
  *   view with `?error=<code>` (`errorCallbackURL`), the code in the address's query, before its `#`;
- * - linking a provider comes back to the account view, likewise;
+ * - linking a provider comes back to Settings' connected accounts (`#/settings/accounts`), likewise;
  * - an invitation, a reset and a new account's confirmation land on `#/set-password?token=…&email=…`
  *   (`&invite=1` for an invitation, `&welcome=1` for a confirmation).
  */
@@ -15,7 +15,7 @@ import { post, request } from "./client.ts";
 /** Where a sign-in lands, and where one that failed does (with `?error=`). */
 export const HOME = "/chat/";
 export const SIGN_IN = "/chat/#/sign-in";
-export const ACCOUNT = "/chat/#/account";
+export const CONNECTED_ACCOUNTS = "/chat/#/settings/accounts";
 export const SET_PASSWORD = "/chat/#/set-password";
 
 const auth = <T>(path: string, body?: unknown): Promise<T> => post<T>(`/auth${path}`, body);
@@ -84,9 +84,9 @@ export interface LinkedAccount {
 
 export const listAccounts = (): Promise<LinkedAccount[]> => request<LinkedAccount[]>("GET", "/auth/list-accounts");
 
-/** Leaves to link `provider` to this user; it comes back to the account view. */
+/** Leaves to link `provider` to this user; it comes back to Settings' connected accounts. */
 export async function linkProvider(provider: string): Promise<void> {
-  const { url } = await auth<{ url?: string }>("/link-social", { provider, callbackURL: ACCOUNT, errorCallbackURL: ACCOUNT, disableRedirect: true });
+  const { url } = await auth<{ url?: string }>("/link-social", { provider, callbackURL: CONNECTED_ACCOUNTS, errorCallbackURL: CONNECTED_ACCOUNTS, disableRedirect: true });
   if (url === undefined) throw new Error("The provider gave no address to link at.");
   window.location.assign(url);
 }

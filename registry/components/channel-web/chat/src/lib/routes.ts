@@ -27,6 +27,15 @@ export function screenKey(route: Route): string {
   return query === "" ? route.path : `${route.path}?${query}`;
 }
 
+/**
+ * The Settings section `#/settings/<id>` opens (`#/settings` alone: the first, `profile`); `undefined`
+ * for any other route. Settings is a modal over the page, not a page: the route only opens it.
+ */
+export function settingsSectionOf(path: string): string | undefined {
+  const match = /^\/settings(?:\/([a-z-]+))?\/?$/.exec(path);
+  return match === null ? undefined : (match[1] ?? "profile");
+}
+
 /** What a link that sets a password carries (channel-web's `setPasswordLink`): its token, why, and whose account. */
 export interface SetPasswordLink {
   token: string | null;

@@ -1,7 +1,9 @@
 /**
  * The user's conversations (`GET /chat/api/conversations`), newest activity first, for the sidebar and
  * the list: the first page read again every `every(20 s)` while the person is here (busy flags, new
- * titles), older pages on demand; renaming and deleting change the list at once.
+ * titles), older pages on demand; renaming, archiving and deleting change the list at once. The
+ * archived ones (`?archived=1`) are read when asked (`loadArchived`: the sidebar's Archived opened),
+ * and again after one is archived or restored.
  */
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
@@ -10,6 +12,8 @@ import type { ChatConversation, ChatPage } from "./chat-api.ts";
 import { get, request, useGet } from "./client.ts";
 
 const PAGE = 30;
+/** The archived ones read at once: the API's largest page. */
+const ARCHIVED_PAGE = 100;
 const POLL_MS = 20_000;
 
 export interface Conversations {
@@ -19,7 +23,12 @@ export interface Conversations {
   loadOlder(): Promise<void>;
   reload(): void;
   rename(id: string, title: string): Promise<ChatConversation>;
+  /** Archives it (listed apart) or restores it (`archived` false). */
+  archive(id: string, archived: boolean): Promise<ChatConversation>;
   remove(id: string): Promise<void>;
+  /** The archived ones, newest activity first; `undefined` until `loadArchived` read them. */
+  archived: ChatConversation[] | undefined;
+  loadArchived(): void;
 }
 
 const Context = createContext<Conversations | undefined>(undefined);
@@ -35,6 +44,9 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const [older, setOlder] = useState<ChatConversation[]>([]);
   const [cursor, setCursor] = useState<string | null>();
   const [changed, setChanged] = useState<Map<string, ChatConversation | null>>(new Map());
+  const [archived, setArchived] = useState<ChatConversation[]>();
+  /** Whether the archived ones were asked for: read again after each change. */
+  const [archivedAsked, setArchivedAsked] = useState(false);
   const { reload } = latest;
 
   // A newer read of the first page knows better than what was changed here.
@@ -51,26 +63,53 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const rename = useCallback(async (id: string, title: string) => {
     const renamed = await request<ChatConversation>("PATCH", `/conversations/${encodeURIComponent(id)}`, { title });
     setChanged((current) => new Map(current).set(id, renamed));
+    setArchived((items) => items?.map((each) => (each.id === id ? renamed : each)));
     return renamed;
   }, []);
+
+  const readArchived = useCallback(() => {
+    get<ChatPage<ChatConversation>>(`/conversations?archived=1&limit=${ARCHIVED_PAGE}`).then(
+      (page) => setArchived(page.items),
+      () => setArchived((current) => current ?? []),
+    );
+  }, []);
+  const loadArchived = useCallback(() => {
+    setArchivedAsked(true);
+    readArchived();
+  }, [readArchived]);
+
+  const archive = useCallback(
+    async (id: string, archive: boolean) => {
+      const now = await request<ChatConversation>("POST", `/conversations/${encodeURIComponent(id)}/${archive ? "archive" : "unarchive"}`, {});
+      setChanged((current) => new Map(current).set(id, now));
+      setArchived((items) => items?.filter((each) => each.id !== id));
+      if (archive) setOlder((items) => items.filter((each) => each.id !== id));
+      // Where it goes now: the first page (restored), the archived ones (archived).
+      reload();
+      if (archivedAsked) readArchived();
+      return now;
+    },
+    [reload, archivedAsked, readArchived],
+  );
 
   const remove = useCallback(async (id: string) => {
     await request<void>("DELETE", `/conversations/${encodeURIComponent(id)}`);
     setChanged((current) => new Map(current).set(id, null));
     setOlder((items) => items.filter((each) => each.id !== id));
+    setArchived((items) => items?.filter((each) => each.id !== id));
   }, []);
 
   const items = useMemo(() => {
     if (latest.data === undefined) return undefined;
     return merged(latest.data.items, older).flatMap((each) => {
       const now = changed.get(each.id);
-      return now === null ? [] : [now ?? each];
+      return now === null || now?.archived === true ? [] : [now ?? each];
     });
   }, [latest.data, older, changed]);
 
   const value = useMemo<Conversations>(
-    () => ({ items, error: latest.data === undefined ? latest.error : undefined, hasOlder: next !== undefined, loadOlder, reload, rename, remove }),
-    [items, latest.data, latest.error, next, loadOlder, reload, rename, remove],
+    () => ({ items, error: latest.data === undefined ? latest.error : undefined, hasOlder: next !== undefined, loadOlder, reload, rename, archive, remove, archived, loadArchived }),
+    [items, latest.data, latest.error, next, loadOlder, reload, rename, archive, remove, archived, loadArchived],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

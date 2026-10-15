@@ -1,9 +1,11 @@
 # The chat page
 
 The page your assistant's users talk to it from, at `/chat/` (channel-web): sign in (email and
-password, a link by email, a button per provider the App offers), their own conversations (rename,
-delete), one live (the answer as it is written, the tool running, stop), a new one, images, and their
-account (name, password, linked providers, browsers signed in). It is yours: a Vite + React + Tailwind
+password, a link by email, a button per provider the App offers), their own conversations (one menu
+on each, in the sidebar, the list and the conversation's header: rename, archive or restore, delete;
+the archived ones apart in the sidebar), one live (the answer as it is written, the tool running,
+stop), a new one, images, and their Settings, a modal (profile, password, connected accounts,
+sessions, appearance). It is yours: a Vite + React + Tailwind
 v4 project whose source you change like any other file of the project. It looks like the dashboard
 (`src/dashboard/`), light and dark, and carries none of its admin code.
 
@@ -32,14 +34,14 @@ again. A bundle that names the admin API (`/admin/api`) is refused.
 | Path | What |
 |---|---|
 | `src/app.tsx` | what the App offers and who is signed in, then the screen of the route |
-| `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar), a new chat, a conversation, the conversations, the account |
+| `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar, the conversation menu), a new chat, a conversation, the conversations, Settings (`settings.tsx`, a modal) |
 | `src/lib/chat-api.ts` | the chat API's JSON: a copy of channel-web's `api.ts` |
 | `src/lib/client.ts`, `auth.ts` | the API (`fetch`, the session cookie, `x-pikit-chat: 1` on changes) and better-auth's routes |
 | `src/lib/live.ts`, `live-state.ts`, `sse.ts` | a conversation live: its server-sent events read with `fetch`, folded into a state; a finished answer's live text stays until the messages read have the stored answer its `message` event named (by id, never by text) |
 | `src/lib/outbox.ts` | messages sent from here not shown yet: sending, queued, failed (send again) |
 | `src/lib/location.ts`, `routes.ts` | the hash routes (`#/c/<id>`, `#/set-password?token=…&email=…`); each signed-out screen keyed by its route, so another route starts it anew |
 | `src/lib/visible.ts` | signed out, the config read again when the tab comes back (a sign-up mode changed meanwhile) |
-| `src/components/bui/`, `src/components/pikit/`, `src/lib/{activity,format,messages,names,sounds,theme,utils}.ts`, `src/index.css`, `public/` | the dashboard's shared pieces and look, copied |
+| `src/components/bui/` (`ActionsMenu` too), `src/components/pikit/` (`settings-shell`, `settings-rows`: the dashboard's settings dialog's frame and rows), `src/lib/{activity,format,messages,names,sounds,theme,utils}.ts`, `src/index.css`, `public/` | the dashboard's shared pieces and look, copied |
 
 The copies are the dashboard's own files: in the kit, `bun scripts/chat-shared.ts generate` makes them
 and `scripts/chat.test.ts` checks them; in your project `pikit upgrade` merges them as any other file.
@@ -51,7 +53,7 @@ and `scripts/chat.test.ts` checks them; in your project `pikit upgrade` merges t
 | `#/` | a new chat |
 | `#/c/<chat id>` | a conversation |
 | `#/chats` | the conversations |
-| `#/account` | the account |
+| `#/settings[/<section>]` | Settings over a new chat, at `profile`, `password`, `accounts` (where linking a provider comes back), `sessions` or `appearance` |
 | `#/sign-in`, `#/sign-up`, `#/forgot` | signing in |
 | `#/set-password?token=…&email=…[&invite=1]` | where an invitation, a confirmation and a password reset land (the email shown read-only) |
 | `#/verify?email=…` | "confirm your email" |

@@ -162,7 +162,7 @@ settings-store do.
   conversation by its chat id only; every route builds the key from the authenticated user's id and
   the path's chat id, in one function (`keyOf(user, chatId)`), so a user can name no other user's
   conversation. Covered by tests on both targets: another user's chat id is `404`, for every route
-  (read, messages, events, send, abort, rename, delete).
+  (read, messages, events, send, abort, rename, archive, unarchive, delete).
 - **Request ids**: `web:<uuid>` (the page may send its own, for retries: `web:` then 1 to 118 of
   `A-Z a-z 0-9 . _ ~ : -`). Never `dashboard:`: `admitInbound` refuses it.
 - **Admission** through `admitInbound` (the router, `inbound.normalize`, duplicates), images with
@@ -201,8 +201,10 @@ settings-store do.
   follow-up streams nothing to the user, even while the user's message waits. Never transcript
   entries, system prompts, tool results or operator notes.
 - **Titles**: the first message, cleaned (`cleanTitle`); the user renames it.
-- **Actions**: stop the run (`agent.runtime`'s `abort`, the conversation's current one); delete from
-  the list (the index only: nothing of the runtime's is deleted). No reset and no slash commands:
+- **Actions**: stop the run (`agent.runtime`'s `abort`, the conversation's current one); archive
+  (listed apart, `?archived=1`, until the user restores it or new activity lists it again, as the
+  dashboard's archive does); delete from the list (the index only: nothing of the runtime's is
+  deleted). No reset and no slash commands:
   a new conversation is a new chat id.
 - **Contract change, `agent.observe`**: from "read-only, for operators" to "read-only, for a reader the
   consumer authorized for that conversation: an operator (`admin.auth`), or a user of a channel for
@@ -222,11 +224,12 @@ cannot send it without CORS, which nothing allows).
 | `GET /chat/api/config` | `ChatConfig`: the assistant's name, sign-in methods (password, magic link, providers with display names), whether one may sign up |
 | `/chat/api/auth/*` | better-auth (sign in, sign up, sign out, OAuth callbacks, verification, reset, link, account linking, sessions) |
 | `GET /chat/api/me` | `ChatMe`: the user (id, name, email, image) and their linked methods |
-| `GET /chat/api/conversations?limit&cursor` | `ChatPage<ChatConversation>`, newest activity first |
+| `GET /chat/api/conversations?limit&cursor&archived` | `ChatPage<ChatConversation>`, newest activity first: not archived, or with `archived=1` the archived ones |
 | `POST /chat/api/conversations` | `ChatSendRequest` → `201 ChatStartResponse` (`{ id, requestId }`) |
-| `GET /chat/api/conversations/:id` | `ChatConversation` (`id`, `title`, `busy`, `lastActivity`) |
+| `GET /chat/api/conversations/:id` | `ChatConversation` (`id`, `title`, `busy`, `archived`, `lastActivity`) |
 | `PATCH /chat/api/conversations/:id` | `{ title }` → `200 ChatConversation` |
-| `DELETE /chat/api/conversations/:id` | `204` (the list only) |
+| `POST /chat/api/conversations/:id/archive`, `.../unarchive` | `200 ChatConversation`: listed apart, or back in the list (the owner only; new activity lists an archived one again) |
+| `DELETE /chat/api/conversations/:id` | `204` (the list only: gone for the user) |
 | `GET /chat/api/conversations/:id/messages?limit&cursor` | `ChatPage<ChatMessage>`, newest first: `{ id, role: "user" \| "assistant", text, images?, at, state? }` (`state` of a user's message: `pending`, `answered`, `failed`, `aborted`; `images` `{ mimeType, url }`, never bytes), at most `PAGE_TEXT_MAX` (1 MiB) of text a page |
 | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | one image's bytes: the conversation's owner only, its type, `nosniff`, `cache-control: private, immutable` |
 | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`{ requestId, admission }`); `429` past `messagesPerMinute` |
@@ -240,9 +243,13 @@ A Vite + React + Tailwind v4 project of its own (section 3), built from the shar
 - Sign-in: the methods `GET /chat/api/config` says (a button per provider, email and password, a
   link by email), sign-up when allowed, forgot password and the verification / reset / invitation
   landing pages better-auth's links lead to.
-- The user's conversations (newest first, rename, delete), one conversation (messages, the answer as
-  written, the tool running, stop), a new one, the composer with images.
-- Account: name, password, linked methods (link Google…), sessions (sign out everywhere), sign out.
+- The user's conversations (newest first; one menu, `ActionsMenu`, on the sidebar's rows, the list's
+  and the conversation's header: rename, archive or restore, delete; the archived ones apart in the
+  sidebar), one conversation (messages, the answer as written, the tool running, stop), a new one,
+  the composer with images.
+- Settings (a modal from the user's menu at the sidebar's foot, the dashboard's settings dialog's
+  frame and rows, `settings-shell`, `settings-rows`): profile (name), password, connected accounts
+  (connect Google...), sessions (sign out the others), appearance; sign out from the same menu.
 - Light and dark theme as the dashboard's; no admin code, route or import in its bundle.
 - An answer's markdown image of another site is a link, never loaded (`MarkdownImages` `same-origin`;
   the CSP refuses it too): an answer cannot carry what it read out in an image's address. A failed

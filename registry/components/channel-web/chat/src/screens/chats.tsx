@@ -1,10 +1,12 @@
 /**
  * The user's conversations, newest activity first, full width (the sidebar's list on a narrow screen):
- * each opens, and renames or deletes from its row. Older ones page in on demand.
+ * each opens, and its row's menu (the sidebar row's own, `useConversationMenu`) renames, archives or
+ * deletes it. Older ones page in on demand.
  */
 
-import { ChatBubble, EditPencil, Plus, Trash } from "iconoir-react";
+import { ChatBubble, Plus } from "iconoir-react";
 import { useState } from "react";
+import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
 import EmptyState from "@/components/bui/EmptyState";
 import { LoaderGrid } from "@/components/bui/LoadingState";
@@ -16,12 +18,12 @@ import { asError } from "@/lib/errors";
 import { formatAgo } from "@/lib/format";
 import { chatPath, go } from "@/lib/location";
 import { usePageTitle, useSession } from "@/lib/session";
-import { titleOf, useChatActions } from "./layout";
+import { titleOf, useConversationMenu } from "./layout";
 
 export function ChatsScreen() {
   const { config } = useSession();
   const conversations = useConversations();
-  const actions = useChatActions();
+  const menu = useConversationMenu();
   const [problem, setProblem] = useState<Error>();
   const [loading, setLoading] = useState(false);
   usePageTitle(config.name, "Conversations");
@@ -55,22 +57,11 @@ export function ChatsScreen() {
                   <span className="text-[12.5px] text-ink-3">{formatAgo(conversation.lastActivity)}</span>
                 </a>
                 {conversation.busy && <StatusPill tone="accent">Answering</StatusPill>}
-                <button
-                  type="button"
-                  aria-label={`Rename “${titleOf(conversation)}”`}
-                  onClick={() => actions.rename(conversation)}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink"
-                >
-                  <EditPencil width={15} height={15} strokeWidth={1.9} />
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Delete “${titleOf(conversation)}”`}
-                  onClick={() => actions.remove(conversation)}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-red"
-                >
-                  <Trash width={15} height={15} strokeWidth={1.9} />
-                </button>
+                <ActionsMenu
+                  actions={menu(conversation)}
+                  label={`Actions for ${titleOf(conversation)}`}
+                  className="size-8 rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink aria-expanded:bg-hover-2 aria-expanded:text-ink"
+                />
               </li>
             ))}
           </ul>

@@ -19,7 +19,7 @@ import { IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_
 import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../registry/components/channel-web/chat/src/lib/errors.ts";
 import { base64Bytes, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
 import { type Action, INITIAL, type LiveState, liveTexts, reduce } from "../registry/components/channel-web/chat/src/lib/live-state.ts";
-import { parseRoute, screenKey, setPasswordOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
+import { parseRoute, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
 import { SseParser } from "../registry/components/channel-web/chat/src/lib/sse.ts";
 import { onVisibleAgain } from "../registry/components/channel-web/chat/src/lib/visible.ts";
 import { CHAT, chatBoundaryViolations, chatCopies, staleCopies } from "./chat-shared.ts";
@@ -375,6 +375,16 @@ describe("routes", () => {
     expect(screenKey(parseRoute("#/forgot?email=a%40b.c"))).not.toBe(screenKey(parseRoute("#/forgot")));
     expect(screenKey(parseRoute("#/sign-in"))).toBe(screenKey(parseRoute("/sign-in")));
     expect(read("src/app.tsx")).toContain("key={key}");
+  });
+
+  test("#/settings[/<section>] opens Settings at a section (profile alone); no other route does; the provider's link comes back to its connected accounts", () => {
+    expect(settingsSectionOf("/settings")).toBe("profile");
+    expect(settingsSectionOf("/settings/")).toBe("profile");
+    expect(settingsSectionOf("/settings/sessions")).toBe("sessions");
+    for (const path of ["/", "/account", "/settings-x", "/settings/a/b", "/c/settings"]) expect({ path, section: settingsSectionOf(path) }).toEqual({ path, section: undefined });
+    const back = parseRoute(new URL("http://localhost/chat/#/settings/accounts").hash);
+    expect(settingsSectionOf(back.path)).toBe("accounts");
+    expect(read("src/lib/auth.ts")).toContain('"/chat/#/settings/accounts"');
   });
 
   test("a link that sets a password, as channel-web makes it, lands with its token, its kind and the account's email", () => {
