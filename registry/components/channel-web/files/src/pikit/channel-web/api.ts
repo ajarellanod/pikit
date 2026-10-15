@@ -12,21 +12,25 @@
  * conversation key is `web:<user id>:<chat id>`, built from the session's user. A chat id of another
  * user's is `404`, as one that never existed.
  *
+ * A conversation reads as the dashboard's does (features/chat-parity.md): a transcript of entries
+ * (`ChatTranscriptEntry`, admin-api's `ApiTranscriptEntry`: pi-ai messages) and live events (`ChatEvent`,
+ * admin-api's `ApiEvent`), both cut to what the operator lets users see (`ChatConfig.visibility`).
+ *
  * | Route | Answer |
  * |---|---|
  * | `GET /chat/api/config` | `ChatConfig` (no session needed) |
  * | `/chat/api/auth/*` | better-auth's own routes (sign in, sign up, OAuth callbacks, links, sessions) |
  * | `GET /chat/api/me` | `ChatMe` |
- * | `GET /chat/api/conversations?limit&cursor&archived` | `ChatPage<ChatConversation>`, newest activity first: those not archived, or with `archived=1` the archived ones |
- * | `POST /chat/api/conversations` | `ChatSendRequest` → `201 ChatStartResponse` (`429` past `ChatConfig`'s rate) |
+ * | `GET /chat/api/conversations?limit&cursor&archived&q` | `ChatPage<ChatConversation>`, newest activity first: those not archived, or with `archived=1` the archived ones; with `q`, only those whose title holds it (any case) |
+ * | `POST /chat/api/conversations` | `ChatStartRequest` → `201 ChatStartResponse` (`429` past `ChatConfig`'s rate; `400` for an `agent` not in `ChatConfig.agents`) |
  * | `GET /chat/api/conversations/:id` | `ChatConversation` |
  * | `PATCH /chat/api/conversations/:id` | `ChatRenameRequest` → `200 ChatConversation` |
  * | `POST /chat/api/conversations/:id/archive`, `…/unarchive` | `200 ChatConversation`: listed apart, or back in the list (new activity lists an archived one again) |
  * | `DELETE /chat/api/conversations/:id` | `204`: out of the list, gone for the user (nothing of the runtime's is deleted) |
- * | `GET /chat/api/conversations/:id/messages?limit&cursor` | `ChatPage<ChatMessage>`, newest first, at most `PAGE_TEXT_MAX` characters of text (then fewer than `limit`, and `next`) |
- * | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | the bytes of a message's image `n` (`ChatImageRef.url`), its type, cached privately |
+ * | `GET /chat/api/conversations/:id/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`, newest first, at most `PAGE_JSON_MAX` characters of stored JSON (then fewer than `limit`, and `next`) |
+ * | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | the bytes of image `n` of the user's message `messageId` (a user message's image part's `url`), its type, cached privately |
  * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` |
- * | `GET /chat/api/conversations/:id/events` | server-sent events, one `ChatEvent` per `data:` line, `state` first |
+ * | `GET /chat/api/conversations/:id/events` | server-sent events, one `ChatEvent` per `data:` line, a `snapshot` first |
  * | `POST /chat/api/conversations/:id/abort` | `200 ChatAbortResponse` |
  */
 
@@ -46,8 +50,10 @@ export const MAX_DURABLE_IMAGE_BYTES = 1024 * 1024;
 export const MAX_TEXT = 32_000;
 /** The longest title, in characters. */
 export const TITLE_MAX = 60;
-/** The most text a page of messages carries, in characters: past it a page is shorter than its `limit`. */
-export const PAGE_TEXT_MAX = 1024 * 1024;
+/** The most a page of the transcript carries, in characters of its entries' stored JSON: past it a page is shorter than its `limit` (never empty). */
+export const PAGE_JSON_MAX = 1024 * 1024;
+/** The longest search (`q`), in characters. */
+export const SEARCH_MAX = 200;
 
 /** One way to sign in, as the sign-in page offers it. */
 export type ChatSignInMethod =
@@ -59,6 +65,31 @@ export type ChatSignInMethod =
   | { kind: "social"; id: string; name: string }
   /** Another OAuth2/OIDC platform: signed in the same way (`/chat/api/auth/sign-in/social`, `{ provider: id }`). */
   | { kind: "oidc"; id: string; name: string };
+
+/**
+ * What users see of a conversation, the operator's policy (a config value and a live setting). The
+ * server cuts every transcript entry and live event by it when it is read: a change applies to history
+ * too. Never shown, whatever it says: system prompts, an operator's messages (`dashboard:` requests) or
+ * the runs only they started, another user's anything, usage or cost.
+ */
+export interface ChatVisibility {
+  /** The model's thinking (its `thinking` blocks and deltas). */
+  thinking: boolean;
+  /**
+   * The tools: `none` (no tool call, result or event at all), `names` (a call's name, never its arguments,
+   * its output or its result's content), `full` (all of it).
+   */
+  tools: "none" | "names" | "full";
+  /** Whether the page shows the Context panel (the images sent; with `tools: "full"`, what searches and fetches found). */
+  context: boolean;
+}
+
+/** An assistant a user may pick for a new conversation. */
+export interface ChatAgent {
+  name: string;
+  /** One line: what it is for (a live agent's). */
+  description?: string;
+}
 
 /** What the page needs before anyone signed in. */
 export interface ChatConfig {
@@ -74,6 +105,9 @@ export interface ChatConfig {
   signUp: "invite" | "allowlist" | "open";
   /** Whether the App sends email: "forgot password" and links by email work. */
   email: boolean;
+  visibility: ChatVisibility;
+  /** The assistants a new conversation may be made with (`ChatStartRequest.agent`); empty: no choice, the router decides. */
+  agents: ChatAgent[];
 }
 
 /** The signed-in user. */
@@ -111,6 +145,8 @@ export interface ChatConversation {
   lastActivity: number;
   /** Epoch ms it was made. */
   createdAt: number;
+  /** The assistant it was made with, when it is one of `ChatConfig.agents`. */
+  agent?: string;
 }
 
 /** An image a message is sent with. */
@@ -121,30 +157,54 @@ export interface ChatImage {
   data: string;
 }
 
-/** An image of a stored message: its type, and where its bytes are (`GET`, the session's cookies). */
-export interface ChatImageRef {
-  /** One of `IMAGE_TYPES`. */
-  mimeType: string;
-  /** `/chat/api/conversations/:id/messages/:messageId/images/:n`. */
-  url: string;
-}
-
-/** One message of a conversation: the user's, or an answer. */
-export interface ChatMessage {
-  /** Unique in the conversation: a user's message is its request id; an answer, its own. */
+/**
+ * One entry of a conversation's transcript, as admin-api's `ApiTranscriptEntry`: `messages` are pi-ai
+ * messages (JSON), cut by `ChatConfig.visibility`.
+ *
+ * - **A user's message**: its `id` is its request id (`ChatSendResponse.requestId`); one `user` message,
+ *   its `content` a text part (when written) then its images, each `{ type: "image", url, mimeType }`
+ *   (read its bytes from `url`, with the session; never inline), its `timestamp` when it was sent;
+ *   `state` says what became of it. A message sent while a run goes is in the transcript (and announced
+ *   live) once that run ended: it is answered after it.
+ * - **A run's message** (an answer, a tool round, a tool's result): `<request id of the run>#<its hash>`,
+ *   the same id the live events announced it with (`message_end`'s `entry`): merged by id, nothing is
+ *   swapped when a run ends. One message each. A run that failed or was stopped keeps what it wrote.
+ */
+export interface ChatTranscriptEntry {
   id: string;
-  role: "user" | "assistant";
-  /** Markdown, for an answer. */
-  text: string;
-  /** A user's message's images: read each from its `url` (with the session), never inline. */
-  images?: ChatImageRef[];
-  /** Epoch ms. */
-  at: number;
+  kind: "message";
+  messages: unknown[];
   /**
-   * A user's message only: `pending` until its run ends, then `answered`, `failed` (the run failed:
-   * send it again) or `aborted` (stopped).
+   * A user's message only: `pending` until its run ends, then `answered`, `failed` (the run failed: send
+   * it again) or `aborted` (stopped).
    */
   state?: "pending" | "answered" | "failed" | "aborted";
+}
+
+/**
+ * One live event of a conversation, in the dashboard's shapes (admin-api's `ApiEvent`, pi-durable's
+ * agent events), cut by `ChatConfig.visibility`. The first is a `snapshot`; a stream that fell behind
+ * gets a new one, so a view is rebuilt from the last `snapshot` and the events after it.
+ *
+ * - `snapshot`: `run` (`{}`) while a run goes; `generation.message`, the answer being written; `tools`,
+ *   `{ callId, name, status, output? }` each.
+ * - `run_start`, `run_end`: a run starts, ends (any run: whether the assistant is busy).
+ * - `message_start` (`message`), `message_update` (`changes`), `message_end` (`entry`: `{ id, kind, model }`,
+ *   the transcript's entry, `model` its messages): the answer as it is written, then stored.
+ * - `tool_execution_start` (`toolCallId`, `toolName`, `args` with `full`), `tool_execution_update`
+ *   (`output`, with `full` only), `tool_execution_end`.
+ * - `entry_appended`: with `entry`, an entry of the user's (a message admitted, or one released after
+ *   the run it waited behind); without, something stored changed (a run's messages, a message's
+ *   state): read the transcript again.
+ *
+ * Only a run known to answer one of the user's messages streams its messages and tools (by the request
+ * ids its inputs name, or the request that started it): an operator's run streams nothing but its
+ * `run_start` and `run_end`. Never an entry of the runtime's own (a system prompt, the user's message as
+ * the agent read it, an operator's), usage or cost.
+ */
+export interface ChatEvent {
+  type: string;
+  [field: string]: unknown;
 }
 
 export interface ChatSendRequest {
@@ -156,6 +216,11 @@ export interface ChatSendRequest {
    * `A-Z a-z 0-9 . _ ~ : -`. Absent, the server makes one.
    */
   requestId?: string;
+}
+
+export interface ChatStartRequest extends ChatSendRequest {
+  /** The assistant the conversation is made with: one of `ChatConfig.agents` (else `400`). Absent: the router decides. */
+  agent?: string;
 }
 
 export interface ChatSendResponse {
@@ -177,31 +242,6 @@ export interface ChatRenameRequest {
 export interface ChatAbortResponse {
   id: string;
 }
-
-/**
- * One live event of a conversation. The first is a `state`. `partial` and `tool` come only during a run
- * of the user's; `message` says something was stored or changed: read the messages again.
- *
- * A run's live text and its stored answer are matched by identity, never by text: the `partial`s of a
- * run name its requests (`requests`), and the `message` of its answer names the request the answer is
- * keyed by (`answers`), one of them.
- */
-export type ChatEvent =
-  /** Whether a run is going. */
-  | { type: "state"; busy: boolean }
-  /**
-   * The answer as written so far (the whole text, not a delta); `""` when a new one starts. `requests`:
-   * the request ids of the messages its run answers, when known (absent for a run going before the
-   * stream opened).
-   */
-  | { type: "partial"; text: string; requests?: string[] }
-  /** A tool runs (`running`) or ended (`done`): its name only. */
-  | { type: "tool"; name: string; state: "running" | "done" }
-  /**
-   * A message or an answer was stored, or a message's state changed (`id` the message's). For an answer,
-   * `answers`: the request id of the run it answers (one of its `partial`s' `requests`).
-   */
-  | { type: "message"; id: string; answers?: string };
 
 export interface ChatError {
   /**

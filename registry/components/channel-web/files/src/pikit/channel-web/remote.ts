@@ -12,17 +12,17 @@
 
 import type { AppContext } from "@pikit/core";
 import type { ActorMailbox, JsonValue } from "@pikit/contracts";
-import type { ChatConversation, ChatEvent, ChatImage, ChatMessage, ChatPage, ChatSendResponse } from "./api.ts";
+import type { ChatConversation, ChatEvent, ChatImage, ChatPage, ChatSendResponse, ChatTranscriptEntry } from "./api.ts";
 import type { ChatBackend, ChatRef, NewMessage } from "./backend.ts";
 import { ACCOUNTS_KEY, CALL, LIVE } from "./calls.ts";
 
 export function createRemoteBackend(mailbox: () => ActorMailbox): ChatBackend {
   const call = async <T>(key: string, type: string, message: JsonValue, ctx: AppContext): Promise<T> => (await mailbox().call(key, type, message, ctx)) as T;
   const named = ({ userId, chatId }: ChatRef) => ({ userId, chatId });
-  const sendable = (ref: ChatRef, message: NewMessage): JsonValue => ({ ...named(ref), ...message }) as unknown as JsonValue;
+  const sendable = (ref: ChatRef, message: NewMessage & { agent?: string }): JsonValue => ({ ...named(ref), ...message }) as unknown as JsonValue;
 
   return {
-    list: (userId, { archived, ...page }, ctx) => call<ChatPage<ChatConversation>>(ACCOUNTS_KEY, CALL.list, { userId, ...page, ...(archived === true && { archived }) }, ctx),
+    list: (userId, { archived, ...query }, ctx) => call<ChatPage<ChatConversation>>(ACCOUNTS_KEY, CALL.list, { userId, ...query, ...(archived === true && { archived }) }, ctx),
     start: (ref, message, ctx) => call<ChatSendResponse>(ref.key, CALL.start, sendable(ref, message), ctx),
     send: (ref, message, ctx) => call<ChatSendResponse>(ref.key, CALL.send, sendable(ref, message), ctx),
     conversation: (ref, ctx) => call<ChatConversation>(ref.key, CALL.conversation, named(ref), ctx),
@@ -31,7 +31,7 @@ export function createRemoteBackend(mailbox: () => ActorMailbox): ChatBackend {
     async hide(ref, ctx) {
       await call<JsonValue>(ref.key, CALL.hide, named(ref), ctx);
     },
-    messages: (ref, page, ctx) => call<ChatPage<ChatMessage>>(ref.key, CALL.messages, { ...named(ref), ...page }, ctx),
+    transcript: (ref, page, ctx) => call<ChatPage<ChatTranscriptEntry>>(ref.key, CALL.transcript, { ...named(ref), ...page }, ctx),
     image: (ref, messageId, index, ctx) => call<ChatImage>(ref.key, CALL.image, { ...named(ref), messageId, index }, ctx),
     // Refused before the stream starts: an unknown conversation is a 404, not an empty stream.
     live: async (ref, ctx) => (await mailbox().stream(ref.key, LIVE, named(ref), ctx)) as AsyncIterable<ChatEvent>,

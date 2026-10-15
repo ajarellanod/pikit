@@ -9,14 +9,22 @@
  *   `web:<user id>:<chat id>` (`keyOf`, `chat.ts`), built from the session's user on every route.
  * - **Admission** through `admitInbound` (the router, `inbound.normalize`, duplicates by request id),
  *   its images with it; stored as the user's message once admitted (`store.ts`).
- * - **Answers take the channels' path**: `startAnswerDelivery` (with `outbound.queue` when installed),
- *   whose transport writes each answer into the channel's own table (`delivery.ts`). A run only
- *   `dashboard:` requests started (an operator's follow-up) is never delivered: the user never sees it.
+ * - **History.** A run that answered a user's message (not only `dashboard:` requests: an operator's
+ *   follow-up is never the user's) is stored whole when it ends (`agent.settled`, `agent.failed`): its
+ *   messages (`AgentResult.messages`: the assistant's, with thinking and tool calls, and the tools'
+ *   results; never the runtime's user or system messages), in the turn of the user's message it
+ *   answered (`store.ts`, `entries.ts`). An aborted or failed run keeps what it wrote.
+ * - **Answers also take the channels' path**: `startAnswerDelivery` (with `outbound.queue` when
+ *   installed), whose transport writes a completed run's answer into the channel's own table only when
+ *   none of the run's messages are (its end never heard: `delivery.ts`).
  * - **States** of a user's message (`pending`, then `answered`, `failed`, `aborted`) move when its run
- *   ends (`agent.settled`, `agent.failed`), and from `agent.submissions` when the page reads a message
- *   still `pending` whose run's end no event brought (K3).
- * - **Live view** (`live.ts`): a projection of `agent.observe`'s `watch`, only what the user may see.
- * - **Sign-up** (`signUp`) is a live setting when `settings` is installed: the dashboard's Settings.
+ *   ends, and from `agent.submissions` when the page reads a message still `pending` whose run's end no
+ *   event brought (K3).
+ * - **Live view** (`live.ts`): a projection of `agent.observe`'s `watch`, the dashboard's event shapes,
+ *   only the user's runs.
+ * - **What users see** (`visibility`: thinking, tools, context) and **the agents they may pick**
+ *   (`agents`) are the operator's policy, cut in the routes (`visibility.ts`); with `signUp`, live
+ *   settings when `settings` is installed (the dashboard's Settings), read at each request.
  *
  * Targets: `server` and `durable`. It never reads the target: in `start`, `actor.inbox`'s `scope` says
  * where it runs.
@@ -31,7 +39,7 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import { type ActorInbox, type ActorMailbox, type AgentResult, type AnswerDelivery, type ChannelTransport, startAnswerDelivery } from "@pikit/contracts";
+import { type ActorInbox, type ActorMailbox, type AgentResult, type AnswerDelivery, answersOnlyTheDashboard, type ChannelTransport, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
 import { linkOrigin } from "./accounts/links.ts";
 import type { Accounts } from "./accounts/types.ts";
@@ -40,11 +48,13 @@ import { createLocalBackend, stateOf } from "./backend.ts";
 import { ACCOUNTS_KEY, answerConversationCalls, answerIndexCalls, SEEN } from "./calls.ts";
 import { CHAT_FILES } from "./chat-files.ts";
 import { parseKey } from "./chat.ts";
-import { type AccountSecrets, Config, configProblem, SignUp, type SignUpSettings, secretsOf } from "./config.ts";
-import { answerText, createTransport, DELIVERY, INSTANCE, routeOf } from "./delivery.ts";
+import type { ChatAgent } from "./api.ts";
+import { Agents, type AccountSecrets, Config, configProblem, SignUp, type SignUpSettings, secretsOf, Visibility, type VisibilitySettings } from "./config.ts";
+import { answerText, createTransport, DELIVERY, HEARD_WAIT_MS, INSTANCE, routeOf } from "./delivery.ts";
+import { runEntryId, runMessages, userEntryOf } from "./entries.ts";
 import { provideAdminRoutes } from "./admin-routes.ts";
 import { createRateLimiter } from "./rate.ts";
-import { chatConfigOf, provideRoutes } from "./routes.ts";
+import { chatConfigOf, provideRoutes, type LiveSettings } from "./routes.ts";
 import { type ConversationRow, createChatStore } from "./store.ts";
 import { type AccountsWiring, BETTER_AUTH } from "./wiring.ts";
 
@@ -60,9 +70,12 @@ export interface ChannelWebOptions {
   transport?: (inner: ChannelTransport) => ChannelTransport;
 }
 
-/** The settings an operator changes live (`settings`): who may sign up. */
-const Settings = Type.Object({ signUp: SignUp }, { additionalProperties: false });
-type Settings = { signUp: SignUpSettings };
+/** The settings an operator changes live (`settings`): who may sign up, what users see, the agents they may pick. */
+const Settings = Type.Object({ signUp: SignUp, visibility: Visibility, agents: Agents }, { additionalProperties: false });
+type Settings = { signUp: SignUpSettings; visibility: VisibilitySettings; agents: string[] };
+
+/** The ends of runs kept (`heard`): a transport waits on one only shortly after it. */
+const ENDS_KEPT = 1000;
 
 export function createChannelWeb(options: ChannelWebOptions = {}) {
   const wiring = options.accounts ?? BETTER_AUTH;
@@ -87,6 +100,9 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       const settings = pikit.useOptional("settings");
       const email = pikit.useOptional("email.send");
       const auth = pikit.useOptional("admin.auth");
+      // The agents users may pick (`agents`), described for the page.
+      const definitions = pikit.useKeyed("agent.definition");
+      const directory = pikit.useOptional("agent.directory");
 
       const store = createChatStore(() => sql.get());
       const assets = createAssets(CHAT_FILES, () => avatarHosts(config.signIn.social));
@@ -96,16 +112,30 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       /** Whether a request's own host is trusted for links without PIKIT_PUBLIC_URL: on Cloudflare (the Worker's route), never on a server. */
       let trustHost = false;
 
-      /** Who may sign up now: the operator's setting, else the config's. */
-      const signUp = async (ctx: AppContext): Promise<SignUpSettings> => {
+      /** The operator's settings now (who may sign up, what users see, the agents they may pick), else the config's. */
+      const liveSettings = async (ctx: AppContext): Promise<LiveSettings> => {
+        const configured = { signUp: config.signUp, visibility: config.visibility, agents: config.agents };
         const live = settings.get();
-        if (live === undefined || !declared) return config.signUp;
+        if (live === undefined || !declared) return configured;
         try {
-          return (await live.get<Settings>(NAME, ctx)).signUp;
+          return await live.get<Settings>(NAME, ctx);
         } catch (error) {
-          ctx.logger.warn("channel-web: its settings could not be read; signUp of its config applies", { error: error instanceof Error ? error.message : String(error) });
-          return config.signUp;
+          ctx.logger.warn("channel-web: its settings could not be read; its config applies", { error: error instanceof Error ? error.message : String(error) });
+          return configured;
         }
+      };
+      const signUp = async (ctx: AppContext): Promise<SignUpSettings> => (await liveSettings(ctx)).signUp;
+
+      /** The agents of `names` that are agents now (the code's, or live ones), in their order, described. */
+      const agentsOf = async (names: readonly string[], ctx: AppContext): Promise<ChatAgent[]> => {
+        if (names.length === 0) return [];
+        const code = new Set(definitions.keys());
+        const live = names.every((name) => code.has(name)) ? [] : ((await directory.get()?.list(ctx)) ?? []);
+        return names.flatMap((name): ChatAgent[] => {
+          if (code.has(name)) return [{ name }];
+          const found = live.find((agent) => agent.name === name);
+          return found === undefined ? [] : [{ name, ...(found.description !== undefined && found.description !== "" && { description: found.description }) }];
+        });
       };
 
       /** Where the users' list is: the store itself (a server), or the accounts actor (Cloudflare). */
@@ -154,7 +184,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       };
 
       /** The page's config, as this App's accounts make it (on Cloudflare the accounts actor answers the Worker with it). */
-      const chatConfig = (ctx: AppContext) => chatConfigOf({ config, target: limits, signUp, email: email.get() !== undefined }, ctx);
+      const chatConfig = (ctx: AppContext) => chatConfigOf({ config, target: limits, settings: liveSettings, agents: agentsOf, email: email.get() !== undefined }, ctx);
 
       provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => limits, rate: async (userId, ctx) => rate.take(userId, ctx.clock.now()), assets });
       provideAdminRoutes(pikit, {
@@ -183,22 +213,51 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
               if (row !== undefined) await changed(row, now);
             })(ctx),
       );
-      const ended = (result: AgentResult, ctx: AppContext) =>
-        parseKey(result.conversation.key) === undefined
-          ? undefined
-          : guarded("a run's end was not recorded; the page reads it from agent.submissions", async (now) => {
-              const key = result.conversation.key;
-              store.runEnded(result.conversation.conversationId);
-              for (const id of await store.settle(key, result.requestIds, stateOf(result.kind))) store.notify(key, { type: "message", id });
-              const row = await store.change(key, { busy: false });
-              if (row !== undefined) await changed(row, now);
-              await delivery?.wake(now);
-            })(ctx);
+      /** The ends of runs heard here, by `key` and the run's first request: their handling, done or going. */
+      const ends = new Map<string, Promise<void>>();
+      /** Resolves once the end of `run` of `key` was handled here, or after `HEARD_WAIT_MS` when it was not heard. */
+      const heard = async (key: string, run: string): Promise<void> => {
+        const id = `${key}\n${run}`;
+        const deadline = Date.now() + HEARD_WAIT_MS;
+        while (!ends.has(id) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        await ends.get(id);
+      };
+      const ended = (result: AgentResult, ctx: AppContext) => {
+        const parsed = parseKey(result.conversation.key);
+        if (parsed === undefined) return undefined;
+        const key = result.conversation.key;
+        const work = guarded("a run's end was not recorded; the page reads its state from agent.submissions, its answer from delivery", async (now) => {
+          store.runEnded(result.conversation.conversationId);
+          // What the run wrote, for the user: never a run only the operator's follow-ups started.
+          let stored = 0;
+          if (!answersOnlyTheDashboard(result)) {
+            const messages = runMessages(result.messages).map((message) => {
+              const at = (message as { timestamp?: unknown }).timestamp;
+              return { id: runEntryId(result.requestId, message), message, at: typeof at === "number" ? at : now.clock.now() };
+            });
+            stored = await store.addRun(key, result.requestId, result.requestIds, messages);
+          }
+          const moved = await store.settle(key, result.requestIds, stateOf(result.kind));
+          // What waited behind it, after it.
+          const released = await store.release(key);
+          if (stored > 0 || moved.length > 0) store.notify(key, { type: "changed" });
+          for (const message of released) store.notify(key, { type: "entry", entry: userEntryOf(parsed.chatId, message) });
+          const row = await store.change(key, { busy: false, ...(stored > 0 && { activity: now.clock.now() }) });
+          if (row !== undefined) await changed(row, now);
+          await delivery?.wake(now);
+        })(ctx);
+        ends.set(`${key}\n${result.requestId}`, work);
+        for (const old of ends.keys()) {
+          if (ends.size <= ENDS_KEPT) break;
+          ends.delete(old);
+        }
+        return work;
+      };
       pikit.on("agent.settled", ended);
       pikit.on("agent.failed", ended);
 
       const startDelivery = async (ctx: AppContext): Promise<void> => {
-        const inner = createTransport({ store, now: () => ctx.clock.now(), changed: (row) => changed(row, ctx) });
+        const inner = createTransport({ store, now: () => ctx.clock.now(), changed: (row) => changed(row, ctx), heard });
         delivery = await startAnswerDelivery(ctx, {
           name: NAME,
           answers: submissions.get().answers,
@@ -243,7 +302,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
           if (problem !== undefined) throw new Error(problem);
           const live = settings.get();
           if (live !== undefined) {
-            live.declare(NAME, Settings, { signUp: config.signUp });
+            live.declare(NAME, Settings, { signUp: config.signUp, visibility: config.visibility, agents: config.agents });
             declared = true;
           }
           const calls = inbox.get();

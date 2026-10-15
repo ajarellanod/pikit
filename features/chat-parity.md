@@ -61,6 +61,30 @@ Conversations, and the dashboard lacks the conversation header's menu the chat h
   never shown, isolation for the new routes, the agent picked (allowed, refused, routing still
   denies), search, both targets (bun lanes and workerd).
 
+### As built (the server), and why
+- **Ids, live and read.** A user's message is its request id; a run's message is
+  `<the run's first request>#<hash of the message itself>` (role, time, tool call id, blocks' text and
+  ids; `entries.ts`). The live view hashes the message `message_end` announces, the store the same
+  message in `AgentResult.messages`: one id, one form (`{ id, kind, model }` live, `{ id, kind, messages }`
+  read), so the view's merge by id never shows one twice. pi-durable's entry ids could not be used:
+  `AgentResult` carries no entry ids, and no contract changes.
+- **A message sent while a run goes is held** out of the transcript and the live view until that run
+  ends: the run's messages are stored only then, and the view puts live-only entries after the
+  transcript's, so a message read before them would jump below them when the run ends. The runtime
+  does the same (a queued input enters the transcript when its run starts); the page shows it as sent
+  meanwhile, as the dashboard does.
+- **Order.** Entries are in turns: a user's message opens one; a run's messages go in the turn of the
+  newest user message it answered, whenever it ends.
+- **Delivery stays**, as the durable path: it writes a completed run's answer (one assistant message)
+  only for a run whose end this App never heard (it waits a second for it), and the run's messages
+  replace it when heard late. The channel conformance suite still runs.
+- **The projection is in the routes** (`visibility.ts`), one place for both targets: on Cloudflare the
+  Worker cuts what the objects give, by the accounts actor's `ChatConfig` (kept 10 s).
+- **Small additions:** a user's entry carries its `state` (`pending`, `answered`, `failed`, `aborted`);
+  `entry_appended` without an entry means "read the transcript again"; `ChatConversation.agent` is said
+  only when it is one users may pick; a failed answer's provider error is replaced by a plain sentence;
+  `run_start` and `run_end` of any run (an operator's too) say only that the assistant is busy.
+
 ## The page
 - The shared conversation view over a chat source (`/chat/api`), with the chat's actions (the menu,
   Archived) and without the operator's (commands, notes, reset).

@@ -24,6 +24,25 @@ export const SignUp = Type.Object(
 );
 export type SignUpSettings = Static<typeof SignUp>;
 
+/** What users see of a conversation (`ChatVisibility`, api.ts); also a live setting. */
+export const Visibility = Type.Object(
+  {
+    /** The model's thinking. */
+    thinking: Type.Boolean({ title: "Thinking", description: "Show the model's thinking." }),
+    /** `none`, `names` (a tool's name, never its arguments or result), or `full`. */
+    tools: Type.Union([Type.Literal("none"), Type.Literal("names"), Type.Literal("full")], { title: "Tools", description: "Which of the tools' work users see." }),
+    /** The page's Context panel: the images sent, and with `tools: "full"` what searches and fetches found. */
+    context: Type.Boolean({ title: "Context", description: "Show the Context panel." }),
+  },
+  { additionalProperties: false },
+);
+export type VisibilitySettings = Static<typeof Visibility>;
+
+/** An agent's name, as `defineAgent` checks it. */
+const AGENT_NAME = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
+/** The agents users may pick for a new conversation; also a live setting. */
+export const Agents = Type.Array(Type.String({ pattern: AGENT_NAME, maxLength: 64 }), { maxItems: 50, uniqueItems: true });
+
 export const Config = Type.Object({
   /** The assistant's name, as the chat page titles itself. */
   name: Type.String({ minLength: 1, maxLength: 80, default: "Assistant" }),
@@ -60,6 +79,23 @@ export const Config = Type.Object({
     },
     { default: {} },
   ),
+  /**
+   * What users see of a conversation (features/chat-parity.md): the model's thinking, the tools (`none`,
+   * `names`: a tool's name only, `full`), the Context panel. A live setting too, read at each request.
+   */
+  visibility: Type.Object(
+    {
+      thinking: Type.Boolean({ default: false }),
+      tools: Type.Union([Type.Literal("none"), Type.Literal("names"), Type.Literal("full")], { default: "names" }),
+      context: Type.Boolean({ default: true }),
+    },
+    { default: {} },
+  ),
+  /**
+   * The agents users may pick for a new conversation (`agent.definition` names, or live ones of
+   * `agent.directory`); empty: no choice, the router decides. A live setting too.
+   */
+  agents: Type.Array(Type.String({ pattern: AGENT_NAME, maxLength: 64 }), { default: [], maxItems: 50, uniqueItems: true }),
   /**
    * How long a session is trusted from its signed cookie, without reading the database: a ban or a
    * removal takes effect within it.

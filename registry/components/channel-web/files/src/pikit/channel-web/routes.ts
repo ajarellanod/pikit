@@ -17,8 +17,13 @@
  *   types `400`, size `413`).
  * - **A user's messages are rated** (`messagesPerMinute`, every conversation together): one too many
  *   is `429 rate_limited` with `retry-after`, before its body is read (`RouteOptions.rate`).
- * - **Images are read one at a time** (`GET .../messages/:messageId/images/:n`), never inline in a page:
- *   the conversation's owner only, its own type, `nosniff`, cached privately (an image never changes).
+ * - **Images are read one at a time** (`GET .../messages/:messageId/images/:n`), never inline in the
+ *   transcript: the conversation's owner only, its own type, `nosniff`, cached privately (an image never
+ *   changes).
+ * - **What users see is the operator's policy** (`ChatConfig.visibility`, read at each request): every
+ *   transcript entry and live event passes through `visibility.ts` here, the one place, on both targets.
+ *   A conversation's `agent` is said only when it is one users may pick (`ChatConfig.agents`).
+ * - **An agent picked** for a new conversation is one of `ChatConfig.agents`, or `400`.
  * - **A refusal is its status**: `not_found` `404`, `invalid_request` and `invalid_cursor` `400`,
  *   `too_large` `413`, `denied` `403` (the router refused it), `rejected` `422` (a stage stopped it),
  *   `no_route` `500`. Anything else (the runtime could not take the message for a while, an object
@@ -37,27 +42,30 @@ import type { AccountUser, Accounts } from "./accounts/types.ts";
 import {
   CHAT_CLIENT_HEADER,
   type ChatAbortResponse,
+  type ChatAgent,
   type ChatConfig,
   type ChatConversation,
   type ChatError,
   type ChatEvent,
   type ChatMe,
-  type ChatMessage,
   type ChatPage,
   type ChatSendResponse,
   type ChatSignInMethod,
   type ChatStartResponse,
+  type ChatTranscriptEntry,
   IMAGE_TYPES,
   MAX_DURABLE_IMAGE_BYTES,
   MAX_IMAGE_BYTES,
   MAX_IMAGES,
   MAX_TEXT,
+  SEARCH_MAX,
   TITLE_MAX,
 } from "./api.ts";
 import { type Assets, BASE } from "./assets.ts";
 import type { ChatBackend, ChatRef, NewMessage } from "./backend.ts";
 import { chatIdFor, imagesProblem, isChatId, keyOf, newChatId, REQUEST_ID, requestIdOf } from "./chat.ts";
-import { type ChannelWebConfig, providerName, type SignUpSettings } from "./config.ts";
+import { type ChannelWebConfig, providerName, type SignUpSettings, type VisibilitySettings } from "./config.ts";
+import { createEventProjector, projectEntry } from "./visibility.ts";
 
 export const API = "/chat/api";
 
@@ -91,6 +99,7 @@ const SendBody = Type.Object(
   },
   { additionalProperties: false },
 );
+const StartBody = Type.Object({ ...SendBody.properties, agent: Type.Optional(Type.String({ maxLength: 64 })) }, { additionalProperties: false });
 const RenameBody = Type.Object({ title: Type.String({ minLength: 1, maxLength: TITLE_MAX * 4 }) }, { additionalProperties: false });
 
 /** The status of each refusal a backend throws; any other is `503`. */
@@ -183,20 +192,59 @@ async function bodyOf(request: Request, max: number): Promise<unknown> {
 }
 
 /** `value` against `schema`, or `400` with the first problem. */
-function checked<S extends typeof SendBody | typeof RenameBody>(schema: S, value: unknown): Static<S> {
+function checked<S extends typeof SendBody | typeof StartBody | typeof RenameBody>(schema: S, value: unknown): Static<S> {
   if (Value.Check(schema, value)) return value as Static<S>;
   const [first] = Value.Errors(schema, value);
   throw new Refused(400, "invalid_request", `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}`);
 }
 
-/** A message from the request's body, checked: something written or attached, images the API takes. */
-async function messageOf(request: Request, target: string): Promise<Omit<NewMessage, "requestId"> & { requestId?: string }> {
-  const body = checked(SendBody, await bodyOf(request, maxBodyOf(target)));
+/** A message from the request's body, checked: something written or attached, images the API takes; a first one may name an agent. */
+async function messageOf(request: Request, target: string, first = false): Promise<Omit<NewMessage, "requestId"> & { requestId?: string; agent?: string }> {
+  const body: Static<typeof StartBody> = checked(first ? StartBody : SendBody, await bodyOf(request, maxBodyOf(target)));
   const images = body.images ?? [];
   if (body.text.trim() === "" && images.length === 0) throw new Refused(400, "invalid_request", "/text: write something, or attach an image");
   const wrong = imagesProblem(images, target);
   if (wrong !== undefined) throw new Refused(wrong.status, wrong.status === 413 ? "too_large" : "invalid_request", `/images: ${wrong.message}`);
-  return { text: body.text, ...(images.length > 0 && { images }), ...(body.requestId !== undefined && { requestId: body.requestId }) };
+  return {
+    text: body.text,
+    ...(images.length > 0 && { images }),
+    ...(body.requestId !== undefined && { requestId: body.requestId }),
+    ...(body.agent !== undefined && { agent: body.agent }),
+  };
+}
+
+/**
+ * `events` cut by `visibility` (`visibility.ts`): what users may see of each, in order. Not a generator:
+ * its `return` reaches `events` at once, also while a `next` waits (a generator would queue it behind
+ * that `next`, and a stream that is idle would never close: on Cloudflare the object's stays open).
+ */
+function projected(events: AsyncIterable<ChatEvent>, visibility: VisibilitySettings): AsyncIterable<ChatEvent> {
+  return {
+    [Symbol.asyncIterator]() {
+      const project = createEventProjector(visibility);
+      const inner = events[Symbol.asyncIterator]();
+      return {
+        async next(): Promise<IteratorResult<ChatEvent>> {
+          for (;;) {
+            const read = await inner.next();
+            if (read.done === true) return read;
+            const shown = project(read.value);
+            if (shown !== undefined) return { done: false, value: shown };
+          }
+        },
+        async return(): Promise<IteratorResult<ChatEvent>> {
+          await inner.return?.();
+          return { done: true, value: undefined };
+        },
+      };
+    },
+  };
+}
+
+/** A conversation as `config` lets users see it: its agent only when it is one they may pick. */
+function shownConversation(conversation: ChatConversation, config: ChatConfig): ChatConversation {
+  const { agent, ...rest } = conversation;
+  return agent !== undefined && config.agents.some((each) => each.name === agent) ? conversation : rest;
 }
 
 /**
@@ -260,7 +308,9 @@ export interface RouteOptions {
   config: ChannelWebConfig;
   /**
    * What `GET /chat/api/config` answers, as the App where the accounts are makes it (`chatConfigOf`):
-   * on a server this App; on Cloudflare the accounts actor's, which the Worker asks.
+   * on a server this App; on Cloudflare the accounts actor's, which the Worker asks (kept
+   * `CONFIG_CACHE_MS`). Its `visibility` cuts every transcript and live event, its `agents` the agent
+   * a new conversation may be made with: read at each request.
    */
   chatConfig(ctx: AppContext): Promise<ChatConfig>;
   /** Where the conversations are, for the image limits: `server`, or `durable` (Cloudflare). */
@@ -273,16 +323,28 @@ export interface RouteOptions {
   assets: Assets;
 }
 
+/** The values an operator changes live (`settings`), else the config's. */
+export type LiveSettings = { signUp: SignUpSettings; visibility: VisibilitySettings; agents: string[] };
+
 /**
  * The page's config, made where the accounts are: their sign-in methods (`config` is that App's), who
- * may sign up now (`signUp`, the live setting), and whether that App sends email (`email.send` there).
+ * may sign up now, what users see and the agents they may pick (`settings`, the live settings, the
+ * agents among them that are agents now: `agents`), and whether that App sends email (`email.send` there).
  */
 export async function chatConfigOf(
-  options: { config: ChannelWebConfig; target: "server" | "durable"; signUp(ctx: AppContext): Promise<SignUpSettings>; email: boolean },
+  options: {
+    config: ChannelWebConfig;
+    target: "server" | "durable";
+    settings(ctx: AppContext): Promise<LiveSettings>;
+    agents(names: readonly string[], ctx: AppContext): Promise<ChatAgent[]>;
+    email: boolean;
+  },
   ctx: AppContext,
 ): Promise<ChatConfig> {
   const { config, target, email } = options;
-  return { name: config.name, target, methods: methodsOf(config, email), signUp: (await options.signUp(ctx)).mode, email };
+  const live = await options.settings(ctx);
+  const { thinking, tools, context } = live.visibility;
+  return { name: config.name, target, methods: methodsOf(config, email), signUp: live.signUp.mode, email, visibility: { thinking, tools, context }, agents: await options.agents(live.agents, ctx) };
 }
 
 /** The sign-in methods the page offers, from the config (a link by email only when the App sends email). */
@@ -352,9 +414,16 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   });
 
   user(`GET ${API}/conversations`, async (request, ctx, me) => {
-    const archived = new URL(request.url).searchParams.get("archived");
+    const params = new URL(request.url).searchParams;
+    const archived = params.get("archived");
     if (archived !== null && archived !== "1" && archived !== "0") throw new Refused(400, "invalid_request", "archived is 1 or 0");
-    return json<ChatPage<ChatConversation>>(200, await backend().list(me.id, { ...pageOf(request), archived: archived === "1" }, ctx));
+    const q = params.get("q")?.trim() ?? "";
+    if (q.length > SEARCH_MAX) throw new Refused(400, "invalid_request", `q is at most ${SEARCH_MAX} characters`);
+    const listed = await backend().list(me.id, { ...pageOf(request), archived: archived === "1", ...(q !== "" && { q }) }, ctx);
+    // The policy only when there is an agent to say or not.
+    if (!listed.items.some((each) => each.agent !== undefined)) return json<ChatPage<ChatConversation>>(200, listed);
+    const config = await options.chatConfig(ctx);
+    return json<ChatPage<ChatConversation>>(200, { ...listed, items: listed.items.map((each) => shownConversation(each, config)) });
   });
 
   /** `429` when `me` sent too many messages this minute; `undefined` when this one may go. */
@@ -368,16 +437,23 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   user(`POST ${API}/conversations`, async (request, ctx, me) => {
     const refused = await limited(me, ctx);
     if (refused !== undefined) return refused;
-    const { requestId: given, ...message } = await messageOf(request, options.limits());
+    const { requestId: given, agent, ...message } = await messageOf(request, options.limits(), true);
+    // Only an agent the operator lets users pick; the routing still allows or denies the message.
+    if (agent !== undefined && !(await options.chatConfig(ctx)).agents.some((each) => each.name === agent)) {
+      throw new Refused(400, "invalid_request", "/agent: not an assistant you may pick");
+    }
     // The page's request id names the conversation too: a retry reaches the same one.
     const chatId = given === undefined ? newChatId() : await chatIdFor(me.id, given);
     const requestId = requestIdOf(given);
-    const started = await backend().start(refOf(me, chatId), { ...message, requestId }, ctx);
-    ctx.logger.info("channel-web: a user started a conversation", { user: me.id, chat: chatId, requestId, admission: started.admission, ...facts(message) });
+    const started = await backend().start(refOf(me, chatId), { ...message, requestId, ...(agent !== undefined && { agent }) }, ctx);
+    ctx.logger.info("channel-web: a user started a conversation", { user: me.id, chat: chatId, requestId, admission: started.admission, ...(agent !== undefined && { agent }), ...facts(message) });
     return json<ChatStartResponse>(201, { id: chatId, ...started });
   });
 
-  user(`GET ${API}/conversations/:id`, async (request, ctx, me) => json<ChatConversation>(200, await backend().conversation(refOf(me, chatIdOf(request)), ctx)));
+  /** A conversation as the user may see it (its agent only when one they may pick). */
+  const shown = async (conversation: ChatConversation, ctx: AppContext): Promise<ChatConversation> => shownConversation(conversation, await options.chatConfig(ctx));
+
+  user(`GET ${API}/conversations/:id`, async (request, ctx, me) => json<ChatConversation>(200, await shown(await backend().conversation(refOf(me, chatIdOf(request)), ctx), ctx)));
 
   user(`PATCH ${API}/conversations/:id`, async (request, ctx, me) => {
     const chatId = chatIdOf(request);
@@ -385,7 +461,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     if (title === "" || title.length > TITLE_MAX) throw new Refused(400, "invalid_request", `/title: 1 to ${TITLE_MAX} characters`);
     const renamed = await backend().rename(refOf(me, chatId), title, ctx);
     ctx.logger.info("channel-web: a user renamed a conversation", { user: me.id, chat: chatId });
-    return json<ChatConversation>(200, renamed);
+    return json<ChatConversation>(200, await shown(renamed, ctx));
   });
 
   for (const [action, archived] of [
@@ -396,7 +472,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
       const chatId = chatIdOf(request);
       const changed = await backend().archive(refOf(me, chatId), archived, ctx);
       ctx.logger.info(`channel-web: a user ${archived ? "archived a conversation" : "put a conversation back in their list"}`, { user: me.id, chat: chatId });
-      return json<ChatConversation>(200, changed);
+      return json<ChatConversation>(200, await shown(changed, ctx));
     });
   }
 
@@ -407,9 +483,12 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
   });
 
-  user(`GET ${API}/conversations/:id/messages`, async (request, ctx, me) =>
-    json<ChatPage<ChatMessage>>(200, await backend().messages(refOf(me, chatIdOf(request)), pageOf(request), ctx)),
-  );
+  user(`GET ${API}/conversations/:id/transcript`, async (request, ctx, me) => {
+    const read = await backend().transcript(refOf(me, chatIdOf(request)), pageOf(request), ctx);
+    const { visibility } = await options.chatConfig(ctx);
+    const items = read.items.flatMap((entry) => projectEntry(entry, visibility) ?? []);
+    return json<ChatPage<ChatTranscriptEntry>>(200, { items, ...(read.next !== undefined && { next: read.next }) });
+  });
 
   user(`GET ${API}/conversations/:id/messages/:messageId/images/:n`, async (request, ctx, me) => {
     const chatId = chatIdOf(request);
@@ -447,7 +526,12 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     return json<ChatSendResponse>(202, sent);
   });
 
-  user(`GET ${API}/conversations/:id/events`, async (request, ctx, me) => eventStream(await backend().live(refOf(me, chatIdOf(request)), ctx), heartbeatOf(options), ctx));
+  user(`GET ${API}/conversations/:id/events`, async (request, ctx, me) => {
+    const ref = refOf(me, chatIdOf(request));
+    // The policy first: no stream is opened that could not be cut by it.
+    const { visibility } = await options.chatConfig(ctx);
+    return eventStream(projected(await backend().live(ref, ctx), visibility), heartbeatOf(options), ctx);
+  });
 
   user(`POST ${API}/conversations/:id/abort`, async (request, ctx, me) => {
     const chatId = chatIdOf(request);

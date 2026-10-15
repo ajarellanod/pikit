@@ -22,10 +22,11 @@ import {
   streamResult,
 } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import { type ChatConversation, type ChatMessage, MAX_DURABLE_IMAGE_BYTES } from "./api.ts";
+import { type ChatConfig, type ChatConversation, type ChatEvent, type ChatTranscriptEntry, MAX_DURABLE_IMAGE_BYTES } from "./api.ts";
 import { ACCOUNTS_KEY, CALL, SEEN } from "./calls.ts";
+import { runEntryId } from "./entries.ts";
 import { createChannelWeb, NAME } from "./index.ts";
-import { adminAuth, eventually, FakeAccounts, imageOf, kvOf, OPERATOR, PIXEL, Runtime, router, type Served, secretsOf, serve, sse } from "./runtime.test-support.ts";
+import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, OPERATOR, PIXEL, Runtime, router, type Served, secretsOf, serve, sse } from "./runtime.test-support.ts";
 import { createChannelWebWorker } from "./worker.ts";
 
 const copy = (value: JsonValue): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
@@ -105,8 +106,16 @@ class Platform {
         pikit.provide("actor.mailbox", this.mailbox);
       },
     });
+    // The App's agents: users may pick `helper` when the config lets them.
+    const agents = defineComponent({
+      name: "agents-test",
+      setup: (pikit) => {
+        pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "test/model" });
+        pikit.provideKeyed("agent.definition", "helper", { name: "helper", model: "test/model" });
+      },
+    });
     const app = await defineApp({
-      components: [secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, platform, createChannelWeb({ accounts: this.accounts.wiring() })],
+      components: [secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, agents, platform, createChannelWeb({ accounts: this.accounts.wiring() })],
       config: { [NAME]: this.config },
       target: "durable",
       logger: silentLogger,
@@ -145,8 +154,10 @@ const as = (user: string, init: RequestInit = {}): RequestInit => ({
 });
 const post = (user: string, body: unknown, method = "POST"): RequestInit => as(user, { method, body: JSON.stringify(body) });
 const API = "/chat/api";
+const transcriptOf = async (w: Served, user: string, id: string): Promise<ChatTranscriptEntry[]> =>
+  ((await (await w.fetch(`${API}/conversations/${id}/transcript`, as(user))).json()) as { items: ChatTranscriptEntry[] }).items;
 
-test("a conversation on the Worker: started by one call to its key's object, listed at once from the accounts actor's index (one call), read, renamed, its messages from its object", async () => {
+test("a conversation on the Worker: started by one call to its key's object, listed at once from the accounts actor's index (one call), read, renamed, its transcript from its object", async () => {
   const { platform, worker: w } = await cloud();
   const started = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "plan the trip", images: [{ mimeType: "image/png", data: PIXEL }] }))).json()) as { id: string; requestId: string; admission: string };
   const key = `web:ana:${started.id}`;
@@ -159,6 +170,10 @@ test("a conversation on the Worker: started by one call to its key's object, lis
   platform.calls.length = 0;
   const listed = (await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] };
   expect(listed.items).toMatchObject([{ id: started.id, title: "plan the trip", busy: true }]);
+  // The index, and the policy (kept by the Worker `CONFIG_CACHE_MS`: the next lists ask the index only).
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`, `${ACCOUNTS_KEY} ${CALL.config}`]);
+  platform.calls.length = 0;
+  await w.fetch(`${API}/conversations`, as("ana"));
   expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`]);
 
   const renamed = await w.fetch(`${API}/conversations/${started.id}`, post("ana", { title: "Trip" }, "PATCH"));
@@ -167,14 +182,14 @@ test("a conversation on the Worker: started by one call to its key's object, lis
 
   await runtime.start(key, [started.requestId]);
   await runtime.end(key, [started.requestId], { text: "Here is a plan" });
-  const messages = await eventually(async () => {
-    const read = (await (await w.fetch(`${API}/conversations/${started.id}/messages`, as("ana"))).json()) as { items: ChatMessage[] };
-    return read.items.length === 2 ? read.items : undefined;
-  }, "the answer in the object");
+  const entries = await eventually(async () => {
+    const read = await transcriptOf(w, "ana", started.id);
+    return read.length === 2 ? read : undefined;
+  }, "the run's messages in the object");
   const url = `/chat/api/conversations/${started.id}/messages/${encodeURIComponent(started.requestId)}/images/0`;
-  expect(messages).toMatchObject([
-    { role: "assistant", text: "Here is a plan" },
-    { id: started.requestId, role: "user", state: "answered", images: [{ mimeType: "image/png", url }] },
+  expect(entries).toEqual([
+    { id: runEntryId(started.requestId, answerOf("Here is a plan")), kind: "message", messages: [{ role: "assistant", content: [{ type: "text", text: "Here is a plan" }], stopReason: "stop", timestamp: 1000 }] },
+    { id: started.requestId, kind: "message", state: "answered", messages: [{ role: "user", content: [{ type: "text", text: "plan the trip" }, { type: "image", url, mimeType: "image/png" }], timestamp: expect.any(Number) }] },
   ]);
   // Its bytes one call to its object, apart from the page.
   platform.calls.length = 0;
@@ -200,7 +215,7 @@ test("a conversation on the Worker: started by one call to its key's object, lis
 
   expect((await w.fetch(`${API}/conversations/${started.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
   expect(await (await w.fetch(`${API}/conversations`, as("ana"))).json()).toEqual({ items: [] });
-  expect((await w.fetch(`${API}/conversations/${started.id}/messages`, as("ana"))).status).toBe(404);
+  expect((await w.fetch(`${API}/conversations/${started.id}/transcript`, as("ana"))).status).toBe(404);
 });
 
 // Found in a browser on a durable project with faux/scripted: the list said "Running" for good.
@@ -224,7 +239,7 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
     ["POST", "/archive"],
     ["POST", "/unarchive"],
     ["DELETE", ""],
-    ["GET", "/messages"],
+    ["GET", "/transcript"],
     ["POST", "/messages", { text: "hi" }],
     ["GET", "/events"],
     ["POST", "/abort"],
@@ -234,7 +249,9 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
     const response = await w.fetch(`${API}/conversations/${id}${path}`, as("ben", { method, ...(body !== undefined && { body: JSON.stringify(body) }) }));
     expect({ method, path, status: response.status }).toEqual({ method, path, status: 404 });
   }
-  expect(platform.calls.filter((each) => each !== `${ACCOUNTS_KEY} ${CALL.rate}`).every((each) => each.startsWith(`web:ben:${id} `))).toBe(true);
+  // Only ben's own key's object, and the accounts actor for the policy and the rate.
+  expect(platform.calls.filter((each) => each !== `${ACCOUNTS_KEY} ${CALL.rate}` && each !== `${ACCOUNTS_KEY} ${CALL.config}`).every((each) => each.startsWith(`web:ben:${id} `))).toBe(true);
+  expect(await (await w.fetch(`${API}/conversations?q=secret`, as("ben"))).json()).toEqual({ items: [] });
   expect((await platform.object(`web:ana:${id}`)).runtime.dispatched.length).toBe(1);
   expect(((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id, archived: false }]);
   // An object answers only of itself: a call naming another conversation is refused.
@@ -242,19 +259,21 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
   expect((other as ActorCallError).code).toBe("invalid_request");
 });
 
-test("live events on the Worker: the object's stream, state first, the answer as written while the user waits; the client leaving closes it in the object", async () => {
+test("live events on the Worker: the object's stream, a snapshot first, the answer as written while the user waits, cut by the policy in the Worker; the client leaving closes it in the object", async () => {
   const { platform, worker: w } = await cloud();
   const { id, requestId } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string; requestId: string };
   const key = `web:ana:${id}`;
   const { runtime } = await platform.object(key);
   const client = new AbortController();
   const events = sse(await w.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
-  expect(await events.take(1)).toEqual([{ type: "state", busy: false }]);
+  expect(await events.take(1)).toEqual([{ type: "snapshot", tools: [] }]);
   await runtime.start(key, [requestId]);
-  runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "He" }] } });
-  expect(await events.take(2)).toEqual([
-    { type: "state", busy: true },
-    { type: "partial", text: "He", requests: [requestId] },
+  runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "He" }], usage: { cost: 1 } } });
+  runtime.push({ type: "tool_execution_start", toolCallId: "t1", toolName: "websearch", args: { q: "secret" } });
+  expect(await events.take(3)).toEqual([
+    { type: "run_start" },
+    { type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "He" }] } },
+    { type: "tool_execution_start", toolCallId: "t1", toolName: "websearch" },
   ]);
   client.abort();
   await events.reader.cancel();
@@ -262,26 +281,65 @@ test("live events on the Worker: the object's stream, state first, the answer as
   expect([runtime.watching, runtime.released]).toEqual([1, 1]);
 });
 
-test("message events on the Worker come from the conversation's object: its answer (naming the request it answers) and a run end found by the page's read", async () => {
+test("entries told live on the Worker come from the conversation's object: what a run stored, a message sent, a state a read found; ids the transcript's", async () => {
   const { platform, worker: w } = await cloud();
   const { id, requestId } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string; requestId: string };
   const key = `web:ana:${id}`;
   const { runtime } = await platform.object(key);
   const client = new AbortController();
   const events = sse(await w.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
-  expect(await events.take(1)).toEqual([{ type: "state", busy: false }]);
-  await runtime.end(key, [requestId], { text: "Hello" });
-  const seen = await events.take(2);
-  expect(seen).toContainEqual({ type: "message", id: requestId });
-  expect(seen).toContainEqual({ type: "message", id: `1:${requestId}#0`, answers: requestId });
+  expect(await events.take(1)).toEqual([{ type: "snapshot", tools: [] }]);
+  await runtime.start(key, [requestId]);
+  const answer = answerOf("Hello");
+  runtime.push({ type: "message_end", entry: { id: 9, kind: "message", model: [answer as never] } });
+  await runtime.end(key, [requestId], { messages: [answer] });
+  const seen = (await events.take(4)) as ChatEvent[];
+  expect(seen).toEqual([
+    { type: "run_start" },
+    { type: "message_end", entry: { id: runEntryId(requestId, answer), kind: "message", model: [{ role: "assistant", content: [{ type: "text", text: "Hello" }], stopReason: "stop", timestamp: 1000 }] } },
+    { type: "run_end" },
+    { type: "entry_appended" },
+  ]);
+  expect((await transcriptOf(w, "ana", id))[0]?.id).toBe(runEntryId(requestId, answer));
 
   const sent = (await (await w.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "again" }))).json()) as { requestId: string };
-  expect(await events.take(1)).toEqual([{ type: "message", id: sent.requestId }]);
+  expect(await events.take(1)).toMatchObject([{ type: "entry_appended", entry: { id: sent.requestId } }]);
   await runtime.end(key, [sent.requestId], { kind: "aborted", quiet: true });
-  expect(((await (await w.fetch(`${API}/conversations/${id}/messages`, as("ana"))).json()) as { items: ChatMessage[] }).items[0]).toMatchObject({ id: sent.requestId, state: "aborted" });
-  expect(await events.take(1)).toEqual([{ type: "message", id: sent.requestId }]);
+  expect((await transcriptOf(w, "ana", id))[0]).toMatchObject({ id: sent.requestId, state: "aborted" });
+  expect(await events.take(2)).toEqual([{ type: "run_end" }, { type: "entry_appended" }]);
   client.abort();
   await events.reader.cancel();
+});
+
+test("the policy, the agents and the search on the Worker: the accounts actor's config; an agent picked reaches the conversation's object, another is 400 before any call; ?q= is the index's", async () => {
+  const { platform, worker: w } = await cloud({ visibility: { tools: "none" }, agents: ["helper"] });
+  const config = (await (await w.fetch(`${API}/config`)).json()) as ChatConfig;
+  expect([config.visibility, config.agents]).toEqual([{ thinking: false, tools: "none", context: true }, [{ name: "helper" }]]);
+  const picked = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "Trip to Paris", agent: "helper" }))).json()) as { id: string; requestId: string };
+  const key = `web:ana:${picked.id}`;
+  const { runtime } = await platform.object(key);
+  expect(runtime.dispatched.at(-1)?.conversation.agent).toBe("helper");
+  expect(await (await w.fetch(`${API}/conversations/${picked.id}`, as("ana"))).json()).toMatchObject({ agent: "helper" });
+  const calls = platform.calls.length;
+  expect((await w.fetch(`${API}/conversations`, post("ana", { text: "x", agent: "assistant" }))).status).toBe(400);
+  expect(platform.calls.slice(calls).filter((each) => !each.startsWith(ACCOUNTS_KEY))).toEqual([]);
+
+  // The policy (tools: none) cuts what the object stored, in the Worker.
+  const call = { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "websearch", arguments: {} }], stopReason: "toolUse", timestamp: 1 };
+  const result = { role: "toolResult", toolCallId: "t1", toolName: "websearch", content: [{ type: "text", text: "found" }], isError: false, timestamp: 2 };
+  await runtime.end(key, [picked.requestId], { messages: [call, result, answerOf("Paris it is")] });
+  const entries = await eventually(async () => {
+    const read = await transcriptOf(w, "ana", picked.id);
+    return read.length === 2 ? read : undefined;
+  }, "the run, cut");
+  expect(JSON.stringify(entries)).not.toMatch(/websearch|found/);
+
+  await w.fetch(`${API}/conversations`, post("ana", { text: "Groceries" }));
+  await w.fetch(`${API}/conversations`, post("ben", { text: "paris too" }));
+  platform.calls.length = 0;
+  const found = (await (await w.fetch(`${API}/conversations?q=PARIS`, as("ana"))).json()) as { items: ChatConversation[] };
+  expect(found.items.map((each) => each.title)).toEqual(["Trip to Paris"]);
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`]);
 });
 
 test("on the Worker images over 1 MB in all are 413 before any call; an object that cannot be reached is 503", async () => {
@@ -333,7 +391,7 @@ test("the index keeps each conversation's newest version: a late or repeated one
   const { platform } = await cloud();
   const index = await platform.object(ACCOUNTS_KEY);
   const chatId = crypto.randomUUID();
-  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, title: "new", createdAt: 1, lastActivity: 5, hidden: false, archived: false, busy: false, version: 3 };
+  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, agent: "assistant", title: "new", createdAt: 1, lastActivity: 5, hidden: false, archived: false, busy: false, version: 3 };
   await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [row] }, index.ctx);
   await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [{ ...row, title: "old", version: 2 }] }, index.ctx);
   const listed = callResult(await answerCall(index.answers.get(CALL.list) as ActorCallHandler, ACCOUNTS_KEY, { userId: "ana", limit: 10 }, index.ctx)) as unknown as { items: ChatConversation[] };

@@ -6,7 +6,8 @@
  * accounts' double), its first message `POST /chat/api/conversations` (the page's request id, so a
  * redelivery reaches the same conversation), the next ones `POST …/messages`, sent again while the
  * API answers `503` as the page does. A user is told the refusals the API answered and the answers
- * stored in the table (`GET …/messages`). The platform fails or hangs the transport's writes.
+ * in the transcript (`GET …/transcript`, the suite's runs write no messages: the answers delivery
+ * stored). The platform fails or hangs the transport's writes.
  */
 
 import { test } from "bun:test";
@@ -14,7 +15,7 @@ import { BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import { type ChannelTransport, compareHttpRoutes, DeliveryError, type HttpRoute, matchesHttpRoute, parseHttpRouteKey } from "@pikit/contracts";
 import { createChannelConformance, type ReceivedPiece } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import type { ChatMessage } from "./api.ts";
+import type { ChatTranscriptEntry } from "./api.ts";
 import { chatIdFor, parseKey } from "./chat.ts";
 import { createChannelWeb } from "./index.ts";
 import { FakeAccounts, secretsOf } from "./runtime.test-support.ts";
@@ -122,10 +123,11 @@ for (const c of createChannelConformance(({ conversations }) => {
       const chat = chats.get(conversation);
       const answers: string[] = [];
       if (chat !== undefined) {
-        const response = await fetch(`/chat/api/conversations/${chat.chatId}/messages`, { headers: headers(conversation) });
+        const response = await fetch(`/chat/api/conversations/${chat.chatId}/transcript`, { headers: headers(conversation) });
         if (response.status === 200) {
-          const { items } = (await response.json()) as { items: ChatMessage[] };
-          answers.push(...items.filter((each) => each.role === "assistant").map((each) => each.text).reverse());
+          const { items } = (await response.json()) as { items: ChatTranscriptEntry[] };
+          const messages = items.flatMap((entry) => entry.messages as { role: string; content: { type: string; text?: string }[] }[]).reverse();
+          answers.push(...messages.filter((each) => each.role === "assistant").map((each) => each.content.map((block) => block.text ?? "").join("")));
         }
       }
       return [...(refusals.get(conversation) ?? []), ...answers];

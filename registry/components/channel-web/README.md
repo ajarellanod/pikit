@@ -3,7 +3,10 @@
 People who are not operators talk to the assistant from a web page, `/chat/`, with accounts of their
 own: they sign in with an email and a password, a link by email, Google, GitHub or any OAuth2/OIDC
 platform, see and continue only their own conversations, watch the answer as it is written, attach
-images and stop a run. The operator invites, bans and removes them from the dashboard. The operator's
+images and stop a run. A conversation reads as the dashboard's (the same JSON: a transcript of
+pi-ai messages and pi-durable's live events), cut to what the operator lets users see (thinking,
+tools, the Context panel); the operator may let them pick an assistant, and they search their
+conversations by title. The operator invites, bans and removes them from the dashboard. The operator's
 dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
 
 - **Provides:** `http.route`: the chat API (`/chat/api/*`, `api.ts`), better-auth's routes
@@ -11,10 +14,11 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
   (`/admin/api/channel-web/*`, `admin-api.ts`).
 - **Requires:** `secrets`, `conversations.registry`, `agent.runtime`, `agent.observe` (the live
   view), `agent.submissions` (answers, and the states of messages whose run's end no event brought),
-  `storage.kv` (the delivery cursor), `storage.sql` (accounts, conversations, messages). A router
+  `storage.kv` (the delivery cursor), `storage.sql` (accounts, conversations, transcripts). A router
   (`router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (answers stored before they are written), `wakeups`
-  (delivery on a Durable Object), `settings` (sign-up changes live), `email.send` (verification,
+  (delivery on a Durable Object), `settings` (sign-up, visibility and the agents users may pick change
+  live), `agent.definition` / `agent.directory` (the agents users may pick, described), `email.send` (verification,
   "forgot password", magic links, invitations by email), `admin.auth` (without it, the operator's
   routes answer `404`), `actor.inbox` / `actor.mailbox` (Cloudflare).
 - **Targets:** `server` and `durable`, from one code (below).
@@ -53,11 +57,36 @@ OIDC platform alike).
   heartbeatMs: 15000,                            // a comment on idle live streams
   messagesPerMinute: 20,                         // a user's messages a minute, all conversations: 429 past it
   trustedProxyHeaders: [],                       // e.g. ["x-forwarded-for"]: only behind a proxy that sets it
+  visibility: { thinking: false, tools: "names", context: true }, // what users see (below)
+  agents: [],                                    // the agents users may pick for a new chat; none: the router decides
 }
 ```
 
-`signUp` is also a setting when `settings` is installed (the dashboard's Settings, Web chat): the
-operator changes it live, read at each sign-up; the config's value is its default.
+`signUp`, `visibility` and `agents` are also settings when `settings` is installed (the dashboard's
+Settings, Web chat): the operator changes them live, read at each request; the config's values are
+their defaults.
+
+**`visibility`** is what users see of a conversation, applied to every transcript entry and live event
+when they are read (`visibility.ts`; a change applies to history too):
+
+| Value | Shows | Never |
+|---|---|---|
+| `thinking: false` (default) | | the model's thinking (blocks, deltas, signatures) |
+| `thinking: true` | the thinking blocks | their signatures |
+| `tools: "none"` | | any tool call, result or event (an answer made only of tool calls is left out) |
+| `tools: "names"` (default) | a call's name, its result's `isError`, tool events by name | arguments, output, a result's content |
+| `tools: "full"` | arguments, output, results' content | a result's `details` |
+| `context: true` (default) / `false` | whether the page shows the Context panel (images sent; sources with `tools: "full"`) | |
+
+Whatever it says, never: a system prompt, the user's message as the runtime holds it, an operator's
+messages or the runs only they started, usage or cost, a model's or provider's name, the provider's
+error text (a failed answer says so plainly).
+
+**`agents`**: names of `agent.definition`s or live agents (`agent.directory`). `ChatConfig.agents` lists
+those that are agents now (a live one with its description); `POST /chat/api/conversations` takes one
+of them (`agent`, else `400`), and the conversation is made with it (`conversations.registry.resolve`
+before `admitInbound`): routing still allows or denies the message, and the conversation keeps it. A
+conversation says its `agent` only when it is one users may pick.
 
 ## What the operator does
 
@@ -76,7 +105,9 @@ installed (`admin-auth-token`). Three ways in, the same routes behind each:
   base dashboard ships. `view/admin-api.ts` is an identical copy of the component's (a test checks).
 - **Settings, Web chat** (`settings/`, while `settings` is provided): who may make an account
   (`signUp.mode`: invited only, an allow list, anyone) and the allow list (`ana@example.com`, or
-  `@example.com` for a whole domain). It stores only what differs from the config's `signUp`.
+  `@example.com` for a whole domain); what users see (Thinking, Tools: None, Names or Full, Context);
+  the assistants users may pick (a switch per agent of the App). It stores only what differs from the
+  config's values.
 - **`pikit channel-web`** (the component's command, `command.ts`), from the project's directory:
 
   ```sh
@@ -146,38 +177,55 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   re-signs the cache without reading) stays off, so a ban or a removal still takes effect within
   `sessionCacheSeconds`. (Done on the server, not by the page polling `/chat/api/auth/get-session`: no
   timer, and every route renews it, the live stream included.)
-- **What a user sees** of their conversation: their own messages, and the answers delivered to it.
-  The sender of each message is `{ channel: "web", id: <user id> }`, so roles by actor see a user, not
-  an operator. An operator's follow-up from the dashboard (`dashboard:` request ids) is never
-  delivered (`startAnswerDelivery`'s own rule) and streams nothing live: the live view sends the
-  answer as written and the tools' names only during a run whose inputs are known to include one of
-  the user's messages (by the request ids the runtime's own events give before the run starts). A run
-  that answers both the user's message and an operator's follow-up is the user's, as delivery is. It
-  names a run already going when the view opened by the request that started it, which its App heard
-  (`agent.started`), so a first message's answer streams even when the page follows it late. It fails
-  closed: a run it cannot name (its start not heard: the process restarted) streams nothing, and its
-  answer comes as a message once stored. Never thinking, tool arguments or results, system prompts or
-  transcript entries (`live.ts`).
-- **Live text and stored answer by identity.** A `partial` event carries its run's request ids
-  (`requests`, when the runtime's events gave them), the `message` event of a stored answer the request
-  its key names (`answers`), and every change of a user's message's state (its run's end, or a run end
-  found when the page reads) is a `message` event too, sent where the live view is made (on Cloudflare
-  the conversation's object). The page keeps a finished answer's live text until the messages it reads
-  have that answer's id, never by comparing texts.
+- **What a user sees** of their conversation: their own messages, and what the runs that answered
+  them wrote, cut by `visibility`. The sender of each message is `{ channel: "web", id: <user id> }`,
+  so roles by actor see a user, not an operator. An operator's follow-up from the dashboard
+  (`dashboard:` request ids) and a run only such follow-ups started are never stored for the user nor
+  streamed (only that a run goes: `run_start`, `run_end`).
+- **History.** A run that answered one of the user's messages is stored whole when it ends
+  (`agent.settled`, `agent.failed`): `AgentResult.messages` (the assistant's, with thinking and tool
+  calls, and the tools' results; never the runtime's user or system messages), in the turn of the
+  newest user message it answered. An aborted or failed run keeps what it wrote. Its end heard twice
+  (a restart re-announces it) stores it once. The transcript (`GET .../transcript`, newest first,
+  paged, at most 1 MiB of stored JSON a page) is the user's messages (`{ type: "image", url, mimeType }`
+  for each image: `GET .../messages/:messageId/images/:n`, the owner only, its type, `nosniff`, cached
+  privately; image bytes are read one at a time, never in a page) and those messages, each its own
+  entry.
+- **One id per entry, live or read.** A user's message's id is its request id; a run's message's is
+  `<the run's first request>#<hash of the message itself>` (its role, time, tool call id, blocks' text
+  and ids: `entries.ts`). The live view announces each message the run writes (`message_end`'s
+  `entry`) with that id and in that form, and the transcript reads it so later: a view merging them by
+  id never shows one twice nor swaps one for another when the run ends.
+- **A message sent while a run goes waits out of the transcript** and of the live view until that run
+  ends (its messages are stored only then); then it is announced (`entry_appended`) after them. The
+  page shows it as sent meanwhile.
+- **Live view** (`live.ts`): pi-durable's events in the dashboard's shapes (a `snapshot` first,
+  `run_start`, `run_end`, `message_*`, `tool_execution_*`, `entry_appended`), the answer and the tools
+  only during a run whose inputs are known to include one of the user's messages (by the request ids
+  the runtime's own events give before the run starts). A run that answers both the user's message and
+  an operator's follow-up is the user's. A run already going when the view opened is named by the
+  request that started it, which its App heard (`agent.started`), so a first message's answer streams
+  even when the page follows it late. It fails closed: a run it cannot name (its start not heard: the
+  process restarted) streams nothing, and its messages come with the transcript once stored. Never a
+  runtime's own entry, a system prompt, usage or cost. `entry_appended` without an entry: something
+  stored changed (a run's messages, a message's state): read the transcript again.
 - **Messages** go through `admitInbound` (the router, `inbound.normalize`, duplicates by request id),
   with their images (at most 4 PNG, JPEG, WebP or GIF, 5 MB each; 1 MB in all on Cloudflare; the body
-  at most what those and the text need, `maxBodyOf`). A page of messages names each image by its URL
-  (`GET .../messages/:messageId/images/:n`: the owner only, its type, `nosniff`, cached privately) and
-  holds at most 1 MiB of text; image bytes are read one at a time, never in a page. The
+  at most what those and the text need, `maxBodyOf`). The
   page may name its request (`web:` then 1 to 118 of `A-Z a-z 0-9 . _ ~ : -`): sent again, it runs
   once. A first message sent again reaches the same conversation (its chat id comes from the request
   id). A refusal is the route's status (`403` denied, `422` a stage halted it, `500` no router); a
-  runtime that cannot take it now is `503`, and the page sends it again.
-- **Answers** take the channels' path: `startAnswerDelivery` (with `outbound.queue` when installed)
-  writes each answer into the channel's table under its idempotency key, at least once, stored once,
-  delivered after a restart or an eviction. A user's message is `pending`, then `answered`, `failed`
-  or `aborted` when its run ends (from `agent.settled` / `agent.failed`, and from `agent.submissions`
-  when the page reads a message whose run's end no event brought).
+  runtime that cannot take it now is `503`, and the page sends it again. A user's message is
+  `pending`, then `answered`, `failed` or `aborted` when its run ends (from `agent.settled` /
+  `agent.failed`, and from `agent.submissions` when the page reads a message whose run's end no event
+  brought).
+- **Answers also take the channels' path**: `startAnswerDelivery` (with `outbound.queue` when
+  installed) writes a completed run's answer into the channel's table only for a run none of whose
+  messages are stored (its end never heard here: after waiting a second for it), at least once, stored
+  once, delivered after a restart or an eviction; the run's messages, stored later, replace it.
+- **Search**: `GET /chat/api/conversations?q=` lists the user's own conversations whose title holds
+  `q` (any case, accents too; `%` and `_` are characters), paged, archived ones apart (`archived=1`). On
+  Cloudflare the accounts actor's index answers it.
 - **Archiving** a conversation lists it apart (`GET /chat/api/conversations?archived=1`; `POST
   .../archive`, `.../unarchive`, the owner only): still theirs, read and written to, and a new message
   or answer in it lists it again, as the dashboard's archive does. On Cloudflare the conversation's
@@ -198,10 +246,10 @@ In `start`, `actor.inbox`'s `scope` says where it runs:
 
 - **A server** (`"all"`, or no `actor.inbox`): the default export does everything in the App: the
   routes, the accounts (better-auth over the App's `storage.sql`), the store
-  (`channel_web_conversations`, `channel_web_messages`), delivery.
+  (`channel_web_conversations`, `channel_web_entries`), delivery.
 - **Cloudflare** (`"one"`): the default export goes in each conversation's Durable Object, which
   admits the Worker's messages, answers its calls about this conversation (`calls.ts`), keeps its
-  messages, delivers its answers and tells the users' index (`channel-web.seen`) of each change. One
+  transcript, stores what its runs wrote and tells the users' index (`channel-web.seen`) of each change. One
   object, `channel-web:accounts`, holds the accounts and the index, and answers the Worker's
   `channel-web.auth.*` calls (`wiring.ts`). Every object registers those handlers and the index's
   (one class), but only `channel-web:accounts` answers them: any other refuses (`no_handler`). The Worker's half (`export const worker`, config key
@@ -209,8 +257,10 @@ In `start`, `actor.inbox`'s `scope` says where it runs:
   the index, live events a stream from the object, better-auth's routes forwarded as JSON with every
   `set-cookie`, and the session from the signed cookie cache when it can (no call), else a call. The
   page's config (`GET /chat/api/config`) is the accounts actor's (`channel-web.config`, kept 10 s in
-  the Worker): its sign-in methods, the live sign-up mode, and whether its App sends email, so
-  `email.send` goes in the default App only (the accounts actor sends), never in the Worker's.
+  the Worker): its sign-in methods, its live settings (sign-up mode, visibility, the agents users may
+  pick), and whether its App sends email, so `email.send` goes in the default App only (the accounts
+  actor sends), never in the Worker's. The Worker cuts the transcript and the live events the objects
+  give it by that config's `visibility`: a change shows within 10 s.
 
 On Cloudflare one script holds both Apps: channel-web adds about 1.3 MiB to it (265 KiB gzip; better-auth,
 its core, zod, jose, OpenTelemetry's conventions), measured with wrangler 4.143.0 on a Worker of
@@ -243,24 +293,34 @@ under an https `PIKIT_PUBLIC_URL`).
 
 - `channel-web.test.ts`: every route on a server, over the runtime's doubles (`runtime.test-support.ts`)
   and a double of the accounts: config, sessions and the page's header, conversations, the list and
-  its cursor, isolation (another user's chat id `404` on every route), answers and states, a lost run
-  end, a run that ends before its admission returns (a quick model: not busy, its message answered),
-  an operator's follow-up never shown, live events, stop, duplicates, request ids, images and body
+  its cursor, isolation (another user's chat id `404` on every route, the transcript and the search
+  included), history (a run's messages stored once with the message it answered, the runtime's user
+  message never, a failed run's kept, pages), a lost run end (its state read, its answer delivered,
+  replaced when heard late), a run that ends before its admission returns (a quick model: not busy, its
+  message answered), an operator's follow-up and its run never shown, live events in the dashboard's
+  shapes with `message_end`'s entry the transcript's (same id, same messages), a message held behind a
+  run, the policy as a live setting on history and live events, the agents users may pick (allowed,
+  refused, denied by routing, taken away), the search, stop, duplicates, request ids, images and body
   limits, refusals, the operator's routes, the live `signUp` setting, what setup declares, the
   lifecycle suite.
+- `visibility.test.ts`: each policy value on messages, entries and live events (a hidden block's
+  deltas left out and the next renumbered), and what never shows under the defaults.
 - Security cases: a spoofed `Host` gets no link nor email and `400` (accounts, the operator's routes),
   loopback hosts and `PIKIT_PUBLIC_URL` work; a client's `x-forwarded-for` never resets a rate limit,
   distinct addresses never share one; a squatter's password never works once the owner comes (magic
   link, confirmation); a user's `messagesPerMinute` (server and Worker); images by URL, never in a page,
   the owner only; a page's text bound; the accounts' and index's calls refused on any key but the
   accounts actor's; `live.test.ts`: a view opened during an operator-only run, the user's message
-  queued, streams nothing of it (the reviewer's probe), the user's next run streams.
+  queued, streams nothing of it (the reviewer's probe), the user's next run streams; a run's messages
+  announced with the transcript's ids, the runtime's user and system messages and own entries never.
 - `conformance.test.ts`: the channel conformance suite (`answers: "pushed"`), the platform being the
   table (its writes failed or left hanging by the fixture).
 - `remote.test.ts`: the Worker's half over a fake platform of one App per key (`scope: "one"`), each
-  conversation's object and the accounts actor: start, list, rename, messages, answers, delete,
-  isolation, live events, image limits, an unreachable object, the index's versions (not busy after a
-  run that ended before its admission returned), removal.
+  conversation's object and the accounts actor: start, list, rename, the transcript, a run's messages,
+  delete, isolation, live events cut in the Worker, entries told live from the object, the policy and
+  the agents from the accounts actor's config, an agent picked reaching the object, the search in the
+  index, image limits, an unreachable object, the index's versions (not busy after a run that ended
+  before its admission returned), removal.
 - `accounts-wiring.test.ts`: the real accounts (better-auth) through the routes, on a server and
   forwarded to the accounts actor on Cloudflare (the cookie cache first, its renewal sent back after a
   database read); chat and admin sessions never open each other's routes; every better-auth route the
@@ -277,9 +337,10 @@ under an https `PIKIT_PUBLIC_URL`).
   storage-kv-sql, actors-do, runtime-pi with provider-faux, conversations-kv, router-basic,
   outbound-durable, admin-auth-token, admin-api): better-auth in the accounts actor (its bundle,
   AsyncLocalStorage, scrypt from `node:crypto`, Web Crypto), sign-up and sign-in with a password, the
-  cookies (`__Secure-` and `Secure` on https only, path `/chat/`), a message and its answer, the live
-  view (`state`, `partial`, `message`), another user's every route on a chat `404`, an operator's
-  follow-up never in the user's messages or live view, the accounts' tables in the accounts actor only;
+  cookies (`__Secure-` and `Secure` on https only, path `/chat/`), a message and its answer (the
+  transcript), the live view (`snapshot`, `message_*` whose entry ids the transcript has), another
+  user's every route on a chat `404`, an operator's follow-up never in the user's transcript or live
+  view, the search, an agent picked, the accounts' tables in the accounts actor only;
   an invitation's link setting a password, a ban refused once the cookie cache expired (the actor asked
   then, its answer renewing the cache cookie; a foreign `Origin` refused through the forwarder);
   `email.send` in the default App only: the config says so, a magic link signs a new user in, a

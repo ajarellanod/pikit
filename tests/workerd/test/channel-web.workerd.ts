@@ -10,9 +10,13 @@
  * - A user signs up (`open`) and in with a password (better-auth in the accounts actor: its bundle,
  *   AsyncLocalStorage, scrypt from `node:crypto` under the `workerd` condition, Web Crypto), gets the
  *   `pikit_chat` cookies (path `/chat/`, `Secure` only on https), talks to the agent and reads the
- *   answer, follows the live view (`state`, `partial`, `message`). Another user with the first's chat
- *   id gets `404` on every route; an operator's follow-up (admin-api, the admin token) never reaches
- *   the user's messages or live view. The accounts' tables are only in the accounts actor.
+ *   answer in the transcript, follows the live view (the dashboard's shapes: a run's `message_end`
+ *   announces the entry the transcript then has, same id, same messages, on pi-durable's real events).
+ *   Another user with the first's chat id gets `404` on every route; an operator's follow-up (admin-api,
+ *   the admin token) never reaches the user's transcript or live view. The accounts' tables are only in
+ *   the accounts actor.
+ * - An agent picked for a new chat (the config's `agents`) makes the conversation with it; another is
+ *   `400`; the search finds the user's own conversations only; the policy (`visibility`) is the config's.
  * - An invitation's link sets a password (`/chat/api/auth/reset-password`), then signs in; a ban is
  *   refused once the signed cookie cache expired (`Date` faked past it), the actor asked then.
  * - With `email.send` in the objects' App only (a fake), `GET /chat/api/config` says email is sent and
@@ -29,7 +33,7 @@ import actorsDo from "../../../registry/components/actors-do/files/src/pikit/act
 import adminApi, { worker as adminApiWorker } from "../../../registry/components/admin-api/files/src/pikit/admin-api/index.ts";
 import { INDEX_KEY } from "../../../registry/components/admin-api/files/src/pikit/admin-api/conversation-index.ts";
 import adminAuthToken from "../../../registry/components/admin-auth-token/files/src/pikit/admin-auth-token/index.ts";
-import type { ChatConfig, ChatEvent, ChatMessage, ChatPage } from "../../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
+import type { ChatConfig, ChatConversation, ChatEvent, ChatPage, ChatTranscriptEntry } from "../../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
 import channelWeb, { ACCOUNTS_KEY, worker as channelWebWorker } from "../../../registry/components/channel-web/files/src/pikit/channel-web/index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerHost } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
@@ -133,19 +137,23 @@ async function signIn(who: Browser, email: string, password = PASSWORD): Promise
 }
 const meOf = async (who: Browser) => (await (await who.send("/chat/api/me")).json()) as { user: { id: string; email: string; name: string }; methods: string[] };
 
-/** A user's messages, newest first. */
-const messagesOf = async (who: Browser, chat: string) => {
-  const response = await who.send(`/chat/api/conversations/${chat}/messages`);
+/** A user's transcript, newest first. */
+const transcriptOf = async (who: Browser, chat: string) => {
+  const response = await who.send(`/chat/api/conversations/${chat}/transcript`);
   expect(response.status).toBe(200);
-  return ((await response.json()) as ChatPage<ChatMessage>).items;
+  return ((await response.json()) as ChatPage<ChatTranscriptEntry>).items;
 };
+
+type Message = { role: string; content: string | { type: string; text?: string }[] };
+/** A message's text. */
+const textOf = (message: Message): string => (typeof message.content === "string" ? message.content : message.content.map((block) => block.text ?? "").join(""));
 
 /** A user's conversation answered: its messages, oldest first, as `role: text (state)`. */
 async function answered(who: Browser, chat: string, count: number): Promise<string[]> {
   return await vi.waitFor(
     async () => {
-      const items = await messagesOf(who, chat);
-      const lines = items.reverse().map((m) => `${m.role}: ${m.text}${m.state === undefined ? "" : ` (${m.state})`}`);
+      const items = await transcriptOf(who, chat);
+      const lines = items.reverse().flatMap((entry) => (entry.messages as Message[]).map((m) => `${m.role}: ${textOf(m)}${entry.state === undefined ? "" : ` (${entry.state})`}`));
       expect(lines).toHaveLength(count);
       expect(lines.at(-1)).toMatch(/^assistant: /);
       expect(lines.filter((line) => line.endsWith("(pending)"))).toEqual([]);
@@ -208,7 +216,15 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   const fetch = compose({ name: "Ada", signUp: { mode: "open" } });
 
   const config = await fetch(`${HTTPS}/chat/api/config`);
-  expect(await config.json()).toEqual({ name: "Ada", target: "durable", methods: [{ kind: "password" }], signUp: "open", email: false } satisfies ChatConfig);
+  expect(await config.json()).toEqual({
+    name: "Ada",
+    target: "durable",
+    methods: [{ kind: "password" }],
+    signUp: "open",
+    email: false,
+    visibility: { thinking: false, tools: "names", context: true },
+    agents: [],
+  } satisfies ChatConfig);
 
   // Signed up over https: the `__Secure-` cookies, path /chat/, HttpOnly, SameSite=Lax, Secure.
   const ana = browser(fetch, HTTPS, "10.0.0.1");
@@ -239,16 +255,24 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   const listed = (await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string }>;
   expect(listed.items.map((each) => each.id)).toEqual([chat]);
 
-  // Live: a state first; the next answer as written, then stored.
+  // Live: a snapshot first; the next answer as written, announced with the entry the transcript then has.
   const view = live(await ana.send(`/chat/api/conversations/${chat}/events`));
   await view.until((seen) => seen.length > 0);
-  expect(view.events[0]).toEqual({ type: "state", busy: false });
+  expect(view.events[0]).toEqual({ type: "snapshot", tools: [] });
   expect((await ana.send(`/chat/api/conversations/${chat}/messages`, { json: { text: "second" } })).status).toBe(202);
-  await view.until((seen) => seen.some((e) => e.type === "partial" && e.text === "faux: second") && seen.filter((e) => e.type === "message").length >= 2);
-  expect(view.events.filter((e) => e.type === "state")).toContainEqual({ type: "state", busy: true });
-  expect(view.events.filter((e) => e.type === "partial").every((e) => e.type === "partial" && "faux: second".startsWith(e.text))).toBe(true);
+  /** The run's answer as `message_end` announced it. */
+  const announced = (seen: ChatEvent[]) =>
+    seen.flatMap((e) => (e.type === "message_end" && e.entry !== undefined ? [e.entry as { id: string; kind: string; model: Message[] }] : [])).find((entry) => entry.model.some((m) => m.role === "assistant" && textOf(m) === "faux: second"));
+  // The user's message, as the transcript has it (a quick run may end before its admission returns: in any order).
+  const sentShown = (seen: ChatEvent[]) => seen.some((e) => e.type === "entry_appended" && e.entry !== undefined && (e.entry as { model: Message[] }).model.map(textOf).join() === "second");
+  await view.until((seen) => announced(seen) !== undefined && seen.some((e) => e.type === "run_end") && sentShown(seen));
+  expect(view.events.map((e) => e.type)).toContain("run_start");
   expect(await answered(ana, chat, 4)).toEqual(["user: hello (answered)", "assistant: faux: hello", "user: second (answered)", "assistant: faux: second"]);
-  await view.until((seen) => seen.filter((e) => e.type === "message").length >= 3);
+  // Stable: the transcript's entry for that answer is the one announced live, same id, same messages (pi-durable's own events).
+  const live2 = announced(view.events) as { id: string; kind: string; model: Message[] };
+  const stored = (await transcriptOf(ana, chat)).find((entry) => entry.id === live2.id);
+  expect(stored).toEqual({ id: live2.id, kind: live2.kind, messages: live2.model });
+  expect(JSON.stringify(view.events)).not.toMatch(/usage|cost|"provider"|"model":"/);
 
   // Another user, with Ana's chat id: 404 on every route, as a chat that never was.
   const ben = browser(fetch, HTTPS, "10.0.0.3");
@@ -257,7 +281,7 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   const tries: [string, { method?: string; json?: unknown }][] = [
     [theirs, {}],
     [theirs, { method: "PATCH", json: { title: "mine" } }],
-    [`${theirs}/messages`, {}],
+    [`${theirs}/transcript`, {}],
     [`${theirs}/messages`, { json: { text: "let me in" } }],
     [`${theirs}/events`, {}],
     [`${theirs}/abort`, { method: "POST" }],
@@ -270,6 +294,8 @@ it("a user signs up and in, talks to the agent and follows it live; another user
     expect([path, init.method ?? (init.json === undefined ? "GET" : "POST"), response.status]).toEqual([path, init.method ?? (init.json === undefined ? "GET" : "POST"), 404]);
   }
   expect(((await (await ben.send("/chat/api/conversations")).json()) as ChatPage<unknown>).items).toEqual([]);
+  expect(((await (await ben.send("/chat/api/conversations?q=hello")).json()) as ChatPage<unknown>).items).toEqual([]);
+  expect(((await (await ana.send("/chat/api/conversations?q=HELLO")).json()) as ChatPage<{ id: string }>).items.map((each) => each.id)).toEqual([chat]);
   const own = (await (await ben.send("/chat/api/conversations", { json: { text: "ben here" } })).json()) as { id: string };
   expect(await answered(ben, own.id, 2)).toEqual(["user: ben here (answered)", "assistant: faux: ben here"]);
   const benView = live(await ben.send(`/chat/api/conversations/${own.id}/events`));
@@ -306,19 +332,19 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   expect(((await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string; archived: boolean }>).items).toMatchObject([{ id: chat, archived: false }]);
   expect(lines.slice(4)).toEqual(["user: third (answered)", "assistant: faux: third"]);
   expect(JSON.stringify(lines)).not.toContain("operator only");
-  await view.until((seen) => seen.slice(before).some((e) => e.type === "partial" && e.text === "faux: third"));
+  await view.until((seen) => seen.slice(before).some((e) => e.type === "message_end" && JSON.stringify(e.entry ?? null).includes("faux: third")));
   const since = view.events.slice(before);
-  expect(since.filter((e) => e.type === "partial" && e.text !== "" && !"faux: third".startsWith(e.text))).toEqual([]);
   expect(JSON.stringify(since)).not.toContain("operator only");
   expect(JSON.stringify(benView.events)).not.toContain("operator only");
-  expect(JSON.stringify(await messagesOf(ben, own.id))).not.toContain("operator only");
+  expect(JSON.stringify(await transcriptOf(ana, chat))).not.toContain("operator only");
+  expect(JSON.stringify(await transcriptOf(ben, own.id))).not.toContain("operator only");
   await view.close();
   await benView.close();
 
   // The accounts' tables: in the accounts actor, never in a conversation's object or admin-api's index.
   expect(await tablesOf(ACCOUNTS_KEY)).toEqual(expect.arrayContaining(ACCOUNT_TABLES));
   expect((await tablesOf(key)).filter((name) => ACCOUNT_TABLES.includes(name))).toEqual([]);
-  expect(await tablesOf(key)).toEqual(expect.arrayContaining(["channel_web_conversations", "channel_web_messages"]));
+  expect(await tablesOf(key)).toEqual(expect.arrayContaining(["channel_web_conversations", "channel_web_entries"]));
   expect((await tablesOf(INDEX_KEY)).filter((name) => ACCOUNT_TABLES.includes(name))).toEqual([]);
 });
 
@@ -388,7 +414,7 @@ it("email.send in the objects' App only: the config says email is sent and offer
 
   // The Worker has no email.send: it asks the accounts actor, whose App sends.
   const config = await fetch(`${HTTPS}/chat/api/config`);
-  expect(await config.json()).toEqual({ name: "Ada", target: "durable", methods: [{ kind: "password" }, { kind: "magic-link" }], signUp: "open", email: true } satisfies ChatConfig);
+  expect(await config.json()).toEqual({ name: "Ada", target: "durable", methods: [{ kind: "password" }, { kind: "magic-link" }], signUp: "open", email: true, visibility: { thinking: false, tools: "names", context: true }, agents: [] } satisfies ChatConfig);
 
   const linkIn = (message: EmailMessage | undefined) => /https?:\/\/\S+/.exec(message?.text ?? "")?.[0] as string;
   const pathOf = (link: string) => {
@@ -426,4 +452,18 @@ it("email.send in the objects' App only: the config says email is sent and offer
   const invited = await fetch(`${HTTPS}/admin/api/channel-web/invitations`, { method: "POST", headers: { ...OPERATOR, "content-type": "application/json" }, body: JSON.stringify({ email: "fay@example.com" }) });
   expect(await invited.json()).toMatchObject({ emailed: true });
   expect(email.sent.at(-1)).toMatchObject({ to: "fay@example.com", subject: "You are invited to Ada" });
+});
+
+it("an agent picked for a new chat makes the conversation with it, another is 400; the policy is the config's", async () => {
+  const fetch = compose({ name: "Ada", signUp: { mode: "open" }, agents: ["echo", "gone"], visibility: { tools: "none", thinking: false, context: false } });
+  const config = (await (await fetch(`${HTTPS}/chat/api/config`)).json()) as ChatConfig;
+  expect([config.agents, config.visibility]).toEqual([[{ name: "echo" }], { thinking: false, tools: "none", context: false }]);
+  const gus = browser(fetch, HTTPS, "10.3.0.1");
+  await signUp(gus, "gus@example.com", "Gus");
+  expect((await gus.send("/chat/api/conversations", { json: { text: "hi", agent: "gone" } })).status).toBe(400);
+  const started = await gus.send("/chat/api/conversations", { json: { text: "hi there", agent: "echo" } });
+  expect(started.status).toBe(201);
+  const { id: chat } = (await started.json()) as { id: string };
+  expect(await answered(gus, chat, 2)).toEqual(["user: hi there (answered)", "assistant: faux: hi there"]);
+  expect(((await (await gus.send(`/chat/api/conversations/${chat}`)).json()) as ChatConversation).agent).toBe("echo");
 });

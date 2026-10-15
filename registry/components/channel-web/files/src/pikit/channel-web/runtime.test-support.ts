@@ -27,6 +27,18 @@ import type { AccountsWiring } from "./wiring.ts";
 
 export const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as unknown as Usage;
 
+/** An answer as pi-ai writes it: one text block. */
+export const answerOf = (text: string, timestamp = 1000): Record<string, unknown> => ({
+  role: "assistant",
+  content: [{ type: "text", text }],
+  api: "test",
+  provider: "test",
+  model: "test/model",
+  usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0.5, output: 0.5, cacheRead: 0, cacheWrite: 0, total: 1 } },
+  stopReason: "stop",
+  timestamp,
+});
+
 /** A 1×1 PNG, base64. */
 export const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 /** An image of `bytes` bytes (base64 of zeros). */
@@ -260,8 +272,16 @@ export class Runtime {
     await this.events?.emit("agent.started", { conversation, requestId: requestIds[0] as string, resumed: false });
   }
 
-  /** The run of `key` that took `requestIds` ends (recorded, then announced unless `quiet`). */
-  async end(key: string, requestIds: string[], outcome: { kind?: "completed" | "aborted" | "failed"; text?: string; quiet?: boolean } = {}): Promise<RunSettlement> {
+  /**
+   * The run of `key` that took `requestIds` ends (recorded, then announced unless `quiet`), with what it
+   * wrote (`messages`; by default the runtime's own user message, which the user never sees, then its
+   * answer, `answerOf(text)`).
+   */
+  async end(
+    key: string,
+    requestIds: string[],
+    outcome: { kind?: "completed" | "aborted" | "failed"; text?: string; quiet?: boolean; messages?: unknown[] } = {},
+  ): Promise<RunSettlement> {
     const conversation = this.pointers.get(key) as ConversationRef;
     const kind = outcome.kind ?? "completed";
     const run: RunSettlement = {
@@ -276,7 +296,8 @@ export class Runtime {
     await this.record.submissions.settled(run, this.events ?? (undefined as never));
     this.push({ type: "run_end" });
     if (outcome.quiet !== true) {
-      const result = { ...run, messages: [] };
+      const written = outcome.messages ?? [{ role: "user", content: "[the runtime's prompt]", timestamp: 1 }, ...(kind === "completed" ? [answerOf(run.text ?? "")] : [])];
+      const result = { ...run, messages: written as never[] };
       if (kind === "failed") await this.events?.emit("agent.failed", { ...result, kind: "failed" });
       else await this.events?.emit("agent.settled", { ...result, kind });
     }

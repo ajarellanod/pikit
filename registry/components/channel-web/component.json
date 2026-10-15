@@ -29,7 +29,9 @@
       "actor.inbox",
       "settings",
       "email.send",
-      "admin.auth"
+      "admin.auth",
+      "agent.definition",
+      "agent.directory"
     ]
   },
   "provides": [
@@ -59,7 +61,9 @@
         "actor.mailbox",
         "settings",
         "email.send",
-        "admin.auth"
+        "admin.auth",
+        "agent.definition",
+        "agent.directory"
       ]
     },
     "worker": {

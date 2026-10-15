@@ -9,26 +9,27 @@
  *
  * | Type | Message | Answer |
  * |---|---|---|
- * | `channel-web.start` | `{ userId, chatId, text, images?, requestId }` | `ChatSendResponse`: the conversation made with its first message |
+ * | `channel-web.start` | `{ userId, chatId, text, images?, requestId, agent? }` | `ChatSendResponse`: the conversation made with its first message (with `agent`, the agent the user picked, which the Worker checked) |
  * | `channel-web.send` | the same | `ChatSendResponse` |
  * | `channel-web.conversation` | `{ userId, chatId }` | `ChatConversation` |
  * | `channel-web.rename` | `{ userId, chatId, title }` | `ChatConversation` |
  * | `channel-web.archive` | `{ userId, chatId, archived }` | `ChatConversation`: archived (`true`) or back in the list (`false`) |
  * | `channel-web.hide` | `{ userId, chatId }` | `{}` |
- * | `channel-web.messages` | `{ userId, chatId, limit, cursor? }` | `ChatPage<ChatMessage>`: images by URL, at most `PAGE_TEXT_MAX` of text (`store.ts`) |
+ * | `channel-web.transcript` | `{ userId, chatId, limit, cursor? }` | `ChatPage<ChatTranscriptEntry>`: every entry as stored, images by URL, at most `PAGE_JSON_MAX` of JSON (`store.ts`); the Worker cuts it by the policy |
  * | `channel-web.image` | `{ userId, chatId, messageId, index }` | `ChatImage`: one image's bytes (base64), at most 5 MB |
  * | `channel-web.abort` | `{ userId, chatId }` | `{}` |
  *
- * And one stream: `channel-web.live` `{ userId, chatId }`, the conversation's `ChatEvent`s, refused
- * `not_found` before the first; it ends when the Worker closes it.
+ * And one stream: `channel-web.live` `{ userId, chatId }`, the conversation's `ChatEvent`s (only the
+ * user's runs, `live.ts`; the Worker cuts them by the policy), refused `not_found` before the first; it
+ * ends when the Worker closes it.
  *
  * To the accounts actor (`ACCOUNTS_KEY`), whose `storage.sql` holds the users' index:
  *
  * | Type | Message | Answer |
  * |---|---|---|
- * | `channel-web.list` | `{ userId, limit, cursor?, archived? }` | `ChatPage<ChatConversation>`: not archived, or with `archived: true` the archived ones |
+ * | `channel-web.list` | `{ userId, limit, cursor?, archived?, q? }` | `ChatPage<ChatConversation>`: not archived, or with `archived: true` the archived ones; with `q`, those whose title holds it |
  * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations leave the index |
- * | `channel-web.config` | `{}` | `ChatConfig`: the page's config as the accounts' App makes it (its methods, its live sign-up mode, whether it sends email) |
+ * | `channel-web.config` | `{}` | `ChatConfig`: the page's config as the accounts' App makes it (its methods, its live settings: sign-up mode, visibility, the agents users may pick; whether it sends email) |
  * | `channel-web.rate` | `{ userId }` | `{ retryAfter? }`: one message of the user's counted (`messagesPerMinute`); `retryAfter` (seconds) when it is one too many |
  *
  * And one message (`send`, `actor.inbox.handle`), from each conversation's object to the accounts
@@ -40,8 +41,8 @@
 
 import type { AppContext } from "@pikit/core";
 import { ActorCallError, type ActorInbox, type JsonValue } from "@pikit/contracts";
-import { type ChatConfig, type ChatImage, MAX_IMAGES } from "./api.ts";
-import { type ChatBackend, type ChatRef, conversationOf, type NewMessage, refusal } from "./backend.ts";
+import { type ChatConfig, type ChatImage, MAX_IMAGES, SEARCH_MAX } from "./api.ts";
+import { type ChatBackend, type ChatRef, conversationOf, type FirstMessage, type NewMessage, refusal } from "./backend.ts";
 import { isChatId, keyOf, REQUEST_ID } from "./chat.ts";
 import type { RateLimiter } from "./rate.ts";
 import type { ChatStore, ConversationRow } from "./store.ts";
@@ -56,7 +57,7 @@ export const CALL = {
   rename: "channel-web.rename",
   archive: "channel-web.archive",
   hide: "channel-web.hide",
-  messages: "channel-web.messages",
+  transcript: "channel-web.transcript",
   abort: "channel-web.abort",
   list: "channel-web.list",
   forget: "channel-web.forget",
@@ -112,7 +113,14 @@ function messageOf(message: JsonValue): NewMessage {
   return { text: written, requestId, ...(list.length > 0 && { images: list }) };
 }
 
-const ROW_FIELDS = { key: "string", userId: "string", chatId: "string", title: "string", createdAt: "number", lastActivity: "number", hidden: "boolean", archived: "boolean", busy: "boolean", version: "number" } as const;
+/** A conversation's first message, and the agent picked, if any. */
+function firstOf(message: JsonValue): FirstMessage {
+  const { agent } = fieldsOf(message);
+  if (agent !== undefined && (typeof agent !== "string" || agent === "")) throw refusal("invalid_request", 'channel-web: "agent" is an agent\'s name');
+  return { ...messageOf(message), ...(typeof agent === "string" && { agent }) };
+}
+
+const ROW_FIELDS = { key: "string", userId: "string", chatId: "string", agent: "string", title: "string", createdAt: "number", lastActivity: "number", hidden: "boolean", archived: "boolean", busy: "boolean", version: "number" } as const;
 
 function rowsOf(message: JsonValue): ConversationRow[] {
   const rows = fieldsOf(message).rows;
@@ -130,7 +138,7 @@ function rowsOf(message: JsonValue): ConversationRow[] {
 
 /** Registers a conversation object's answers over `backend` (its own, local). Call it in `start`. */
 export function answerConversationCalls(inbox: ActorInbox, backend: ChatBackend): void {
-  inbox.answer(CALL.start, async (key, message, ctx) => json(await backend.start(refOf(key, message), messageOf(message), ctx)));
+  inbox.answer(CALL.start, async (key, message, ctx) => json(await backend.start(refOf(key, message), firstOf(message), ctx)));
   inbox.answer(CALL.send, async (key, message, ctx) => json(await backend.send(refOf(key, message), messageOf(message), ctx)));
   inbox.answer(CALL.conversation, async (key, message, ctx) => json(await backend.conversation(refOf(key, message), ctx)));
   inbox.answer(CALL.rename, async (key, message, ctx) => json(await backend.rename(refOf(key, message), text(fieldsOf(message), "title"), ctx)));
@@ -143,8 +151,8 @@ export function answerConversationCalls(inbox: ActorInbox, backend: ChatBackend)
     await backend.hide(refOf(key, message), ctx);
     return {};
   });
-  // A page carries no image's bytes and at most PAGE_TEXT_MAX of text: well under what a call carries (32 MiB).
-  inbox.answer(CALL.messages, async (key, message, ctx) => json(await backend.messages(refOf(key, message), pageOf(message), ctx)));
+  // A page carries no image's bytes and at most PAGE_JSON_MAX of JSON (or one entry): well under what a call carries (32 MiB).
+  inbox.answer(CALL.transcript, async (key, message, ctx) => json(await backend.transcript(refOf(key, message), pageOf(message), ctx)));
   inbox.answer(CALL.image, async (key, message, ctx) => {
     const { messageId, index } = fieldsOf(message);
     if (typeof messageId !== "string" || !REQUEST_ID.test(messageId)) throw refusal("invalid_request", 'channel-web: "messageId" is a user\'s message id');
@@ -194,9 +202,10 @@ export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (c
   inbox.answer(CALL.config, async (_key, _message, ctx) => json(await config(ctx)));
   inbox.handle(SEEN, async (_key, message) => store.seen(rowsOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {
-    const { archived } = fieldsOf(message);
+    const { archived, q } = fieldsOf(message);
     if (archived !== undefined && typeof archived !== "boolean") throw refusal("invalid_request", 'channel-web: "archived" is a boolean');
-    const listed = await store.list(text(fieldsOf(message), "userId"), { ...pageOf(message), archived: archived === true });
+    if (q !== undefined && (typeof q !== "string" || q.length > SEARCH_MAX)) throw refusal("invalid_request", `channel-web: "q" is a string of at most ${SEARCH_MAX} characters`);
+    const listed = await store.list(text(fieldsOf(message), "userId"), { ...pageOf(message), archived: archived === true, ...(typeof q === "string" && q !== "" && { q }) });
     return json({ items: listed.items.map((row) => conversationOf(row)), ...(listed.next !== undefined && { next: listed.next }) });
   });
   inbox.answer(CALL.forget, async (_key, message) => {

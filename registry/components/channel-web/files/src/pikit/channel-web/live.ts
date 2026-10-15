@@ -1,80 +1,43 @@
 /**
- * A conversation's live view for its user (`GET /chat/api/conversations/:id/events`): `ChatEvent`s,
- * a projection of `agent.observe`'s `watch` of the key's current runtime conversation, with what the
- * store hears (`store.ts`'s `notify`), made in the App that holds the conversation.
+ * A conversation's live view for its user (`GET /chat/api/conversations/:id/events`): the dashboard's
+ * event shapes (`ChatEvent`, api.ts), a projection of `agent.observe`'s `watch` of the key's current
+ * runtime conversation and of what the store hears (`store.ts`'s `notify`), made in the App that holds
+ * the conversation. What users may see of what passes is cut later, by the operator's policy
+ * (`visibility.ts`, in the routes); here, which runs and entries are the user's at all, and only those.
  *
- * What the user sees, and only that:
- * - `state`: whether a run goes. The first event, then on each change.
- * - `partial`: the answer as written, its text only (no thinking, no tool calls), the whole text so
- *   far; `""` when a new one starts. With the request ids of its run's inputs when the watch reported
- *   them (`submission` events): the page knows which stored answer replaces it.
- * - `tool`: a tool's name while it runs (`running`), and when it ends (`done`): no arguments, no output.
- * - `message`: a message or an answer was stored, or a message's state changed: read them again. For
- *   an answer, the request its key names (`answers`, `answeredRequest`).
+ * - `snapshot` first: `run` (`{}`) while any run goes; the answer being written (`generation.message`)
+ *   and the tools going (`tools`) only for a run of the user's.
+ * - `run_start`, `run_end`: any run (only whether the assistant is busy).
+ * - `message_start`, `message_update`, `message_end` (its `entry`), `tool_execution_*`: only during a run
+ *   of the user's, and only the assistant's messages and the tools' results: never the user's message
+ *   as the runtime holds it (with what a stage added), nor an operator's. `message_end`'s entry carries
+ *   the id the transcript will have (`runEntryId`), one entry per message.
+ * - `entry_appended`: with `entry`, a user's message now in the transcript (`userEntryOf`); without, the
+ *   transcript changed (read it again). The runtime's own `entry_appended` (entries no model reads) never.
  *
- * `partial` and `tool` come only during a run whose inputs are known to include one of the user's
- * messages (a `web:` request id: this conversation's key is the user's), known from the watch's own
- * `submission` events, which the runtime sends before the run that takes them starts. A run that
- * answers both a user's message and an operator's follow-up is the user's, as `startAnswerDelivery`
- * delivers its answer to them. A run going when the view opened (a snapshot names its inputs by
- * submission id only, and `agent.submissions` cannot turn one into a request id) is named by the request
- * that started it, which this App heard (`agent.started`, kept by the store until the run ends): a
- * user's first message streams its answer even when the page opens the view after the run started. It
- * fails closed: a run it cannot name (its start not heard: the process restarted) streams nothing, its
- * answer comes as a `message` once stored; the next run that starts is named. So a run the operator's own follow-up started never streams to the user, even
- * while the user's message waits, and a fast run is streamed even when its user's message was stored
- * after it ended. Never a transcript entry, a system prompt, a tool's arguments or results, or an
- * operator's note.
+ * **Whose run.** A run is the user's when its inputs are known to include one of the user's messages
+ * (a `web:` request id: this conversation's key is the user's), known from the watch's own `submission`
+ * events, which the runtime sends before the run that takes them starts. A run that answers both a
+ * user's message and an operator's follow-up is the user's, as its messages are stored for them. A run
+ * going when the view opened (a snapshot names its inputs by submission id only, and
+ * `agent.submissions` cannot turn one into a request id) is named by the request that started it, which
+ * this App heard (`agent.started`, kept by the store until the run ends). It fails closed: a run it
+ * cannot name (its start not heard: the process restarted) streams nothing, its messages come with the
+ * transcript once stored; the next run that starts is named. So a run the operator's own follow-up
+ * started never streams to the user, even while the user's message waits.
  */
 
 import { type AppContext, withAbortSignal } from "@pikit/core";
-import { type AgentObserver, answerKey, type ObservedEvent } from "@pikit/contracts";
+import type { AgentObserver, ObservedEvent } from "@pikit/contracts";
 import { CHAT_REQUEST_PREFIX, type ChatEvent } from "./api.ts";
+import { liveEntryOf, runEntryId, runMessages } from "./entries.ts";
 import type { ChatStore, StoreNote } from "./store.ts";
 
 type Item = { kind: "observed"; event: ObservedEvent } | { kind: "note"; note: StoreNote } | { kind: "end"; error?: unknown };
 
-type Block = { type?: unknown; text?: unknown };
-type Assistant = { role?: unknown; content?: unknown };
-
-/** The text blocks of an assistant message, joined: what the user reads of it. */
-function textOf(message: Assistant | undefined): string {
-  if (message === undefined || !Array.isArray(message.content)) return "";
-  return (message.content as Block[]).flatMap((block) => (block?.type === "text" && typeof block.text === "string" ? [block.text] : [])).join("");
-}
-
-/** pi-ai's streaming changes, applied to the text blocks only. */
-function applyChanges(message: Assistant | undefined, changes: unknown): Assistant | undefined {
-  if (!Array.isArray(changes)) return message;
-  let current = message;
-  for (const change of changes as { type?: unknown; contentIndex?: unknown; delta?: unknown; block?: unknown; message?: unknown }[]) {
-    if (change?.type === "message") {
-      current = change.message as Assistant;
-      continue;
-    }
-    if (current === undefined || typeof change?.contentIndex !== "number") continue;
-    const content = Array.isArray(current.content) ? [...(current.content as Block[])] : [];
-    if (change.type === "text_delta" && typeof change.delta === "string") {
-      const part = content[change.contentIndex];
-      if (part?.type === "text") content[change.contentIndex] = { ...part, text: `${typeof part.text === "string" ? part.text : ""}${change.delta}` };
-    } else if (change.type === "text_start" || change.type === "thinking_start" || change.type === "toolcall_start" || change.type === "block") {
-      content[change.contentIndex] = change.block as Block;
-    } else continue;
-    current = { ...current, content };
-  }
-  return current;
-}
-
-/**
- * The request an answer's piece key names (`answerKey(conversation, requestId)#<index>`, the transport's
- * message id), when it is an answer of `conversationId`.
- */
-export function answeredRequest(conversationId: string | undefined, pieceKey: string): string | undefined {
-  if (conversationId === undefined) return undefined;
-  const prefix = answerKey({ conversationId }, "");
-  if (!pieceKey.startsWith(prefix)) return undefined;
-  return /^(.+)#[0-9]+$/.exec(pieceKey.slice(prefix.length))?.[1];
-}
+type Fields = Record<string, unknown>;
+const fieldsOf = (value: unknown): Fields => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Fields) : {});
+const pick = (from: Fields, keys: readonly string[]): Fields => Object.fromEntries(keys.filter((key) => from[key] !== undefined).map((key) => [key, from[key]]));
 
 export interface LiveOptions {
   observe: AgentObserver;
@@ -123,7 +86,6 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
     })();
   }
 
-  let busy: boolean | undefined;
   /** The request id of each submission the watch reported, by its id: what a run's inputs are. */
   const requests = new Map<number, string>();
   /** The request ids of the run going, by its inputs; `undefined` when they are not all known. */
@@ -135,29 +97,18 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
   };
   /** Whether the run going is the user's: its inputs are known, and one of them is a message of the user's. Unknown inputs: no. */
   const streams = (): boolean => runRequests?.some((id) => id.startsWith(CHAT_REQUEST_PREFIX)) === true;
-  let partial: Assistant | undefined;
-  let shown: string | undefined;
-  const tools = new Map<string, string>();
 
-  /** What changed for the user since the last events: a state, a partial text, tools. */
-  function* changes(next: { busy?: boolean; partial?: Assistant | undefined; started?: boolean }): Generator<ChatEvent> {
-    if (next.busy !== undefined && next.busy !== busy) {
-      busy = next.busy;
-      yield { type: "state", busy };
-    }
-    if ("partial" in next) partial = next.partial;
-    if (!streams()) return;
-    const text = partial === undefined ? undefined : textOf(partial);
-    if (text !== undefined && (text !== shown || next.started === true)) {
-      shown = text;
-      yield { type: "partial", text, ...(runRequests !== undefined && { requests: runRequests }) };
-    }
-    if (text === undefined) shown = undefined;
-  }
+  /** The run's messages an entry holds, each an entry of its own with the transcript's id. */
+  const entriesOf = (value: unknown): Fields[] => {
+    const run = runRequests?.[0];
+    const model = fieldsOf(value).model;
+    if (run === undefined || !Array.isArray(model)) return [];
+    return runMessages(model).map((message) => ({ id: runEntryId(run, message), kind: "message", model: [message] }));
+  };
 
   try {
     // No conversation in the runtime yet: nothing runs.
-    if (conversationId === undefined) yield* changes({ busy: false });
+    if (conversationId === undefined) yield { type: "snapshot", tools: [] };
     for (;;) {
       if (ctx.abortSignal?.aborted === true) return;
       const item = queue.shift();
@@ -170,8 +121,7 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
         return;
       }
       if (item.kind === "note") {
-        const answers = item.note.answer === true ? answeredRequest(conversationId, item.note.id) : undefined;
-        yield { type: "message", id: item.note.id, ...(answers !== undefined && { answers }) };
+        yield item.note.type === "entry" ? { type: "entry_appended", entry: liveEntryOf(item.note.entry) } : { type: "entry_appended" };
         continue;
       }
       const event = item.event;
@@ -182,54 +132,55 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
           break;
         }
         case "snapshot": {
-          const generation = event.generation as { message?: Assistant } | undefined;
-          const running = Array.isArray(event.tools) ? (event.tools as { callId?: unknown; name?: unknown; status?: unknown }[]) : [];
           const run = event.run as { inputs?: unknown } | null | undefined;
+          const going = run !== undefined && run !== null;
           // A snapshot names its run's inputs by submission id: the request that started it, as this App
           // heard it (`agent.started`), names it when the watch has not.
-          const starter = run === undefined || run === null || conversationId === undefined ? undefined : store.startedBy(conversationId);
-          runRequests = requestsOf(run?.inputs) ?? (starter === undefined ? undefined : [starter]);
-          yield* changes({ busy: event.run !== undefined && event.run !== null, partial: generation?.message?.role === "assistant" ? generation.message : undefined });
-          const now = new Map(running.filter((tool) => tool.status !== "done" && typeof tool.callId === "string" && typeof tool.name === "string").map((tool) => [tool.callId as string, tool.name as string]));
-          for (const [callId, name] of tools) if (!now.has(callId) && streams()) yield { type: "tool", name, state: "done" };
-          for (const [callId, name] of now) if (!tools.has(callId) && streams()) yield { type: "tool", name, state: "running" };
-          tools.clear();
-          for (const [callId, name] of now) tools.set(callId, name);
+          const starter = !going || conversationId === undefined ? undefined : store.startedBy(conversationId);
+          runRequests = going ? (requestsOf(run.inputs) ?? (starter === undefined ? undefined : [starter])) : undefined;
+          const message = fieldsOf(fieldsOf(event.generation).message);
+          const mine = streams();
+          yield {
+            type: "snapshot",
+            ...(going && { run: {} }),
+            ...(mine && message.role === "assistant" && { generation: { message } }),
+            tools: mine && Array.isArray(event.tools) ? event.tools.map((tool) => pick(fieldsOf(tool), ["callId", "name", "status", "output"])) : [],
+          };
           break;
         }
         case "run_start":
           runRequests = requestsOf(event.inputs);
-          yield* changes({ busy: true });
+          yield { type: "run_start" };
           break;
         case "run_end":
-          yield* changes({ busy: false, partial: undefined });
-          tools.clear();
           runRequests = undefined;
           if (Array.isArray(event.inputs)) for (const input of event.inputs) if (typeof input === "number") requests.delete(input);
+          yield { type: "run_end" };
           break;
         case "message_start": {
-          const message = event.message as Assistant | undefined;
-          if (message?.role === "assistant") yield* changes({ partial: message, started: true });
+          const message = fieldsOf(event.message);
+          if (streams() && message.role === "assistant") yield { type: "message_start", message };
           break;
         }
         case "message_update":
-          if (partial !== undefined) yield* changes({ partial: applyChanges(partial, event.changes) });
+          if (streams()) yield { type: "message_update", changes: event.changes };
           break;
-        case "message_end":
-          yield* changes({ partial: undefined });
-          break;
-        case "tool_execution_start": {
-          const name = typeof event.toolName === "string" ? event.toolName : "tool";
-          tools.set(String(event.toolCallId), name);
-          if (streams()) yield { type: "tool", name, state: "running" };
+        case "message_end": {
+          if (!streams()) break;
+          const [first, ...more] = entriesOf(event.entry);
+          yield { type: "message_end", ...(first !== undefined && { entry: first }) };
+          for (const entry of more) yield { type: "entry_appended", entry };
           break;
         }
-        case "tool_execution_end": {
-          const name = tools.get(String(event.toolCallId));
-          tools.delete(String(event.toolCallId));
-          if (name !== undefined && streams()) yield { type: "tool", name, state: "done" };
+        case "tool_execution_start":
+          if (streams()) yield { type: event.type, ...pick(event, ["toolCallId", "toolName", "args"]) };
           break;
-        }
+        case "tool_execution_update":
+          if (streams()) yield { type: event.type, ...pick(event, ["toolCallId", "toolName", "output"]) };
+          break;
+        case "tool_execution_end":
+          if (streams()) yield { type: event.type, ...pick(event, ["toolCallId", "toolName"]) };
+          break;
         default:
           break;
       }

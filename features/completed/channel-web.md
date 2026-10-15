@@ -172,6 +172,11 @@ settings-store do.
   together; one too many is `429 rate_limited` with `retry-after`, before its body is read. Counted in
   memory where every message of a user passes: on a server the App; on Cloudflare the accounts actor,
   which the Worker asks before each message (`channel-web.rate`). A restart forgets it.
+- **Since [chat parity](../chat-parity.md)** the store is a transcript (`channel_web_entries`: the
+  user's messages, and what each run that answered them wrote, stored when it ends), the page reads
+  `GET .../transcript` and the live view gives the dashboard's event shapes, both cut by the operator's
+  `visibility`; delivery writes an answer only for a run whose end was never heard. The bullets on
+  answers and the live view below say how it was first built; the README and the API table below say what it is now.
 - **Answers take the channels' path**: `startAnswerDelivery` (with `outbound.queue` when installed)
   whose transport delivers to the channel's own store: table `channel_web_messages` (the user's
   messages, written when admitted, and each answer, written by the transport, idempotent by its
@@ -221,19 +226,19 @@ cannot send it without CORS, which nothing allows).
 
 | Route | Answer |
 |---|---|
-| `GET /chat/api/config` | `ChatConfig`: the assistant's name, sign-in methods (password, magic link, providers with display names), whether one may sign up |
+| `GET /chat/api/config` | `ChatConfig`: the assistant's name, sign-in methods (password, magic link, providers with display names), whether one may sign up, `visibility` (`{ thinking, tools: "none" \| "names" \| "full", context }`), `agents` (`{ name, description? }[]`, the ones users may pick) (features/chat-parity.md) |
 | `/chat/api/auth/*` | better-auth (sign in, sign up, sign out, OAuth callbacks, verification, reset, link, account linking, sessions) |
 | `GET /chat/api/me` | `ChatMe`: the user (id, name, email, image) and their linked methods |
-| `GET /chat/api/conversations?limit&cursor&archived` | `ChatPage<ChatConversation>`, newest activity first: not archived, or with `archived=1` the archived ones |
-| `POST /chat/api/conversations` | `ChatSendRequest` → `201 ChatStartResponse` (`{ id, requestId }`) |
-| `GET /chat/api/conversations/:id` | `ChatConversation` (`id`, `title`, `busy`, `archived`, `lastActivity`) |
+| `GET /chat/api/conversations?limit&cursor&archived&q` | `ChatPage<ChatConversation>`, newest activity first: not archived, or with `archived=1` the archived ones; with `q`, those whose title holds it (any case) |
+| `POST /chat/api/conversations` | `ChatStartRequest` (a `ChatSendRequest` and `agent?`, one of `ChatConfig.agents`, else `400`) → `201 ChatStartResponse` (`{ id, requestId, admission }`) |
+| `GET /chat/api/conversations/:id` | `ChatConversation` (`id`, `title`, `busy`, `archived`, `lastActivity`, `createdAt`, `agent?` when one users may pick) |
 | `PATCH /chat/api/conversations/:id` | `{ title }` → `200 ChatConversation` |
 | `POST /chat/api/conversations/:id/archive`, `.../unarchive` | `200 ChatConversation`: listed apart, or back in the list (the owner only; new activity lists an archived one again) |
 | `DELETE /chat/api/conversations/:id` | `204` (the list only: gone for the user) |
-| `GET /chat/api/conversations/:id/messages?limit&cursor` | `ChatPage<ChatMessage>`, newest first: `{ id, role: "user" \| "assistant", text, images?, at, state? }` (`state` of a user's message: `pending`, `answered`, `failed`, `aborted`; `images` `{ mimeType, url }`, never bytes), at most `PAGE_TEXT_MAX` (1 MiB) of text a page |
-| `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | one image's bytes: the conversation's owner only, its type, `nosniff`, `cache-control: private, immutable` |
+| `GET /chat/api/conversations/:id/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`, newest first: admin-api's `ApiTranscriptEntry` (`{ id, kind, messages }`, pi-ai messages) cut by `visibility`; a user's message (id its request id, `state`: `pending`, `answered`, `failed`, `aborted`; images `{ type: "image", url, mimeType }`, never bytes) and each message its runs wrote (id `<run's request>#<hash>`, the id the live events gave it); at most `PAGE_JSON_MAX` (1 MiB) of stored JSON a page |
+| `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | one image's bytes of a user's message: the conversation's owner only, its type, `nosniff`, `cache-control: private, immutable` |
 | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`{ requestId, admission }`); `429` past `messagesPerMinute` |
-| `GET /chat/api/conversations/:id/events` | server-sent `ChatEvent`s, heartbeats; ends when the client goes |
+| `GET /chat/api/conversations/:id/events` | server-sent `ChatEvent`s, admin-api's `ApiEvent` shapes (`snapshot` first, `run_*`, `message_*`, `tool_execution_*`, `entry_appended`) cut by `visibility`, the user's runs only; heartbeats; ends when the client goes |
 | `POST /chat/api/conversations/:id/abort` | `200` |
 | `GET /chat/*` | the page's files, under a Content-Security-Policy (`default-src 'self'`, images `'self'`, `data:`, `blob:` and the configured built-in providers' avatar hosts only) |
 

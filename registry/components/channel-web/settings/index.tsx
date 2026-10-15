@@ -1,20 +1,29 @@
 /**
- * channel-web's section of the Settings dialog, Web chat: who may make an account on the chat page
- * (its `signUp` setting, declared when `settings` is installed, its default the config's `signUp`):
- * only people the operator invites, also anyone whose verified email is on the allow list, or anyone.
- * Read at each sign-up, for every method (password, link, OAuth). It stores only what differs from the
- * config's value, so a value equal to it follows the config again.
+ * channel-web's section of the Settings dialog, Web chat (its settings, declared when `settings` is
+ * installed, their defaults the config's; each read at each request):
+ * - Sign-up (`signUp`): who may make an account on the chat page: only people the operator invites,
+ *   also anyone whose verified email is on the allow list, or anyone. For every method (password, link,
+ *   OAuth).
+ * - What users see (`visibility`): the model's thinking, the tools (none, their names, all of them),
+ *   the Context panel. Applied to history too.
+ * - Assistants users may pick (`agents`), for a new chat: the App's agents (`GET /admin/api/agents`),
+ *   none by default (the router decides).
+ * It stores only what differs from the config's values, so a value equal to one follows the config again.
  */
 
 import { ChatLines } from "iconoir-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/bui/Button";
+import { Switch } from "@/components/bui/Switch";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Segmented, SettingsHeading, SettingsRow, storedOf } from "@/components/pikit/settings";
 import { defineSettings, useSettings } from "@/lib/settings";
+import { useShell } from "@/lib/shell";
 
 type Mode = "invite" | "allowlist" | "open";
 type SignUp = { mode: Mode; allow: string[] };
+type Tools = "none" | "names" | "full";
+type Visibility = { thinking: boolean; tools: Tools; context: boolean };
 
 /** An entry of the allow list: `ana@example.com`, or `@example.com` for a whole domain (config.ts' pattern). */
 const ENTRY = /^(?:[^@\s]+)?@[^@\s]+$/;
@@ -31,6 +40,21 @@ const SAID: Record<Mode, string> = {
   open: "Anyone may make an account, with any sign-in method the page offers.",
 };
 
+const TOOLS: { value: Tools; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "names", label: "Names" },
+  { value: "full", label: "Full" },
+];
+const TOOLS_SAID: Record<Tools, string> = {
+  none: "Users see no tool at all.",
+  names: "Users see which tool runs, never its arguments or its result.",
+  full: "Users see each tool's arguments, output and result.",
+};
+
+const isVisibility = (value: unknown): value is Visibility =>
+  typeof value === "object" && value !== null && typeof (value as Visibility).thinking === "boolean" && typeof (value as Visibility).tools === "string" && typeof (value as Visibility).context === "boolean";
+const isNames = (value: unknown): value is string[] => Array.isArray(value) && value.every((each) => typeof each === "string");
+
 const isSignUp = (value: unknown): value is SignUp =>
   typeof value === "object" && value !== null && typeof (value as SignUp).mode === "string" && Array.isArray((value as SignUp).allow);
 
@@ -41,9 +65,12 @@ function entriesOf(text: string): string[] {
 
 function WebChatSettings() {
   const settings = useSettings("channel-web");
+  const { agents } = useShell();
   const [failed, setFailed] = useState<Error>();
   const section = settings.section;
   const current = isSignUp(section?.value.signUp) ? section.value.signUp : undefined;
+  const visibility = isVisibility(section?.value.visibility) ? section.value.visibility : undefined;
+  const picked = isNames(section?.value.agents) ? section.value.agents : [];
   const shown = current?.allow.join("\n") ?? "";
   const [draft, setDraft] = useState(shown);
   useEffect(() => setDraft(shown), [shown]);
@@ -52,10 +79,16 @@ function WebChatSettings() {
   if (section === undefined) return <p className="text-[13px] text-ink-3">Loading</p>;
   if (current === undefined) return <p className="text-[13px] text-ink-3">The web chat does not offer its sign-up setting.</p>;
 
-  const save = (next: SignUp) => {
+  /** Saves `change` over the current values, only what differs from the config's. */
+  const store = (change: Record<string, unknown>) => {
     setFailed(undefined);
-    settings.save(storedOf({ signUp: next }, section.defaults)).catch((thrown: unknown) => setFailed(thrown instanceof Error ? thrown : new Error(String(thrown))));
+    settings.save(storedOf({ ...section.value, ...change }, section.defaults)).catch((thrown: unknown) => setFailed(thrown instanceof Error ? thrown : new Error(String(thrown))));
   };
+  const save = (next: SignUp) => store({ signUp: next });
+  const see = (change: Partial<Visibility>) => visibility !== undefined && store({ visibility: { ...visibility, ...change } });
+  // The App's agents, then any picked that is no agent now (kept until taken away).
+  const choices = [...(agents ?? []).map((agent) => ({ name: agent.name, description: agent.description })), ...picked.filter((name) => !(agents ?? []).some((agent) => agent.name === name)).map((name) => ({ name, description: "No agent now: users do not see it." }))];
+  const pick = (name: string, on: boolean) => store({ agents: on ? [...picked, name] : picked.filter((each) => each !== name) });
   const entries = entriesOf(draft);
   const wrong = entries.filter((entry) => !ENTRY.test(entry) || entry.length > 254);
   const problem = wrong.length > 0 ? `Not an email or @domain: ${wrong.slice(0, 3).join(", ")}${wrong.length > 3 ? "…" : ""}` : entries.length > MAX_ENTRIES ? `At most ${MAX_ENTRIES} entries` : undefined;
@@ -120,6 +153,46 @@ function WebChatSettings() {
           </div>
         </SettingsRow>
       )}
+      {visibility !== undefined && (
+        <>
+          <SettingsHeading
+            aside={
+              JSON.stringify(visibility) !== JSON.stringify(section.defaults.visibility) &&
+              isVisibility(section.defaults.visibility) && (
+                <Button size="sm" variant="quiet" disabled={settings.saving} onClick={() => store({ visibility: section.defaults.visibility })}>
+                  Use the config's
+                </Button>
+              )
+            }
+          >
+            What users see
+          </SettingsHeading>
+          <SettingsRow label="Thinking" description={visibility.thinking ? "Users read the model's thinking." : "The model's thinking stays hidden."}>
+            <Switch checked={visibility.thinking} label="Thinking" onChange={(thinking) => see({ thinking })} />
+          </SettingsRow>
+          <SettingsRow label="Tools" description={TOOLS_SAID[visibility.tools]} wrap>
+            <Segmented label="Tools" value={visibility.tools} options={TOOLS} disabled={settings.saving} onChange={(tools) => see({ tools })} />
+          </SettingsRow>
+          <SettingsRow
+            label="Context"
+            description={visibility.context ? (visibility.tools === "full" ? "The Context panel: the images sent, what searches and fetches found." : "The Context panel: the images sent (sources need Tools: Full).") : "No Context panel."}
+          >
+            <Switch checked={visibility.context} label="Context" onChange={(context) => see({ context })} />
+          </SettingsRow>
+        </>
+      )}
+      {isNames(section.value.agents) && (
+        <>
+          <SettingsHeading>Assistants users may pick</SettingsHeading>
+          {choices.length === 0 && <p className="py-3 text-[13px] text-ink-3">{agents === undefined ? "Loading" : "No agent."}</p>}
+          {choices.map((agent) => (
+            <SettingsRow key={agent.name} label={agent.name} description={agent.description ?? (picked.includes(agent.name) ? "Offered for a new chat." : "Not offered.")}>
+              <Switch checked={picked.includes(agent.name)} label={agent.name} onChange={(on) => pick(agent.name, on)} />
+            </SettingsRow>
+          ))}
+          {choices.length > 0 && picked.length === 0 && <p className="pt-2 text-[12.5px] text-ink-3">None picked: users get no choice, and the router decides.</p>}
+        </>
+      )}
     </div>
   );
 }
@@ -129,6 +202,6 @@ export default defineSettings({
   title: "Web chat",
   icon: ChatLines,
   requires: ["settings"],
-  keywords: ["sign up", "sign-up", "accounts", "invite", "allow list", "allowlist", "open", "users", "chat"],
+  keywords: ["sign up", "sign-up", "accounts", "invite", "allow list", "allowlist", "open", "users", "chat", "visibility", "thinking", "tools", "context", "agents", "assistants"],
   component: WebChatSettings,
 });
