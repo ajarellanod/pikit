@@ -139,6 +139,30 @@ export interface ApiUsage {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
 }
 
+/**
+ * Who a conversation is with, as its channel describes it (`conversation.describe`), or as its key says
+ * when no channel describes it.
+ */
+export interface ApiParty {
+  /**
+   * The channel: its kind (`web`, `telegram`, `googlechat`, `http`, `dashboard`…), the instance when not
+   * the default (`support` of `telegram:support`), and how it reads ("Web chat", "Telegram", "Google
+   * Chat", "HTTP API", "Dashboard").
+   */
+  channel: { kind: string; instance?: string; label: string };
+  /** The person or the chat, readable: "Ana López", "@ana", "Ops team" (a group, a space). Absent when not known. */
+  name?: string;
+  /** One more line: an email, a group's or space's name, "Direct message". */
+  detail?: string;
+  /**
+   * Identifiers an operator may need, each with a label ("User id", "Chat id", "Space", "Key",
+   * "Conversation"), in order. The last two are always the conversation key and the runtime's id.
+   */
+  ids: { label: string; value: string }[];
+  /** A dashboard path about this party ("/channel-web?user=…", the Web users page, filtered), when there is one. */
+  link?: { label: string; path: string };
+}
+
 /** One conversation of the runtime. */
 export interface ApiConversation {
   /**
@@ -168,6 +192,8 @@ export interface ApiConversation {
    * reset's new conversation has its own. Absent until then.
    */
   title?: string;
+  /** Who it is with (`ApiParty`): present whenever it has a key. */
+  party?: ApiParty;
 }
 
 /** One page, and the cursor of the next (absent on the last page). */

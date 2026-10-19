@@ -150,6 +150,27 @@ object). The dashboard then lists the channel's title, and asks no model of its 
 model call, per conversation. An operator's `/name` or Rename there changes only the dashboard's,
 until the channel names it again.
 
+### Who it is with
+
+Every conversation with a key is listed and read with `party` (`ApiParty`, `party.ts`): its channel
+(`kind`, the `instance` when not the default, and how it reads: "Web chat", "Telegram", "Google
+Chat", "HTTP API", "Dashboard"), the person or chat (`name`), one more line (`detail`), labelled ids,
+and a dashboard `link` when the channel has one.
+
+- **Its channel describes it** when the channel's component has a stage of the `conversation.describe`
+  pipeline (channel-web, channel-telegram, channel-telegram-webhook, channel-google-chat,
+  channel-http do), read through `describeConversation`, which cleans what it says (one line each,
+  bounded, no control characters) and never throws: a describer that fails is logged, and the
+  conversation is described by its key. A pipeline, not a capability: admin-api depends on no channel
+  (channel-web depends on admin-api, for `/name`).
+- **Otherwise by its key:** the channel's label from its kind, the instance from the channel recorded
+  with the key (`telegram:ops`), the rest of the key as its "Chat id".
+- **The dashboard's own** (`dashboard:<uuid>`): "Dashboard", the operator.
+- The conversation key ("Key") and the runtime's id ("Conversation") are always its last two ids.
+- It is asked where the conversation is: on a server in the App, on Cloudflare in the conversation's
+  object (with `admin-api.conversation`), where the channel's object half and its storage are. No
+  call of its own: a page of 20 costs what it cost before, plus each describer's read.
+
 ### Browser sessions
 
 `POST /admin/api/session` with the credential (and the header `x-pikit-admin: 1`) answers with a

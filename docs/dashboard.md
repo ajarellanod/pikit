@@ -30,7 +30,8 @@ object's answers), `conversation-index.ts`, `titles.ts`, `assets.ts` (the files 
 
 It requires `admin.auth`, `agent.observe`, `agent.runtime`, `conversations.registry`, `storage.sql` and
 `actor.mailbox`; it uses `outbound.queue`, `actor.inbox`, `agent.definition`, `agent.command` and
-`model.complete` when present. It provides `http.route` and two `agent.command`s, `new` (reset the
+`model.complete` when present. Who each conversation is with (its `party`) is what the channels'
+stages of the `conversation.describe` pipeline say, else what its key says. It provides `http.route` and two `agent.command`s, `new` (reset the
 key) and `name` (set the title).
 
 ### Routes

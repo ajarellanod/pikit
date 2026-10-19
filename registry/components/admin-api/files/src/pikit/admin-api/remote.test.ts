@@ -17,6 +17,7 @@ import {
   answerCall,
   answerStream,
   callResult,
+  describeStage,
   type JsonValue,
   streamResult,
 } from "@pikit/contracts";
@@ -54,6 +55,8 @@ class Platform {
   readonly before = new Map<string, (runtime: Runtime) => void>();
   /** Each key's `storage.sql`: an object started again keeps it, as a Durable Object's storage outlives it. */
   readonly storage = new Map<string, ComponentDefinition>();
+  /** More components in every object's App (a channel's object half). */
+  readonly extra: ComponentDefinition[] = [];
 
   readonly mailbox: ActorMailbox = {
     send: async (key, type, message) => {
@@ -110,7 +113,7 @@ class Platform {
     const logger = { ...silentLogger, warn: (message: string) => void this.warnings.push(message) };
     const storage = this.storage.get(key) ?? sqliteStorage();
     this.storage.set(key, storage);
-    const app = await defineApp({ components: [auth, agents, runtime.component(), platform, storage, adminApi], target: "durable", logger }).create();
+    const app = await defineApp({ components: [auth, agents, runtime.component(), platform, storage, adminApi, ...this.extra], target: "durable", logger }).create();
     await app.start();
     return { app, runtime, answers, handlers, streams, ctx: app.context() };
   }
@@ -194,6 +197,37 @@ test("the Worker's list: conversations from the index, newest activity first, ea
   // The index's object is not a conversation, and was given none.
   const none = await platform.mailbox.call(INDEX_KEY, "admin-api.conversation", { conversationId: "1" }, w.app.context()).catch((error: unknown) => error);
   expect((none as ActorCallError).code).toBe("not_found");
+});
+
+test("who each conversation is with is its object's: the channel's stage there (no call of its own), else what the key says", async () => {
+  const { platform, worker: w } = await cloud();
+  // A channel's object half, which knows only its own object's chat.
+  platform.extra.push(
+    defineComponent({
+      name: "describer-test",
+      setup(pikit) {
+        const describer = { describe: async (key: string) => (key === "telegram:1" ? { name: "@ana", detail: "Direct message", ids: [{ label: "Chat id", value: "1" }] } : undefined) };
+        pikit.pipeline("conversation.describe", describeStage(describer), { id: "describer-test" });
+      },
+    }),
+  );
+  await chat(platform, "telegram:1");
+  await chat(platform, "http:b");
+  await platform.active("telegram:1", 100);
+  await platform.active("http:b", 200);
+  platform.calls.length = 0;
+
+  const body = (await (await w.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: ApiConversation[] };
+
+  expect(body.items.map(({ conversationId, party }) => ({ conversationId, party }))).toEqual([
+    { conversationId: "http:b~1", party: { channel: { kind: "http", label: "HTTP API" }, ids: [{ label: "Chat id", value: "b" }, { label: "Key", value: "http:b" }, { label: "Conversation", value: "1" }] } },
+    {
+      conversationId: "telegram:1~1",
+      party: { channel: { kind: "telegram", label: "Telegram" }, name: "@ana", detail: "Direct message", ids: [{ label: "Chat id", value: "1" }, { label: "Key", value: "telegram:1" }, { label: "Conversation", value: "1" }] },
+    },
+  ]);
+  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.list`, "http:b admin-api.conversation", "telegram:1 admin-api.conversation"]);
+  expect(((await (await w.fetch("/admin/api/conversations/telegram%3A1~1", { headers: AUTH })).json()) as ApiConversation).party?.name).toBe("@ana");
 });
 
 test("the Worker's list pages, at most CONVERSATIONS_PER_PAGE whatever limit asks; an object that does not answer is left out and logged", async () => {

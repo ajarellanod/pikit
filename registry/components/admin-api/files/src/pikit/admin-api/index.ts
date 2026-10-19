@@ -38,6 +38,10 @@
  *   costs no model call. Each change
  *   of the title a conversation is listed by is told to the index (`seen` with its `title`, as at
  *   start), which searches it (`?q=`): on Cloudflare the titles are the objects', not the index's.
+ * - **Who each conversation is with** (`ApiConversation.party`, `party.ts`): its channel's stage of
+ *   the `conversation.describe` pipeline (read and cleaned by `describeConversation`), else what its
+ *   key says; the dashboard's own are the operator's. A pipeline, so admin-api depends on no channel. Asked where the conversation is: on Cloudflare in its
+ *   object, where the channel's object half is.
  * - **Only a conversation's current one is talked to.** A message, an abort or a reset to a
  *   conversation a reset left behind is `409 not_current`. A reset's new conversation is its key's
  *   current one, with the key's agent, before any message reaches it: it is talked to at once.

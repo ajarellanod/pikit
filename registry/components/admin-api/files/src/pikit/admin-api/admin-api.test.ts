@@ -7,7 +7,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { ADMIN_CLIENT_HEADER, type AgentCommand, type CompletionRequest, type ConversationRef, type DeliveryReceipt, type OutboundQueue, type PendingPiece, type SqlDatabase } from "@pikit/contracts";
+import { ADMIN_CLIENT_HEADER, type AgentCommand, type CompletionRequest, type ConversationDescriber, type ConversationRef, describeStage, type DeliveryReceipt, type OutboundQueue, type PendingPiece, type SqlDatabase } from "@pikit/contracts";
 import { createAgentCommandConformance } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import Type from "typebox";
@@ -41,6 +41,16 @@ const post = (body?: unknown): RequestInit => ({
   method: "POST",
   headers: { ...AUTH, "content-type": "application/json" },
   ...(body !== undefined && { body: JSON.stringify(body) }),
+});
+
+/** Who a conversation no channel describes is with: what its key says. */
+const keyParty = (kind: string, label: string, chat: string, key: string, conversationId: string) => ({
+  channel: { kind, label },
+  ids: [
+    { label: "Chat id", value: chat },
+    { label: "Key", value: key },
+    { label: "Conversation", value: conversationId },
+  ],
 });
 
 /** The ids of the list's first page. */
@@ -123,12 +133,53 @@ test("GET /admin/api/conversations: what the runtime held at start, newest activ
 
   expect(response.status).toBe(200);
   expect(body.items).toEqual([
-    { conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true, lastActivity: 5, usage: ZERO, current: true },
-    { conversationId: "c2", key: "http:a", agent: "assistant", busy: false, lastActivity: 3, usage: ZERO, current: true },
+    { conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true, lastActivity: 5, usage: ZERO, current: true, party: keyParty("telegram", "Telegram", "1", "telegram:1", "c1") },
+    { conversationId: "c2", key: "http:a", agent: "assistant", busy: false, lastActivity: 3, usage: ZERO, current: true, party: keyParty("http", "HTTP API", "a", "http:a", "c2") },
   ]);
   const last = (await (await s.fetch(`/admin/api/conversations?limit=2&cursor=${encodeURIComponent(body.next as string)}`, { headers: AUTH })).json()) as { items: Record<string, unknown>[]; next?: string };
-  expect(last).toEqual({ items: [{ conversationId: "c0", key: "telegram:1", agent: "assistant", busy: false, lastActivity: 1, usage: ZERO, current: false }] });
+  expect(last).toEqual({ items: [{ conversationId: "c0", key: "telegram:1", agent: "assistant", busy: false, lastActivity: 1, usage: ZERO, current: false, party: keyParty("telegram", "Telegram", "1", "telegram:1", "c0") }] });
   expect((await s.fetch("/admin/api/conversations/c3", { headers: AUTH })).status).toBe(200);
+});
+
+test("who each conversation is with: its channel's stage of conversation.describe (cleaned, its instance), else what its key and recorded channel say; a failing describer is the key's; Key and Conversation last", async () => {
+  const describers = defineComponent({
+    name: "describers-test",
+    setup(pikit) {
+      const telegram: ConversationDescriber = {
+        async describe(key) {
+          const chat = /^telegram(?::ops)?:(\d+)$/.exec(key)?.[1];
+          if (chat === undefined) return undefined;
+          return { name: "  @ana ", detail: "Direct message", ids: [{ label: "Chat id", value: chat }], link: { label: "Bot", path: "/telegram" }, ...(key.includes(":ops:") && { instance: "ops" }) };
+        },
+      };
+      pikit.pipeline("conversation.describe", describeStage(telegram), { id: "telegram-test" });
+      pikit.pipeline("conversation.describe", describeStage({ describe: async (key) => (key.startsWith("http:") ? Promise.reject(new Error("down")) : undefined) }), { id: "http-test" });
+    },
+  });
+  const runtime = new Runtime();
+  runtime.add({ conversationId: "c1", key: "telegram:ops:5", agent: "assistant", lastActivity: 4 });
+  runtime.add({ conversationId: "c2", key: "http:a", agent: "assistant", lastActivity: 3 });
+  runtime.add({ conversationId: "c3", key: "googlechat:ops:spaces/AAA", agent: "assistant", lastActivity: 2 });
+  // The channel recorded with the key says its instance.
+  runtime.pointers.set("googlechat:ops:spaces/AAA", { key: "googlechat:ops:spaces/AAA", agent: "assistant", conversationId: "c3", channel: "googlechat:ops" });
+  runtime.add({ conversationId: "c4", key: "telegram:9", agent: "assistant", lastActivity: 1 });
+  const s = await started({}, [describers], runtime);
+
+  const page = (await (await s.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: { conversationId: string; party?: unknown }[] };
+
+  const own = (key: string, id: string) => [
+    { label: "Key", value: key },
+    { label: "Conversation", value: id },
+  ];
+  expect(Object.fromEntries(page.items.map((each) => [each.conversationId, each.party]))).toEqual({
+    c1: { channel: { kind: "telegram", instance: "ops", label: "Telegram" }, name: "@ana", detail: "Direct message", ids: [{ label: "Chat id", value: "5" }, ...own("telegram:ops:5", "c1")], link: { label: "Bot", path: "/telegram" } },
+    c2: { channel: { kind: "http", label: "HTTP API" }, ids: [{ label: "Chat id", value: "a" }, ...own("http:a", "c2")] },
+    c3: { channel: { kind: "googlechat", instance: "ops", label: "Google Chat" }, ids: [{ label: "Chat id", value: "spaces/AAA" }, ...own("googlechat:ops:spaces/AAA", "c3")] },
+    c4: { channel: { kind: "telegram", label: "Telegram" }, name: "@ana", detail: "Direct message", ids: [{ label: "Chat id", value: "9" }, ...own("telegram:9", "c4")], link: { label: "Bot", path: "/telegram" } },
+  });
+  expect(s.logged.some((each) => each.message.includes("describer failed"))).toBe(true);
+  // One conversation's page says it too.
+  expect(((await (await s.fetch("/admin/api/conversations/c4", { headers: AUTH })).json()) as { party?: { name?: string } }).party?.name).toBe("@ana");
 });
 
 test("the list follows activity: a message dispatched, a run settled or failed, a reset move a conversation to the front; a duplicate does not", async () => {
@@ -588,7 +639,15 @@ test("a reset's new conversation is its key's current one, with the key's agent,
   expect(s.runtime.conversations.get("c100")?.key).toBeUndefined();
 
   const one = await s.fetch("/admin/api/conversations/c100", { headers: AUTH });
-  expect(await one.json()).toEqual({ conversationId: "c100", key: "dashboard:1", agent: "assistant", busy: false, usage: ZERO, current: true });
+  expect(await one.json()).toEqual({
+    conversationId: "c100",
+    key: "dashboard:1",
+    agent: "assistant",
+    busy: false,
+    usage: ZERO,
+    current: true,
+    party: { channel: { kind: "dashboard", label: "Dashboard" }, name: "Operator", ids: [{ label: "Key", value: "dashboard:1" }, { label: "Conversation", value: "c100" }] },
+  });
   const page = (await (await s.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: Record<string, unknown>[] };
   expect(page.items.map(({ conversationId, key, current }) => ({ conversationId, key, current }))).toEqual([
     { conversationId: "c100", key: "dashboard:1", current: true },

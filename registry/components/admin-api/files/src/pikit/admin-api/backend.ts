@@ -68,6 +68,7 @@ import {
   WEB_SEARCH_TOOL,
 } from "./api.ts";
 import type { ConversationIndex, Hidden } from "./conversation-index.ts";
+import { partyOf } from "./party.ts";
 
 /**
  * A message to a conversation, checked: what `POST …/messages` takes (its attachments by
@@ -273,20 +274,28 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
    * it; before that (a reset's new conversation), the key `keyOf` knows and the agent its key has
    * (`conversations.registry`'s `get`: a key keeps its agent through resets). Neither: none.
    */
-  const identify = async (conversation: ObservedConversation, ctx: AppContext): Promise<{ key: string; agent: string; current: boolean } | undefined> => {
+  const identify = async (conversation: ObservedConversation, ctx: AppContext): Promise<{ key: string; agent: string; current: boolean; channel?: string } | undefined> => {
     const key = conversation.key ?? (await contracts.keyOf(conversation.conversationId, ctx));
     if (key === undefined) return undefined;
     const now = await contracts.registry().get(key, ctx);
     const agent = conversation.agent ?? now?.agent;
-    return agent === undefined ? undefined : { key, agent, current: now?.conversationId === conversation.conversationId };
+    if (agent === undefined) return undefined;
+    return { key, agent, current: now?.conversationId === conversation.conversationId, ...(now?.channel !== undefined && { channel: now.channel }) };
   };
 
-  /** The conversation, with its key, its agent, whether its key points to it now and its title (else its first message) when it has a key. */
+  /**
+   * The conversation, with its key, its agent, whether its key points to it now, its title (else its
+   * first message) and who it is with (`partyOf`) when it has a key.
+   */
   const described = async (conversation: ObservedConversation, ctx: AppContext): Promise<ApiConversation> => {
     const identity = await identify(conversation, ctx);
     if (identity === undefined) return conversation as ApiConversation;
-    const title = await listedTitle(contracts.index(), conversation.conversationId);
-    return { ...(conversation as ApiConversation), ...identity, ...(title !== undefined && { title }) };
+    const { channel, ...shown } = identity;
+    const [title, party] = await Promise.all([
+      listedTitle(contracts.index(), conversation.conversationId),
+      partyOf(identity.key, conversation.conversationId, channel, ctx),
+    ]);
+    return { ...(conversation as ApiConversation), ...shown, ...(title !== undefined && { title }), party };
   };
 
   const found = async (id: string, ctx: AppContext): Promise<ObservedConversation> => {
