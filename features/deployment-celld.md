@@ -3,7 +3,8 @@
 **Public appeal:** —
 
 **Specified:** idea, with a spike and stability tests (2026-10-07, celld 0.6.1). It should come: the self-hosted way to
-scale out (owner's decision, 2026-10-07).
+scale out (owner's decision, 2026-10-07). **Built** (2026-10-19, celld 0.6.2): the component `deployment-celld` and the
+preset `telegram-celld` ("Built" below); it moves to `completed/` once a fleet runs it in production.
 
 **Needed by:** nothing required.
 
@@ -136,11 +137,29 @@ A spike tool `sandbox` ran commands in a container per conversation through `@cl
   the conditional writes (celld's docs); MinIO passes but is not qualified, and no longer ships
   binaries or a Docker Hub image.
 
+## Built
+`registry/components/deployment-celld` (its README has the details), checked end to end on a Mac: `pikit new
+--preset telegram-celld` with `faux/scripted` and a fake Telegram, `pikit dev` (`celld dev`) answering a webhook; then
+two celld 0.6.2 nodes on a local rustfs bucket: `pikit up` (deploy, wait, webhook set), a broken deploy rolled back
+(both nodes back on the previous deployment within one poll), `deploy.mjs` under Node, and a conversation's files
+kept across a graceful stop of the node that held it.
+- **Config:** `wrangler.jsonc` stays the project's one Worker config; each deploy derives
+  `wrangler.celld.jsonc` from it (the spike's changes, golden-tested), deleted after. `build.command` (the UI
+  build) is run by pikit before `celld deploy`, and once at the start of `pikit dev`.
+- **The version** `/health` reports is `PIKIT_DEPLOYMENT`, a variable each deploy sets to a new id.
+- **Rollback:** celld has none (`denoland/celld#181`) but keeps every deployment; pikit reads the bucket's
+  pointer (`deploy/current.json`) before deploying and writes it back with `If-Match` when the new one fails
+  `/health` (its own SigV4 client: S3-compatible buckets with keys in the environment; not across a change of
+  Durable Object classes).
+- **Secrets** go in the derived config's `vars` (written 0600 while `celld deploy` runs, ignored by git), so
+  they land in the bucket in plain text: the bucket is the fleet's trust boundary already (its keys administer
+  the fleet, every conversation is in it). Encrypting them with a key the nodes hold changes nothing while celld
+  can hand a Worker only `vars`.
+- **CI:** `deploy.mjs` (Node only) and a GitHub Actions template; **nodes:** systemd, Caddy, nftables and ECS on
+  EC2 templates; `logs` and `down` over SSH (celld has no command for either), `down` deleting nothing.
+
 ## Open questions
-- Secrets: celld has none yet (`denoland/celld#190`), and `vars` land in the bucket in plain text.
-  Wait for it, or encrypt the values and give the nodes the key.
-- `/health`'s version without `version_metadata` (C8: `pikit up` waits for the version it deployed):
-  the deployment celld's `/state` reports, or a variable the component writes.
+- Secrets: celld has none yet (`denoland/celld#190`); when it has, `deployment-celld` moves them out of `vars`.
 - R2, GCS and Tigris are untested (S3 is tested); and a fleet in the bucket's region, not a laptop.
 - Channels that do not retry see the `500`s of a failover or a drain (`channel-http` has no
   `durable` twin yet).

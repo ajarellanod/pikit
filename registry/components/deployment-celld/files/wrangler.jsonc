@@ -1,0 +1,36 @@
+// The project on celld (deployment-celld, SPEC §4.1): a Worker and one Durable Object per
+// conversation, both running pikit.config.ts (its `worker` export and its default export), on a fleet
+// of your machines that share a bucket.
+//
+// celld does not read this file: `pikit up`, `pikit dev` and deploy.mjs derive the config it reads
+// from it (wrangler.celld.jsonc, written for each run and deleted after): `name` (this file's, else
+// package.json's), the secrets as `vars` (celld has no secrets: README, "Secrets"), and
+// PIKIT_DEPLOYMENT, the version /health reports. Keys celld does not have (`build`) are dropped from
+// it. Edit this file, never the derived one.
+//
+// Secrets are never here: `pikit up` reads them from .env, a CI deploy from its environment.
+{
+  "main": "src/pikit/deployment-celld/worker.ts",
+  // The UI projects, every folder of src/ with a package.json but src/pikit/: the dashboard (SPEC §5),
+  // when the project has a UI (src/dashboard/, `pikit ui on`), and a component's own (its
+  // component.json's `ui`: channel-web's src/chat/). `pikit up`, `pikit dev` and deploy.mjs run this
+  // command before celld bundles, and its build writes its component's module,
+  // src/pikit/<component>/<folder>-files.ts, which the Worker bundles: a build that fails stops the
+  // deploy, so no Worker ships an old or empty page. Without one it does nothing.
+  "build": {
+    "command": "for project in src/*/package.json; do dir=\"${project%/package.json}\"; if [ ! -f \"$project\" ] || [ \"$dir\" = src/pikit ]; then continue; fi; (cd \"$dir\" && bun install --frozen-lockfile && bun run build) || exit 1; done"
+  },
+  "compatibility_date": "2026-09-01",
+  // Components and Pi use node:* APIs that celld provides with it, as Workers do (Buffer, crypto, process.env).
+  "compatibility_flags": ["nodejs_compat"],
+  // One object per conversation (C1). The entrypoint reads the binding as CONVERSATION.
+  "durable_objects": {
+    "bindings": [{ "name": "CONVERSATION", "class_name": "Conversation" }]
+  },
+  // SQLite-backed: storage-do, the runtime (pi-durable) and submissions keep the conversation in the object's SQL.
+  // A migration is forever: add new ones below, never edit or remove this one.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Conversation"] }],
+  // A prompt in a .md file is imported as text. celld bundles every `**/*.wasm` import as a compiled
+  // module by itself (execution-do's QuickJS), and takes a rule's globs only as `**/*.ext`.
+  "rules": [{ "type": "Text", "globs": ["**/*.md"] }]
+}

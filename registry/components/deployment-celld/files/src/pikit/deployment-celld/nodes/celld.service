@@ -1,0 +1,45 @@
+# deployment-celld: one celld node under systemd (README, "Running a fleet"). A template: pikit never
+# runs it. On each node:
+#   sudo useradd --system --home /var/lib/celld --shell /usr/sbin/nologin celld
+#   sudo install -m 0755 celld /usr/local/bin/celld        # the release's binary, the same on every node
+#   sudo install -D -m 0600 celld.env /etc/celld/celld.env # this node's settings (nodes/celld.env)
+#   sudo install -m 0644 celld.service /etc/systemd/system/celld.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now celld
+# `pikit logs` and `pikit down` reach this unit over SSH (PIKIT_CELLD_SSH): journalctl, systemctl stop.
+
+[Unit]
+Description=celld node (pikit deployment-celld)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=celld
+Group=celld
+EnvironmentFile=/etc/celld/celld.env
+# A node keeps its identity and its disk: a fixed CELLD_NODE (in celld.env) and CELLD_WATCH on a disk
+# that outlives the process. A node back with a new identity or an empty disk cannot vouch for the
+# writes it acknowledged, and the conversations active during an outage stay blocked
+# (features/deployment-celld.md, "Stability").
+Environment=CELLD_WATCH=/var/lib/celld/watch
+StateDirectory=celld
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/celld
+# A bucket outage makes every node fence itself and exit (code 3) within about 10 s: start it again,
+# always, with the same identity and disk, and it recovers.
+Restart=always
+RestartSec=2
+# On SIGTERM a node drains and hands its conversations off to the others (CELLD_SHUTDOWN_TOTAL_MS,
+# 40 s by default; about 25 s measured). Kill it before that and its conversations wait for its lease
+# to expire (20 to 35 s) instead. Keep this above CELLD_SHUTDOWN_TOTAL_MS.
+KillSignal=SIGTERM
+TimeoutStopSec=90
+LimitNOFILE=1048576
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/celld
+
+[Install]
+WantedBy=multi-user.target

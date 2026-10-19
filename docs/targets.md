@@ -8,7 +8,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | | `server` | `durable` |
 |---|---|---|
 | Model | one long-lived process | one actor (Durable Object) per conversation, evicted between events |
-| Provider today | `deployment-docker` | `deployment-cloudflare` |
+| Provider today | `deployment-docker` | `deployment-cloudflare`; `deployment-celld` (your machines, celld) |
 | Apps in `pikit.config.ts` | one (default export) | two: the object's (default) and the Worker's (`worker`) |
 | Requests arrive at | `server-bun` (Hono on `Bun.serve`, port 3000) | the Worker (deployment-cloudflare's host), then RPC to an object |
 | `storage.sql`, `storage.sqlite` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
@@ -111,15 +111,15 @@ A `deployment-*` component runs the App instead of running in it: no default exp
 [deployment-module.ts](../packages/cli/src/project/deployment-module.ts)); `dev` and `exec` are
 optional exports. A project has exactly one.
 
-| Function | deployment-docker | deployment-cloudflare |
-|---|---|---|
-| `up` | `beforeDeploy` hooks, `docker compose up --detach --build --wait` | login check, `beforeDeploy` hooks, `wrangler deploy --tag migrations:<last tag> --secrets-file` (`.env`), wait until `/health` answers from the new version (3 min), roll back if it says its App does not start or never answers (not across a Durable Object migration), then `afterDeploy` hooks |
-| `down` | `docker compose down` (the volume stays) | `wrangler delete` (deletes every object's data; only at a terminal) |
-| `restart` | `docker compose restart` | not exported |
-| `logs` | `docker compose logs [--follow] [--tail N]` | `wrangler tail` (always follows) |
-| `status` | containers, `/health`, `/ready` | `wrangler deployments list`, `/health` |
-| `dev` | not exported (the CLI runs `main.ts --watch`) | `wrangler dev` |
-| `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | not exported |
+| Function | deployment-docker | deployment-cloudflare | deployment-celld |
+|---|---|---|---|
+| `up` | `beforeDeploy` hooks, `docker compose up --detach --build --wait` | login check, `beforeDeploy` hooks, `wrangler deploy --tag migrations:<last tag> --secrets-file` (`.env`), wait until `/health` answers from the new version (3 min), roll back if it says its App does not start or never answers (not across a Durable Object migration), then `afterDeploy` hooks | `beforeDeploy` hooks, `build.command`, `celld deploy` of the config derived from `wrangler.jsonc` (`.env`'s secrets as `vars`), wait until `/health` answers the new `PIKIT_DEPLOYMENT` (3 min), roll back by restoring the bucket's previous pointer (S3-compatible buckets; not across a class change), then `afterDeploy` hooks |
+| `down` | `docker compose down` (the volume stays) | `wrangler delete` (deletes every object's data; only at a terminal) | `systemctl stop celld` on each node over SSH, one at a time (deletes nothing) |
+| `restart` | `docker compose restart` | not exported | not exported |
+| `logs` | `docker compose logs [--follow] [--tail N]` | `wrangler tail` (always follows) | `journalctl -u celld` on every node over SSH (`PIKIT_CELLD_SSH`) |
+| `status` | containers, `/health`, `/ready` | `wrangler deployments list`, `/health` | the last deploy from this machine, `celld diagnose --read-only`, `/health` |
+| `dev` | not exported (the CLI runs `main.ts --watch`) | `wrangler dev` | `celld dev` (one node, a local store) |
+| `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | not exported | not exported |
 
 Every UI project (a folder of `src/` with a `package.json`: the dashboard's `src/dashboard/`, a
 component's own such as channel-web's `src/chat/`) is built by every deploy: in a stage of the Docker
@@ -132,6 +132,12 @@ then the after-deploy scripts it is given (the Telegram webhook's). A rollback i
 `pikit: <version> failed /health: rolled back to <previous>`. A deploy that changed the Durable Object
 classes (a new `migrations` tag) is never rolled back: Cloudflare cannot, and the deploy fails saying
 so. deployment-cloudflare's README has the rules ("Rolling back").
+
+On celld (deployment-celld), the same Apps run on your machines: nodes that share a bucket
+(R2, S3, GCS, Tigris; two at least), each with a fixed identity and disk, behind TLS. A CI job runs
+`node src/pikit/deployment-celld/deploy.mjs` (`ci/deploy.yml`) with the same wait and rollback; celld
+has no secrets yet, so they reach the Worker as `vars`, stored in the bucket. Its README has the
+rules and the node templates ("Running a fleet").
 
 ## What each target cannot do
 

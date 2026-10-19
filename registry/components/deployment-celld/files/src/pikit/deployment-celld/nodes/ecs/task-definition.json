@@ -1,0 +1,48 @@
+{
+  "family": "pikit-celld",
+  "requiresCompatibilities": ["EC2"],
+  "networkMode": "awsvpc",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/pikit-celld-execution",
+  "containerDefinitions": [
+    {
+      "name": "celld",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/pikit-celld:0.6.2",
+      "essential": true,
+      "memoryReservation": 6144,
+      "portMappings": [
+        { "name": "worker", "containerPort": 8080, "protocol": "tcp" },
+        { "name": "internal", "containerPort": 8081, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "CELLD_BUCKET", "value": "s3://my-pikit-fleet" },
+        { "name": "AWS_REGION", "value": "REGION" },
+        { "name": "CELLD_IDLE_EVICT_S", "value": "300" },
+        { "name": "CELLD_TRUST_FORWARDED_HEADERS", "value": "1" }
+      ],
+      "secrets": [
+        { "name": "AWS_ACCESS_KEY_ID", "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/pikit-celld/aws-access-key-id" },
+        { "name": "AWS_SECRET_ACCESS_KEY", "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/pikit-celld/aws-secret-access-key" }
+      ],
+      "mountPoints": [{ "sourceVolume": "celld-state", "containerPath": "/var/lib/celld" }],
+      "stopTimeout": 90,
+      "ulimits": [{ "name": "nofile", "softLimit": 1048576, "hardLimit": 1048576 }],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/.well-known/celld/health >/dev/null || exit 1"],
+        "interval": 10,
+        "timeout": 3,
+        "retries": 6,
+        "startPeriod": 300
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/pikit/celld",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "celld",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ],
+  "volumes": [{ "name": "celld-state", "host": { "sourcePath": "/var/lib/celld" } }]
+}

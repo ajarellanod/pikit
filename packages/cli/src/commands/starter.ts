@@ -146,6 +146,9 @@ export function gitignore(target = "server"): string {
   return `${GITIGNORE}# wrangler's own: local secrets, the local objects' state and its build cache.
 .dev.vars*
 .wrangler/
+# celld's (deployment-celld): the local node's state, and the config each deploy derives (it holds the secrets).
+.celld/
+wrangler.celld.jsonc
 `;
 }
 
@@ -353,10 +356,14 @@ export default defineComponent({
 });
 `;
 
-/** What `pikit up` does with a deployment component, for the starter's text; another one is named as it is. */
-export const DEPLOYMENT_TEXT: Readonly<Record<string, { up: string; then: string }>> = {
+/**
+ * What `pikit up` does with a deployment component, for the starter's text; another one is named as it
+ * is. `dev`: what `pikit dev` runs on `durable`, when it is not wrangler dev.
+ */
+export const DEPLOYMENT_TEXT: Readonly<Record<string, { up: string; then: string; dev?: string }>> = {
   "deployment-docker": { up: "run it in Docker", then: "pikit status, logs, down" },
   "deployment-cloudflare": { up: "deploy it to Cloudflare", then: "pikit status, logs" },
+  "deployment-celld": { up: "deploy it to your celld fleet", then: "pikit status, logs", dev: "run it here on one celld node (celld dev)" },
 };
 
 /** The installed deployment (`deployment-*`), which `pikit up` delegates to; undefined without one. */
@@ -385,7 +392,7 @@ export function readme(name: string, components: string[], target = "server", ui
     target === "durable"
       ? `pikit configure   # the variables in .env.example (they go up as the Worker's secrets), and a model API key
 pikit doctor      # the component graph; green when everything is provided and its variables are set
-pikit dev         # run it here in workerd (wrangler dev), reloading on change, once the model's API key is in .env
+pikit dev         # ${(deployment === undefined ? undefined : DEPLOYMENT_TEXT[deployment]?.dev) ?? "run it here in workerd (wrangler dev)"}, reloading on change, once the model's API key is in .env
 ${up}`
       : `pikit configure   # the variables in .env.example, and a model login or API key
 pikit doctor      # the component graph; green when everything is provided and its variables are set

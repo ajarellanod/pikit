@@ -48,8 +48,8 @@ pikit new <dir> [--target server|durable] [--preset <name> [--with <component>].
   marked `UNFINISHED`.
 
 Presets in [registry/presets](../registry/presets): `http` (server, channel-http), `telegram` (an
-alias of `http` with channel-telegram), `telegram-cloudflare` (durable), `cloudflare-minimal` (durable,
-storage only).
+alias of `http` with channel-telegram), `telegram-cloudflare` (durable), `telegram-celld` (durable, the same
+on your own machines with celld), `cloudflare-minimal` (durable, storage only).
 
 ## pikit add
 
@@ -152,11 +152,11 @@ It never prints a value, and never touches Pi's own `~/.pi/agent/auth.json`.
 ## pikit dev
 
 Runs the project here after `doctor` passes and the model credentials of this machine are checked:
-the deployment's `dev` when it exports one (`wrangler dev` on Cloudflare), else `bun --watch
+the deployment's `dev` when it exports one (`wrangler dev` on Cloudflare, `celld dev` with deployment-celld), else `bun --watch
 src/pikit/<deployment>/main.ts` with `.env` loaded (deployment-docker). Either way, a UI project (the
 dashboard, a component's `src/chat/`) is built again (`bun run build` in it) when one of its files
 changes, and the app reloads with the module its build writes. On a server each is also built once at
-start, alongside the app (wrangler's build command does it on Cloudflare), so a fresh project serves
+start, alongside the app (wrangler's build command does it on Cloudflare, deployment-celld's `dev` with celld), so a fresh project serves
 its pages before any edit.
 
 ## pikit up | down | restart | logs | status

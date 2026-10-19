@@ -57,7 +57,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [component-commands](component-commands.md) | | An installed component adds `pikit <name>` (declared in `component.json`, recorded in `pikit.json`), as the deployment component's `up` and the hooks already are | No; agent folders' `pikit agents` |
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
 | [conversation-routing](conversation-routing.md) | | Decided: a conversation is one chat of one channel; its key is never rewritten | No |
-| [deployment-celld](deployment-celld.md) | | The `durable` target on your own machines (celld, self-hosted Durable Objects): scale out without Cloudflare | No; it should come, as the self-hosted way to scale out |
+| [deployment-celld](deployment-celld.md) | | The `durable` target on your own machines (celld, self-hosted Durable Objects): scale out without Cloudflare. Built (`deployment-celld`, preset `telegram-celld`): deploy, rollback, CI, node templates; moves to `completed/` once a fleet runs it in production | No; it should come, as the self-hosted way to scale out |
 | [deployment-systemd](deployment-systemd.md) | | Run as a systemd service, without Docker | No |
 | [deployment-targets](deployment-targets.md) | | Targets as runtime models; Vercel, E2B, exe.dev, Modal without closing deployment | No; the dashboard (SPEC §5) follows its rules |
 | [health](health.md) | | Components report failures; essential ones restart the process | Yes: SPEC §5 and §6 |

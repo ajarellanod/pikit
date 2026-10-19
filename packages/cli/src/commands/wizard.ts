@@ -51,8 +51,8 @@ const TARGET_TEXT: Record<string, { label: string; hint: string }> = {
     hint: "or on your own machine while it is on",
   },
   durable: {
-    label: "durable — on Cloudflare (Workers + Durable Objects)",
-    hint: "no server to keep: a Durable Object per chat; the Workers Free plan is enough",
+    label: "durable — on Cloudflare (Workers + Durable Objects), or your own machines (celld)",
+    hint: "a Durable Object per chat; on Cloudflare no server to keep, the Workers Free plan is enough",
   },
 };
 
@@ -65,6 +65,11 @@ const DEPLOYMENT_TEXT: Record<string, { up: string; upHint: string; running: str
     up: "In Docker, in the background (`pikit up`)",
     upHint: "it keeps running after you log out",
     running: "Your agent is running. In its folder (`cd {name}`): `pikit logs --follow` to watch it, `pikit status`, `pikit down` to stop it.",
+  },
+  "deployment-celld": {
+    up: "On your celld fleet (`pikit up`)",
+    upHint: "it deploys to the fleet's bucket; the nodes run it without this machine",
+    running: "Your agent is deployed. In its folder (`cd {name}`): `pikit status`, `pikit logs` (with PIKIT_CELLD_SSH); `pikit down` stops the nodes.",
   },
   "deployment-cloudflare": {
     up: "On Cloudflare (`pikit up`)",

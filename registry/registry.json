@@ -121,6 +121,14 @@
       ],
       "path": "components/credentials-file"
     },
+    "deployment-celld": {
+      "version": "0.0.0",
+      "description": "Runs a pikit project of the durable target on your own machines with celld (self-hosted Durable Objects): the Worker and its objects, wrangler.jsonc, the commands `pikit up | down | logs | status | dev` delegate to, a CI deploy script, and the nodes' templates.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/deployment-celld"
+    },
     "deployment-cloudflare": {
       "version": "0.0.0",
       "description": "Runs a pikit project on Cloudflare: the Worker and its Durable Objects running the project's two Apps, wrangler.jsonc, and the commands `pikit up | down | logs | status | dev` delegate to.",
