@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { capabilityEntry, KIT_CATALOGUE, type RegistryCatalogue } from "./capabilities.ts";
-import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports, stripComments } from "./imports.ts";
+import { isPiImport, isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports, stripComments } from "./imports.ts";
 import { commandProblems, type Manifest, ManifestSchema, schemaProblems, uiModule, uiProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 import { confinedPath } from "../project/paths.ts";
@@ -276,7 +276,7 @@ export function checkImports(componentDir: string, name: string, targets: readon
         problems.push(`${at} imports the Node builtin "${specifier}" without its scheme: write "node:${specifier}"`);
         continue;
       }
-      if (specifier.startsWith("@earendil-works/")) {
+      if (isPiImport(specifier)) {
         problems.push(`${at} imports "${specifier}": only @pikit/pi-adapter imports Pi`);
       }
       // A kit export that reaches Node (`@pikit/pi-adapter/node`) is Node by another name.
