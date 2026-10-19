@@ -22,6 +22,9 @@
  *   event brought (K3).
  * - **Live view** (`live.ts`): a projection of `agent.observe`'s `watch`, the dashboard's event shapes,
  *   only the user's runs.
+ * - **Who a conversation is with**, for the dashboard (its stage of `conversation.describe`): its
+ *   user's name and email, as the accounts know them (on Cloudflare one call to the accounts actor),
+ *   its ids, and a link to the Web users page showing that user (`usersPagePath`).
  * - **What users see** (`visibility`: thinking, tools, context) and **the agents they may pick**
  *   (`agents`) are the operator's policy, cut in the routes (`visibility.ts`); with `signUp`, live
  *   settings when `settings` is installed (the dashboard's Settings), read at each request.
@@ -39,7 +42,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import { type ActorInbox, type ActorMailbox, type AgentResult, type AnswerDelivery, answersOnlyTheDashboard, type ChannelTransport, startAnswerDelivery } from "@pikit/contracts";
+import { type ActorInbox, type ActorMailbox, type AgentResult, type AnswerDelivery, answersOnlyTheDashboard, type ChannelTransport, type ConversationDescriber, describeStage, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
 import { linkOrigin } from "./accounts/links.ts";
 import type { Accounts } from "./accounts/types.ts";
@@ -63,6 +66,9 @@ export { worker, WORKER_NAME } from "./worker.ts";
 export { ACCOUNTS_KEY } from "./calls.ts";
 
 export const NAME = "channel-web";
+
+/** The dashboard's Web users page (the view's `BASE`), showing only `userId` (`?user=`, its search). */
+export const usersPagePath = (userId: string): string => `/channel-web?user=${encodeURIComponent(userId)}`;
 
 export interface ChannelWebOptions {
   /** How the accounts are made: better-auth's (the default), or a test's double. */
@@ -206,6 +212,42 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         return accounts;
       };
 
+      /** The accounts actor's, reached through the mailbox: what a conversation's object reads a user from (on Cloudflare). */
+      let remoteAccounts: Accounts | undefined;
+      /**
+       * Where this App reads its users: its own accounts (a server; the accounts actor), else, in a
+       * conversation's object, the accounts actor's (one call).
+       */
+      const usersOf = async (ctx: AppContext): Promise<Pick<Accounts, "list">> => {
+        if (accounts !== undefined || limits === "server") return localAccounts(ctx);
+        const send = mailbox.get();
+        if (send === undefined) throw new Error("channel-web: in a conversation's object the users are the accounts actor's, reached through actor.mailbox");
+        if (remoteAccounts === undefined) {
+          secretsRead ??= await secretsOf(config, (name) => secrets.get().get(name));
+          remoteAccounts = wiring.remote({ mailbox: () => send, config, secret: secretsRead.secret, ...(secretsRead.publicUrl !== undefined && { publicUrl: secretsRead.publicUrl }) });
+        }
+        return remoteAccounts;
+      };
+
+      /** Who a conversation is with, for the dashboard: its user, as the accounts know them. */
+      const describer: ConversationDescriber = {
+        async describe(key, ctx) {
+          const parsed = parseKey(key);
+          if (parsed === undefined) return undefined;
+          const party = { ids: [{ label: "User id", value: parsed.userId }, { label: "Chat id", value: parsed.chatId }] };
+          try {
+            const page = await (await usersOf(ctx)).list({ limit: 10, offset: 0, q: parsed.userId }, ctx);
+            const user = page.items.find((each) => each.id === parsed.userId);
+            if (user === undefined) return party;
+            const name = user.name.trim();
+            return { ...(name === "" ? { name: user.email } : { name, detail: user.email }), ...party, link: { label: "Web user", path: usersPagePath(parsed.userId) } };
+          } catch (error) {
+            ctx.logger.warn("channel-web: a conversation's user could not be read; it is described by its key", { conversation: key, error: error instanceof Error ? error.message : String(error) });
+            return party;
+          }
+        },
+      };
+
       /** The page's config, as this App's accounts make it (on Cloudflare the accounts actor answers the Worker with it). */
       const chatConfig = (ctx: AppContext) => chatConfigOf({ config, target: limits, settings: liveSettings, agents: agentsOf, email: email.get() !== undefined }, ctx);
 
@@ -216,6 +258,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         backend: () => backend,
         origin: (request) => linkOrigin(request.url, secretsRead?.publicUrl, trustHost),
       });
+      pikit.pipeline("conversation.describe", describeStage(describer), { id: NAME });
 
       /** Logged, never thrown: an event's other listeners and the run go on. */
       const guarded = (what: string, work: (ctx: AppContext) => Promise<void>) => async (ctx: AppContext) => {
@@ -344,6 +387,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
           const stopping = delivery;
           delivery = undefined;
           accounts = undefined;
+          remoteAccounts = undefined;
           secretsRead = undefined;
           declared = false;
           trustHost = false;

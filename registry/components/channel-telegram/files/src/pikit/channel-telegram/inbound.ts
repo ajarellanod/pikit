@@ -24,6 +24,7 @@ import { type AppContext } from "@pikit/core";
 import { admitInbound, type AgentRuntime, type ConversationRegistry, type InboundMessage, type KeyValueStore } from "@pikit/contracts";
 import type { TelegramUpdate, TelegramUser } from "./api.ts";
 import { conversationKeyOf } from "./account.ts";
+import { rememberChat } from "./party.ts";
 import type { Replies } from "./replies.ts";
 
 export interface InboundDeps {
@@ -34,7 +35,7 @@ export interface InboundDeps {
   delivery: Replies;
   conversations: ConversationRegistry;
   runtime: AgentRuntime;
-  /** The channel's namespace of `storage.kv`: the last command handled in each chat. */
+  /** The channel's namespace of `storage.kv`: the last command handled in each chat, and who each chat is with (`party.ts`). */
   store: KeyValueStore;
   /** A context of the channel's own, never `start`'s. */
   ctx: AppContext;
@@ -74,6 +75,9 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
     }
     return;
   }
+
+  // Who the chat is with, for the dashboard: kept from what this message says (party.ts).
+  await rememberChat(deps.store, conversationKeyOf(deps.instance, chatId), message, ctx);
 
   const text = message.text ?? message.caption;
   if (text === undefined || text.trim() === "") {

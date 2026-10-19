@@ -2,7 +2,11 @@
 
 Talk to your agent in Telegram: send your bot a message, get the answer in the chat.
 
-- **Provides:** nothing to other components. It receives messages and sends answers.
+- **Provides:** nothing to other components. It receives messages and sends answers. Its stage of the
+  `conversation.describe` pipeline says who a chat is with, for the dashboard (a
+  person's name and @username, a group's title, the chat id, the account of a named bot), from what
+  the allowed users' messages carried, kept in its `storage.kv` namespace under `party:<key>` (written
+  only when it changed; Telegram is never asked). A chat with no record yet is described by its id.
 - **Requires:** `secrets` (the bot token and the allowed users), `conversations.registry`,
   `agent.runtime`, `agent.submissions` (runtime-pi provides it: every run's end) and `storage.kv`
   (`storage-kv-sql`, which `pikit add` brings: its place in them). A router (such as

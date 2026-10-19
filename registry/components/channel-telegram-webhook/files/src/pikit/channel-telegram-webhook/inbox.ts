@@ -26,13 +26,14 @@ import { admitInbound, type AgentRuntime, type ConversationRegistry, type Inboun
 import { conversationKeyOf } from "./account.ts";
 import type { TelegramMessage } from "./api.ts";
 import { type Bot, TELEGRAM_TIMEOUT_MS, within } from "./bot.ts";
+import { rememberChat } from "./party.ts";
 import { textOf } from "./update.ts";
 
 export interface InboxDeps {
   bot: Bot;
   conversations: ConversationRegistry;
   runtime: AgentRuntime;
-  /** The channel's namespace of `storage.kv`: the last command handled in each chat. */
+  /** The channel's namespace of `storage.kv`: the last command handled in each chat, and who each chat is with (`party.ts`). */
   store: KeyValueStore;
 }
 
@@ -54,6 +55,8 @@ export async function handleMessage(message: TelegramMessage, deps: InboxDeps, c
   const text = textOf(message);
   // The Worker sends only messages with text: one without is not this channel's to answer.
   if (text === undefined || message.from === undefined) throw new Error(`channel-telegram-webhook: message ${message.message_id} of ${key} has no text or no sender`);
+  // Who the chat is with, for the dashboard: kept from what this message says (party.ts).
+  await rememberChat(deps.store, key, message, ctx);
 
   const command = await commandOf(text, bot);
   if (command === "start" || command === "help" || command === "new" || command === "login") {

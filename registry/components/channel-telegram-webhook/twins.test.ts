@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 const POLLING = join(import.meta.dir, "../channel-telegram/files/src/pikit/channel-telegram");
 const WEBHOOK = join(import.meta.dir, "files/src/pikit/channel-telegram-webhook");
-const SHARED = ["format.ts", "format.test.ts", "transport.ts"];
+const SHARED = ["format.ts", "format.test.ts", "transport.ts", "party.ts"];
 
 for (const file of SHARED) {
   test(`${file} is the same in channel-telegram and channel-telegram-webhook`, async () => {

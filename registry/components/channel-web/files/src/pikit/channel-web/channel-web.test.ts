@@ -8,11 +8,13 @@
 import { afterEach, expect, test } from "bun:test";
 import { type ComponentDefinition, defineApp, defineComponent, halt, silentLogger } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
+import { describeConversation } from "@pikit/contracts";
+import { createConversationDescribeConformance, HOSTILE_NAME } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import { type ChatConfig, type ChatConversation, type ChatEvent, type ChatTranscriptEntry, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, PAGE_JSON_MAX, TITLE_MAX } from "./api.ts";
 import { chatIdFor, cleanTitle, keyOf, parseKey } from "./chat.ts";
 import { runEntryId } from "./entries.ts";
-import channelWeb, { createChannelWeb, NAME } from "./index.ts";
+import channelWeb, { createChannelWeb, NAME, usersPagePath } from "./index.ts";
 import { avatarHosts, cspOf } from "./assets.ts";
 import { maxBodyOf } from "./routes.ts";
 import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, OPERATOR, PIXEL, Runtime, router, SECRETS, type Served, secretsOf, serve, sse } from "./runtime.test-support.ts";
@@ -1025,3 +1027,55 @@ for (const c of createLifecycleConformance(() => {
 })) {
   test(`${c.group}: ${c.name}`, () => c.run());
 }
+
+// Who a conversation is with, for the dashboard: its user, as the accounts know them.
+for (const c of createConversationDescribeConformance(() => {
+  const accounts = new FakeAccounts();
+  const chatId = crypto.randomUUID();
+  return {
+    components: [secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, createChannelWeb({ accounts: accounts.wiring() })],
+    kind: "web",
+    async known() {
+      const ana = accounts.add("ana", "ana@example.com");
+      ana.name = "Ana López";
+      return {
+        key: keyOf("ana", chatId),
+        check(party) {
+          expect(party).toEqual({
+            name: "Ana López",
+            detail: "ana@example.com",
+            ids: [
+              { label: "User id", value: "ana" },
+              { label: "Chat id", value: chatId },
+            ],
+            link: { label: "Web user", path: "/channel-web?user=ana" },
+          });
+        },
+      };
+    },
+    // A user removed, or never there: by the key.
+    unknown: keyOf("nobody", chatId),
+    foreign: ["web:ana", "web:ana:not-a-chat-id", `web::${chatId}`, `web:ana:${chatId.toUpperCase()}`],
+    async hostile() {
+      accounts.add("eve").name = HOSTILE_NAME;
+      return keyOf("eve", chatId);
+    },
+  };
+})) {
+  test(`${c.group}: ${c.name}`, () => c.run());
+}
+
+test("a conversation's user with no name is named by their email; one the accounts cannot read is described by the key, logged", async () => {
+  const accounts = new FakeAccounts();
+  accounts.add("ana", "ana@example.com").name = " ";
+  const served = await serve([secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, createChannelWeb({ accounts: accounts.wiring() })]);
+  apps.push(served);
+  const chatId = crypto.randomUUID();
+  const ctx = served.app.context();
+  const describe = (key: string) => describeConversation(ctx, key);
+  expect(await describe(keyOf("ana", chatId))).toMatchObject({ name: "ana@example.com", link: { path: usersPagePath("ana") } });
+  accounts.list = async () => Promise.reject(new Error("the accounts are down"));
+  expect(await describe(keyOf("ana", chatId))).toEqual({ ids: [{ label: "User id", value: "ana" }, { label: "Chat id", value: chatId }] });
+  expect(served.logged.some((each) => each.message.includes("could not be read"))).toBe(true);
+  expect(usersPagePath("a b/c")).toBe("/channel-web?user=a%20b%2Fc");
+});

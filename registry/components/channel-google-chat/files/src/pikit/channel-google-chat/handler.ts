@@ -8,6 +8,8 @@
  *   route already told it: this is a guard), logged. A message from a bot, or with no name, is `done`
  *   with nothing admitted. Its text is the message's without the app's mention (`argumentText`, else
  *   `text` with the `USER_MENTION` annotations of bots removed).
+ *   - What it says of its space (its name, the person of a direct message) is kept for the dashboard
+ *     (party.ts `rememberSpace`, when it changed).
  *   - `/new` (alone, after the mention, or as a slash command) resets the conversation
  *     (`conversations.reset(key, undefined, ctx)`) once per message id (`command:<message name>` in
  *     `storage.kv` keeps what it said), and says so in the thread.
@@ -44,6 +46,7 @@ import { type AddOnEvent, type ChatMessage, type ChatSpace, type ChatUser, event
 import { type PieceIds, pieceIds } from "./ids.ts";
 import { NAME, parseConversationKey } from "./instance.ts";
 import { createSpaceThreading, threadOf } from "./key.ts";
+import { rememberSpace } from "./party.ts";
 import { quoteOf } from "./quote.ts";
 import { strangerText } from "./route.ts";
 import { type AdmissionDeps, ChatApiError, type EventHandler, type HandledEvent } from "./types.ts";
@@ -146,6 +149,8 @@ export function createEventHandler(deps: AdmissionDeps): EventHandler {
     if (parts === undefined || parts.instance !== instance.instance || parts.space !== space.name) {
       throw new Error(`channel-google-chat: the message ${id} came with the key "${key}", which is not a conversation of ${instance.instance} in ${space.name}`);
     }
+    // Who the space is with, for the dashboard: kept from what this message says (party.ts).
+    await rememberSpace(store, space, sender, ctx);
     // Where the channel's own replies go: the message's thread, unless the chat has none.
     const thread = (await threading.threaded(space, ctx)) ? threadOf(message, space.name) : undefined;
 

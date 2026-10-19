@@ -25,6 +25,9 @@
  *   With an `outbound.queue` installed (`outbound-durable`), answers are enqueued, stored before
  *   they are sent, through the same transports; without one, each piece is sent directly and marked,
  *   so a crash resends at most the piece in flight, marked `↻ `.
+ * - Who a chat is with, for the dashboard (its stage of `conversation.describe`, `party.ts`): the
+ *   names its allowed user's messages carried (a person's, a group's title), kept in its namespace of
+ *   `storage.kv`; never asked of Telegram.
  * - Replies of its own (commands, a stranger told their id) and "typing…" go through `replies.ts`.
  *
  * It refuses to start when a bot has no valid token, no allowed user, or a webhook (Telegram
@@ -37,9 +40,10 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type AgentResult, type AnswerDelivery, type ChannelTransport, type DeliveryPolicy, isDashboardRequest, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
+import { type AgentResult, type AnswerDelivery, type ChannelTransport, type DeliveryPolicy, describeStage, isDashboardRequest, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, chatIn } from "./account.ts";
+import { createDescriber } from "./party.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, TelegramError } from "./api.ts";
 import { handleUpdate, type InboundDeps, tellNotTaken } from "./inbound.ts";
 import { type Poller, startPolling } from "./poller.ts";
@@ -92,6 +96,9 @@ export default defineComponent({
     const health = pikit.useOptional("health");
 
     let running: { bots: RunningBot[]; answers: AnswerDelivery } | undefined;
+
+    // Who each chat is with, for the dashboard: what its messages said (party.ts).
+    pikit.pipeline("conversation.describe", describeStage(createDescriber(accountsOf(config.accounts), () => storage.get().namespace("channel-telegram"))), { id: "channel-telegram" });
 
     /** The bot and chat of a conversation this channel made, or `undefined` for another channel's. */
     const find = (bots: readonly RunningBot[], key: string): { bot: RunningBot; chatId: number } | undefined => {

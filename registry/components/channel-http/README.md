@@ -4,7 +4,8 @@ Talk to an agent over HTTP: send a message, get the answer in the response.
 
 - **Provides:** `http.route`: `POST /v1/messages`, `GET /v1/conversations/:id/messages/:messageId`
   and `POST /v1/conversations/:id/reset`. It also adds the stage `channel-http-bearer` to
-  `http.authenticate`.
+  `http.authenticate`, and one to `conversation.describe`: who a conversation is with, for the
+  dashboard: the client's conversation id, all the channel knows.
 - **Requires:** `secrets` (the token), `conversations.registry`, `agent.runtime`. A server (such as
   `server-bun`) serves the routes, and a router (such as `router-basic`) picks the agent.
 - **Uses, if installed:** `agent.submissions` (runtime-pi provides it): a message's outcome can be

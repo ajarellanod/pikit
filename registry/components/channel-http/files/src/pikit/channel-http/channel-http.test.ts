@@ -18,7 +18,7 @@ import {
   type HttpRoute,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createMemorySubmissions, type RecordingSubmissions } from "@pikit/contracts/testing";
+import { createConversationDescribeConformance, createMemorySubmissions, type RecordingSubmissions } from "@pikit/contracts/testing";
 import channelHttp from "./index.ts";
 
 const TOKEN = "test-token-0123456789abcdef";
@@ -224,6 +224,22 @@ test("what setup declares: component.json's provides / requires / optional come 
   });
   expect(app.describe().pipelines["http.authenticate"]).toEqual([{ id: "channel-http-bearer", priority: 100 }]);
 });
+
+// Who a conversation is with, for the dashboard: the client's conversation id, once a message made it.
+for (const c of createConversationDescribeConformance(() => ({
+  components: [secretsWith({ PIKIT_HTTP_TOKEN: TOKEN }), memoryRegistry(), router, scriptedRuntime().component, channelHttp],
+  kind: "http",
+  known: async () => ({
+    key: "http:order-42",
+    check(party) {
+      expect(party).toEqual({ name: "order-42", detail: "HTTP API", ids: [{ label: "Conversation id", value: "order-42" }] });
+    },
+  }),
+  unknown: "http:never-seen",
+  foreign: ["http:a b", `http:${"x".repeat(129)}`, "http:a/b"],
+}))) {
+  test(`${c.group}: ${c.name}`, () => c.run());
+}
 
 test("no stage in http.authenticate leaves no verdict: the request is not authenticated", async () => {
   const app = await defineApp({ components: [], logger: silentLogger }).create();

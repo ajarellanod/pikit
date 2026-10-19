@@ -30,11 +30,13 @@ import {
 import type { WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import {
+  createConversationDescribeConformance,
   createMemoryFeed,
   createMemoryKeyValueStorage,
   createMemoryMailbox,
   createMemorySubmissions,
   createMemoryWakeups,
+  HOSTILE_NAME,
   type RecordingSubmissions,
 } from "@pikit/contracts/testing";
 import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
@@ -45,6 +47,7 @@ import { LOGIN_COOL_DOWN_MS } from "./login.ts";
 import { afterDeploy } from "./deploy.ts";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.test-support.ts";
 import channelTelegramWebhook, { NAME, worker, WORKER_NAME } from "./index.ts";
+import { partyKey, type SeenChat } from "./party.ts";
 import { POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
 
 const OWNER = { id: 1001, first_name: "Ada", username: "ada" };
@@ -1084,3 +1087,60 @@ test("a request to Telegram times out with a timer cleared once it settles, so n
   stop.abort(new Error("stopping"));
   expect(await stopped.catch((error: unknown) => (error as Error).message)).toBe("stopping");
 });
+
+// ---------------------------------------------------------------------------------------------
+// Who a chat is with, for the dashboard (party.ts, channel-telegram's): what its messages said, kept
+// in the object's storage.kv, where admin-api asks.
+
+for (const c of createConversationDescribeConformance(() => {
+  const telegram = fake();
+  const kv = createMemoryKeyValueStorage();
+  const { submissions } = createMemorySubmissions();
+  const server = httpServer();
+  const secrets = secretsFor(telegram);
+  const key = `telegram:${OWNER.id}`;
+  let registered = false;
+  /** `user` writes `text` to the bot (the webhook registered first), and resolves once what it said of the chat is kept. */
+  const write = async (user: { id: number; first_name: string }, text: string, kept: string): Promise<void> => {
+    if (!registered) {
+      registered = true;
+      expect(await afterDeploy({ url: server.url(), config: { apiBase: telegram.url, accounts: [] }, get: (name) => secrets[name as keyof typeof secrets], say: () => {} })).toEqual([]);
+    }
+    expect((await telegram.write(user, text)).status).toBe(200);
+    await until(async () => (await kv.namespace(NAME).get<SeenChat>(partyKey(key)))?.firstName === kept, "what the chat's message said kept");
+  };
+  return {
+    components: [
+      secretsWith(secrets),
+      memoryRegistry([]),
+      router,
+      scriptedRuntime(submissions).component,
+      submissionsWith(submissions),
+      kvWith(kv),
+      createMemoryWakeups({ retryMs: 50 }),
+      channelTelegramWebhook,
+      createMemoryMailbox(),
+      worker,
+      server.component,
+    ],
+    config: configFor(telegram),
+    kind: "telegram",
+    async known() {
+      await write({ ...OWNER, last_name: "Lovelace" } as typeof OWNER, "hello", OWNER.first_name);
+      return {
+        key,
+        check(party) {
+          expect(party).toEqual({ name: "Ada Lovelace", detail: "@ada, direct message", ids: [{ label: "Chat id", value: String(OWNER.id) }] });
+        },
+      };
+    },
+    unknown: "telegram:4242",
+    foreign: [`telegram:ops:${OWNER.id}`, "telegram:abc"],
+    async hostile() {
+      await write({ id: OWNER.id, first_name: HOSTILE_NAME }, "hello", HOSTILE_NAME.slice(0, 256));
+      return key;
+    },
+  };
+})) {
+  test(`${c.group}: ${c.name}`, () => c.run(), 10_000);
+}

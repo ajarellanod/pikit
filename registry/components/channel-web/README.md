@@ -11,7 +11,11 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
 
 - **Provides:** `http.route`: the chat API (`/chat/api/*`, `api.ts`), better-auth's routes
   (`/chat/api/auth/*`), the page's files (`/chat/*`), and the operator's routes over the users
-  (`/admin/api/channel-web/*`, `admin-api.ts`).
+  (`/admin/api/channel-web/*`, `admin-api.ts`). A stage of the `conversation.describe` pipeline: who a
+  conversation is with, for the dashboard: its user's name (else email) and email, the user and chat
+  ids, and a link to the Web users page showing that user (`/channel-web?user=<id>`, which the view
+  opens searching for them). On Cloudflare the conversation's object reads the user with one call to
+  the accounts actor.
 - **Requires:** `secrets`, `conversations.registry`, `agent.runtime`, `agent.observe` (the live
   view), `agent.submissions` (answers, and the states of messages whose run's end no event brought),
   `storage.kv` (the delivery cursor; whose each title is), `storage.sql` (accounts, conversations, transcripts). A router

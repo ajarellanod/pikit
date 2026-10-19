@@ -18,6 +18,7 @@ import {
   answerCall,
   answerStream,
   callResult,
+  describeConversation,
   type JsonValue,
   streamResult,
 } from "@pikit/contracts";
@@ -449,4 +450,43 @@ test("the Worker refuses to start without CHANNEL_WEB_AUTH_SECRET", async () => 
   const app = await defineApp({ components: [secretsOf({}), mailbox, createChannelWebWorker(new FakeAccounts().wiring())], logger: silentLogger, target: "durable" }).create();
   const failed = (await app.start().catch((error: unknown) => error)) as Error;
   expect(String(failed.cause)).toContain("CHANNEL_WEB_AUTH_SECRET");
+});
+
+test("who a conversation is with, in its object: its user read from the accounts actor (the remote accounts: one call), never from accounts of its own", async () => {
+  const accounts = new FakeAccounts();
+  accounts.add("ana", "ana@example.com").name = "Ana";
+  const made: string[] = [];
+  const wiring = {
+    local: () => {
+      throw new Error("a conversation's object makes no accounts of its own");
+    },
+    remote: () => {
+      made.push("remote");
+      return accounts;
+    },
+    answer: () => {},
+  };
+  const objectActors = defineComponent({
+    name: "actors-test",
+    setup(pikit) {
+      pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {}, answerStream: () => {} });
+      pikit.provide("actor.mailbox", { send: async () => {}, call: async () => null, stream: async () => (async function* () {})() });
+    },
+  });
+  const app = await defineApp({
+    components: [secretsOf(), new Runtime(String).component(), kvOf(), sqliteStorage(), router, createChannelWeb({ accounts: wiring }), objectActors],
+    target: "durable",
+    logger: silentLogger,
+  }).create();
+  await app.start();
+  try {
+    const chatId = crypto.randomUUID();
+    const describe = (userId: string) => describeConversation(app.context(), `web:${userId}:${chatId}`);
+    expect(await describe("ana")).toMatchObject({ name: "Ana", detail: "ana@example.com", link: { path: "/channel-web?user=ana" } });
+    expect(await describe("ana")).toMatchObject({ name: "Ana" });
+    // Made once, at the first description.
+    expect(made).toEqual(["remote"]);
+  } finally {
+    await app.stop();
+  }
 });

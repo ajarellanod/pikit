@@ -18,6 +18,10 @@
  *   - "typing…" while a message waits for its run: the wakeup `channel-telegram-webhook.typing`
  *     (`typing.ts`).
  *
+ * Who a chat is with, for the dashboard (its stage of `conversation.describe`, `party.ts`, as
+ * channel-telegram's): the names its messages carried, kept in the object's `storage.kv`, where
+ * admin-api asks.
+ *
  * Delivery runs at every start, whenever a message arrives, and whenever a run of one of its
  * conversations ends (`agent.settled`, `agent.failed`): an answer that ended while nothing ran is
  * delivered at the next run (K6).
@@ -32,9 +36,10 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import { type AgentResult, type AnswerDelivery, type DeliveryPolicy, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
+import { type AgentResult, type AnswerDelivery, type DeliveryPolicy, describeStage, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
 import { ACCOUNT_NAME, accountsOf } from "./account.ts";
+import { createDescriber } from "./party.ts";
 import { registerInbox } from "./actor-inbox.ts";
 import { createTelegramApi } from "./api.ts";
 import { type Bot, createBot, findBot, TELEGRAM_TIMEOUT_MS } from "./bot.ts";
@@ -88,6 +93,9 @@ export default defineComponent({
     const outbound = pikit.useOptional("outbound.queue");
     const accounts = accountsOf(config.accounts);
     let running: Running | undefined;
+
+    // Who each chat is with, for the dashboard: what its messages said, kept in this object (party.ts).
+    pikit.pipeline("conversation.describe", describeStage(createDescriber(accounts, () => storage.get().namespace(NAME))), { id: NAME });
 
     /**
      * One update the Worker sent, checked (the mailbox carries JSON), handled by `handle`. Once it is

@@ -44,11 +44,14 @@
  * Guarantee: a message accepted by `dispatch` (any answer but 4xx/5xx before it) is in the session
  * and will be answered there, at least once.
  *
+ * Who a conversation is with, for the dashboard (its stage of `conversation.describe`): its client's
+ * conversation id, all the channel knows of it.
+ *
  * Target: `server` (it needs a server component to serve its route).
  */
 
 import { type AppContext, defineComponent, Halt } from "@pikit/core";
-import { admitInbound, type AgentResult, foldParts, type InboundMessage, type RunSettlement } from "@pikit/contracts";
+import { admitInbound, type AgentResult, type ConversationParty, describeStage, foldParts, type InboundMessage, type RunSettlement } from "@pikit/contracts";
 import Type from "typebox";
 import { bearerToken, type Digest, digest, matches, MIN_TOKEN_LENGTH, TOKEN_SECRET } from "./auth.ts";
 import { CONVERSATION_ID, MESSAGE_ID, readMessageBody } from "./body.ts";
@@ -78,6 +81,16 @@ const Config = Type.Object({
 
 /** The conversation key of a client's conversation id. */
 export const conversationKey = (conversationId: string): string => `${CHANNEL}:${conversationId}`;
+
+/**
+ * Who a conversation of this channel is with (`conversation.describe`): the client's own conversation
+ * id, which is all the channel knows (its sender is the token's bearer). `undefined` for another key.
+ */
+export function describeKey(key: string): ConversationParty | undefined {
+  const conversationId = key.startsWith(`${CHANNEL}:`) ? key.slice(CHANNEL.length + 1) : "";
+  if (!new RegExp(CONVERSATION_ID).test(conversationId)) return undefined;
+  return { name: conversationId, detail: "HTTP API", ids: [{ label: "Conversation id", value: conversationId }] };
+}
 
 const json = (status: number, body: unknown): Response => Response.json(body, { status });
 const UNAUTHORIZED = (): Response =>
@@ -220,6 +233,9 @@ export default defineComponent({
       if (reset === undefined) return json(404, { error: "not_found" });
       return json(200, { conversationId, previousRuntimeConversationId: reset.previousConversationId, runtimeConversationId: reset.newConversationId });
     });
+
+    // Who its conversations are with, for the dashboard: the client's conversation id.
+    pikit.pipeline("conversation.describe", describeStage({ describe: async (key) => describeKey(key) }), { id: "channel-http" });
 
     return {
       async start() {

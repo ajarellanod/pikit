@@ -17,6 +17,7 @@ import {
   type ConversationRef,
   type ConversationRegistry,
   DeliveryError,
+  describeConversation,
   type DeliveryReceipt,
   type KeyValueStorage,
   type OutboundMessage,
@@ -24,9 +25,10 @@ import {
   type PendingConversation,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createMemoryFeed, createMemoryKeyValueStorage, createMemorySubmissions, type RecordingSubmissions } from "@pikit/contracts/testing";
+import { createConversationDescribeConformance, createMemoryFeed, createMemoryKeyValueStorage, createMemorySubmissions, HOSTILE_NAME, type RecordingSubmissions } from "@pikit/contracts/testing";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.test-support.ts";
-import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
+import { type Account, accountsOf, chatIn, conversationKeyOf } from "./account.ts";
+import { partyKey, partyOf, type SeenChat, seenChatOf } from "./party.ts";
 import { createTelegramApi } from "./api.ts";
 import channelTelegram from "./index.ts";
 import { DOWN_AFTER_FAILURES, startPolling } from "./poller.ts";
@@ -827,4 +829,113 @@ test("health: Telegram unreachable is reported as such", async () => {
   await poller.stop();
 
   expect(reports[0]).toEqual(["bot", "degraded", "getUpdates failed: unreachable"]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Who a chat is with, for the dashboard (party.ts): what its messages said, kept in storage.kv.
+
+/** Resolves once the channel kept what a message of `key` said of its chat, as `name` (a first name). */
+async function chatKept(kv: KeyValueStorage, key: string, name: string): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while ((await kv.namespace("channel-telegram").get<SeenChat>(partyKey(key)))?.firstName !== name) {
+    if (Date.now() > deadline) throw new Error(`what ${key}'s messages say of it was not kept`);
+    await Bun.sleep(5);
+  }
+}
+
+for (const c of createConversationDescribeConformance(() => {
+  const telegram = startFakeTelegram();
+  const kv = createMemoryKeyValueStorage();
+  const { submissions } = createMemorySubmissions();
+  const key = `telegram:${OWNER.id}`;
+  return {
+    components: [
+      secretsWith({ TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: String(OWNER.id) }),
+      memoryRegistry([]),
+      router,
+      scriptedRuntime(new Set(), submissions).component,
+      submissionsWith(submissions),
+      kvWith(kv),
+      channelTelegram,
+    ],
+    config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
+    kind: "telegram",
+    async known() {
+      telegram.say({ ...OWNER, last_name: "Lovelace" }, "hello");
+      await chatKept(kv, key, OWNER.first_name);
+      return {
+        key,
+        check(party) {
+          expect(party).toEqual({ name: "Ada Lovelace", detail: "@ada, direct message", ids: [{ label: "Chat id", value: String(OWNER.id) }] });
+        },
+      };
+    },
+    unknown: "telegram:4242",
+    // Not a bot this channel runs, not a chat id.
+    foreign: [`telegram:ops:${OWNER.id}`, "telegram:abc", "telegram:1.5"],
+    async hostile() {
+      telegram.say({ id: OWNER.id, first_name: HOSTILE_NAME }, "hello");
+      // Kept as Telegram sent it, at most 256 characters; cleaned when shown.
+      await chatKept(kv, key, HOSTILE_NAME.slice(0, 256));
+      return key;
+    },
+    dispose: () => telegram.stop(),
+  };
+})) {
+  test(`${c.group}: ${c.name}`, () => c.run(), 10_000);
+}
+
+test("who a chat is with: a person by name, else @username; a group by its title; a chat with no record by its id's sign; a named bot's instance", () => {
+  const [main, ops] = accountsOf(["ops"]) as [Account, Account];
+  const chat = (seen?: SeenChat, id = 7, account = main) => partyOf(account, id, seen);
+  expect(chat({ type: "private", firstName: "Ada" })).toEqual({ name: "Ada", detail: "Direct message", ids: [{ label: "Chat id", value: "7" }] });
+  expect(chat({ type: "private", username: "ada" })).toEqual({ name: "@ada", detail: "Direct message", ids: [{ label: "Chat id", value: "7" }] });
+  expect(chat({ type: "supergroup", title: "Ops team" }, -100)).toEqual({ name: "Ops team", detail: "Group", ids: [{ label: "Chat id", value: "-100" }] });
+  expect(chat(undefined, -100)).toEqual({ detail: "Group", ids: [{ label: "Chat id", value: "-100" }] });
+  expect(chat(undefined, 7, ops)).toEqual({
+    detail: "Direct message",
+    ids: [
+      { label: "Chat id", value: "7" },
+      { label: "Account", value: "ops" },
+    ],
+    instance: "ops",
+  });
+  expect(seenChatOf({ message_id: 1, date: 0, chat: { id: -5, type: "group", title: "Ops" }, from: { id: 1, is_bot: false, first_name: "Ada" } })).toEqual({ type: "group", title: "Ops" });
+});
+
+test("a named bot's chats are described with its account; a message of a stranger keeps nothing", async () => {
+  const kv = createMemoryKeyValueStorage();
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  const ops = telegram.addBot(OPS_TOKEN, OPS_BOT);
+  const { submissions } = createMemorySubmissions();
+  const secrets = {
+    TELEGRAM_BOT_TOKEN: "123456789:fake-token-for-tests",
+    TELEGRAM_ALLOWED_USERS: String(OWNER.id),
+    TELEGRAM_OPS_BOT_TOKEN: OPS_TOKEN,
+    TELEGRAM_OPS_ALLOWED_USERS: String(OPERATOR.id),
+  };
+  const app = await defineApp({
+    components: [secretsWith(secrets), memoryRegistry([]), router, scriptedRuntime(new Set(), submissions).component, submissionsWith(submissions), kvWith(kv), channelTelegram],
+    config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1, accounts: ["ops"] } },
+    logger: silentLogger,
+  }).create();
+  apps.push(app);
+  await app.start();
+  ops.say(OPERATOR, "hi");
+  telegram.say(STRANGER, "let me in");
+  await chatKept(kv, `telegram:ops:${OPERATOR.id}`, OPERATOR.first_name);
+  await telegram.sentCount(1);
+
+  const party = await describeConversation(app.context(), `telegram:ops:${OPERATOR.id}`);
+  expect(party).toEqual({
+    name: "Olga",
+    detail: "Direct message",
+    ids: [
+      { label: "Chat id", value: String(OPERATOR.id) },
+      { label: "Account", value: "ops" },
+    ],
+    instance: "ops",
+  });
+  expect(await kv.namespace("channel-telegram").get(partyKey(`telegram:${STRANGER.id}`))).toBeUndefined();
 });

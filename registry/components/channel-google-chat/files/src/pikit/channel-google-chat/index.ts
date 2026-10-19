@@ -26,6 +26,8 @@
  * - The placeholder follows the runs of its conversations (never a dashboard request): `agent.started`
  *   creates it, `agent.partial` writes the answer into it, `agent.settled` / `agent.failed` delete what
  *   has nothing to send. A wakeup at start (`channel-google-chat.sweep`) deletes a crash's leftovers.
+ * - Who a conversation is with, for the dashboard (its stage of `conversation.describe`,
+ *   party.ts): the space's name, or the person of a direct message, as its messages said.
  * - The `conversations` setting is declared in `start`, when `settings` is installed (its dashboard
  *   section: `settings/index.tsx` of the component).
  *
@@ -34,12 +36,13 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type AgentResult, type ChannelTransport, type DeliveryPolicy, isDashboardRequest, type JsonValue, startAnswerDelivery } from "@pikit/contracts";
+import { type AgentResult, type ChannelTransport, type DeliveryPolicy, describeStage, isDashboardRequest, type JsonValue, startAnswerDelivery } from "@pikit/contracts";
 import { CALL_TIMEOUT_MS } from "./api.ts";
 import { createClickHandler, createQuestionRecords } from "./click.ts";
 import { type AddOnEvent, type AddOnResponse, readEvent } from "./event.ts";
 import { createEventHandler } from "./handler.ts";
 import { Config, createConversationSettings, type Instance, instanceOfKey, instancesOf, NAME } from "./instance.ts";
+import { createDescriber } from "./party.ts";
 import { createAnswerTargets } from "./key.ts";
 import { createPlaceholderMarks, createPlaceholders } from "./placeholder.ts";
 import { drawnQuestion } from "./question-cards.ts";
@@ -108,6 +111,8 @@ export default defineComponent({
     for (const instance of instances) {
       pikit.provideKeyed("http.route", `POST ${instance.path}`, (request, ctx) => serve(running?.apps.get(instance.instance)?.route, request, ctx));
     }
+    // Who each conversation is with, for the dashboard: what its space's messages said (party.ts).
+    pikit.pipeline("conversation.describe", describeStage(createDescriber(instances, () => storage.get().namespace(NAMESPACE))), { id: NAME });
 
     /** The running instance whose conversation `key` is, or `undefined` (another channel's, or not running). */
     const appOf = (key: string): App | undefined => {

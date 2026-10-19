@@ -304,6 +304,21 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   const benView = live(await ben.send(`/chat/api/conversations/${own.id}/events`));
   await benView.until((seen) => seen.length > 0);
 
+  // Who it is with, in the dashboard: her name and email, read in her conversation's object from the accounts actor.
+  const listedParty = (await (await fetch(`${HTTPS}/admin/api/conversations/${id(`${key}~1`)}`, { headers: OPERATOR })).json()) as { party?: unknown };
+  expect(listedParty.party).toEqual({
+    channel: { kind: "web", label: "Web chat" },
+    name: "Ana",
+    detail: "ana@example.com",
+    ids: [
+      { label: "User id", value: me.user.id },
+      { label: "Chat id", value: chat },
+      { label: "Key", value: key },
+      { label: "Conversation", value: "1" },
+    ],
+    link: { label: "Web user", path: `/channel-web?user=${encodeURIComponent(me.user.id)}` },
+  });
+
   // The operator's follow-up in Ana's conversation (admin-api, the admin token): answered there, never shown to her.
   const before = view.events.length;
   const followUp = await fetch(`${HTTPS}/admin/api/conversations/${id(`${key}~1`)}/messages`, {

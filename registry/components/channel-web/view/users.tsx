@@ -7,7 +7,8 @@
  * A link is shown once, in the dialog that made it (`link.tsx`), and in nothing else: the list never
  * carries one. The list is the server's, 20 users a page, newest first: the search and the state's
  * filter are the route's (`q`, `state`), so the chips' counts and the footer's total are of every user,
- * not of a page read.
+ * not of a page read. A link with `?user=<id>` (a conversation's party, in the conversations' views)
+ * opens it searching for that user.
  */
 
 import { Calendar, Clock, Group, KeyBack, LogIn, Mail, Prohibition, Trash, Undo, User, UserBadgeCheck, UserPlus } from "iconoir-react";
@@ -62,10 +63,13 @@ function refusal(thrown: unknown): Error {
   return asError(thrown);
 }
 
+/** The user a link names (`/channel-web?user=<id>`, a conversation's party in the dashboard): the page opens searching for them. */
+const linkedUser = (): string => new URLSearchParams(window.location.search).get("user")?.trim() ?? "";
+
 export function UsersPage() {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(linkedUser);
   /** The search the route is asked: the query once the typing stops. */
-  const [needle, setNeedle] = useState("");
+  const [needle, setNeedle] = useState(linkedUser);
   const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState<Dialog>();

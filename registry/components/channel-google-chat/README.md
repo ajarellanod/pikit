@@ -9,7 +9,10 @@ reply's context; the agent's questions (`askUser`, [tool-ask-user](../tool-ask-u
 asked with buttons and forms.
 
 - **Provides:** `http.route`: `POST /google-chat` (and `POST /google-chat/<name>` per named app), the
-  app's endpoint.
+  app's endpoint. A stage of the `conversation.describe` pipeline: who a conversation is with, for the
+  dashboard (a space's name, the person of a direct message, the space, thread and named app), from
+  what its messages carried, kept in its `storage.kv` namespace under `party:<space>` (written only
+  when it changed; Google is never asked).
 - **Requires:** `secrets`, `conversations.registry`, `agent.runtime`, `agent.submissions`,
   `storage.kv`, `wakeups`. **Uses, if installed:** `outbound.queue` (answers stored before they are
   sent, with a receipt for each; without it, answers survive a restart too, from the runtime's

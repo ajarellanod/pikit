@@ -3,7 +3,10 @@
 Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.
 
 - **Provides:** `http.route` (`POST /telegram`, and `POST /telegram/<name>` per extra bot, where
-  Telegram posts; `GET /telegram/setup`, which registers the webhooks).
+  Telegram posts; `GET /telegram/setup`, which registers the webhooks). The object's half adds a stage
+  to the `conversation.describe` pipeline, as channel-telegram does (`party.ts`, the same file):
+  who a chat is with, from what its messages carried, kept in the object's `storage.kv` under
+  `party:<key>`.
 - **Requires:** in the Worker's half, `secrets` and `actor.mailbox`; in the object's half, `secrets`,
   `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv`, `wakeups` and
   `actor.inbox`, where it registers the handler of `telegram.update`. A router (such as
