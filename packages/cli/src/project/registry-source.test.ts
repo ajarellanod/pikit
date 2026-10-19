@@ -237,12 +237,19 @@ function repositoryWith(extra: Manifest[]): string {
 
 test("a second server provider of storage.sql leaves the repository's presets composing: they name their storage", () => {
   const sqlite = openRegistry(DEFAULT_REGISTRY).manifest("storage-sqlite");
-  const root = repositoryWith([{ ...sqlite, name: "storage-postgres", description: "A second server storage.sql." }]);
+  // A second provider of all storage-sqlite provides (storage.sql and storage.sqlite).
+  const root = repositoryWith([{ ...sqlite, name: "storage-postgres", description: "A second server storage.sql and storage.sqlite." }]);
   expect(checkPresets(root)).toEqual([]);
-  // A preset that left its storage to the offer: with two providers nothing is offered, and it says so.
+  // A preset that left its storage to the offer: with two providers nothing is offered, and it says so,
+  // as it is and with each answer and feature it offers (whichever those are), and of nothing else.
   const http = readFileSync(join(root, "presets", "http.yaml"), "utf8");
   writeFileSync(join(root, "presets", "leaning.yaml"), http.replace(/^\s+- storage-sqlite\n/m, ""));
-  expect(checkPresets(root)).toContain('presets/leaning.yaml: on server, runtime-pi requires "storage.sql", which nothing provides');
+  const problems = checkPresets(root);
+  expect(problems).toContain('presets/leaning.yaml: on server, runtime-pi requires "storage.sqlite", which nothing provides');
+  expect(problems).toContain('presets/leaning.yaml: on server, storage-kv-sql requires "storage.sql", which nothing provides');
+  for (const problem of problems) {
+    expect(problem).toMatch(/^presets\/leaning\.yaml: (with [\w -]+, )?on server, [\w-]+ requires "storage\.sql(ite)?", which nothing provides$/);
+  }
 });
 
 test("a second Cloudflare provider of storage.kv leaves cloudflare-minimal composing: it names its storage", () => {
