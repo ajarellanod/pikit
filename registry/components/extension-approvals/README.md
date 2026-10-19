@@ -40,10 +40,17 @@ call it claimed leaves that approval claimed and unexecuted).
    decided by telegram:12345.` or `[approvals] Not recorded: <why>.` A redelivered answer changes
    nothing. A store it cannot reach throws: the channel does not acknowledge, the platform redelivers.
 4. The model calls `bash` with the same arguments: `beforeTool` hashes the call as it will run and
-   claims an approval of it from this conversation, for this tool task (`<conversation>:<task>`).
-   pi-durable runs `beforeTool` again when a task recovers before its intent was committed: the same
-   claimant gets the same approval. A second call, other arguments or another conversation get none
-   and are refused. A store that fails blocks the call.
+   claims an approval of it from this conversation's origin, for this tool task
+   (`<conversation>:<task>`). pi-durable runs `beforeTool` again when a task recovers before its
+   intent was committed: the same claimant gets the same approval. A second call, other arguments or
+   another conversation's tree get none and are refused. A store that fails blocks the call.
+
+**A delegated agent** (tool-delegate) asks for the person in the chat, not for its task: the approval
+is proposed for its conversation's origin (`originOf(CONVERSATION)`, `requestedBy.conversation`), the
+conversation the person talks in. Its question reaches that chat with the delegating agent's answer
+(the task's report, or the `delegate` call's result, carries it); admin-approvals tells that
+conversation an operator's decision; and any conversation of that tree (the chat, a new delegation
+from it) may claim it, none of another tree.
 5. `afterTool` settles it: `executed`, or `failed` with the error's first line. A call interrupted
    after its intent (an `unsafe` tool) is not run again and its approval stays `claimed`.
 

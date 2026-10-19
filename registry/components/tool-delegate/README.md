@@ -76,8 +76,16 @@ Each sees only the tasks its own conversation started: another's id is an unknow
   logged and delivered like any answer.
 - **A task's key is the call's**: `delegate:<depth>:<tool call's task id>`. This tool makes it and
   reads a conversation's depth from it. The child conversation's channel (`ConversationRef.channel`)
-  is `delegate`. A call made again after a crash (replay `safe`) finds the
-  child it created and the input it submitted, and only waits again.
+  is `delegate`; its origin (`ConversationRef.origin`), the conversation the person talks in, is the
+  runtime's to record, so the child's memory, scheduled prompts and approvals are that person's
+  (`originOf`). A call made again after a crash (replay `safe`) finds the child it created and the
+  input it submitted, and only waits again.
+- **What the child asks the person reaches them**: a completed task's outcome carries its run's parts
+  (a `question` its `askUser` or `request_approval` asked). Waited for, the `delegate` call's result
+  carries them (`withParts`); not waited for, the task's report does (`AgentRequest.parts`). Either
+  way they go with the answer of this conversation's run, which its channel delivers, and the model
+  reads them as shown to the person (`partsNote`), so it does not ask again. The answer comes back
+  to this conversation as a message: the agent hands it on with a new delegation.
 - **The tasks not waited for** are the runtime's `list`, `steer` and `cancel` (`AGENT_DELEGATION`),
   which read the calling conversation's own record of them (so another's are not found, and a restart
   loses nothing). Replay `safe`: listing only reads, a steer's request id is its call's (a rerun sends
@@ -102,6 +110,9 @@ Each sees only the tasks its own conversation started: another's id is an unknow
 - The runtime's side (`packages/pi-adapter/src/delegation.test.ts`): the child as the other agent, a
   rerun after a crash, a stop that reaches the child, background tasks across a restart, a stable id,
   the list after a restart, a steer that joins the run and one that comes after its last tool round,
-  a cancel reported once, and another conversation's id `not_found`.
+  a cancel reported once, another conversation's id `not_found`, the origin two delegations deep and
+  after a restart, and the child's parts in `run`'s outcome and in the report, once.
+- `tests/acceptance/team-bases.test.ts`: a delegated worker's approval asked, decided in the chat and
+  used by the chat's tree once (never by another's), its memory and its scheduled prompt.
 
 Design note: [features/subagents.md](https://github.com/ajarellanod/pikit/blob/main/features/subagents.md).

@@ -8,8 +8,8 @@
 
 import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { CONVERSATION, type ConversationRef } from "@pikit/contracts";
-import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, type DelegatedOutcome, type DelegatedTask } from "@pikit/pi-adapter/tools";
+import { CONVERSATION, type ConversationRef, type MessagePart } from "@pikit/contracts";
+import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, type DelegatedOutcome, type DelegatedTask, PARTS_DETAIL } from "@pikit/pi-adapter/tools";
 import toolDelegate, {
   CANCEL_TOOL,
   createCancelTool,
@@ -110,6 +110,16 @@ test("each outcome is what the model reads: an answer, or an error", async () =>
   expect(textOf(await call({ agent: "researcher", task: "x" }, delegation({ kind: "completed", text: "" })))).toBe('The agent "researcher" answered:\n\n(nothing)');
   await expect(call({ agent: "researcher", task: "x" }, delegation({ kind: "failed", message: "no model" }))).rejects.toThrow('the agent "researcher" could not do the task: no model');
   await expect(call({ agent: "researcher", task: "x" }, delegation({ kind: "aborted" }))).rejects.toThrow("was stopped before it answered");
+});
+
+test("what the child asked the person goes with the call's result, as its parts, and the model reads not to repeat it", async () => {
+  const question = { type: "question", fallback: "Pay acme 10? Answer yes or no." } as unknown as MessagePart;
+  const result = await call({ agent: "researcher", task: "x" }, delegation({ kind: "completed", text: "", parts: [question] }));
+
+  expect(result.details).toEqual({ [PARTS_DETAIL]: [question] as never });
+  expect(textOf(result)).toBe('The agent "researcher" answered:\n\n(nothing)\n\n[The person is shown what follows with your answer, as it is: do not repeat it.]\n\nPay acme 10? Answer yes or no.');
+  // None: no details at all.
+  expect((await call({ agent: "researcher", task: "x" })).details).toBeUndefined();
 });
 
 test("a delegated task always waits for its own delegations, and goes no deeper than maxDepth", async () => {

@@ -10,15 +10,17 @@
  *   the store refuses a text that looks like a credential, and the model reads why.
  * - **`forget`** removes one by id (safe: deleting twice is deleting once); **`recall`** searches
  *   (read-only).
- * - **Whose memory**: `scopeOf`, the conversation's key and agent today (one chat is one person). The
- *   only place to change when linking two keys into one person comes.
+ * - **Whose memory**: `scopeOf`, the agent of the conversation and the key of its origin (one chat is
+ *   one person): a delegated agent keeps and reads its own memory of the person behind the task
+ *   (`originOf(CONVERSATION)`), never of the task's key. The only place to change when linking two keys
+ *   into one person comes.
  *
  * Targets: `server` and `durable`: it imports nothing platform-specific.
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineComponent } from "@pikit/core";
-import { CONVERSATION } from "@pikit/contracts";
-import { ConversationDoc, defineExtension, defineTool, type Extension, section } from "@pikit/pi-adapter/extensions";
+import { CONVERSATION, type ConversationRef, originOf } from "@pikit/contracts";
+import { defineExtension, defineTool, type Extension, section } from "@pikit/pi-adapter/extensions";
 import Type, { type Static } from "typebox";
 import type { Memory, MemoryScope, MemoryStore } from "./contract.ts";
 
@@ -36,9 +38,12 @@ const Config = Type.Object({
 
 export type MemoryRecallConfig = Static<typeof Config>;
 
-/** Whose memory a conversation reads and writes. Today: its key (one chat is one person). */
-export function scopeOf(conversation: { key: string; agent: string }): MemoryScope {
-  return { agent: conversation.agent, person: conversation.key };
+/**
+ * Whose memory a conversation reads and writes: its agent's, of the person its origin's key is (one chat
+ * is one person). A delegated conversation's person is the one behind the task, never the task's key.
+ */
+export function scopeOf(conversation: ConversationRef): MemoryScope {
+  return { agent: conversation.agent, person: originOf(conversation).key };
 }
 
 const line = (m: Memory) => `- ${m.text.replace(/\s*\n\s*/g, " ")} (id ${m.id})`;
@@ -108,8 +113,8 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     tools: [remember, forget, recall],
     sections: [
       section(MEMORY, async (input, context) => {
-        // A section sees pi-durable's conversation id; the key and agent are its ConversationDoc.
-        const conversation = await input.read.snapshot(ConversationDoc, input.conversationId, context);
+        // Rendered in the conversation's scope: its ref, origin included.
+        const conversation = context.value(CONVERSATION);
         if (conversation === undefined) return undefined;
         const scope = scopeOf(conversation);
         const ctx = within(context);

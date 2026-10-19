@@ -6,7 +6,10 @@
  * 1. **`request_approval`** (`{ tool, args, title, reason }`, for a tool in config only) proposes the
  *    action `{ type: "tool:<name>", payload: args }`, idempotent by `<conversation>:<call>` (so
  *    `replay: "safe"`), and ends the run with a `question` part (`approval:<id>`, one `confirm` field),
- *    as `askUser` does. A channel draws it or sends its fallback.
+ *    as `askUser` does. A channel draws it or sends its fallback. It is asked for the conversation's
+ *    origin (`originOf(CONVERSATION)`, its `requestedBy.conversation`): the one a person talks in, also
+ *    when a delegated agent asks (its question reaches that chat with the delegating agent's answer,
+ *    and admin-approvals tells that conversation an operator's decision).
  * 2. **The answer** comes back as a message whose text is `answerText`'s (Google Chat's buttons write
  *    it; elsewhere the person types it, as the question says). A stage of `inbound.normalize` reads it
  *    before the model does and records the decision as the channel authenticated the sender
@@ -15,7 +18,9 @@
  *    twice (the store answers the same verdict as it was). A store that cannot be reached throws, so the
  *    channel does not acknowledge and the platform delivers the message again.
  * 3. **`beforeTool`** on the tools in config claims an approval of that exact call (hash of its name and
- *    arguments as they will run) from this conversation, for this tool task (`<conversation>:<task>`).
+ *    arguments as they will run) asked from this conversation's origin, for this tool task
+ *    (`<conversation>:<task>`): any conversation of one tree of delegations may use an approval asked
+ *    in it, and none of another tree.
  *    pi-durable runs the hook again when the task recovers before its intent was committed: the same
  *    claimant gets the same approval, so it is safe. Without one, the call is blocked and the model is
  *    told to ask with exactly these arguments. A store that fails blocks (a hook that throws blocks).
@@ -28,7 +33,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineComponent } from "@pikit/core";
-import { answerText, CONVERSATION, type JsonValue, type Question, questionPart, RUN_REQUESTS } from "@pikit/contracts";
+import { answerText, CONVERSATION, type JsonValue, originOf, type Question, questionPart, RUN_REQUESTS } from "@pikit/contracts";
 import { defineExtension, defineTool, type Extension, hook, ToolTask } from "@pikit/pi-adapter/extensions";
 import { type ToolExecutionResult, withParts } from "@pikit/pi-adapter/tools";
 import Type, { type Static } from "typebox";
@@ -115,7 +120,8 @@ export function createApprovals(config: ApprovalsConfig, store: () => ApprovalSt
           title: args.title,
           summary: args.reason,
           approvers: config.approvers,
-          requestedBy: { conversation, ...(sender !== undefined && { sender }) },
+          // Asked for the person behind the tree: its origin is where it is told and where it may be claimed.
+          requestedBy: { conversation: originOf(conversation), ...(sender !== undefined && { sender }) },
           expiresAt: ctx.clock.now() + config.expiresInMs,
         },
         ctx,
@@ -144,7 +150,10 @@ export function createApprovals(config: ApprovalsConfig, store: () => ApprovalSt
         beforeTool: async (call, api, context) => {
           if (!gated.has(call.name)) return undefined;
           const hash = await actionHash(toolAction(call.name, call.arguments as JsonValue));
-          const claimed = await store().claim({ actionHash: hash, conversationId: String(api.conversationId), claimant: claimant(api) }, within(context));
+          // The approvals of this conversation's tree: those asked from its origin.
+          const conversation = context.value(CONVERSATION);
+          const from = conversation === undefined ? String(api.conversationId) : originOf(conversation).conversationId;
+          const claimed = await store().claim({ actionHash: hash, conversationId: from, claimant: claimant(api) }, within(context));
           if (claimed !== undefined) return undefined;
           return {
             block: `"${call.name}" needs a person's approval of this exact call. Call ${REQUEST_APPROVAL} with tool "${call.name}" and args ${canonicalJson(call.arguments as JsonValue)}, then call it again once approved.`,

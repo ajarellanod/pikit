@@ -28,7 +28,11 @@ and search.
   (`telegram:12345`). So `person = conversation.key`, in one function (memory-recall's `scopeOf`;
   memory-summaries reads the same key from the answers feed) that is the place to change when linking
   comes. Consequences: two channels are two people until linked; a group chat is one "person" (the
-  group's shared memory).
+  group's shared memory). A delegated agent's conversation (tool-delegate) is keyed by its task, so
+  `scopeOf` takes the key of its origin (`originOf(conversation)`, `ConversationRef.origin`): the
+  person in the chat the task comes from, with the delegated agent's own memory of them. A delegated
+  task's runs are not in the answers feed (only the report to the chat is), so memory-summaries never
+  sees them: the chat's summary covers what the task reported.
 - **Linking two keys into one person is explicit and confirmed from both sides** (`/link` on one
   channel gives a one-time code, sent from the other), never guessed from a name or a number: a wrong
   link shows one person's memory to another. It belongs with [pairing](pairing.md)'s approvals and is

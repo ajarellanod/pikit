@@ -32,6 +32,10 @@ with `withParts`), with `control.terminate`: **the run ends with the question, a
 the answer**. A run that waited would hold its conversation (on Cloudflare a Durable Object) for as
 long as the person takes.
 
+- **From a delegated agent too.** An agent working on a task another delegated to it (tool-delegate)
+  asks the person in the chat the task comes from: the task's outcome carries the question, and the
+  delegating agent's answer brings it to the chat (the `delegate` call's result, or the task's report).
+  The answer arrives in the chat, for the delegating agent to hand on.
 - **Drawn or folded.** A channel that draws `question` parts (`ChannelTransport.draws`; Google
   Chat: one `confirm` or `select` field as buttons, anything else as a form in a dialog) shows it; any
   other sends its fallback text, which lists the fields and their options and asks for a reply.

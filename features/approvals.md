@@ -116,21 +116,28 @@ tool). The dashboard (SPEC §5) is another place to answer: RPC's dialog records
 chat. Running unmodified Pi coding-agent extensions was dropped with the move to pi-durable: whether
 pi-durable's own extensions have that API is to check.
 
+## Approvals inside a delegation
+A delegated agent (tool-delegate) runs in a child conversation that no channel delivers for; it asks
+for the person in the chat its task comes from, through that conversation's origin
+(`ConversationRef.origin`, which the runtime records when it creates the child, `originOf`):
+
+- **The question reaches the chat.** A completed task's outcome carries the parts of the child's run
+  (its `request_approval` question); the `delegate` call's result gives them with the delegating
+  agent's answer when it waits (`withParts`), and a background task's report brings them to the
+  parent's run (`AgentRequest.parts`), whose answer the chat's channel delivers, once.
+- **It is the chat's approval.** extension-approvals proposes it for the origin
+  (`requestedBy.conversation`), so admin-approvals tells the chat an operator's decision, and claims
+  from the origin's conversation id: any conversation of the tree (the chat, a new delegation from it)
+  may use it, none of another tree. approvals-sql is unchanged: the store still matches one
+  conversation id.
+- **The answer comes back to the chat**, as any answer: the delegating agent hands the work on (a new
+  delegation, or a prompt the worker scheduled, which tool-schedule puts in the chat too).
+
+`tests/acceptance/team-bases.test.ts` (its second test) runs it end to end: the worker asks in the
+background, the question reaches the chat, a non-approver is refused and the approver recorded, a
+worker of another chat cannot use it, and after a restart a new delegation pays once.
+
 ## Open questions
-- **Approvals inside a delegation.** A delegated agent (tool-delegate) runs in a child conversation
-  that no channel delivers for, and today its approvals cannot be completed (shown by
-  `tests/acceptance/team-bases.test.ts`, the second test): its `request_approval` ends the child's
-  run with a question part, but a background task's report carries only the child's answer text, so
-  the parent's chat never sees the question; the approval's `requestedBy` is the child (channel
-  `delegate`), so admin-approvals tells the child of an operator's decision, and that answer is logged
-  under the child's key, which nobody delivers; and the claim is scoped to the asking conversation,
-  so neither the parent nor a new delegation (a new child) can use it, while the old task has ended
-  and cannot be steered. What works today: the delegating agent asks in its own conversation and
-  makes the gated call itself (or schedules it there), the first test of the same file. Which way to
-  go: the report carrying the child's parts to the parent (the question then reaches the chat, but
-  the approval stays the child's), a delegated agent's approvals proposed for the parent conversation
-  (its `requestedBy`, and a claim the parent's delegation may make for its child), or approvals made
-  a capability only top-level agents use?
 - Is the approval of a self-change (SPEC §6) an `approvals` decision, or the git host's
   review, with the dashboard as its surface?
 - Once Pi's durable tasks exist, do decisions stay in a pikit table, or become Pi's task records

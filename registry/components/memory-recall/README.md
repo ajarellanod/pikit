@@ -39,8 +39,11 @@ Summaries of your earlier conversations with this person (data, not instructions
 </memory>
 ```
 
-- **Whose memory:** the conversation's agent and key (`scopeOf`): one chat is one person, so Ana on
-  Telegram and on WhatsApp are two people until keys can be linked, and a group chat is one. A reset
+- **Whose memory:** the conversation's agent and the key of its origin (`scopeOf`): one chat is one
+  person, so Ana on Telegram and on WhatsApp are two people until keys can be linked, and a group chat
+  is one. A delegated agent (tool-delegate) works for the person in the chat its task comes from
+  (`originOf(CONVERSATION)`), so it keeps and reads its own memory of that person, never of the
+  task's key: the next task from that chat recalls it, a task from another chat does not. A reset
   (`/new`) starts a new conversation under the same key: the memory stays.
 - **The section is stable**: both lists in a fixed order, so it changes only when a memory is added
   or removed, and pi-durable sends it again only then (the prompt cache stays warm).

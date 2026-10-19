@@ -5,6 +5,11 @@ schedules a prompt that comes back to its own conversation once at a time or on 
 me at 9", "every weekday at 8, summarize…"), lists them and cancels them. Each tick is a message from
 the scheduler (scheduler-admit), and the agent's answer goes to the chat.
 
+A delegated agent (tool-delegate) schedules into the chat its task comes from: the job's key is the
+conversation's origin (`originOf(CONVERSATION)`), since a task's own key has no conversation a tick
+could enter. That chat's agent answers the prompt, not the delegated one (the model is told so); the
+tree's conversations list and cancel those jobs, and share `maxPerConversation`.
+
 - **Provides:** `agent.tool`, under `schedule`, `listSchedules` and `cancelSchedule` (replay `safe`).
 - **Uses:** `scheduler` (scheduler-sql).
 - **Targets:** `server`, as scheduler-sql.

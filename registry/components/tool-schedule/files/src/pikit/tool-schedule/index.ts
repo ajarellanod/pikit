@@ -3,19 +3,22 @@
  * (`schedule`, `listSchedules`, `cancelSchedule`), through `scheduler`. Each tick comes back to the
  * conversation as a message, and its answer to the chat (scheduler-admit).
  *
- * - **Its own conversation only.** A job's key is the run's conversation key (`CONVERSATION`); listing
- *   and cancelling see only the jobs this tool made for that key. Another conversation's job, or one a
- *   routine made, is "no such job" (its existence is not revealed).
+ * - **Its own conversation only.** A job's key is the key of the run's conversation's origin
+ *   (`originOf(CONVERSATION)`): the conversation itself, or for a delegated agent the one the person
+ *   talks in, since a delegated task's own key has no conversation to come back to. Its ticks are
+ *   answered there, by that conversation's agent (scheduler-admit), not by the delegated one. Listing
+ *   and cancelling see only the jobs this tool made for that key, from any conversation of the tree.
+ *   Another conversation's job, or one a routine made, is "no such job" (its existence is not revealed).
  * - **Idempotent, so `replay: "safe"`.** A job's id is `tool-schedule:<conversation>:<call>`, the same
  *   when pi-durable runs an interrupted call again, and `scheduler` keeps a known id as it is.
  *   Cancelling twice is cancelling once; listing only reads.
- * - **Bounded.** At most `maxPerConversation` jobs per conversation key.
+ * - **Bounded.** At most `maxPerConversation` jobs per key (a tree of delegations shares its origin's).
  *
  * Targets: `server`, as scheduler-sql. It imports nothing platform-specific.
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineComponent } from "@pikit/core";
-import { CONVERSATION } from "@pikit/contracts";
+import { CONVERSATION, originOf } from "@pikit/contracts";
 import { defineTool, type ToolRegistration } from "@pikit/pi-adapter/tools";
 import Type, { type Static } from "typebox";
 import type { ScheduledJobState, Scheduler, ScheduleWhen } from "./contract.ts";
@@ -46,14 +49,16 @@ export function createScheduleTools(scheduler: () => Scheduler, within: (context
   const keyOf = (context: Context): string => {
     const conversation = context.value(CONVERSATION);
     if (conversation === undefined) throw new Error("this tool runs only in a conversation's run");
-    return conversation.key;
+    // Where its ticks come back: a delegated task's key has no conversation a tick could enter.
+    return originOf(conversation).key;
   };
 
   const schedule = defineTool({
     name: SCHEDULE_TOOL,
     description:
       "Schedules a prompt that comes back to you in this conversation, as a message from the scheduler, once at a time (at) or repeatedly (cron); " +
-      "your answer to it is sent to this chat. Write the prompt as the instruction to follow then, with everything it needs. A time already past runs at once.",
+      "your answer to it is sent to this chat. Write the prompt as the instruction to follow then, with everything it needs. A time already past runs at once. " +
+      "On a task another agent delegated to you, it comes back instead to the conversation the person talks in, and that conversation's agent answers it: write it for that agent.",
     parameters: Type.Object({
       prompt: Type.String({ minLength: 1, maxLength: 4_000, description: "What to do at each run." }),
       at: Type.Optional(Type.String({ description: "Once, at this ISO 8601 date-time with its offset: 2030-05-01T09:00:00+02:00." })),

@@ -6,7 +6,8 @@
  */
 
 import { expect, test } from "bun:test";
-import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
+import { CONVERSATION } from "@pikit/contracts";
 import type {} from "@pikit/pi-adapter";
 import type { Memory, MemoryKind, MemoryScope, MemoryStore } from "./contract.ts";
 import memoryRecall, { createMemoryRecall, MEMORY, memoryText, scopeOf } from "./index.ts";
@@ -51,8 +52,11 @@ test("it provides one extension named like its key, with its section and three t
   ]);
 });
 
-test("whose memory: the conversation's agent and key, one chat one person", () => {
-  expect(scopeOf({ key: "telegram:12345", agent: "assistant" })).toEqual({ agent: "assistant", person: "telegram:12345" });
+test("whose memory: the conversation's agent and its origin's key, one chat one person", () => {
+  expect(scopeOf({ key: "telegram:12345", agent: "assistant", conversationId: "c1" })).toEqual({ agent: "assistant", person: "telegram:12345" });
+  // A delegated agent's memory is of the person behind the task, never of the task's key; still its own agent's.
+  const origin = { key: "telegram:12345", agent: "assistant", conversationId: "c1", channel: "telegram" };
+  expect(scopeOf({ key: "delegate:1:7", agent: "researcher", conversationId: "c2", channel: "delegate", origin })).toEqual({ agent: "researcher", person: "telegram:12345" });
 });
 
 test("the section lists facts, then summaries, as notes with their ids; with neither, there is none", () => {
@@ -82,11 +86,13 @@ test("the section reads the conversation's scope, `limit` facts and `summaries` 
     { id: "s", kind: "summary", text: "talked", createdAt: 3 },
   ]);
   const section = createMemoryRecall({ limit: 1, summaries: 2 }, () => store, () => BACKGROUND_CONTEXT as never).sections?.[0];
-  const input = { conversationId: "c1", read: { snapshot: async () => ({ key: "telegram:1", agent: "assistant" }) } } as never;
+  const input = { conversationId: 1 } as never;
+  // The runtime renders it in the conversation's scope.
+  const context = withContextValue(CONVERSATION, { key: "telegram:1", agent: "assistant", conversationId: "1" }, BACKGROUND_CONTEXT) as never;
 
-  const first = await section?.render(input, BACKGROUND_CONTEXT as never);
+  const first = await section?.render(input, context);
   expect(first).toBe(memoryText([{ id: "b", kind: "fact", text: "two", createdAt: 2 }], [{ id: "s", kind: "summary", text: "talked", createdAt: 3 }]));
-  expect(await section?.render(input, BACKGROUND_CONTEXT as never)).toBe(first);
+  expect(await section?.render(input, context)).toBe(first);
   const scope = { agent: "assistant", person: "telegram:1" };
   expect(asked.slice(0, 2)).toEqual([
     { scope, kind: "fact", limit: 1 },

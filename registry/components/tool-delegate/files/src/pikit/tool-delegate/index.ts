@@ -14,7 +14,12 @@
  *   always waits for its own delegations: only a conversation a person started gets answers later.
  * - **The child's key** is `delegate:<depth>:<tool call's task id>`: this tool owns that namespace,
  *   and reads a conversation's depth from it. The child's sender is the delegating agent
- *   (`{ channel: "delegate", id }`), which its tools and hooks read (`RUN_REQUESTS`).
+ *   (`{ channel: "delegate", id }`), which its tools and hooks read (`RUN_REQUESTS`). Its origin
+ *   (`ConversationRef.origin`: the conversation the person talks in) is the runtime's to set.
+ * - **What the child asks the person reaches them**: a question its `askUser` or `request_approval`
+ *   asked (its run's parts) goes with this call's result (`withParts`) when it waits, and with the
+ *   task's report when it does not; either way with the answer of this conversation's run, which its
+ *   channel delivers. The answer comes back here as a message: hand it on with a new delegation.
  * - **Replay is `safe`**: a call made again after a crash finds the child it created and the input it
  *   submitted (pi-durable's ownership and request ids), and only waits again.
  * - **The tasks it did not wait for** have an id (`wait: false` returns it), and three tools of their
@@ -30,7 +35,7 @@
 
 import { defineComponent } from "@pikit/core";
 import { CONVERSATION } from "@pikit/contracts";
-import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, defineTool, type ToolRegistration } from "@pikit/pi-adapter/tools";
+import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, defineTool, partsNote, type ToolRegistration, withParts } from "@pikit/pi-adapter/tools";
 import Type, { type Static } from "typebox";
 
 /** The name agents give it, and its key under `agent.tool`. */
@@ -114,7 +119,11 @@ export function createDelegateTool(config: DelegateConfig): ToolRegistration {
         return { output: [{ type: "text", text: `The task "${id}" is with the agent "${args.agent}" now. Its answer will arrive in this conversation as a message when it ends; carry on meanwhile.` }] };
       }
       const outcome = await delegation.run(api, task, context);
-      if (outcome.kind === "completed") return { output: [{ type: "text", text: `The agent "${args.agent}" answered:\n\n${outcome.text === "" ? "(nothing)" : outcome.text}` }] };
+      if (outcome.kind === "completed") {
+        const answered = { output: [{ type: "text" as const, text: `The agent "${args.agent}" answered:\n\n${outcome.text === "" ? "(nothing)" : outcome.text}${partsNote(outcome.parts)}` }] };
+        // What the child asked the person (a question) goes with this run's answer.
+        return outcome.parts === undefined || outcome.parts.length === 0 ? answered : withParts(answered, outcome.parts);
+      }
       if (outcome.kind === "failed") throw new Error(`the agent "${args.agent}" could not do the task: ${outcome.message}`);
       throw new Error(`the agent "${args.agent}" was stopped before it answered`);
     },

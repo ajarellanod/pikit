@@ -18,7 +18,9 @@ Every route asks `admin.auth` first: `401` otherwise, and `approvals` is not ask
 | `GET /admin/api/approvals?status=&cursor=&limit=` | `{ items, next? }`, newest first; `400` for a bad status, cursor or limit |
 | `POST /admin/api/approvals/:id/decision` `{ "verdict": "approve" \| "reject" }` | `{ approval }`; `404 not_found`, `403 forbidden`, `409 not_pending` / `expired`, `400` for another body |
 
-After a decision taken from the dashboard, the conversation that asked gets one message:
+After a decision taken from the dashboard, the conversation that asked (`requestedBy.conversation`:
+for an approval a delegated agent asked through extension-approvals, the chat its task comes from)
+gets one message:
 `[approvals] Approval <id> ("<title>") was approved by dashboard:<operator>.`, dispatched with the
 request id `approval-decided:<id>`, so a repeated click, or a click after a crash between the decision
 and the message, never tells it twice. A decision taken in the chat is not told again (the answer
