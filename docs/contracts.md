@@ -22,7 +22,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 
 | Capability | Mode | Provided by | Used by (`?` = optional) | Suite |
 |---|---|---|---|---|
-| `agent.runtime` | single | runtime-pi | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createAgentRuntimeConformance` |
+| `agent.runtime` | single | runtime-pi | admin-api, admin-approvals, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createAgentRuntimeConformance` |
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
 | `agent.submissions` | single | runtime-pi | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
 | `agent.observe` | single | runtime-pi | admin-api, channel-web | `createAgentObserveConformance` |
@@ -30,18 +30,18 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
-| `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
+| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, repo-github-app, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, repo-github-app, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, channel-google-chat, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-web?, settings-store? | `createMailboxConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, approvals-sql, channel-google-chat, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | approvals-sql, channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, outbound-durable, channel-web?, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
-| `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, channel-web?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
+| `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
@@ -53,6 +53,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `execution` | single | execution-do, execution-local | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-local | tool-bash | same |
+| `approvals` | single | approvals-sql | admin-approvals, extension-approvals | `createApprovalsConformance` (approvals-sql's `conformance.ts`) |
 | `workspace` | single | workspace-local | channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
@@ -220,7 +221,7 @@ suite").
 One pi-durable `Extension` per name (`defineExtension` from `@pikit/pi-adapter/extensions`): system
 prompt sections, hooks on model requests, tool calls and compaction, tool wrappers, durable tasks,
 tools. An agent runs with the ones it names, in order, after its own tools. Names starting with
-`pikit.` are the runtime's. Provider in the registry: extension-house-rules.
+`pikit.` are the runtime's. Providers in the registry: extension-house-rules, extension-approvals.
 
 ### `agent.command` (keyed, [command.ts](../packages/contracts/src/command.ts))
 
@@ -829,8 +830,40 @@ Crypto, `AWS_SES_*`). Consumer: channel-web's accounts (being built). Suite:
 A registry adds a capability without changing the CLI: the defining component declares it in
 `component.json` (`declares.capabilities`, and `declares.kinds` for a new prefix), keeps its type in a
 file of its own (declaration merging on `AppCapabilities`), and ships a suite. Another component that
-uses it carries an identical copy of that file. Redeclaring a kit capability is refused. No component
-in this registry declares one today; [features/memory.md](../features/memory.md) is the worked example.
+uses it carries an identical copy of that file. Redeclaring a kit capability is refused.
+[features/memory.md](../features/memory.md) is the worked example. This repository type-checks as one
+program, so the capabilities its own components declare are named in `RegistryDeclared`
+(`capabilities.ts`), which keeps them out of the kit's catalogue type.
+
+### `approvals` (declared by approvals-sql, [contract.ts](../registry/components/approvals-sql/files/src/pikit/approvals-sql/contract.ts))
+
+Exact actions waiting for a person's approval, recorded by trusted code ([features/approvals.md](../features/approvals.md)).
+
+```ts
+interface ApprovalStore {
+  propose(request, ctx): Promise<Approval>;   // { idempotencyKey, action: { type, payload }, title, summary?, approvers, requestedBy, expiresAt? }
+  list({ status?, cursor?, limit? }, ctx): Promise<{ items: Approval[]; next?: string }>;
+  decide(id, { verdict, by: Sender }, ctx): Promise<DecideOutcome>;   // not_found | not_pending | expired | forbidden
+  claim({ actionHash, conversationId, claimant }, ctx): Promise<Approval | undefined>;
+  settle(claimant, { kind: "executed" | "failed", detail? }, ctx): Promise<Approval | undefined>;
+}
+```
+
+- An approval is one immutable action, identified by `actionHash` (SHA-256 of its canonical JSON,
+  `actionHash` in the contract file, Web Crypto). `propose` is idempotent by key; the same key with
+  another action is `conflict`, a malformed request or no approvers `invalid`.
+- Who decides is the proposer's policy (`approvers`: `<channel>:<id>`, `<channel>:*`), held by the
+  store: anyone else is `forbidden` and nothing is recorded. A decision is taken once; the same verdict
+  again answers `ok` unchanged.
+- Expiry is read with the owning App's clock: a pending or approved approval past `expiresAt` can be
+  neither decided nor claimed.
+- An approved action runs at most once: `claim` takes one approved, unexpired, unclaimed approval of
+  that hash from that conversation; the same claimant again gets the same one, any other none.
+
+Provider: approvals-sql (`storage.sql`, one actor `approvals-sql:approvals` through `actor.mailbox`;
+server). Users: extension-approvals (`request_approval`, a `beforeTool` claim, an `inbound.normalize`
+stage that records answers), admin-approvals (`/admin/api/approvals`). Suite:
+`createApprovalsConformance` (approvals-sql's `conformance.ts`).
 
 The offer resolver uses this extended catalogue too. A declared single capability may set
 `offer: true`: if the target and App have exactly one eligible provider, `add` and `new` offer it

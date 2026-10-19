@@ -245,6 +245,15 @@ there.
   `kit.commit`, and what runs now, read in-process from `APP_DESCRIPTION` (K13, which exempts it) and
   `agent.definition`, config secrets redacted; no tool. Only the steward may name it: the App does not
   start with another agent that does, nor (runtime-pi) with two stewards.
+- Approvals of exact actions (server): `approvals-sql` declares the kind and capability `approvals`
+  (its `contract.ts`, its suite `createApprovalsConformance`): an immutable action and its hash,
+  idempotent by key, decided once by the proposer's approvers (`<channel>:<id>`, `<channel>:*`),
+  expiry read with the App's clock, each approved action claimed at most once; one actor
+  (`approvals-sql:approvals`) over `storage.sql`. `extension-approvals` (`extensions: ["approvals"]`):
+  `request_approval` ends the run with a `question` part, an `inbound.normalize` stage records the
+  answer as its channel authenticated the sender, and a `beforeTool` claim lets the exact approved
+  call run once. `admin-approvals`: `/admin/api/approvals` to list and decide as `dashboard:<operator>`,
+  the asking conversation told once (`approval-decided:<id>`).
 - Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`; git in its image; with
   `proposals-local`, self-improvement's deployer as a second compose service started by the same
   `pikit up`, the only one with the Docker socket: it merges an approved head into `main`, runs the

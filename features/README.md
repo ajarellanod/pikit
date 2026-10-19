@@ -28,7 +28,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 
 | Feature | ⭐ | One line | Needed by required work? |
 |---|---|---|---|
-| [approvals](approvals.md) | ⭐ | Questions a person answers from the chat, now or days later (`askUser`, Pi extensions' questions, decisions), bound to the message that asks | Open: self-improvement's approval (SPEC §6) may use it |
+| [approvals](approvals.md) | ⭐ | Questions a person answers from the chat, now or days later (`askUser`, Pi extensions' questions, decisions), bound to the message that asks; approvals of exact tool calls built (approvals-sql, extension-approvals, admin-approvals, server) | Open: self-improvement's approval (SPEC §6) may use it |
 | [browser](browser.md) | ⭐ | A tool to read and act on web pages | No |
 | [channel-discord](channel-discord.md) | ⭐ | A Discord bot, in DMs, channels and threads | No |
 | [channel-email](channel-email.md) | ⭐ | An address for the agent; replies in the thread | No |

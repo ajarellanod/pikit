@@ -1,0 +1,49 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "approvals-sql",
+  "version": "0.0.0",
+  "title": "Approvals: exact actions a person approves, recorded by code",
+  "description": "Stores approvals of exact actions (an action's hash, who may decide, its expiry) on storage.sql, owned by one actor: decided once by an allowed approver, claimed at most once by the call that runs it.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": [
+      "storage.sql",
+      "actor.mailbox",
+      "actor.inbox"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "approvals"
+  ],
+  "declares": {
+    "kinds": [
+      "approvals"
+    ],
+    "capabilities": {
+      "approvals": {
+        "mode": "single",
+        "stability": "experimental",
+        "summary": "Exact actions waiting for a person's approval: decided by allowed approvers, each approved action claimed at most once."
+      }
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
+  "devDependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
