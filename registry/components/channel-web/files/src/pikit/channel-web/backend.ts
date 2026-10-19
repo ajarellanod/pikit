@@ -94,6 +94,12 @@ export interface LocalContracts {
   changed(row: ConversationRow, ctx: AppContext): Promise<void>;
   /** A message was admitted: answers may be due soon. */
   wake(ctx: AppContext): Promise<void>;
+  /** The titles (`titles.ts`): a new conversation's first title, a user's rename. Absent: the row's title alone. */
+  titles?: {
+    creating(key: string, title: string): () => void;
+    renaming(key: string): Promise<void>;
+    renamed(key: string, title: string, ctx: AppContext): Promise<void>;
+  };
 }
 
 const STATE_OF: Record<string, MessageState> = { completed: "answered", aborted: "aborted", failed: "failed" };
@@ -154,16 +160,19 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     if (wrong !== undefined) throw refusal(wrong.status === 413 ? "too_large" : "invalid_request", wrong.message);
     // Before the admission: what its run writes is always later.
     const at = ctx.clock.now();
+    const title = firstTitle(message.text, images.length);
+    // A new conversation's title is the App's too (`/name`), given while its first message is dispatched.
+    const forget = create ? contracts.titles?.creating(ref.key, title) : undefined;
     const outcome = await admitInbound(
       ctx,
       { id: message.requestId, channel: CHANNEL, conversationId: `${ref.userId}:${ref.chatId}`, actor: { id: ref.userId }, text: message.text, ...(images.length > 0 && { images }) },
       { conversations: contracts.conversations(), runtime: contracts.runtime(), key: ref.key },
-    );
+    ).finally(() => forget?.());
     if (outcome.kind !== "admitted" && outcome.kind !== "duplicate") throw refused(outcome);
     const admitted = outcome.kind === "admitted";
     const conversationId = outcome.conversation.conversationId;
     if (create) {
-      await store.create({ key: ref.key, userId: ref.userId, chatId: ref.chatId, agent: outcome.conversation.agent, title: firstTitle(message.text, images.length), createdAt: at, lastActivity: at, busy: admitted });
+      await store.create({ key: ref.key, userId: ref.userId, chatId: ref.chatId, agent: outcome.conversation.agent, title, createdAt: at, lastActivity: at, busy: admitted });
     }
     // Waiting behind a run going: out of the transcript until that run's messages are in it.
     const held = admitted && outcome.admission.kind === "queued";
@@ -240,8 +249,11 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
 
     async rename(ref, title, ctx) {
       await owned(ref);
+      // The user's from now on: no model titles it again.
+      await contracts.titles?.renaming(ref.key);
       const row = (await store.change(ref.key, { title })) as ConversationRow;
       await contracts.changed(row, ctx);
+      await contracts.titles?.renamed(ref.key, title, ctx);
       return conversationOf(row, await busyOf(row, ctx));
     },
 

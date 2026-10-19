@@ -169,7 +169,7 @@ test("a conversation on the Worker: started by one call to its key's object, lis
 
   platform.calls.length = 0;
   const listed = (await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] };
-  expect(listed.items).toMatchObject([{ id: started.id, title: "plan the trip", busy: true }]);
+  expect(listed.items).toMatchObject([{ id: started.id, title: "Plan the trip", busy: true }]);
   // The index, and the policy (kept by the Worker `CONFIG_CACHE_MS`: the next lists ask the index only).
   expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`, `${ACCOUNTS_KEY} ${CALL.config}`]);
   platform.calls.length = 0;

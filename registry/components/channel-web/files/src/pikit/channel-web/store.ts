@@ -86,9 +86,10 @@ export interface ChatStore {
   create(row: Omit<ConversationRow, "version" | "hidden" | "archived">): Promise<ConversationRow>;
   /**
    * Changes the row (a newer activity only moves it forward, and takes it out of the archived ones unless
-   * `archived` is given) and bumps its version; `undefined` when there is none.
+   * `archived` is given) and bumps its version; `undefined` when there is none, or with `whenTitle` when
+   * its title is not that one now (a model's title never replaces one the user gave meanwhile).
    */
-  change(key: string, change: { title?: string; hidden?: boolean; archived?: boolean; busy?: boolean; activity?: number }): Promise<ConversationRow | undefined>;
+  change(key: string, change: { title?: string; hidden?: boolean; archived?: boolean; busy?: boolean; activity?: number; whenTitle?: string }): Promise<ConversationRow | undefined>;
 
   /** The index's: keeps each row unless it holds a newer version of it. */
   seen(rows: readonly ConversationRow[]): Promise<void>;
@@ -108,6 +109,8 @@ export interface ChatStore {
   addAnswer(key: string, run: string, id: string, message: unknown, at: number): Promise<boolean>;
   /** The transcript, newest first, held messages left out, at most `PAGE_JSON_MAX` of JSON. Throws `invalid_cursor`. */
   entries(key: string, page: { limit: number; cursor?: string }): Promise<Paged<EntryRow>>;
+  /** The text of the first user's message stored in `key` (`""` with images only), or `undefined` before one is. */
+  firstText(key: string): Promise<string | undefined>;
   /** Image `index` of the user's message `id` in `key`, or `undefined`. */
   image(key: string, id: string, index: number): Promise<ChatImage | undefined>;
   /** Moves the user's messages `ids` still `pending` to `state`: the ids it moved. */
@@ -282,7 +285,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
           `UPDATE ${CONVERSATIONS} SET title = COALESCE(?, title), title_search = COALESCE(?, title_search), hidden = COALESCE(?, hidden), busy = COALESCE(?, busy), ` +
             // Every right-hand side reads the row as it was: newer activity unarchives it.
             "archived = COALESCE(?, CASE WHEN ? > last_activity THEN 0 ELSE archived END), " +
-            "last_activity = CASE WHEN ? > last_activity THEN ? ELSE last_activity END, version = version + 1 WHERE key = ?",
+            "last_activity = CASE WHEN ? > last_activity THEN ? ELSE last_activity END, version = version + 1 WHERE key = ? AND (? IS NULL OR title = ?)",
           [
             change.title ?? null,
             change.title === undefined ? null : searchOf(change.title),
@@ -293,6 +296,8 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
             Math.floor(change.activity ?? 0),
             Math.floor(change.activity ?? 0),
             key,
+            change.whenTitle ?? null,
+            change.whenTitle ?? null,
           ],
         );
         if (changes === 0) return undefined;
@@ -425,6 +430,11 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       const page = rows.slice(0, kept);
       const last = page.at(-1);
       return { items: page.map(entryOf), ...(rows.length > kept && last !== undefined && { next: `${Number(last.turn)}.${Number(last.pos)}:${encodeURIComponent(last.id)}` }) };
+    },
+
+    async firstText(key) {
+      const [row] = await (await db()).query<{ text: string | null }>(`SELECT text FROM ${ENTRIES} WHERE key = ? AND kind = 'user' ORDER BY turn, id LIMIT 1`, [key]);
+      return row === undefined ? undefined : (row.text ?? "");
     },
 
     async image(key, id, index) {

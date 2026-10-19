@@ -22,6 +22,9 @@
  * - With `email.send` in the objects' App only (a fake), `GET /chat/api/config` says email is sent and
  *   offers the magic link, which signs a new user in; a password sign-up's emailed link sets its first
  *   password (the sign-up's own never works).
+ * - Titles: after its first answer a model (faux/echo, through runtime-pi's `model.complete`) titles a
+ *   web conversation in its object; the dashboard lists the same title (channel-web runs admin-api's
+ *   `/name` there), its own titler never tries, and the user's rename is the dashboard's too.
  */
 
 import { type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
@@ -471,4 +474,46 @@ it("an agent picked for a new chat makes the conversation with it, another is 40
   const { id: chat } = (await started.json()) as { id: string };
   expect(await answered(gus, chat, 2)).toEqual(["user: hi there (answered)", "assistant: faux: hi there"]);
   expect(((await (await gus.send(`/chat/api/conversations/${chat}`)).json()) as ChatConversation).agent).toBe("echo");
+});
+
+it("titles: a web conversation is named by its first message in both apps, then by the model's title after its first answer, the same in the chat and the dashboard, which asks no model; the user's rename is the dashboard's too", async () => {
+  const fetch = compose({ name: "Ada", signUp: { mode: "open" } });
+  const tess = browser(fetch, HTTPS, "10.0.0.7");
+  await signUp(tess, "tess@example.com", "Tess");
+  const me = await meOf(tess);
+
+  const started = await tess.send("/chat/api/conversations", { json: { text: "plan a trip to Lisbon." } });
+  expect(started.status).toBe(201);
+  const { id: chat } = (await started.json()) as { id: string };
+  const key = `web:${me.user.id}:${chat}`;
+  const inChat = async () => ((await (await tess.send(`/chat/api/conversations/${chat}`)).json()) as ChatConversation).title;
+  const inDashboard = async () => ((await (await fetch(`${HTTPS}/admin/api/conversations/${id(`${key}~1`)}`, { headers: OPERATOR })).json()) as { title?: string }).title;
+  await answered(tess, chat, 2);
+  // faux/echo titles it too: `faux: <the first message>`, cleaned the same way in both.
+  await vi.waitFor(
+    async () => {
+      expect(await inChat()).toBe("Faux: plan a trip to Lisbon");
+      expect(await inDashboard()).toBe("Faux: plan a trip to Lisbon");
+    },
+    { timeout: 15_000, interval: 100 },
+  );
+  // The dashboard's title is the channel's (`/name`, run in the conversation's object): its own titler never tried.
+  const titles = await runInDurableObject(env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.idFromName(key)), (_instance, state) =>
+    state.storage.sql.exec("SELECT title, source, tries FROM admin_api_conversation_titles").toArray(),
+  );
+  expect(titles).toEqual([{ title: "Faux: plan a trip to Lisbon", source: "operator", tries: 0 }]);
+  // The list (the users' index) has it too.
+  const listed = (await (await tess.send("/chat/api/conversations")).json()) as ChatPage<ChatConversation>;
+  expect(listed.items.map((each) => each.title)).toEqual(["Faux: plan a trip to Lisbon"]);
+
+  // The user's rename: the dashboard's title too, and searched by it there.
+  expect((await tess.send(`/chat/api/conversations/${chat}`, { method: "PATCH", json: { title: "My Lisbon trip" } })).status).toBe(200);
+  expect(await inDashboard()).toBe("My Lisbon trip");
+  await vi.waitFor(
+    async () =>
+      expect(((await (await fetch(`${HTTPS}/admin/api/conversations?q=${id("lisbon trip")}`, { headers: OPERATOR })).json()) as { items: { conversationId: string }[] }).items.map((each) => each.conversationId)).toContain(
+        `${key}~1`,
+      ),
+    { timeout: 10_000 },
+  );
 });

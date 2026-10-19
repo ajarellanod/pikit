@@ -31,7 +31,9 @@
       "email.send",
       "admin.auth",
       "agent.definition",
-      "agent.directory"
+      "agent.directory",
+      "model.complete",
+      "agent.command"
     ]
   },
   "provides": [
@@ -63,7 +65,9 @@
         "email.send",
         "admin.auth",
         "agent.definition",
-        "agent.directory"
+        "agent.directory",
+        "model.complete",
+        "agent.command"
       ]
     },
     "worker": {

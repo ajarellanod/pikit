@@ -14,13 +14,16 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
   (`/admin/api/channel-web/*`, `admin-api.ts`).
 - **Requires:** `secrets`, `conversations.registry`, `agent.runtime`, `agent.observe` (the live
   view), `agent.submissions` (answers, and the states of messages whose run's end no event brought),
-  `storage.kv` (the delivery cursor), `storage.sql` (accounts, conversations, transcripts). A router
+  `storage.kv` (the delivery cursor; whose each title is), `storage.sql` (accounts, conversations, transcripts). A router
   (`router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (answers stored before they are written), `wakeups`
   (delivery on a Durable Object), `settings` (sign-up, visibility and the agents users may pick change
   live), `agent.definition` / `agent.directory` (the agents users may pick, described), `email.send` (verification,
   "forgot password", magic links, invitations by email), `admin.auth` (without it, the operator's
-  routes answer `404`), `actor.inbox` / `actor.mailbox` (Cloudflare).
+  routes answer `404`), `actor.inbox` / `actor.mailbox` (Cloudflare), `model.complete` (runtime-pi's:
+  a model titles each conversation after its first answer; without it, its first message names it),
+  `agent.command` (admin-api's `/name`: the dashboard lists a web conversation by the chat's title,
+  "Titles" below).
 - **Targets:** `server` and `durable`, from one code (below).
 - **Installs to:** `src/pikit/channel-web/`; with a UI, its view and Settings section to
   `src/dashboard/src/views/channel-web/` and `src/dashboard/src/settings/channel-web/`. Adds the command
@@ -59,6 +62,7 @@ OIDC platform alike).
   trustedProxyHeaders: [],                       // e.g. ["x-forwarded-for"]: only behind a proxy that sets it
   visibility: { thinking: false, tools: "names", context: true }, // what users see (below)
   agents: [],                                    // the agents users may pick for a new chat; none: the router decides
+  titleModel: "anthropic/claude-haiku-4-5",      // optional: the model that titles conversations; absent, each one's agent's
 }
 ```
 
@@ -231,6 +235,24 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   installed) writes a completed run's answer into the channel's table only for a run none of whose
   messages are stored (its end never heard here: after waiting a second for it), at least once, stored
   once, delivered after a restart or an eviction; the run's messages, stored later, replace it.
+- **Titles** (`titles.ts`): a conversation is named by its first message at once (cleaned as the
+  dashboard cleans a title: its first line, no label, quotes or end punctuation, a capital first, at
+  most 60 characters). After its first run that answers the user, a model titles it, in the background
+  (nothing waits for it), once: `model.complete` (runtime-pi's) with `titleModel`, else the
+  conversation's agent's model, told the first message's text (at most 1,000 characters; a first
+  message of images only keeps its first title). A failure is logged and tried once more after a
+  later run, then never. The page hears the new title as a change of the conversation (its live view
+  says it changed: the page reads the conversation and the list again). **The user's rename always
+  wins**: no model titles a renamed conversation, and a model's title is written only while the
+  conversation still has the title it had when the model was asked. Whose the title is and the tries
+  are a record per conversation in the channel's `storage.kv` (`title:<key>`), no table.
+- **One title in both apps.** Each title set here (the first message's, the model's, the user's) is
+  given to the App's `/name` (`agent.command` `"name"`, admin-api's, through `runAgentCommand`), in the
+  App that holds the conversation (on Cloudflare its object): the dashboard lists the web conversation
+  by the chat's title. The first one is given while its message is dispatched (`agent.dispatched`,
+  before any run of it can settle), so admin-api's titler finds the conversation named and asks no
+  model: one model call per conversation. An operator's `/name` or Rename in the dashboard changes the
+  dashboard's title only, until the chat sets one again. Without admin-api nothing else is told.
 - **Search**: `GET /chat/api/conversations?q=` lists the user's own conversations whose title holds
   `q` (any case, accents too; `%` and `_` are characters), paged, archived ones apart (`archived=1`). On
   Cloudflare the accounts actor's index answers it.
@@ -325,6 +347,11 @@ under an https `PIKIT_PUBLIC_URL`).
   announced with the transcript's ids, the runtime's user and system messages and own entries never.
 - `conformance.test.ts`: the channel conformance suite (`answers: "pushed"`), the platform being the
   table (its writes failed or left hanging by the fixture).
+- `titles.test.ts`: the titles (a `model.complete` and a `/name` double): the first message's given to
+  `/name` while dispatched (before a quick run's end), a model's after the first answer (not after a
+  failed run, nor one only the operator's follow-ups started), once, one more try after a failure,
+  heard by the live view, a rename winning over a model writing meanwhile, none without
+  `model.complete`.
 - `remote.test.ts`: the Worker's half over a fake platform of one App per key (`scope: "one"`), each
   conversation's object and the accounts actor: start, list, rename, the transcript, a run's messages,
   delete, isolation, live events cut in the Worker, entries told live from the object, the policy and
@@ -354,6 +381,7 @@ under an https `PIKIT_PUBLIC_URL`).
   an invitation's link setting a password, a ban refused once the cookie cache expired (the actor asked
   then, its answer renewing the cache cookie; a foreign `Origin` refused through the forwarder);
   `email.send` in the default App only: the config says so, a magic link signs a new user in, a
-  password sign-up verifies first, an invitation is emailed.
+  password sign-up verifies first, an invitation is emailed; a model's title (faux/echo) the same in
+  the chat and the dashboard (admin-api's titler never trying), and a rename the dashboard's too.
 
 Not covered yet: the page, the view and the Settings section in a browser.

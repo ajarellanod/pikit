@@ -1,5 +1,5 @@
 /**
- * `agent.command`: the slash commands an operator (or, later, a channel) runs in a conversation,
+ * `agent.command`: the slash commands an operator (or a channel: channel-web gives `/name` its titles) runs in a conversation,
  * `/name args`, modelled on Pi's `registerCommand` (`RegisteredCommand`: a name, a description, an
  * argument hint, a handler of the text after the name). A component registers each one under its
  * name, as it registers a tool:

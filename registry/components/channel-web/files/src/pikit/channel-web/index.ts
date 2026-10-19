@@ -38,7 +38,7 @@
  *   half's (`worker.ts`); they are registered here too, where no server serves them.
  */
 
-import { type AppContext, defineComponent } from "@pikit/core";
+import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
 import { type ActorInbox, type ActorMailbox, type AgentResult, type AnswerDelivery, answersOnlyTheDashboard, type ChannelTransport, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
 import { linkOrigin } from "./accounts/links.ts";
@@ -54,6 +54,7 @@ import { answerText, createTransport, DELIVERY, HEARD_WAIT_MS, INSTANCE, routeOf
 import { runEntryId, runMessages, userEntryOf } from "./entries.ts";
 import { provideAdminRoutes } from "./admin-routes.ts";
 import { createRateLimiter } from "./rate.ts";
+import { createTitles } from "./titles.ts";
 import { chatConfigOf, provideRoutes, type LiveSettings } from "./routes.ts";
 import { type ConversationRow, createChatStore } from "./store.ts";
 import { type AccountsWiring, BETTER_AUTH } from "./wiring.ts";
@@ -103,6 +104,9 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       // The agents users may pick (`agents`), described for the page.
       const definitions = pikit.useKeyed("agent.definition");
       const directory = pikit.useOptional("agent.directory");
+      // Titles: a model's, through the runtime's models; each one given to the App's `/name` (admin-api's).
+      const completion = pikit.useOptional("model.complete");
+      const commands = pikit.useKeyed("agent.command");
 
       const store = createChatStore(() => sql.get());
       const assets = createAssets(CHAT_FILES, () => avatarHosts(config.signIn.social));
@@ -151,6 +155,24 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         }
       };
 
+      /** What outlives the events (a model's title): cancelled at stop. */
+      let cancelling: AbortController | undefined;
+      let background = BACKGROUND_CONTEXT;
+      const titles = createTitles({
+        store,
+        kv: () => kv.get().namespace(NAME),
+        complete: () => completion.get(),
+        async modelFor(agent, ctx) {
+          if (config.titleModel !== undefined) return config.titleModel;
+          const defined = definitions.get(agent)?.model;
+          if (defined !== undefined) return defined;
+          return (await directory.get()?.list(ctx))?.find((each) => each.name === agent)?.model;
+        },
+        commands: () => commands,
+        current: (key, ctx) => conversations.get().get(key, ctx),
+        changed: (row, ctx) => changed(row, ctx),
+      });
+
       /** `durable` once start found the App is one key's actor (a Durable Object). */
       let limits: "server" | "durable" = "server";
       let delivery: AnswerDelivery | undefined;
@@ -165,6 +187,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         submissions: () => submissions.get(),
         limits: () => limits,
         changed,
+        titles,
         wake: async (ctx) => {
           await delivery?.wake(ctx).catch((error: unknown) => ctx.logger.warn("channel-web: could not ask for answers to be delivered; the next run's end does", { error: String(error) }));
         },
@@ -203,6 +226,8 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         }
       };
 
+      // A conversation being made here is named in the App's `/name` before any run of it can settle.
+      pikit.on("agent.dispatched", ({ conversation }, ctx) => (parseKey(conversation.key) === undefined ? undefined : titles.dispatched(conversation, ctx)));
       pikit.on("agent.started", ({ conversation, requestId }, ctx) =>
         parseKey(conversation.key) === undefined
           ? undefined
@@ -226,6 +251,8 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         const parsed = parseKey(result.conversation.key);
         if (parsed === undefined) return undefined;
         const key = result.conversation.key;
+        // An answer to the user: a model titles the conversation, in the background, once.
+        if (result.kind === "completed" && !answersOnlyTheDashboard(result)) titles.settled(result.conversation, ctx.derive(() => background));
         const work = guarded("a run's end was not recorded; the page reads its state from agent.submissions, its answer from delivery", async (now) => {
           store.runEnded(result.conversation.conversationId);
           // What the run wrote, for the user: never a run only the operator's follow-ups started.
@@ -298,6 +325,8 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
 
       return {
         async start(ctx) {
+          cancelling = new AbortController();
+          background = withAbortSignal(cancelling.signal, BACKGROUND_CONTEXT);
           const problem = configProblem(config);
           if (problem !== undefined) throw new Error(problem);
           const live = settings.get();
@@ -320,6 +349,9 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
           trustHost = false;
           // A write in flight is cut, and goes again (idempotent) at the next start.
           await stopping?.stop(ctx.abortSignal);
+          // A title under way is cut: it is tried again after a later run.
+          cancelling?.abort();
+          await titles.idle();
         },
       };
     },

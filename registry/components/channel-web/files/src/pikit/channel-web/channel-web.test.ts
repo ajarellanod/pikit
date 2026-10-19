@@ -91,7 +91,9 @@ test("keys: web:<user>:<chat id>, the chat id a UUID; parsed back; nothing else 
   expect(await chatIdFor("ana", "web:1")).toBe(await chatIdFor("ana", "web:1"));
   expect(await chatIdFor("ana", "web:1")).not.toBe(await chatIdFor("ben", "web:1"));
   expect(await chatIdFor("ana", "web:1")).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  expect(cleanTitle("  \n hello   there \n more")).toBe("hello there");
+  expect(cleanTitle("  \n hello   there \n more")).toBe("Hello there");
+  // As the dashboard cleans a title: no label, quotes or end punctuation; a capital first.
+  expect(cleanTitle('Title: "trip to Lisbon."\nmore')).toBe("Trip to Lisbon");
   expect(cleanTitle("x".repeat(100))?.length).toBe(TITLE_MAX);
 });
 
@@ -239,9 +241,9 @@ test("the list: newest activity first, paged with a cursor; a forged cursor is 4
   }
   await c.served.fetch(`${API}/conversations/${ids[0]}/messages`, post("ana", { text: "again" }));
   const first = (await (await c.served.fetch(`${API}/conversations?limit=2`, as("ana"))).json()) as { items: ChatConversation[]; next: string };
-  expect(first.items.map((each) => each.title)).toEqual(["one", "three"]);
+  expect(first.items.map((each) => each.title)).toEqual(["One", "Three"]);
   const second = (await (await c.served.fetch(`${API}/conversations?limit=2&cursor=${encodeURIComponent(first.next)}`, as("ana"))).json()) as { items: ChatConversation[]; next?: string };
-  expect(second.items.map((each) => each.title)).toEqual(["two"]);
+  expect(second.items.map((each) => each.title)).toEqual(["Two"]);
   expect(second.next).toBeUndefined();
   for (const query of ["?cursor=forged", "?limit=0", "?limit=101", "?limit=x"]) expect({ query, status: (await c.served.fetch(`${API}/conversations${query}`, as("ana"))).status }).toEqual({ query, status: 400 });
 
@@ -266,10 +268,10 @@ test("archive: listed apart (?archived=1), still read and written to; unarchive 
   const list = async (query = "") => ((await (await c.served.fetch(`${API}/conversations${query}`, as("ana"))).json()) as { items: ChatConversation[] }).items.map((each) => each.title);
 
   const archived = await c.served.fetch(`${API}/conversations/${two}/archive`, as("ana", { method: "POST" }));
-  expect({ status: archived.status, body: await archived.json() }).toMatchObject({ status: 200, body: { id: two, title: "two", archived: true } });
-  expect(await list()).toEqual(["three", "one"]);
-  expect(await list("?archived=1")).toEqual(["two"]);
-  expect(await list("?archived=0")).toEqual(["three", "one"]);
+  expect({ status: archived.status, body: await archived.json() }).toMatchObject({ status: 200, body: { id: two, title: "Two", archived: true } });
+  expect(await list()).toEqual(["Three", "One"]);
+  expect(await list("?archived=1")).toEqual(["Two"]);
+  expect(await list("?archived=0")).toEqual(["Three", "One"]);
   expect((await c.served.fetch(`${API}/conversations?archived=yes`, as("ana"))).status).toBe(400);
   // Still the user's: read, and archiving twice is the same.
   expect(await (await c.served.fetch(`${API}/conversations/${two}`, as("ana"))).json()).toMatchObject({ id: two, archived: true });
@@ -278,15 +280,15 @@ test("archive: listed apart (?archived=1), still read and written to; unarchive 
 
   const back = await c.served.fetch(`${API}/conversations/${two}/unarchive`, as("ana", { method: "POST" }));
   expect(await back.json()).toMatchObject({ id: two, archived: false });
-  expect(await list()).toEqual(["three", "two", "one"]);
+  expect(await list()).toEqual(["Three", "Two", "One"]);
   expect(await list("?archived=1")).toEqual([]);
 
   // A message in an archived conversation lists it again, at the top.
   await c.served.fetch(`${API}/conversations/${one}/archive`, as("ana", { method: "POST" }));
-  expect(await list()).toEqual(["three", "two"]);
+  expect(await list()).toEqual(["Three", "Two"]);
   await Bun.sleep(3);
   expect((await c.served.fetch(`${API}/conversations/${one}/messages`, post("ana", { text: "again" }))).status).toBe(202);
-  expect(await list()).toEqual(["one", "three", "two"]);
+  expect(await list()).toEqual(["One", "Three", "Two"]);
   expect(await list("?archived=1")).toEqual([]);
 
   // Deleted while archived: gone from both.
@@ -325,7 +327,7 @@ test("ISOLATION: user B naming user A's chat id gets 404 on every route, and A's
   for (const bad of ["..%2F..", encodeURIComponent(`ana:${id}`), id.toUpperCase()]) expect((await c.served.fetch(`${API}/conversations/${bad}`, as("ana"))).status).toBe(404);
   expect(c.runtime.dispatched.length).toBe(dispatched);
   expect(c.runtime.aborted).toEqual([]);
-  expect(await (await c.served.fetch(`${API}/conversations/${id}`, as("ana"))).json()).toMatchObject({ id, title: "my secret plan" });
+  expect(await (await c.served.fetch(`${API}/conversations/${id}`, as("ana"))).json()).toMatchObject({ id, title: "My secret plan" });
   expect((await transcriptOf(c, "ana", id)).length).toBe(1);
   // B starting a conversation never lands in A's: their keys differ even for the same request id.
   const theirs = await start(c, "ben", "hello", { requestId: "web:same" });
@@ -790,18 +792,18 @@ test("SEARCH: ?q= finds the user's own conversations whose title holds it, any c
   }
   await start(c, "ben", "Paris for ben");
   const titles = async (query: string, user = "ana") => ((await (await c.served.fetch(`${API}/conversations?${query}`, as(user))).json()) as { items: ChatConversation[] }).items.map((each) => each.title);
-  expect(await titles("q=paris")).toEqual(["paris notes", "Trip to Paris"]);
-  expect(await titles("q=%20PARIS%20")).toEqual(["paris notes", "Trip to Paris"]);
+  expect(await titles("q=paris")).toEqual(["Paris notes", "Trip to Paris"]);
+  expect(await titles("q=%20PARIS%20")).toEqual(["Paris notes", "Trip to Paris"]);
   expect(await titles(`q=${encodeURIComponent("école")}`)).toEqual(["École plans"]);
   expect(await titles(`q=${encodeURIComponent("%")}`)).toEqual(["100% done"]);
   expect(await titles(`q=${encodeURIComponent("_")}`)).toEqual([]);
   expect(await titles("q=")).toHaveLength(5);
   const first = (await (await c.served.fetch(`${API}/conversations?q=paris&limit=1`, as("ana"))).json()) as { items: ChatConversation[]; next: string };
-  expect(first.items.map((each) => each.title)).toEqual(["paris notes"]);
+  expect(first.items.map((each) => each.title)).toEqual(["Paris notes"]);
   expect(await titles(`q=paris&limit=1&cursor=${encodeURIComponent(first.next)}`)).toEqual(["Trip to Paris"]);
   await c.served.fetch(`${API}/conversations/${ids["paris notes"]}/archive`, as("ana", { method: "POST" }));
   expect(await titles("q=paris")).toEqual(["Trip to Paris"]);
-  expect(await titles("q=paris&archived=1")).toEqual(["paris notes"]);
+  expect(await titles("q=paris&archived=1")).toEqual(["Paris notes"]);
   // A renamed one is found by its new title.
   await c.served.fetch(`${API}/conversations/${ids.Groceries}`, post("ana", { title: "Paris groceries" }, "PATCH"));
   expect(await titles("q=paris")).toEqual(["Paris groceries", "Trip to Paris"]);
@@ -1013,7 +1015,7 @@ test("what setup declares", async () => {
     name: NAME,
     provides: ["http.route"],
     requires: ["secrets", "conversations.registry", "agent.runtime", "agent.observe", "agent.submissions", "storage.kv", "storage.sql"],
-    optional: ["wakeups", "outbound.queue", "actor.inbox", "actor.mailbox", "settings", "email.send", "admin.auth", "agent.definition", "agent.directory"],
+    optional: ["wakeups", "outbound.queue", "actor.inbox", "actor.mailbox", "settings", "email.send", "admin.auth", "agent.definition", "agent.directory", "model.complete", "agent.command"],
   });
 });
 

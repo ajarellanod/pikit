@@ -118,6 +118,12 @@ export const Config = Type.Object({
    * never trusted. Name one only when every request comes through a proxy that sets it.
    */
   trustedProxyHeaders: Type.Array(Type.String({ pattern: "^[a-z0-9-]{1,64}$" }), { default: [], maxItems: 8, uniqueItems: true }),
+  /**
+   * The model that titles a conversation after its first answer (`provider/modelId`, one of the App's
+   * providers), through `model.complete` (`titles.ts`). Absent: the conversation's agent's model.
+   * Read where runs settle: on Cloudflare the conversations' objects (the default App).
+   */
+  titleModel: Type.Optional(Type.String({ pattern: "^[^/\\s]+/\\S+$", description: "provider/modelId of the model that titles conversations; absent, each conversation's agent's model" })),
 });
 export type ChannelWebConfig = Static<typeof Config>;
 

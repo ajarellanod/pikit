@@ -31,7 +31,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
-| `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
+| `agent.command` | keyed | admin-api, runtime-pi | admin-api?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, outbound-durable, repo-github-app, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
@@ -47,7 +47,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
 | `email.send` | single | email-resend, email-ses | channel-web? | `createEmailSenderConformance` |
-| `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
+| `model.complete` | single | runtime-pi | admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `execution` | single | execution-do, execution-local | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
@@ -226,7 +226,9 @@ One slash command per name (`COMMAND_NAME`: lowercase letters, digits, `-`, `:`)
 conversation and acts only through contracts. `run` resolves with `{ text? }`, a note for whoever ran
 it; a thrown `Error` is the reason it failed. `listAgentCommands` and `runAgentCommand` are the
 helpers a runner uses (`runAgentCommand` never throws). Providers: admin-api (`new`, `name`),
-runtime-pi (`compact`). Runner: admin-api.
+runtime-pi (`compact`). Runners: admin-api (the dashboard's "/"), channel-web (`/name` with each
+title it sets, so the dashboard lists a web conversation by the chat's title and asks no model of its
+own).
 
 ---
 
@@ -566,7 +568,7 @@ adapter). Suite:
 - **`model.complete`** ([model.ts](../packages/contracts/src/model.ts)): `complete({ model, system?,
   prompt, maxTokens? }, ctx): Promise<string>`. One text from one of the App's models: no
   conversation, no tools, not counted in any conversation's usage. Refuses a model none of the
-  providers has. Provider: runtime-pi. User: admin-api (titles).
+  providers has. Provider: runtime-pi. Users: admin-api and channel-web (titles).
 
 ## Execution
 

@@ -84,21 +84,36 @@ export function imagesProblem(images: readonly ChatImage[], target: string): { s
 
 const ELLIPSIS = String.fromCharCode(0x2026);
 
+const chars = (...codes: number[]): string => String.fromCharCode(...codes);
+/** Typographic quotes and brackets a title may be wrapped in: single and double curly quotes, guillemets, CJK corner brackets. */
+const QUOTES = chars(0x2018, 0x2019, 0x201c, 0x201d, 0xab, 0xbb, 0x300c, 0x300d);
+/** Labels a model may put before a title ("Title: ", "Titre - "), in a few languages: taken off. */
+const TITLE_LABEL = new RegExp(`^(?:title|name|subject|topic|t${chars(0xed)}tulo|titulo|titre|titel|titolo|nombre|nom)(?:\\s*:\\s*|\\s+[-${chars(0x2013, 0x2014)}]\\s+)`, "i");
+/** Quotes and markdown a title is wrapped in. */
+const TITLE_WRAP = new RegExp(`^[\\s"'\`*_#>${QUOTES}-]+|[\\s"'\`*_${QUOTES}]+$`, "g");
+/** What a title never ends with. */
+const TRAILING = /[.,;:\s]+$/u;
+
 /**
- * A conversation's title from a text (its first message, or the user's): its first line with words,
- * spaces collapsed, at most `TITLE_MAX` characters (cut at a word, with an ellipsis); `undefined` when
- * nothing is left.
+ * A conversation's title from a text (its first message, or a model's answer): its first line with
+ * words, without a label ("Title:"), quotes or markdown around it, spaces collapsed, no `.`, `,`, `;` or
+ * `:` at its end, its first letter a capital, at most `TITLE_MAX` characters (cut at a word, with an
+ * ellipsis); `undefined` when nothing is left. The rules of admin-api's titles, so the dashboard, which
+ * cleans what `/name` gives it the same way, lists a conversation by the same title as the chat.
  */
 export function cleanTitle(text: string): string | undefined {
   const line = text
     .split(/\r?\n/)
-    .map((each) => each.replace(/\s+/g, " ").trim())
+    .map((each) => each.replace(TITLE_WRAP, "").replace(TITLE_LABEL, "").replace(TITLE_WRAP, "").replace(/\s+/g, " ").trim())
     .find((each) => /[\p{L}\p{N}]/u.test(each));
   if (line === undefined) return undefined;
-  if (line.length <= TITLE_MAX) return line;
-  const cut = line.slice(0, TITLE_MAX - 1);
-  const space = cut.lastIndexOf(" ");
-  return `${(space >= TITLE_MAX / 3 ? cut.slice(0, space) : cut).trimEnd()}${ELLIPSIS}`;
+  let title = line.replace(TRAILING, "");
+  if (title.length > TITLE_MAX) {
+    const cut = title.slice(0, TITLE_MAX - 1);
+    const space = cut.lastIndexOf(" ");
+    title = `${(space >= TITLE_MAX / 3 ? cut.slice(0, space) : cut).replace(TRAILING, "")}${ELLIPSIS}`;
+  }
+  return title === "" ? undefined : title.charAt(0).toLocaleUpperCase() + title.slice(1);
 }
 
 /** The title of a conversation started with `text`: the text's, else what it holds. */

@@ -118,6 +118,22 @@ Conversations, and the dashboard lacks the conversation header's menu the chat h
 - **Search** in Conversations: `?q=` 250 ms after the last key, with an "Archived" switch that searches
   the archived ones alike; without either the list is the sidebar's. The sidebar's own search still
   filters the chats it has loaded (its field is the shared `SidebarNav`'s, unchanged).
+- **Titles, one per conversation in both apps** (channel-web's `titles.ts`). A web conversation is
+  named by its first message at once, then, after its first run that answers the user, by a model
+  (`model.complete`; `titleModel`, else its agent's model), in the background, once (one more try
+  after a later run if it failed). The user's rename always wins: no model titles a renamed
+  conversation, and a model's title is written only while the title is still the one it replaces
+  (whose the title is: a `storage.kv` record per conversation, no table). The page hears a new title
+  as a change (the live view's `entry_appended` with no entry: it reads the conversation and the list
+  again). The dashboard titles conversations on its own (admin-api's titler), so channel-web gives
+  each title it sets to the App's `/name` (`agent.command`, a public contract; on Cloudflare run in
+  the conversation's object): the dashboard lists the chat's title, and, the first one being given
+  while the first message is dispatched (before any run can settle), admin-api's titler finds the
+  conversation named and asks no model. Both clean a title alike (first line, no label or quotes, no
+  end punctuation, a capital first, 60 characters at most), so the two read the same. An operator's
+  rename in the dashboard stays the dashboard's until the chat sets a title again. Elsewhere (any
+  channel), the dashboard lists a conversation by its first message from the moment it is
+  dispatched, so one whose runs all fail is never listed by its id.
 
 ## The dashboard
 - Uses the same shared view over its admin source: unchanged behaviour.

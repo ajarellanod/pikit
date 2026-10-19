@@ -205,7 +205,9 @@ settings-store do.
   is named. So a run of the operator's own
   follow-up streams nothing to the user, even while the user's message waits. Never transcript
   entries, system prompts, tool results or operator notes.
-- **Titles**: the first message, cleaned (`cleanTitle`); the user renames it.
+- **Titles**: the first message, cleaned (`cleanTitle`); the user renames it. Later (chat-parity):
+  a model titles it after its first answer unless the user renamed it, and each title is given to the
+  App's `/name`, so the dashboard lists the same one (`titles.ts`).
 - **Actions**: stop the run (`agent.runtime`'s `abort`, the conversation's current one); archive
   (listed apart, `?archived=1`, until the user restores it or new activity lists it again, as the
   dashboard's archive does); delete from the list (the index only: nothing of the runtime's is
