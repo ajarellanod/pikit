@@ -1,7 +1,8 @@
 /**
  * One conversation, live, in the shared view (`components/pikit/conversation.tsx`) over the admin API
  * (`source.ts`); and what an operator does to it (SPEC §5): a message (with images, a web search), a
- * stop, a reset (`/new`). Its top bar holds, when there is any, the Context panel's button (the images
+ * stop, a reset (`/new`). Its top bar holds who it is with (`PartyChip`: the channel, the name, and its
+ * Details: the ids, a link to where the channel shows them), when there is any, the Context panel's button (the images
  * sent in it, what its web searches and fetches found), and its menu (Rename, Archive or Restore,
  * Delete: the sidebar row's). Its composer shows its assistant: a conversation never changes agent, so
  * picking another starts a new chat with it. Its "/" runs the App's commands here (`POST
@@ -19,6 +20,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { ConversationView, type ThreadNote } from "@/components/pikit/conversation";
 import { ErrorNote } from "@/components/pikit/error-note";
+import { PartyChip, partyOf } from "@/components/pikit/party";
 import { api, type ApiCommandResponse, type ApiConversation, type ApiPage, post, useApi } from "@/lib/api";
 import { agentsOf, type CommandNote, useChats } from "@/lib/chats";
 import { navigate, pagePath } from "@/lib/router";
@@ -97,7 +99,6 @@ export function ConversationPage({ params }: { params: Record<string, string> })
     <ConversationView
       source={source}
       sent={chats}
-      from={conversation?.key}
       context={conversation !== undefined}
       onChange={reload}
       onFirstText={onFirstText}
@@ -105,6 +106,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
       actions={(contextButton) =>
         conversation !== undefined && (
           <TabActions>
+            <PartyChip party={partyOf(conversation)} />
             {contextButton}
             <ActionsMenu
               actions={conversationActions(conversation, archived)}

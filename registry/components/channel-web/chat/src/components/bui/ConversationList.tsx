@@ -1,12 +1,12 @@
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { formatAgo } from "@/lib/format";
 import { ActionsMenu, type ActionsMenuItem } from "./ActionsMenu";
 import { Badge } from "./Badge";
 
 /* ---------------------------------------------------------
  * CONVERSATION LIST
- * A page's list of conversations, compact (44px rows): the
- * title on the left, a spinner while one runs, a tag, the time
+ * A page's list of conversations, compact (44px rows): a small
+ * muted glyph when given (where it came from), the title, a spinner while one runs, a tag, the time
  * of its last activity small and muted on the right, then its
  * "…" menu (`ActionsMenu`), shown on hover or focus (always on
  * touch). The whole row opens it. The dashboard's and the
@@ -16,6 +16,8 @@ import { Badge } from "./Badge";
 export type ConversationListItem = {
   id: string;
   title: string;
+  /** a small muted glyph before the title (where it came from), labelled for a screen reader */
+  icon?: ReactNode;
   /** its page, for a new tab; a plain click calls `onOpen` when given */
   href: string;
   /** epoch ms */
@@ -38,6 +40,7 @@ export function ConversationList({ items, onOpen }: { items: readonly Conversati
     <ul className="records-shell flex flex-col divide-y divide-line">
       {items.map((item) => (
         <li key={item.id} className="group/row relative flex h-11 items-center gap-3 pr-1.5 pl-4 transition-colors duration-100 hover:bg-hover has-[a:focus-visible]:bg-hover">
+          {item.icon !== undefined && <span className="-mr-1 flex size-4 shrink-0 items-center justify-center text-ink-3 [&_svg]:size-[15px]">{item.icon}</span>}
           <a
             href={item.href}
             title={item.title}

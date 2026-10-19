@@ -294,8 +294,6 @@ export interface ConversationViewProps {
   source: ConversationSource;
   /** The messages sent and not shown yet: the app's, kept above its pages. */
   sent: SentMessages;
-  /** Who wrote the person's messages, when it is not the one reading (the dashboard: the conversation's key). */
-  from?: string | undefined;
   composer?: ComposerProps;
   /** In place of the composer: why the conversation cannot be talked to (a reset left it behind). */
   closed?: ReactNode;
@@ -316,7 +314,7 @@ export interface ConversationViewProps {
 }
 
 /** The thread, the activity line, the floating composer and the Context panel of one conversation. */
-export function ConversationView({ source, sent, from, composer = {}, closed, context = true, toolDetails = true, actions, side, notes = [], onChange, onFirstText }: ConversationViewProps) {
+export function ConversationView({ source, sent, composer = {}, closed, context = true, toolDetails = true, actions, side, notes = [], onChange, onFirstText }: ConversationViewProps) {
   const id = source.id;
   const live = useLive(source);
   const transcript = useTranscript(source, live.changes);
@@ -481,7 +479,7 @@ export function ConversationView({ source, sent, from, composer = {}, closed, co
           {turns.map((turn, i) => (
             <div key={turn.key} className="mx-auto flex w-full max-w-[720px] flex-col gap-8">
               {turn.kind === "user" && notesBefore(i, turn.message.timestamp).map((each) => <Fragment key={each.key}>{each.node}</Fragment>)}
-              {turn.kind === "user" ? <UserBubble message={turn.message} risen={risen(turn.message)} {...(from !== undefined && { from })} /> : <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />}
+              {turn.kind === "user" ? <UserBubble message={turn.message} risen={risen(turn.message)} /> : <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />}
             </div>
           ))}
           {notes

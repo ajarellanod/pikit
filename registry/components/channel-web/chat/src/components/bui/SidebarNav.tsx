@@ -36,6 +36,8 @@ export type SidebarChatAction = ActionsMenuItem;
 export type SidebarChat = {
   id: string;
   label: string;
+  /** a small muted glyph before the label (where the chat came from), labelled for a screen reader */
+  icon?: ReactNode;
   busy?: boolean;
   active?: boolean;
   href?: string;
@@ -348,6 +350,7 @@ function ChatRow({ chat, menuOpen, onPick, onMenu }: { chat: SidebarChat; menuOp
         onClick={(event) => follow(event, () => onPick(chat.id))}
         className={`sidebar-row sidebar-chat-row relative z-10 mx-2 flex h-8 items-center gap-2 rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${chat.active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""} ${withMenu ? "pr-8" : ""}`}
       >
+        {chat.icon !== undefined && <span className="sidebar-copy flex size-4 shrink-0 items-center justify-center text-ink-3 [&_svg]:size-[14px]">{chat.icon}</span>}
         <span className={`sidebar-copy min-w-0 flex-1 truncate text-[14px] font-medium ${chat.active ? "text-ink" : "text-ink-2"}`}>{chat.label}</span>
         {/* never `sidebar-copy`: its transform and transition would hold the spin still (the whole list fades when collapsed) */}
         {chat.busy === true && <span aria-label="Running" className="spinner size-3 shrink-0" />}

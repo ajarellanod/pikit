@@ -17,6 +17,7 @@ import { ThemeToggle } from "@/components/bui/ThemeToggle";
 import { useChatActions } from "@/components/pikit/chat-actions";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Mark } from "@/components/pikit/mark";
+import { ChannelIcon, partyOf } from "@/components/pikit/party";
 import { SettingsDialog } from "@/components/pikit/settings-dialog";
 import { SignIn } from "@/components/pikit/sign-in";
 import { TabBar } from "@/components/pikit/tab-bar";
@@ -153,9 +154,11 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const chatActions = useChatActions({ shown: openId, onLeft: () => newChat() });
   const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation): SidebarChat => {
     const id = conversation.conversationId;
+    const { channel } = partyOf(conversation);
     return {
       id,
       label: chats.titleOf(conversation),
+      icon: <ChannelIcon kind={channel.kind} label={channel.label} />,
       busy: conversation.busy,
       active: path === pagePath(CHAT, id),
       href: `${BASE}${pagePath(CHAT, id)}`,

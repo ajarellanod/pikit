@@ -3,7 +3,7 @@
  * a time ("Load more", the API's cursor), where the sidebar lists only the latest (`SIDEBAR_CHATS`,
  * its "View all" leads here). A search finds them by title or key (`?q=`, the API's: any case), as the
  * operator stops typing; "Archived" lists the archived ones instead (`?archived=1`), searched alike:
- * the only place they are. Each row opens its conversation, and its menu is the sidebar row's (Rename,
+ * the only place they are. Each row shows its channel's icon, and opens its conversation, and its menu is the sidebar row's (Rename,
  * Archive or Restore, Delete: `useShell().conversationActions`); a change made anywhere here reads the
  * list again (`useChats().changed`).
  */
@@ -18,6 +18,7 @@ import { Page } from "@/components/bui/Page";
 import SearchField from "@/components/bui/SearchField";
 import { Switch } from "@/components/bui/Switch";
 import { ErrorNote } from "@/components/pikit/error-note";
+import { ChannelIcon, partyOf } from "@/components/pikit/party";
 import { SEARCH_MAX } from "@/lib/admin-api";
 import { api, type ApiConversation, type ApiPage } from "@/lib/api";
 import { useChats } from "@/lib/chats";
@@ -120,14 +121,18 @@ export function ConversationsPage() {
         )}
         {items !== undefined && items.length > 0 && (
           <ConversationList
-            items={items.map((conversation) => ({
-              id: conversation.conversationId,
-              title: chats.titleOf(conversation),
-              href: `${BASE}${pagePath("/conversations", conversation.conversationId)}`,
-              lastActivity: conversation.lastActivity,
-              busy: conversation.busy,
-              actions: conversationActions(conversation, archived),
-            }))}
+            items={items.map((conversation) => {
+              const { channel } = partyOf(conversation);
+              return {
+                id: conversation.conversationId,
+                title: chats.titleOf(conversation),
+                icon: <ChannelIcon kind={channel.kind} label={channel.label} />,
+                href: `${BASE}${pagePath("/conversations", conversation.conversationId)}`,
+                lastActivity: conversation.lastActivity,
+                busy: conversation.busy,
+                actions: conversationActions(conversation, archived),
+              };
+            })}
             onOpen={(id) => navigate(pagePath("/conversations", id))}
           />
         )}

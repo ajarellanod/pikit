@@ -9,7 +9,8 @@
  * (`ApiConversation.title`: a model's, made after its first run, or the operator's, `/name` or `rename`; until then
  * its first message, once a model was asked to title it); until there is one, its first message when
  * this page has it at hand (sent from New chat, or read in the open conversation's transcript: never
- * looked for), else for another channel's key the id in it (`telegram:12345` is `12345`), and "New
+ * looked for), else for another channel's conversation who it is with (its party's name), else the id
+ * in its key (`telegram:12345` is `12345`), and "New
  * chat" for one of the dashboard's own. A conversation with no key (no message reached it and no reset
  * pointed a key to it) has nothing to show or do: the list leaves it out. Tabs are kept in
  * `localStorage["pikit-tabs"]`.
@@ -95,7 +96,7 @@ export interface Chats extends SentMessages {
   reload(): void;
   /** Moves at each conversation renamed, archived, restored or deleted here: a list of its own reads again. */
   changed: number;
-  /** Its title: the API's, else the first message at hand, the id in its key, or `NEW_CHAT`. */
+  /** Its title: the API's, else the first message at hand, its party's name, the id in its key, or `NEW_CHAT`. */
   titleOf(conversation: ApiConversation): string;
   /** A tab's title: its conversation's, as it is now. */
   tabTitle(tab: Tab): string;
@@ -163,6 +164,8 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
       if (known !== undefined) return known;
       const key = conversation.key;
       if (key === undefined || isDashboardKey(key)) return NEW_CHAT;
+      const name = (conversation as ApiConversation & { party?: { name?: string } }).party?.name;
+      if (name !== undefined && name.trim() !== "") return name;
       return key.slice(key.indexOf(":") + 1) || key;
     },
     [titled, firsts],
