@@ -33,7 +33,7 @@ a project installs, and agents that name what they may use.
 | An orchestrator: assign, list, follow, steer and cancel other agents' tasks, read their transcripts | `tool-delegate`: `delegate` (`wait: false` returns an id), `delegate_tasks`, `delegate_steer`, `delegate_cancel`, on `AgentDelegation`'s `list`, `steer`, `cancel`, each conversation its own tasks; reading a child's transcript is open | [subagents](subagents.md) |
 | An agent writes to another chat | none; `outbound.queue.enqueue` reached through the mailbox | no note yet |
 | Questions to the user (`askUser`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) (`askUser`) |
-| Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate only (SPEC §6) | [approvals](approvals.md) |
+| Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate (SPEC §6); approvals of exact tool calls by named approvers, in the chat or the dashboard, each run once (approvals-sql, extension-approvals, admin-approvals; server); no rules, veto window or reminders | [approvals](approvals.md) |
 | Missions: a goal ledger with checkpoints, mirrored in a task tracker | none | no note yet |
 | Memory: summaries, search, rules, preferences | none | [memory](memory.md) |
 | Routines (cron), followups (one-shot, agent-made) | `wakeups-timers` (the runtime's own) | [scheduler](scheduler.md) |

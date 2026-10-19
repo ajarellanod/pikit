@@ -5,7 +5,8 @@ chat. Hermes has command approval; OpenClaw approves requests from the chat or i
 
 **Specified:** partly (moved from the former SPEC §18, whose §4.5 named the `approvals` capability,
 and from the former SPEC §6.2b, the questions from extensions, which was the `interaction` note and is
-merged here: both sections are kept below verbatim)
+merged here: both sections are kept below verbatim). **Built:** approvals of exact actions (below),
+on a server.
 
 **Needed by:** nothing required directly. Self-improvement needs a human's approval of every
 self-change (SPEC §6); whether that approval is this component or the git host's review is open
@@ -14,6 +15,45 @@ below. The dashboard answers approvals only when this exists (SPEC §5).
 with a `question` part instead of waiting (declared in `@pikit/contracts`' `question.ts`, the
 shared vocabulary below), drawn as cards and dialogs, its answer a new message that says it in its text. What stays here: Pi's extensions' questions (pi-durable has no UI API yet) and
 decisions that wait days.
+
+## Built: approvals of exact actions
+A tool with effects runs only once a person the configuration names approved that exact call, and the
+approval is recorded by code, never by the model reading "approved". Three components:
+
+| Component | Provides | Uses | What it is |
+|---|---|---|---|
+| `approvals-sql` | `approvals` (declared: kind and capability) | `storage.sql`, `actor.mailbox`, `actor.inbox` | the store, its `contract.ts` and its suite (`conformance.ts`) |
+| `extension-approvals` | `agent.extension` `approvals`, an `inbound.normalize` stage | `approvals` | `request_approval`, the `beforeTool` claim, the answer recorded |
+| `admin-approvals` | `http.route` | `approvals`, `agent.runtime`, `admin.auth`? | `/admin/api/approvals`: list, decide as `dashboard:<operator>` |
+
+- **The contract** (`ApprovalStore`, approvals-sql's `contract.ts`, an identical copy in each user;
+  [docs/contracts.md](../docs/contracts.md), "A registry's own contracts"): an approval is one
+  immutable action `{ type, payload }` with its hash (canonical JSON, SHA-256), idempotent by key;
+  decided once by a `Sender` matching the proposer's `approvers` (`<channel>:<id>`, `<channel>:*`; an instance `telegram:ops` is its own channel),
+  `forbidden` otherwise; expired when read past `expiresAt`; claimed at most once, from the
+  conversation that asked, by one claimant (the same claimant again gets it back).
+- **The ask** is a `question` part (`approval:<id>`, one `confirm` field), like `askUser`'s: the run
+  ends with it, and the answer is a message in `answerText`'s words. Google Chat's buttons write it;
+  elsewhere the fallback says the two lines to send. The stage reads it before the model and decides
+  as the channel authenticated the sender; who may decide is the store's check.
+- **The gate** is `beforeTool`: the call's hash (name and arguments as they run) is claimed for that
+  tool task; pi-durable runs the hook again when a task recovers before its intent is committed, and
+  the same claimant gets the same approval. `afterTool` settles it.
+- **One owner**: the actor `approvals-sql:approvals`, so the same code reaches one Durable Object on
+  Cloudflare; not tested there, so the targets are `server`.
+
+Decided while building: `decide` takes no action hash (the action of an id never changes, so a
+`moved` outcome could never happen); there is no `get` (nothing reads one approval alone yet); the
+claim is scoped to the asking conversation, so one person's approval is never another
+conversation's; `settle` is by claimant (the hook's `afterTool` sees the call's original arguments,
+not the ones that ran).
+
+Still open, besides the questions below: Cloudflare (a workerd run, and admin routes in the Worker's
+App, which has no `storage.sql`); a dashboard view; reminders, escalation and approval by rule or
+after a veto window (components on this contract); Pi extensions' `ctx.ui` questions; an approval
+claimed by a call that then fails to run (another hook blocks it, a crash after intent) stays
+`claimed`; channel-google-chat takes the first answer of anyone it admits, so a stranger's click
+spends the card's buttons (the approver then answers in text).
 
 ## What it gives
 Something the agent cannot decide alone ("allow this `rm -rf`?", "which of these three?", "approve
@@ -49,11 +89,11 @@ of asker, one mechanism:
   extensions keep a no-op UI (`hasUI: false`), and `permission-gate` blocks.
 
 ## How it fits pikit
-- Capability `approvals` (`ApprovalStore`), its conformance suite written first. Providers:
-  `approvals-sql` on `storage.sql` (server); on Cloudflare, Workflows (which the former SPEC §9.2 named
-  for "anything that waits > 15 min": an alarm gets 15 minutes of wall clock, C4) or the Durable
-  Object's own storage with `wakeups`, to decide. The kind `approvals` is new: a naming decision
-  (`KINDS` in `packages/cli/src/registry/checks.ts`).
+- Capability `approvals` (`ApprovalStore`), with its suite, declared by its provider `approvals-sql`
+  on `storage.sql` (built, above); the kind `approvals` is declared by it too, not the kit's. On
+  Cloudflare the same actor would be a Durable Object; whether reminders need Workflows (which the
+  former SPEC §9.2 named for "anything that waits > 15 min": an alarm gets 15 minutes of wall clock,
+  C4) or the object's `wakeups` is to decide.
 - With `approvals` installed, the adapter gives extensions `hasUI: true` and a `ui` backed by it.
 - It binds a question to the message that carries it by reading `outbound.queue`'s `receipts` feed
   and `answerKey` (`Feed`, SPEC K3; `packages/contracts/src/outbound.ts`). The answer comes back as

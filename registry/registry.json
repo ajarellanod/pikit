@@ -18,6 +18,14 @@
       ],
       "path": "components/admin-api"
     },
+    "admin-approvals": {
+      "version": "0.0.0",
+      "description": "The dashboard's routes for approvals: list them, and approve or reject one as an operator, held to the approvers like anyone; the conversation that asked is told once.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/admin-approvals"
+    },
     "admin-auth-token": {
       "version": "0.0.0",
       "description": "Who is an operator: a request carrying the bearer token PIKIT_ADMIN_TOKEN. What admin routes (the dashboard) ask before answering.",
@@ -53,6 +61,14 @@
         "durable"
       ],
       "path": "components/agents-live"
+    },
+    "approvals-sql": {
+      "version": "0.0.0",
+      "description": "Stores approvals of exact actions (an action's hash, who may decide, its expiry) on storage.sql, owned by one actor: decided once by an allowed approver, claimed at most once by the call that runs it.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/approvals-sql"
     },
     "channel-google-chat": {
       "version": "0.0.0",
@@ -178,6 +194,14 @@
         "server"
       ],
       "path": "components/expose-cloudflare-tunnel"
+    },
+    "extension-approvals": {
+      "version": "0.0.0",
+      "description": "Tools in config run only with a person's approval of that exact call: the agent asks with request_approval (a question in the chat), the answer is recorded by code as its channel authenticated the sender, and the approved call runs once.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/extension-approvals"
     },
     "extension-house-rules": {
       "version": "0.0.0",
