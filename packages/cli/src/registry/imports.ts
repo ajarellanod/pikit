@@ -140,6 +140,17 @@ export const SERVER_ONLY_EXPORTS: readonly string[] = [
 /** Pi's own Node subpath: fine behind a server-only export, never in a neutral one. */
 export const PI_NODE = "@earendil-works/pi-durable/env/node";
 
+/**
+ * Earendil Works' packages that are not Pi: Gondolin, its micro-VM sandbox (execution-gondolin's), has
+ * no Pi inside, so a component depends on it as on any npm package.
+ */
+const NOT_PI: ReadonlySet<string> = new Set(["@earendil-works/gondolin"]);
+
+/** Whether `specifier` imports Pi (`@earendil-works/*`, but for `NOT_PI`), which only `@pikit/pi-adapter` may. */
+export function isPiImport(specifier: string): boolean {
+  return specifier.startsWith("@earendil-works/") && !NOT_PI.has(packageName(specifier));
+}
+
 /** `@scope/pkg/sub` → `@scope/pkg`; `pkg/sub` → `pkg`. */
 export function packageName(specifier: string): string {
   const parts = specifier.split("/");

@@ -164,6 +164,14 @@
       ],
       "path": "components/execution-do"
     },
+    "execution-gondolin": {
+      "version": "0.0.0",
+      "description": "Each conversation's tools work in a Linux micro-VM of its own (Gondolin, over QEMU): a real shell that cannot read the server's files or other conversations', with its files on the host, no network but the hosts you allow, and secrets the guest never sees.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/execution-gondolin"
+    },
     "execution-local": {
       "version": "0.0.0",
       "description": "The agent's tools work on this server: its filesystem and its shell, whose commands start without the server's secrets.",
