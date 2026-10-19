@@ -117,6 +117,21 @@ export function createApprovalsConformance(fixture: () => ApprovalsFixture): Con
       check(operatorDecided.ok && operatorDecided.approval.status === "rejected", "dashboard:* lets any operator decide");
     }),
 
+    scenario("a channel instance (a channel with a `:`) is a channel of its own: its exact sender and its `:*` decide, `<channel>:*` does not cover it", async ({ store, ctx }) => {
+      const ops = { channel: "telegram:ops", id: "12345" };
+      const exact = await store.propose(request("k1", { command: "ls" }, { approvers: ["telegram:ops:12345"] }), ctx);
+      const wildcard = await store.propose(request("k2", { command: "pwd" }, { approvers: ["googlechat:ops:*"] }), ctx);
+      const plain = await store.propose(request("k3", { command: "id" }, { approvers: ["telegram:*"] }), ctx);
+      const exactDecided = await store.decide(exact.id, { verdict: "approve", by: ops }, ctx);
+      check(exactDecided.ok && exactDecided.approval.status === "approved", "the instance's exact sender decides");
+      same(exactDecided.approval.decidedBy, ops, "decidedBy keeps the instance");
+      same(await store.decide(exact.id, { verdict: "approve", by: { channel: "telegram", id: "12345" } }, ctx), { ok: false, code: "forbidden" }, "the same id on the plain channel");
+      same(await store.decide(wildcard.id, { verdict: "approve", by: { channel: "googlechat", id: "users/1" } }, ctx), { ok: false, code: "forbidden" }, "the plain channel under an instance's star");
+      check((await store.decide(wildcard.id, { verdict: "approve", by: { channel: "googlechat:ops", id: "users/1" } }, ctx)).ok, "anyone on the instance under its star");
+      same(await store.decide(plain.id, { verdict: "approve", by: ops }, ctx), { ok: false, code: "forbidden" }, "an instance under the plain channel's star");
+      check((await store.decide(plain.id, { verdict: "approve", by: { channel: "telegram", id: "9" } }, ctx)).ok, "the plain channel under its star");
+    }),
+
     scenario("an unknown approval is not_found", async ({ store, ctx }) => {
       same(await store.decide("nope", { verdict: "approve", by: owner }, ctx), { ok: false, code: "not_found" }, "an unknown id");
     }),

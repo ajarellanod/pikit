@@ -35,7 +35,11 @@ export type ApprovalRequest = {
   title: string;
   /** Why, for the person who decides. */
   summary?: string;
-  /** Who may decide: `<channel>:<id>` or `<channel>:*` (`telegram:12345`, `dashboard:*`). One or more. */
+  /**
+   * Who may decide: the whole sender `<channel>:<id>`, or `<channel>:*` for anyone on exactly that channel
+   * (`telegram:12345`, `telegram:ops:12345`, `dashboard:*`). A channel instance (`telegram:ops`) is a
+   * channel of its own: `telegram:*` does not cover it. One or more.
+   */
   approvers: string[];
   /** The conversation that asked (where the action may be claimed), and who it was answering. */
   requestedBy: { conversation: ConversationRef; sender?: Sender };

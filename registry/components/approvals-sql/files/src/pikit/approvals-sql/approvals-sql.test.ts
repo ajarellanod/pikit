@@ -57,4 +57,9 @@ test("isApprover: an exact sender, or anyone on a channel with <channel>:*", () 
   expect(isApprover(["dashboard:*"], { channel: "dashboard", id: "ops" })).toBe(true);
   expect(isApprover(["dashboard:*"], { channel: "telegram", id: "ops" })).toBe(false);
   expect(isApprover(["google-chat:users/1"], { channel: "google-chat", id: "users/1" })).toBe(true);
+  // A channel instance holds a `:`: the whole sender, or its own star; the plain channel's star is not its.
+  expect(isApprover(["telegram:ops:12345"], { channel: "telegram:ops", id: "12345" })).toBe(true);
+  expect(isApprover(["telegram:ops:*"], { channel: "telegram:ops", id: "7" })).toBe(true);
+  expect(isApprover(["telegram:*"], { channel: "telegram:ops", id: "12345" })).toBe(false);
+  expect(isApprover(["telegram:ops:*"], { channel: "telegram", id: "7" })).toBe(false);
 });

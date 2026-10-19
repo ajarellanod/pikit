@@ -29,7 +29,7 @@ approval is recorded by code, never by the model reading "approved". Three compo
 - **The contract** (`ApprovalStore`, approvals-sql's `contract.ts`, an identical copy in each user;
   [docs/contracts.md](../docs/contracts.md), "A registry's own contracts"): an approval is one
   immutable action `{ type, payload }` with its hash (canonical JSON, SHA-256), idempotent by key;
-  decided once by a `Sender` matching the proposer's `approvers` (`<channel>:<id>`, `<channel>:*`),
+  decided once by a `Sender` matching the proposer's `approvers` (`<channel>:<id>`, `<channel>:*`; an instance `telegram:ops` is its own channel),
   `forbidden` otherwise; expired when read past `expiresAt`; claimed at most once, from the
   conversation that asked, by one claimant (the same claimant again gets it back).
 - **The ask** is a `question` part (`approval:<id>`, one `confirm` field), like `askUser`'s: the run

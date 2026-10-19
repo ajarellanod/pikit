@@ -852,7 +852,9 @@ interface ApprovalStore {
 - An approval is one immutable action, identified by `actionHash` (SHA-256 of its canonical JSON,
   `actionHash` in the contract file, Web Crypto). `propose` is idempotent by key; the same key with
   another action is `conflict`, a malformed request or no approvers `invalid`.
-- Who decides is the proposer's policy (`approvers`: `<channel>:<id>`, `<channel>:*`), held by the
+- Who decides is the proposer's policy (`approvers`: the whole sender `<channel>:<id>`, or
+  `<channel>:*` for exactly that channel; an instance `telegram:ops` is its own channel, which
+  `telegram:*` does not cover), held by the
   store: anyone else is `forbidden` and nothing is recorded. A decision is taken once; the same verdict
   again answers `ok` unchanged.
 - Expiry is read with the owning App's clock: a pending or approved approval past `expiresAt` can be

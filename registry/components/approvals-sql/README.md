@@ -29,8 +29,10 @@ Guarantees, each enforced here and checked by the suite (`conformance.ts`):
   `{ type, payload }` (`actionHash`, `canonicalJson`: sorted keys, Web Crypto). The same
   `idempotencyKey` and action give the same approval; the same key with another action is refused
   (`code: "conflict"`); a malformed request or one with no approvers is refused (`code: "invalid"`).
-- **Who decides is the proposer's policy, held here.** `approvers` are `<channel>:<id>` or
-  `<channel>:*`; a `Sender` that matches none is `forbidden`, and nothing is recorded. A decision is
+- **Who decides is the proposer's policy, held here.** `approvers` are the whole sender
+  `<channel>:<id>`, or `<channel>:*` for anyone on exactly that channel. A channel instance
+  (`telegram:ops`) is a channel of its own: `telegram:ops:12345` and `telegram:ops:*` name its
+  senders, `telegram:*` does not. A `Sender` that matches none is `forbidden`, and nothing is recorded. A decision is
   taken once: the same verdict again answers `ok` unchanged (an answer delivered twice), the other one
   `not_pending`; an unknown id is `not_found`.
 - **Expiry is read, never timed**: a pending or approved approval past `expiresAt` (the owning App's
@@ -50,7 +52,7 @@ Guarantees, each enforced here and checked by the suite (`conformance.ts`):
 
 ## Tests
 `approvals-sql.test.ts` runs the `approvals` suite over SQLite and the in-memory mailbox: idempotent
-proposals and conflicts, invalid requests, decisions once, strangers forbidden (`<channel>:*` included),
+proposals and conflicts, invalid requests, decisions once, strangers forbidden (`<channel>:*` included, channel instances apart),
 not found, expiry, claims once (same claimant, another claimant, another conversation, other
 arguments, a rejected one, four claimants at once), settle once, a restart, pages and statuses. Plus
 what setup declares, the owner-only key and `isApprover`. Each guarantee was checked to fail on a

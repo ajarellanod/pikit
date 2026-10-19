@@ -43,7 +43,10 @@ export const QUESTION_PREFIX = "approval:";
 const Config = Type.Object({
   /** Tools that run only with a person's approval of that exact call. */
   tools: Type.Array(Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]*$" }), { default: [] }),
-  /** Who may approve: `<channel>:<id>` as the channel authenticated them, or `<channel>:*` (`dashboard:*`: any operator). */
+  /**
+   * Who may approve: `<channel>:<id>` as the channel authenticated them, or `<channel>:*` for exactly that
+   * channel (`dashboard:*`: any operator). An instance is its own channel: `telegram:ops:*`, not `telegram:*`.
+   */
   approvers: Type.Array(Type.String({ pattern: "^[^:\\s]+:\\S+$" }), { default: [] }),
   /** How long an approval may be decided and used, in ms. */
   expiresInMs: Type.Integer({ minimum: 60_000, default: 86_400_000 }),

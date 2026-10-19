@@ -33,13 +33,14 @@ export const CALL = {
 const APPROVER = /^[^:\s]+:\S+$/;
 const STATUSES: readonly ApprovalStatus[] = ["pending", "approved", "rejected", "expired", "claimed", "executed", "failed"];
 
-/** Whether `sender` matches one of `approvers` (`<channel>:<id>`, or `<channel>:*` for anyone on that channel). */
+/**
+ * Whether `sender` matches one of `approvers`: the whole `<channel>:<id>` (as extension-house-rules'
+ * `senderName`), or `<channel>:*` for anyone on exactly that channel. A channel may hold `:` (an
+ * instance, `telegram:ops`), and each instance is a channel of its own: `telegram:*` is not `telegram:ops`'s.
+ */
 export function isApprover(approvers: readonly string[], sender: Sender): boolean {
-  return approvers.some((pattern) => {
-    const at = pattern.indexOf(":");
-    const id = pattern.slice(at + 1);
-    return pattern.slice(0, at) === sender.channel && (id === "*" || id === sender.id);
-  });
+  const name = `${sender.channel}:${sender.id}`;
+  return approvers.some((pattern) => pattern === name || (pattern.endsWith(":*") && pattern.slice(0, -2) === sender.channel));
 }
 
 const invalid = (what: string) => new ActorCallError("invalid", `approvals-sql: ${what}`);

@@ -7,8 +7,8 @@
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { answerText } from "@pikit/contracts";
-import type { ApprovalStore } from "./contract.ts";
-import extensionApprovals, { approvalQuestion, parseAnswer } from "./index.ts";
+import type { Approval, ApprovalStore } from "./contract.ts";
+import extensionApprovals, { approvalQuestion, decisionNote, parseAnswer } from "./index.ts";
 
 const store = defineComponent({ name: "approvals-test", setup: (pikit) => pikit.provide("approvals", {} as ApprovalStore) });
 
@@ -35,6 +35,12 @@ test("an answer in answerText's words is read: the approval's id and the verdict
   expect(parseAnswer("yes")).toBeUndefined();
   expect(parseAnswer(answerText({ ...question, id: "q1" }, { approve: true }))).toBeUndefined();
   expect(parseAnswer(`${answerText(question, { approve: true })}\nand more`)).toBeUndefined();
+});
+
+test("the note names a sender of a channel instance whole: <channel>:<id>", () => {
+  const approval = { status: "approved", decidedBy: { channel: "telegram:ops", id: "12345" } } as Approval;
+  expect(decisionNote("a1", "telegram:ops:12345", { ok: true, approval })).toBe("[approvals] Recorded: approval a1 is approved, decided by telegram:ops:12345.");
+  expect(decisionNote("a1", "telegram:ops:2", { ok: false, code: "forbidden" })).toBe("[approvals] Not recorded: telegram:ops:2 may not decide approval a1.");
 });
 
 test("a title cannot carry another approval's id: the last one, with its own field, is read", () => {
