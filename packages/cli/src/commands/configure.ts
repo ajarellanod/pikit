@@ -14,7 +14,10 @@
  *    variable the provider's component declares (its manifest's first secret `environment` entry). The login runs where the app will run: through the deployment's `exec` for
  *    `pikit up` (in Docker, its volume), or on this machine for `pikit dev`. Each place keeps its
  *    own copy; nothing is copied between them. A project with no `model.credentials`
- *    component (on Cloudflare) has nowhere to keep a login: it is offered the API key only.
+ *    component has nowhere to keep a login: it is offered the API key only. On Cloudflare
+ *    (`durable`), the store (credentials-do) is the deployed app's own object: the login runs here and
+ *    its credential is uploaded to the deployed Worker's operator route (`uploadLogin`), with `.env`'s
+ *    `PIKIT_ADMIN_TOKEN`; what the deployed app holds is read from the same route.
  *
  * Without a terminal (or with `--yes`) it asks nothing: a variable comes from the process
  * environment or from `--generate <NAME>`, and a missing required one fails the command. It never
@@ -25,8 +28,8 @@ import { type ComponentConfigureResult, componentsWithSteps } from "../project/c
 import { declaredVariables, planModels, planVariables } from "../project/configure-plan.ts";
 import { type AppExec, deploymentExec } from "../project/deployment-module.ts";
 import { ENV_FILE, readEnv, writeEnv } from "../project/env-file.ts";
-import type { CredentialsResult } from "../project/credentials.ts";
-import { apiKeyHint, canLogIn, type CheckedCredentials, checkModelCredentials, providersInUse } from "../project/model-credentials.ts";
+import { type CredentialsResult, credentialsRoute } from "../project/credentials.ts";
+import { apiKeyHint, canLogIn, type CheckedCredentials, checkModelCredentials, deployedApp, deployedCredentials, providersInUse } from "../project/model-credentials.ts";
 import { readProjectManifest } from "../project/pikit-json.ts";
 import { runScript, runScriptInApp } from "../project/run.ts";
 import { ask, askSecret, beginGuided, Cancelled, CliError, choose, isInteractive, log } from "../ui.ts";
@@ -133,14 +136,20 @@ async function configureModels(projectDir: string, options: ConfigureOptions, in
     if (!ids.includes(options.login) && !here.unused.includes(options.login)) throw new CliError(`no installed component provides the model provider "${options.login}"`);
     if (!here.oauth.includes(options.login)) throw new CliError(`the model provider "${options.login}" has no login: it takes an API key (${apiKeyHint(projectDir, here, options.login)})`);
     if (!canLogIn(here, options.login)) throw new CliError(`the model provider "${options.login}" has no model.credentials component to store a login: ${apiKeyHint(projectDir, here, options.login)}`);
-    await login(projectDir, options.login, here.store, exec, options.loginMethod);
+    if (here.remote) await uploadLogin(projectDir, options.login, here.store as string, options.loginMethod);
+    else await login(projectDir, options.login, here.store, exec, options.loginMethod);
     return { left: ids.filter((id) => here.providers[id] !== true && id !== options.login), checked: here };
   }
 
   // What this machine lacks may be where the app runs: `pikit up` reads the deployment's copy.
   const lacking = ids.filter((id) => here.providers[id] !== true);
   let there: Record<string, boolean> | undefined;
-  if (lacking.length > 0 && exec !== undefined) {
+  if (lacking.length > 0 && here.remote) {
+    // On `durable`, the deployed app's store: what it holds, when it answers.
+    const deployed = await deployedCredentials(projectDir, here.store as string);
+    if ("why" in deployed) log.info(`  the deployed app's model credentials cannot be read (${deployed.why}): a login is offered once it can`);
+    else there = deployed.stored;
+  } else if (lacking.length > 0 && exec !== undefined) {
     log.step("checking the model credentials where the app runs (`pikit up`); the first time, its image is built (about a minute)");
     try {
       there = (await checkModelCredentials(projectDir, exec, used)).providers;
@@ -153,6 +162,7 @@ async function configureModels(projectDir: string, options: ConfigureOptions, in
   const plan = planModels({ checked: here, there, components: readProjectManifest(projectDir).components, exec: exec !== undefined });
   for (const { id, has } of plan) {
     if (has === "here") log.info(`  model provider ${id}: has credentials`);
+    else if (has === "there" && here.remote) log.info(`  model provider ${id}: has credentials in the deployed app (${here.store}); \`pikit dev\` takes an API key`);
     else if (has === "there") log.info(`  model provider ${id}: has credentials for \`pikit up\` (for \`pikit dev\` too: \`pikit configure --login ${id} --local\`)`);
   }
   const unconfigured = plan.filter((step) => step.has === "none");
@@ -165,7 +175,8 @@ async function configureModels(projectDir: string, options: ConfigureOptions, in
       continue;
     }
     const choice = await choose(`The model provider "${id}" has no credentials. How should your agent reach it?`, choices);
-    if (choice === "up") await login(projectDir, id, here.store, exec);
+    if (choice === "up" && here.remote) await uploadLogin(projectDir, id, here.store as string);
+    else if (choice === "up") await login(projectDir, id, here.store, exec);
     else if (choice === "dev") await login(projectDir, id, here.store, undefined);
     else if (choice === "key" && keyName !== undefined) {
       const key = await askSecret(keyName);
@@ -201,6 +212,22 @@ async function login(projectDir: string, id: string, store: string | undefined, 
   if (!result.ok) throw new CliError(`login to ${id} failed: ${result.error}`);
   const where = exec === undefined ? "on this machine, for `pikit dev`" : "where the app runs, for `pikit up`";
   log.ok(`logged in to ${id} ${where}; the tokens are stored by ${store ?? "model.credentials"} (see its config in pikit.config.ts)`);
+}
+
+/**
+ * On `durable`: logs in on this machine (the code login unless `method` says otherwise: nothing has
+ * to come back to a callback), and `credentials.ts` uploads the credential to the deployed app's
+ * store (`PUT <url>/admin/api/<store>/<id>`, `.env`'s `PIKIT_ADMIN_TOKEN`). It is never written here.
+ */
+async function uploadLogin(projectDir: string, id: string, store: string, method?: LoginMethod): Promise<void> {
+  const app = await deployedApp(projectDir);
+  if ("why" in app) throw new CliError(`cannot log in to ${id} for the deployed app: ${app.why}; then \`pikit configure --login ${id}\` again`);
+  log.step(`logging in to ${id} on this machine; the credential goes to the deployed app's ${store} (${app.url})`);
+  log.info("  a subscription's terms say whether it may serve a deployed bot: check them first");
+  const args = ["login", id, PI_LOGIN_METHOD[method ?? IN_APP_LOGIN_METHOD], "--upload", credentialsRoute(app.url, store, id)];
+  const result = await runScript<CredentialsResult>("credentials.ts", projectDir, args, { interactive: true });
+  if (!result.ok) throw new CliError(`login to ${id} failed: ${result.error}`);
+  log.ok(`logged in to ${id}: the tokens are stored by ${store} in the deployed app (${app.url}); nothing is kept here`);
 }
 
 function randomToken(): string {

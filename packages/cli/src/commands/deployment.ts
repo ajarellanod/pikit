@@ -69,9 +69,9 @@ async function checkLocalCredentials(projectDir: string, probed: ProbeResult): P
     .filter(([, ok]) => !ok)
     .map(([id]) => id);
   for (const id of missing) {
-    // A login is kept by `model.credentials`: without one (on Cloudflare), or for a provider with no
-    // OAuth login, the key is the only way.
-    const login = checked.store === undefined || !checked.oauth.includes(id) ? "" : `run \`pikit configure --login ${id} --local\`, or `;
+    // A login is kept by `model.credentials`: without one, for a provider with no OAuth login, or on
+    // Cloudflare (whose store is the deployed app's: `pikit dev` has objects of its own), the key is the only way.
+    const login = checked.store === undefined || checked.remote || !checked.oauth.includes(id) ? "" : `run \`pikit configure --login ${id} --local\`, or `;
     log.problem(`the model provider "${id}" has no credentials on this machine, for \`pikit dev\`: ${login}${apiKeyHint(projectDir, checked, id)}`);
   }
   if (missing.length > 0) throw new CliError("the app would start without model credentials");

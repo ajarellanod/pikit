@@ -9,7 +9,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Runner, deployHooks, deploySecrets, down, dev, login, logs, parseDeployments, status, up, workerName } from "./commands.ts";
+import { type Runner, deployHooks, deploySecrets, down, dev, login, logs, parseDeployments, status, up, url, workerName } from "./commands.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -107,8 +107,12 @@ test("up deploys with .env's secrets but not wrangler's own, then waits until /h
   expect(existsSync(deploy?.command[5] as string)).toBe(false);
   expect(wrangler.calls).toHaveLength(1);
   expect(health.urls).toEqual(Array(3).fill("https://my-bot-v2.acme.workers.dev/health"));
-  // status finds the Worker from this record.
+  // status finds the Worker from this record, and url answers it (with no wrangler call).
   expect(JSON.parse(readFileSync(join(cwd, ".pikit", "deployment-cloudflare.json"), "utf8"))).toEqual(deployed);
+  expect(await url({ cwd, run: wrangler.run })).toBe("https://my-bot-v2.acme.workers.dev");
+  expect(wrangler.calls).toHaveLength(1);
+  // Before any up from this machine: no URL.
+  expect(await url({ cwd: project() })).toBeUndefined();
 });
 
 test("up passes no secrets file without a .env, and asks /health at the URL it is given", async () => {

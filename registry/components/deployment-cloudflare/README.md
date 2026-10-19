@@ -325,7 +325,9 @@ the dashboard (Workers Logs).
 keeps the objects' state in `.wrangler/`.
 
 There is no `restart` (a new version is `up`) and no `exec`: nothing runs a command where the app
-runs, so `pikit configure` logs in on your machine and model keys go in `.env`.
+runs, so `pikit configure` logs in on your machine and model keys go in `.env`. **`url`** answers
+where the last `up` from this machine deployed (`.pikit/deployment-cloudflare.json`), with no
+account call: `pikit configure --login` uploads a subscription login there, to credentials-do's route.
 
 ## Removing it
 

@@ -1,12 +1,13 @@
 // The login's terminal side of `credentials.ts`: the adapter's `loginInteraction` behind `choosing`,
-// over a stubbed terminal, and `lineTerminal` over in-memory streams. No network, no pi-ai login.
+// over a stubbed terminal, and `lineTerminal` over in-memory streams; the upload of a login to a
+// deployed app (`durable`), against a local `Bun.serve` fake of its route. No network, no pi-ai login.
 
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { CREDENTIALS_MODULE, type CredentialsModule, choosing, deviceId, type LoginTerminal, lineTerminal } from "./credentials.ts";
+import { CREDENTIALS_MODULE, type CredentialsModule, choosing, credentialsRoute, deviceId, type LoginTerminal, lineTerminal, safeUploadUrl, uploadCredential } from "./credentials.ts";
 
 // As the script does at run time: the adapter's module, not a type import (see credentials.ts).
 const { loginInteraction } = (await import(CREDENTIALS_MODULE)) as CredentialsModule;
@@ -151,5 +152,47 @@ test("the installation's device id is a UUID made at the first login, the same a
     expect(deviceId(project)).toBe(replaced);
   } finally {
     rmSync(project, { recursive: true, force: true });
+  }
+});
+
+const SECRET = { type: "oauth", access: "sk-ant-oat-secret-access", refresh: "sk-ant-ort-secret-refresh", expires: 1 };
+const TOKEN = "an-admin-token-of-at-least-32-characters";
+
+test("a durable store's route is /admin/api/<store>, a provider's under it; a credential goes only over https or to this machine", () => {
+  expect(credentialsRoute("https://bot.ana.workers.dev/", "credentials-do")).toBe("https://bot.ana.workers.dev/admin/api/credentials-do");
+  expect(credentialsRoute("https://bot.ana.workers.dev", "credentials-do", "openai-codex")).toBe("https://bot.ana.workers.dev/admin/api/credentials-do/openai-codex");
+  expect(["https://bot.ana.workers.dev/x", "http://127.0.0.1:8787/x", "http://localhost:8787/x"].map(safeUploadUrl)).toEqual([true, true, true]);
+  expect(["http://bot.ana.workers.dev/x", "ftp://x/y", "not a url"].map(safeUploadUrl)).toEqual([false, false, false]);
+});
+
+test("uploadCredential PUTs the credential with the operators' bearer token; what it reports on failure holds neither", async () => {
+  const seen: { method: string; path: string; authorization: string | null; body: unknown }[] = [];
+  let status = 200;
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      seen.push({ method: request.method, path: new URL(request.url).pathname, authorization: request.headers.get("authorization"), body: await request.json() });
+      return status === 200 ? Response.json({ providerId: "anthropic", type: "oauth" }) : Response.json({ error: "invalid_request", message: "The body is a credential" }, { status });
+    },
+  });
+  try {
+    const url = credentialsRoute(`http://127.0.0.1:${server.port}`, "credentials-do", "anthropic");
+    expect(await uploadCredential(url, TOKEN, SECRET)).toBeUndefined();
+    expect(seen).toEqual([{ method: "PUT", path: "/admin/api/credentials-do/anthropic", authorization: `Bearer ${TOKEN}`, body: SECRET }]);
+
+    const reported: string[] = [];
+    for (status of [401, 404, 400]) reported.push((await uploadCredential(url, TOKEN, SECRET)) as string);
+    expect(reported[0]).toContain("refused PIKIT_ADMIN_TOKEN");
+    expect(reported[1]).toContain("`pikit up`");
+    expect(reported[2]).toBe("the deployed app answered 400: The body is a credential");
+    // Not https: refused before anything is sent.
+    const before = seen.length;
+    expect(await uploadCredential(`http://bot.ana.workers.dev/admin/api/credentials-do/anthropic`, TOKEN, SECRET)).toContain("not https");
+    expect(seen).toHaveLength(before);
+    reported.push((await uploadCredential(`http://127.0.0.1:1/admin/api/credentials-do/anthropic`, TOKEN, SECRET)) as string);
+    for (const line of reported) for (const secret of [TOKEN, SECRET.access, SECRET.refresh]) expect(line).not.toContain(secret);
+  } finally {
+    await server.stop(true);
   }
 });
