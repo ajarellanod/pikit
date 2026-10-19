@@ -91,6 +91,7 @@ import { runContext, toChord } from "./context.ts";
 import { harnessEnv } from "./execution.ts";
 import type { WorkspaceProvider } from "./types.ts";
 import { isSettledInput, type SettledInput, settlementOf, toResult } from "./result.ts";
+import { RecentMap } from "./recent.ts";
 import { openDurableStorage } from "./sql.ts";
 import { ABANDONED, AdmissionsDoc, announced, durableId, INPUT_KIND, runKey, runsOf, senderOfEntry, storedRunsOf } from "./submissions.ts";
 
@@ -165,6 +166,12 @@ export interface DurableRuntimeOptions {
    * `PARTIAL_EVERY_MS`); `0`: at each of pi-durable's commits of the partial answer.
    */
   partialEveryMs?: number;
+  /**
+   * How many conversations' `ConversationRef`s are kept in memory, the most recently used (default
+   * `REFS_KEPT`). Another one is read again from its `pikit.conversation` document when needed, so the
+   * memory a long-lived process holds is bounded however many conversations it has touched.
+   */
+  refsKept?: number;
   /**
    * For a host that keeps running only while an event is in progress (a Durable Object): called by
    * `whenIdle` when nothing is driven but live work waits for a time (a model retry's backoff, a
@@ -264,6 +271,12 @@ export const INBOX_KICK = "pikit.inbox-kick";
 /** How often `agent.partial` is emitted at most, per conversation, by default: a preview's pace, not a stream's. */
 export const PARTIAL_EVERY_MS = 1_000;
 
+/**
+ * How many conversations' `ConversationRef`s the runtime keeps in memory by default (`refsKept`): a ref
+ * is a few hundred bytes, and a miss is one document read.
+ */
+const REFS_KEPT = 1_000;
+
 /** What the runtime reads of a `pi.live` commit: the run and the response being written. */
 type LiveValue = { run?: { inputs?: number[] }; generation?: { message?: { content?: readonly { type: string; text?: unknown }[] } } };
 
@@ -327,8 +340,12 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   const runs = new Map<string, RunAnnouncement>();
   /** Per submission id, who waits for its settlement to be handled (`recover`, `abandon`). */
   const handled = new Map<number, (() => void)[]>();
-  /** Known `ConversationRef`s by conversation id. */
-  const refs = new Map<ConversationId, ConversationRef>();
+  /**
+   * Known `ConversationRef`s by conversation id, the `refsKept` most recently used: a cache of each
+   * conversation's `pikit.conversation` document, written with it (`config.apply` returns what it
+   * recorded), so a dropped entry is read back the same (`refOf`).
+   */
+  const refs = new RecentMap<ConversationId, ConversationRef>(options.refsKept ?? REFS_KEPT);
   /** Resolved at each commit. */
   let commitWaiters: (() => void)[] = [];
   let resolveClosed!: () => void;
@@ -790,6 +807,9 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     const harness = open ?? (await harnessOf(events));
     const recorded = await harness.snapshot(ConversationDoc, id, toChord(events));
     if (recorded === undefined || recorded.key === "") return undefined;
+    // Written meanwhile (an admission's commit, after this snapshot's): the newer one stands.
+    const written = refs.get(id);
+    if (written !== undefined) return written;
     const ref = withChannel({ key: recorded.key, agent: recorded.agent, conversationId: String(id) }, recorded.channel);
     refs.set(id, ref);
     return ref;
