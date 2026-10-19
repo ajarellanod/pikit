@@ -96,7 +96,8 @@ function RoutingSettings() {
   const channels = [...new Set([...channelsOf(app), ...rules.flatMap((rule) => (rule.channel !== undefined && rule.channel !== "" ? [rule.channel] : []))])];
   const known = channelsOf(app);
   const defaultAgent = typeof basic?.value.defaultAgent === "string" ? basic.value.defaultAgent : undefined;
-  const webPicks = Array.isArray(web?.value.agents) && web.value.agents.length > 0;
+  // The assistants the web chat's picker offers: there it starts on the one Routing chooses, and a user may pick another.
+  const webPicks = Array.isArray(web?.value.agents) ? (web.value.agents as unknown[]).filter((name): name is string => typeof name === "string") : [];
 
   const edit = (index: number, patch: Partial<Rule>) => setDraft(rows.map((row, at) => (at === index ? { ...row, rule: { ...row.rule, ...patch } } : row)));
   const without = (index: number, field: "conversation" | "actor") =>
@@ -255,7 +256,13 @@ function RoutingSettings() {
                     )}
                   </div>
                   {problem !== undefined && <p className={`mt-2 text-[12.5px] ${problem.level === "error" ? "text-red" : "text-orange"}`}>{problem.text}</p>}
-                  {problem === undefined && webPicks && isWeb(rule.channel) && <p className="mt-2 text-[12.5px] text-ink-3">In the web chat, an assistant a user picks wins over this rule.</p>}
+                  {problem === undefined && !deny && webPicks.length > 0 && isWeb(rule.channel) && (
+                    <p className="mt-2 text-[12.5px] text-ink-3">
+                      {webPicks.includes(rule.agent ?? "")
+                        ? "In the web chat, the picker starts on this assistant; a user may pick another."
+                        : "In the web chat, users pick among the assistants offered, and this one is not: the picker starts on the first."}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5">
                   <Button size="xs" variant="quiet" aria-label={`Move rule ${n} up`} title="Up" disabled={index === 0} onClick={() => move(index, index - 1)} className="w-7 px-0">

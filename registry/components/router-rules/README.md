@@ -32,7 +32,9 @@ both, neither, or a field it does not know is invalid config, so a typo is never
 A message no rule matches is left undecided, for the next stage: `router-basic`'s `defaultAgent`,
 or `no_route` when nothing else routes it. The stage runs at priority 1, right before
 `router-basic` (0); a project stage with a higher priority (10) still routes around both. A
-decision already there is left alone.
+decision already there is left alone. The stage only reads (its config, settings, the directory) and
+decides, with no side effect but a log line: channel-web runs `route.resolve` as a dry run, to start
+its picker on the agent a user's new chat would get.
 
 It refuses to start when a rule names an agent that is not an `agent.definition`, unless
 `agent.directory` is installed (below).
@@ -43,11 +45,13 @@ With `settings` installed (settings-store, which comes with the dashboard), the 
 setting: an operator edits them in Settings, Routing, and they apply from the next message, with no
 deploy. Each rule reads as a sentence ("Messages from [web] in chat [...] from sender [...] go to
 [Researcher]", or "are refused", with a reason for the log): the channel one of the App's (its
-`channel-*` components and their accounts) or typed, the chat and the sender added only when wanted;
+`channel-*` components and their named instances: Telegram's `accounts`, `telegram:support`; Google
+Chat's `instances`, `googlechat:ops`, read as "Google Chat: ops") or typed, the chat and the sender added only when wanted;
 rules are dragged or moved up and down; a fixed last line says where everything else goes (the
 default agent, set in Agent). Under a rule, what is wrong with it: no agent chosen, a rule an earlier
-one always takes first. Where the web chat lets users pick an assistant, its rules say that the
-pick wins. "Use default" goes back to the config's rules. The section's logic is `settings/rules.ts`,
+one always takes first. Where the web chat lets users pick an assistant (channel-web's `agents`), a
+rule for `web` picks the one its picker starts on (when that agent is offered; else the first offered),
+and a user may pick another: its note says so. "Use default" goes back to the config's rules. The section's logic is `settings/rules.ts`,
 tested by the repository's `scripts/routing-settings.test.ts`. The config's `rules` are
 the default, what the project deploys with; the operator's replace them whole, validated as the
 config's are (a typo is refused). Settings that cannot be read leave the config's, logged.
@@ -66,7 +70,7 @@ Rules are values. Choosing the agent another way (from the chat itself, by conte
 router component, not a config key here.
 
 **No `thread` field.** A channel with threads keeps `conversation` the chat or space and puts the
-thread in the conversation's key (features/threads.md): an agent per space is one rule, whatever the
+thread in the conversation's key ([features/threads.md](https://github.com/ajarellanod/pikit/blob/main/features/threads.md)): an agent per space is one rule, whatever the
 thread. A rule with `thread` is invalid config, as any field it does not know.
 
 ## Config

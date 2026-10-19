@@ -16,6 +16,16 @@ test("channelsOf: each channel-* component's channel, in the order installed, th
   expect(channelsOf({ components: [], config: {} })).toEqual([]);
 });
 
+test("channelsOf: Google Chat's named apps are its config's instances (googlechat:ops), and its Worker half's on Cloudflare, each once", () => {
+  const server = { components: [{ name: "channel-google-chat" }, { name: "channel-web" }], config: { "channel-google-chat": { instances: ["ops", "", 7] } } };
+  expect(channelsOf(server)).toEqual(["googlechat", "googlechat:ops", "web"]);
+  const cloudflare = { components: [{ name: "channel-google-chat" }], config: { "channel-google-chat": { instances: ["ops"] }, "channel-google-chat-worker": { instances: ["ops", "sales"] } } };
+  expect(channelsOf(cloudflare)).toEqual(["googlechat", "googlechat:ops", "googlechat:sales"]);
+  expect(channelsOf({ components: [{ name: "channel-google-chat" }], config: { "channel-google-chat-worker": { instances: ["ops"] } } })).toEqual(["googlechat", "googlechat:ops"]);
+  // accounts is Telegram's field, not Google Chat's; instances is not Telegram's.
+  expect(channelsOf({ components: [{ name: "channel-google-chat" }, { name: "channel-telegram" }], config: { "channel-google-chat": { accounts: ["x"] }, "channel-telegram": { instances: ["y"] } } })).toEqual(["googlechat", "telegram"]);
+});
+
 test("cleaned: a rule as stored, texts trimmed, empty match fields gone; an agent, or a refusal with its reason", () => {
   expect(cleaned({ channel: " web ", conversation: "", actor: "  ", agent: "researcher" })).toEqual({ channel: "web", agent: "researcher" });
   expect(cleaned({ channel: "telegram", deny: true, reason: " spam ", agent: "x" })).toEqual({ channel: "telegram", deny: true, reason: "spam" });

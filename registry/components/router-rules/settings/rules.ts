@@ -15,13 +15,21 @@ const CHANNEL_OF: Record<string, string> = {
   "channel-google-chat": "googlechat",
 };
 
-/** Components whose config's `accounts` (names) add instances `<kind>:<name>`. */
-const ACCOUNTS = ["channel-telegram", "channel-telegram-webhook"];
+/**
+ * Where a component's named instances (`<kind>:<name>`) are in the config: the config keys read, and the
+ * field that lists the names. Telegram's are `accounts`; Google Chat's `instances` (in its config, and on
+ * Cloudflare its Worker half's too, `channel-google-chat-worker`, which `pikit doctor` keeps the same).
+ */
+const INSTANCES: Record<string, { keys: readonly string[]; field: string }> = {
+  "channel-telegram": { keys: ["channel-telegram"], field: "accounts" },
+  "channel-telegram-webhook": { keys: ["channel-telegram-webhook"], field: "accounts" },
+  "channel-google-chat": { keys: ["channel-google-chat", "channel-google-chat-worker"], field: "instances" },
+};
 
 /**
  * The channels of an App's composition (`ApiApp`), in the order installed: each `channel-*` component's
- * kind (`channel-web` → `web`; another one's name without `channel-`), then its accounts' instances
- * (`telegram:support`), each once.
+ * kind (`channel-web` → `web`; another one's name without `channel-`), then its named instances
+ * (`telegram:support`, `googlechat:ops`), each once.
  */
 export function channelsOf(app: { components: readonly { name: string }[]; config: Record<string, unknown> }): string[] {
   const found: string[] = [];
@@ -29,8 +37,11 @@ export function channelsOf(app: { components: readonly { name: string }[]; confi
     if (!name.startsWith("channel-")) continue;
     const kind = CHANNEL_OF[name] ?? name.slice("channel-".length);
     found.push(kind);
-    const accounts = ACCOUNTS.includes(name) ? (app.config[name] as { accounts?: unknown } | undefined)?.accounts : undefined;
-    if (Array.isArray(accounts)) for (const account of accounts) if (typeof account === "string" && account !== "") found.push(`${kind}:${account}`);
+    const { keys = [], field = "" } = INSTANCES[name] ?? {};
+    for (const key of keys) {
+      const names = (app.config[key] as Record<string, unknown> | undefined)?.[field];
+      if (Array.isArray(names)) for (const each of names) if (typeof each === "string" && each !== "") found.push(`${kind}:${each}`);
+    }
   }
   return [...new Set(found)];
 }
