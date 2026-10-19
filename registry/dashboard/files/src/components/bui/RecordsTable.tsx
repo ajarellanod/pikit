@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { capitalizeFirst } from "@/lib/format";
 import Pagination from "./Pagination";
 
 /* ---------------------------------------------------------
@@ -78,7 +79,8 @@ export function tagHue(text: string): string {
 export function RecordTag({ children, base, title, mono = false }: { children: ReactNode; base?: string; title?: string; mono?: boolean }) {
   return (
     <span className={`badge ${base === undefined ? "badge-outline" : "badge-tint"} ${mono ? "font-mono text-[11.5px]" : ""}`} title={title} style={base === undefined ? undefined : ({ "--tag-base": base } as CSSProperties)}>
-      {children}
+      {/* a mono tag is an identifier: as written */}
+      {mono ? children : capitalizeFirst(children)}
     </span>
   );
 }

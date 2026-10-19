@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { capitalizeFirst } from "@/lib/format";
 import { type PillTone, TONE_DOT } from "./FilterTable";
 
 /* ---------------------------------------------------------
@@ -13,7 +14,7 @@ export function StatusDot({ tone, children, title, className = "" }: { tone: Pil
   return (
     <span title={title} className={`inline-flex min-w-0 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] font-medium text-ink ${className}`}>
       <span className="size-1.5 shrink-0 rounded-full" style={{ background: TONE_DOT[tone] }} aria-hidden />
-      {children}
+      {capitalizeFirst(children)}
     </span>
   );
 }

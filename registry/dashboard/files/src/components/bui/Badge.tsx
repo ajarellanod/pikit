@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { capitalizeFirst } from "@/lib/format";
 
 export type BadgeTone = "neutral" | "green" | "orange" | "red" | "accent";
 
@@ -10,7 +11,7 @@ export type BadgeTone = "neutral" | "green" | "orange" | "red" | "accent";
 export function Badge({ children, tone = "neutral", title, className = "" }: { children: ReactNode; tone?: BadgeTone; title?: string; className?: string }) {
   return (
     <span title={title} className={`badge align-middle ${tone === "neutral" ? "badge-outline" : `badge-tint badge-${tone}`} ${className}`}>
-      {children}
+      {capitalizeFirst(children)}
     </span>
   );
 }

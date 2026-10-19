@@ -9,6 +9,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAssets, type DashboardFiles } from "../registry/components/admin-api/files/src/pikit/admin-api/assets.ts";
+import { capitalizeFirst } from "../registry/dashboard/files/src/lib/format.ts";
 import { assistantName } from "../registry/dashboard/files/src/lib/names.ts";
 import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/lib/sources.ts";
 import { INITIAL, type LiveState, reduce } from "../registry/dashboard/files/src/lib/transcript.ts";
@@ -299,4 +300,13 @@ test("Home groups the components by what they are for, sums the App up in a line
   ]);
   // A pipeline with no stage is left out; a stage the API gives otherwise shows as its JSON.
   expect(wiring.pipelines).toEqual([{ name: "route.resolve", stages: [{ id: "project.vip", priority: 10 }, { id: "router-basic.default", priority: 0 }, { id: '"odd"' }] }]);
+});
+
+test("a table's states and tags read with a capital first letter, the rest as written; an element is left alone", () => {
+  expect(capitalizeFirst("banned")).toBe("Banned");
+  expect(capitalizeFirst("possibly twice")).toBe("Possibly twice");
+  expect(capitalizeFirst("telegram:support")).toBe("Telegram:support");
+  expect(capitalizeFirst("")).toBe("");
+  const element = { type: "span" };
+  expect(capitalizeFirst(element)).toBe(element);
 });

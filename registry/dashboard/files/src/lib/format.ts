@@ -34,3 +34,11 @@ export function formatAgo(at: number | undefined, now = Date.now()): string {
   }
   return relative.format(value, "year");
 }
+
+/**
+ * A label's first letter in capitals, the rest as written (`possibly twice` → `Possibly twice`): how a
+ * table's states and tags read. Anything but a string (an element) is left alone.
+ */
+export function capitalizeFirst<T>(label: T): T | string {
+  return typeof label === "string" && label !== "" ? label.charAt(0).toLocaleUpperCase() + label.slice(1) : label;
+}

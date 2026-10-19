@@ -10,7 +10,7 @@
  * not of a page read.
  */
 
-import { Calendar, Clock, Group, KeyBack, LogIn, Mail, Prohibition, Trash, Undo, User, UserPlus } from "iconoir-react";
+import { Calendar, Clock, Group, KeyBack, LogIn, Mail, Prohibition, Trash, Undo, User, UserBadgeCheck, UserPlus } from "iconoir-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
@@ -164,7 +164,7 @@ export function UsersPage() {
       width: 140,
       cell: (row) => <TagList tags={row.methods} empty="nothing yet" render={(method) => <RecordTag>{method}</RecordTag>} />,
     },
-    { key: "state", label: "State", icon: <Prohibition />, width: 100, sort: (a, b) => stateOf(a).localeCompare(stateOf(b)), cell: (row) => <StatusDot tone={TONE[stateOf(row)]}>{stateOf(row)}</StatusDot> },
+    { key: "state", label: "State", icon: <UserBadgeCheck />, width: 100, sort: (a, b) => stateOf(a).localeCompare(stateOf(b)), cell: (row) => <StatusDot tone={TONE[stateOf(row)]}>{stateOf(row)}</StatusDot> },
     {
       key: "created",
       label: "Created",
