@@ -58,6 +58,12 @@
       "description": "pikit's message piece of the dashboard."
     },
     {
+      "name": "party",
+      "type": "registry:file",
+      "title": "party",
+      "description": "pikit's party piece of the dashboard."
+    },
+    {
       "name": "settings-dialog",
       "type": "registry:file",
       "title": "settings-dialog",

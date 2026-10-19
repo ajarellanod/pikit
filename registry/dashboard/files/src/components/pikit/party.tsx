@@ -14,17 +14,11 @@ import { Antenna, ArrowUpRight, ChatLines, Check, Code, Copy, Globe, Telegram, U
 import { Popover } from "radix-ui";
 import { type ComponentType, type SVGProps, useEffect, useState } from "react";
 import { Button } from "@/components/bui/Button";
-import type { ApiConversation } from "@/lib/api";
+import type { ApiConversation, ApiParty } from "@/lib/api";
+
+export type { ApiParty };
 import { navigate } from "@/lib/router";
 
-// TEMPORARY: admin-api's `ApiParty`, until its commit lands in `@/lib/admin-api`.
-export interface ApiParty {
-  channel: { kind: string; instance?: string; label: string };
-  name?: string;
-  detail?: string;
-  ids: { label: string; value: string }[];
-  link?: { label: string; path: string };
-}
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -41,7 +35,7 @@ const channelOf = (kind: string): { icon: Icon; label: string } => CHANNELS[kind
 
 /** The party of `conversation`: the API's, else one made from its key (its channel, the key and the id). */
 export function partyOf(conversation: ApiConversation): ApiParty {
-  const given = (conversation as ApiConversation & { party?: ApiParty }).party;
+  const given = conversation.party;
   if (given !== undefined) return given;
   const key = conversation.key;
   const kind = key === undefined ? "" : key.slice(0, Math.max(0, key.indexOf(":")));
