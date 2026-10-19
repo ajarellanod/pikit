@@ -9,15 +9,17 @@
  * a tool ended (`control.terminate`) is answered by the assistant entry that called its tools, so its
  * transcript also has the results of those calls, written after it.
  *
- * Its parts (`AgentResult.parts`) are those its successful tool results carry (`withParts`,
- * `parts.ts`), in the order the results were written.
+ * Its parts (`AgentResult.parts`, `runParts`) are those its inputs carry (`AgentRequest.parts`, in
+ * their `pikit.input` entries), in the order the run took them, then those its successful tool results
+ * carry (`withParts`, `parts.ts`), in the order the results were written. Both are read from the
+ * transcript, so a run's parts are the same whoever builds its result (live, or a reconciliation).
  */
 
 import type { Context } from "@earendil-works/chord";
-import type { Conversation, EntryId, EntryRecord, SubmissionRecord } from "@earendil-works/pi-durable";
-import type { AgentResult, ConversationRef, RunSettlement } from "@pikit/contracts";
-import { partsOfToolResult } from "./parts.ts";
-import { isInputKind } from "./submissions.ts";
+import type { Conversation, Cursor, EntryId, EntryQuery, EntryRecord, Page, SubmissionRecord } from "@earendil-works/pi-durable";
+import type { AgentResult, ConversationRef, MessagePart, RunSettlement } from "@pikit/contracts";
+import { partsOfInput, partsOfToolResult } from "./parts.ts";
+import { INPUT_KIND, isInputKind } from "./submissions.ts";
 
 /** A pi-ai 1.0 message, as pi-durable entries carry them. */
 export type DurableMessage = NonNullable<EntryRecord["model"]>[number];
@@ -33,14 +35,23 @@ export function isSettledInput(record: SubmissionRecord): record is SettledInput
 
 const PAGE = 100;
 
+/** Reads a conversation's entries a page at a time: a `Conversation`'s (`entriesOf`), or a commit's (`tx.scanEntries`). */
+export type EntryScan = (query: Omit<EntryQuery, "conversationId">, limit: number, cursor: Cursor | undefined) => Promise<Page<EntryRecord, Cursor>>;
+
+/** `conversation`'s entries, as an `EntryScan`. */
+export const entriesOf =
+  (conversation: Conversation, ctx: Context): EntryScan =>
+  (query, limit, cursor) =>
+    conversation.entries(query, limit, cursor, ctx);
+
 /** `records`: the inputs one run took, oldest first (or one input withdrawn while queued). */
 export async function toResult(conversation: Conversation, ref: ConversationRef, records: readonly SettledInput[], ctx: Context): Promise<AgentResult> {
   const [record] = records;
   if (record === undefined) throw new Error("toResult: a run takes at least one input");
   const requestIds = records.map((input) => input.requestId ?? String(input.id));
-  const entries = await runEntries(conversation, records, ctx);
+  const entries = await runEntries(entriesOf(conversation, ctx), records);
   const messages = entries.flatMap((entry) => entry.model ?? []).filter((message) => message.role !== "system");
-  const parts = messages.flatMap(partsOfToolResult);
+  const parts = partsOfEntries(entries, records);
   const base = {
     conversation: ref,
     requestId: requestIds[0] as string,
@@ -72,22 +83,35 @@ export function settlementOf(result: AgentResult): RunSettlement {
   };
 }
 
+/** The parts of a run (`records`: its inputs, oldest first), read through `scan`: its inputs', then its tools'. */
+export async function runParts(scan: EntryScan, records: readonly SettledInput[]): Promise<MessagePart[]> {
+  return partsOfEntries(await runEntries(scan, records), records);
+}
+
+/** The parts in a run's `entries`: those of its input entries, in order, then those of its tool results. */
+function partsOfEntries(entries: readonly EntryRecord[], records: readonly SettledInput[]): MessagePart[] {
+  const inputs = new Set(records.flatMap((record) => (record.entry === undefined ? [] : [record.entry])));
+  const given = entries.flatMap((entry) => (inputs.has(entry.id) && entry.kind === INPUT_KIND ? partsOfInput(entry.data) : []));
+  const tools = entries.flatMap((entry) => entry.model ?? []).flatMap(partsOfToolResult);
+  return [...given, ...tools];
+}
+
 /** The run's entries, oldest first; none for an input that was never placed (withdrawn while queued). */
-async function runEntries(conversation: Conversation, records: readonly SettledInput[], ctx: Context): Promise<EntryRecord[]> {
+async function runEntries(scan: EntryScan, records: readonly SettledInput[]): Promise<EntryRecord[]> {
   const inputs = new Set(records.flatMap((record) => (record.entry === undefined ? [] : [record.entry])));
   if (inputs.size === 0) return [];
   const from = Math.min(...inputs) as EntryId;
   const record = records[0] as SettledInput;
   const to = record.status === "done" ? record.answer : undefined;
   const newestFirst: EntryRecord[] = [];
-  let cursor: Parameters<Conversation["entries"]>[2];
+  let cursor: Cursor | undefined;
   do {
-    const page = await conversation.entries({ minEntryId: from, ...(to !== undefined && { maxEntryId: to }) }, PAGE, cursor, ctx);
+    const page = await scan({ minEntryId: from, ...(to !== undefined && { maxEntryId: to }) }, PAGE, cursor);
     newestFirst.push(...page.items);
     cursor = page.next;
   } while (cursor !== undefined);
   const entries = newestFirst.reverse();
-  if (to !== undefined) return [...entries, ...(await finalToolResults(conversation, entries, to, ctx))];
+  if (to !== undefined) return [...entries, ...(await finalToolResults(scan, entries, to))];
   // Unanswered: the run ended at its last entry before the next run's input.
   const next = entries.findIndex((entry) => isInputKind(entry.kind) && !inputs.has(entry.id));
   return next === -1 ? entries : entries.slice(0, next);
@@ -97,13 +121,13 @@ async function runEntries(conversation: Conversation, records: readonly SettledI
  * The results of the tool calls the answer made, when a tool ended the run (`control.terminate`): they
  * are written after the answer. None for an answer that called no tool (a run the model ended).
  */
-async function finalToolResults(conversation: Conversation, entries: readonly EntryRecord[], answer: EntryId, ctx: Context): Promise<EntryRecord[]> {
+async function finalToolResults(scan: EntryScan, entries: readonly EntryRecord[], answer: EntryId): Promise<EntryRecord[]> {
   const message = entries.find((entry) => entry.id === answer)?.model?.find((m) => m.role === "assistant");
   const calls = new Set(message?.role === "assistant" ? message.content.flatMap((part) => (part.type === "toolCall" ? [part.id] : [])) : []);
   const found: EntryRecord[] = [];
-  let cursor: Parameters<Conversation["entries"]>[2];
+  let cursor: Cursor | undefined;
   while (calls.size > 0) {
-    const page = await conversation.entries({ minEntryId: (answer + 1) as EntryId, order: "ascending" }, PAGE, cursor, ctx);
+    const page = await scan({ minEntryId: (answer + 1) as EntryId, order: "ascending" }, PAGE, cursor);
     for (const entry of page.items) {
       // The next run's input: the round's results are all before it.
       if (isInputKind(entry.kind)) return found;

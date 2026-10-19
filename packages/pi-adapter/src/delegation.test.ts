@@ -9,11 +9,12 @@
 import { afterEach, expect, test } from "bun:test";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineTool } from "@earendil-works/pi-durable";
-import { CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
+import { CONVERSATION, type ConversationOrigin, type ConversationRef, defineAgent, type MessagePart, originOf, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
 import type { DurableTool } from "./agent.ts";
 import { ConversationDoc } from "./agent.ts";
 import { toChord } from "./context.ts";
 import { AGENT_DELEGATION, type BackgroundDelegation, RESULT_LIMIT, RESULT_REQUEST_PREFIX } from "./delegation.ts";
+import { withParts } from "./parts.ts";
 import { databaseFile, holdTool, openWorker, type Worker, type WorkerOptions } from "./test-support.ts";
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -65,17 +66,25 @@ const control = defineTool({
 }) as unknown as DurableTool;
 
 /** A hold for the helper: blocks until released or its run stops; records what its run's requests and conversation are. */
-function hold() {
+function hold(replay: "safe" | "unsafe" = "unsafe") {
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
   let started!: () => void;
   const holding = new Promise<void>((resolve) => (started = resolve));
-  const seen: { requests?: readonly RunRequest[] | undefined; key?: string | undefined; agent?: string | undefined; channel?: string | undefined; aborted: boolean } = { aborted: false };
+  const seen: {
+    requests?: readonly RunRequest[] | undefined;
+    key?: string | undefined;
+    agent?: string | undefined;
+    channel?: string | undefined;
+    origin?: ConversationOrigin | undefined;
+    aborted: boolean;
+  } = { aborted: false };
   const tool = holdTool(async (context) => {
     seen.requests = await context.value(RUN_REQUESTS)?.list(context);
     seen.key = context.value(CONVERSATION)?.key;
     seen.agent = context.value(CONVERSATION)?.agent;
     seen.channel = context.value(CONVERSATION)?.channel;
+    seen.origin = context.value(CONVERSATION)?.origin;
     started();
     await new Promise<void>((resolve, reject) => {
       const signal = context.abortSignal;
@@ -88,13 +97,38 @@ function hold() {
       void released.then(resolve);
     });
     return "released";
-  });
+  }, replay);
   return { tool, started: holding, release: () => release(), seen };
 }
 
+/** A question for the person, as a tool of the helper's asks it. */
+const QUESTION = { type: "question", fallback: "Pay acme 10? Answer yes or no." } as unknown as MessagePart;
+
+/** The helper's `ask`: ends its run with `QUESTION` as a part, as askUser and request_approval do. */
+const ask = defineTool({
+  name: "ask",
+  description: "Asks the person",
+  parameters: Type.Object({}),
+  replay: "safe",
+  execute: async () => withParts({ output: [{ type: "text", text: "Asked." }], control: { terminate: true } }, [QUESTION]),
+}) as unknown as DurableTool;
+
+/** What the relay's `prepare` was given as its conversation, each time. */
+const prepared: ConversationRef[] = [];
+
 const agents = [
   defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate", "control"] }),
-  defineAgent({ name: "helper", model: "faux/scripted", systemPrompt: "You help.", tools: ["hold"] }),
+  defineAgent({ name: "helper", model: "faux/scripted", systemPrompt: "You help.", tools: ["hold", "ask"] }),
+  // Delegates again: a task two delegations deep.
+  defineAgent({
+    name: "relay",
+    model: "faux/scripted",
+    tools: ["delegate"],
+    prepare: (_state, ctx) => {
+      prepared.push(ctx.conversation);
+      return {};
+    },
+  }),
 ];
 
 function records() {
@@ -102,7 +136,7 @@ function records() {
   cleanup.push(file.dispose);
   return {
     async worker(options: WorkerOptions) {
-      const w = await openWorker(file.path, { agents, ...options, tools: { control, ...options.tools } });
+      const w = await openWorker(file.path, { agents, ...options, tools: { control, ask, ...options.tools } });
       cleanup.push(w.close);
       return w;
     },
@@ -386,4 +420,71 @@ test("another conversation's task is not_found: it lists none, and can neither s
   held.release();
   const reported = await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
   expect(reported.text).toContain("answer: hold");
+});
+
+test("a child's origin is the conversation its tree descends from, two delegations deep too: its tools and prepare see it, after a restart as well", async () => {
+  prepared.length = 0;
+  const db = await records();
+  const first = hold("safe");
+  const w1 = await db.worker({ tools: { delegate, hold: first.tool } });
+  const conversation = await w1.conversation("assistant");
+  const origin = originOf(conversation);
+  const deep = JSON.stringify({ agent: "helper", task: "hold" });
+
+  // assistant -> relay -> helper, each waiting.
+  await w1.dispatch("r1", `call: delegate ${JSON.stringify({ agent: "relay", task: `call: delegate ${deep}` })}`, conversation);
+  await first.started;
+  expect(first.seen.agent).toBe("helper");
+  expect(first.seen.origin).toEqual(origin);
+  expect(prepared.map((each) => [each.agent, each.origin])).toContainEqual(["relay", origin]);
+  expect(prepared.every((each) => each.origin?.conversationId === conversation.conversationId)).toBe(true);
+  await w1.close();
+
+  // The hold runs again after the restart (replay safe): the child is built from its record, origin included.
+  const next = hold("safe");
+  next.release();
+  const w2 = await db.worker({ tools: { delegate, hold: next.tool } });
+  await w2.runtime.resume(conversation, w2.ctx);
+  expect((await w2.result("r1")).kind).toBe("completed");
+  expect(next.seen.agent).toBe("helper");
+  expect(next.seen.origin).toEqual(origin);
+  // The conversation a person talks in has none.
+  const { harness } = await w2.runtime.opened(w2.ctx);
+  expect((await harness.snapshot(ConversationDoc, Number(conversation.conversationId) as ConversationId, toChord(w2.ctx)))?.origin).toBeUndefined();
+});
+
+test("run: a completed task's outcome carries the parts of the child's run that answered it", async () => {
+  const w = await (await records()).worker({ tools: { delegate, hold: hold().tool } });
+  const conversation = await w.conversation("assistant");
+
+  await w.dispatch("r1", 'call: delegate {"agent":"helper","task":"call: ask {}"}', conversation);
+  const [outcome] = toolResults((await w.result("r1")).messages);
+
+  expect(JSON.parse(outcome ?? "null")).toEqual({ kind: "completed", text: "", parts: [QUESTION] });
+});
+
+test("start: the report brings the child's parts to the parent's answer, once, also after a restart", async () => {
+  const db = await records();
+  const w1 = await db.worker({ tools: { delegate, hold: hold().tool } });
+  const conversation = await w1.conversation("assistant");
+
+  await w1.dispatch("r1", 'call: delegate {"agent":"helper","task":"call: ask {}","wait":false}', conversation);
+  const reported = await w1.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+
+  expect(reported.conversation.conversationId).toBe(conversation.conversationId);
+  expect(reported.parts).toEqual([QUESTION]);
+  // The parent's agent reads what the person is shown, so as not to repeat it.
+  expect(reported.text).toContain("[The person is shown what follows with your answer, as it is: do not repeat it.]");
+  expect(reported.text).toContain(QUESTION.fallback);
+  // `list` keeps the answer's text, not its parts.
+  await w1.dispatch("r2", 'call: control {"op":"list"}', conversation);
+  expect(JSON.parse(toolResults((await w1.result("r2")).messages)[0] ?? "null")).toEqual([{ id: expect.any(String) as never, agent: "helper", status: "completed", result: "" }]);
+  await w1.close();
+
+  const w2 = await db.worker({ tools: { delegate, hold: hold().tool } });
+  await w2.runtime.inspect(w2.ctx);
+  await w2.runtime.whenIdle(w2.ctx);
+  const logged = (await w2.runtime.submissions.answers.read(undefined, 100)).items.map((item) => item.fact).filter((fact) => fact.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  expect(logged.map((fact) => fact.parts)).toEqual([[QUESTION]]);
+  expect(w2.results()).toEqual([]);
 });

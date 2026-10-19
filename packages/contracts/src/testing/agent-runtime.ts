@@ -14,8 +14,9 @@
  * - A turn whose newest message is exactly `hold` first calls a tool that blocks until
  *   `fixture.hold.release()`. The tool honours cancellation. Once it returns, the turn answers the
  *   newest inbound message as usual (`answer: hold`). Each call first reads the run's requests from
- *   its context (`RUN_REQUESTS`), which `fixture.hold.requests()` returns. Once released, a later
- *   call returns at once.
+ *   its context (`RUN_REQUESTS`), which `fixture.hold.requests()` returns, and its conversation
+ *   (`CONVERSATION`), which `fixture.hold.conversation()` returns. Once released, a later call
+ *   returns at once.
  * - `holdAtEnd()` pauses the next run at its final answer, before it ends.
  * - `failNext()` makes the next model call wait, then fail: the run in progress fails.
  *
@@ -37,7 +38,8 @@ import {
   silentLogger,
   withCancel,
 } from "@pikit/core";
-import type { Admission, AgentRuntime, ConversationRef, Sender } from "../agent.ts";
+import type { Admission, AgentRequest, AgentRuntime, ConversationRef, Sender } from "../agent.ts";
+import type { MessagePart } from "../parts.ts";
 import type { RunRequest } from "../run-requests.ts";
 import type { ConformanceCase } from "@pikit/core/testing";
 
@@ -65,6 +67,8 @@ export interface AgentRuntimeFixture {
      * `undefined` before any call, or when the context had none.
      */
     requests(): readonly RunRequest[] | undefined;
+    /** What the tool's last call read from its context's `CONVERSATION`; `undefined` before any call. */
+    conversation(): ConversationRef | undefined;
   };
   /** Pause the next run at its final answer (the model's answer has not ended the run yet), until `release()`. */
   holdAtEnd(): { reached: Promise<void>; release(): void };
@@ -95,6 +99,9 @@ type Recorded = { [K in AgentEventName]: { name: K; payload: AppEvents[K] } }[Ag
 type Result = AppEvents["agent.settled"] | AppEvents["agent.failed"];
 
 const GROUP = "agent.runtime";
+/** A part of a kind no component declares, as a producer of the suite's own would give it. */
+const part = (fallback: string): MessagePart => ({ type: "conformance", fallback }) as unknown as MessagePart;
+
 /** A 1×1 transparent PNG, base64: the image of the images case. */
 const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
@@ -288,6 +295,83 @@ export function createAgentRuntimeConformance(
       );
     }),
 
+    runtimeCase("a message's parts are given with the answer of the run that takes it (AgentResult.parts)", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const asked = part("Pay acme 10? Answer yes or no.");
+
+      expect(await w.send({ requestId: "r1", conversation, prompt: "hello", parts: [asked] }), { kind: "started", requestId: "r1" }, "admission");
+      const result = await w.result("r1");
+      expect([result.kind, result.text, result.parts], ["completed", "answer: hello", [asked]], "result");
+      await w.dispatch("r2", "and you?", conversation);
+      expect((await w.result("r2")).parts, undefined, "the parts of a run whose messages brought none");
+    }),
+
+    runtimeCase("the messages a run takes bring their parts in the order it took them, once: a duplicate brings none", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const [a, b, c] = [part("first"), part("second"), part("redelivered")];
+      await w.dispatch("r1", "hold", conversation);
+      await s.within(s.fixture.hold.started, "the hold tool to start");
+
+      await w.send({ requestId: "r2", conversation, prompt: "one", parts: [a] });
+      await w.send({ requestId: "r3", conversation, prompt: "two", parts: [b] });
+      expect(await w.send({ requestId: "r2", conversation, prompt: "one", parts: [c] }), { kind: "duplicate", requestId: "r2" }, "a redelivery with other parts");
+      s.fixture.hold.release();
+
+      expect((await w.result("r1")).parts, undefined, "the parts of the run in progress");
+      const next = await w.result("r2");
+      expect([next.requestIds, next.parts], [["r2", "r3"], [a, b]], "the next run's requests and parts");
+    }),
+
+    runtimeCase("a steer's parts are given with the answer of the run it joins", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const joined = part("joined");
+      await w.dispatch("r1", "hold", conversation);
+      await s.within(s.fixture.hold.started, "the hold tool to start");
+
+      await w.send({ requestId: "r2", conversation, prompt: "change course", whenBusy: "steer", parts: [joined] });
+      s.fixture.hold.release();
+
+      const result = await w.result("r1");
+      expect([result.requestIds, result.parts], [["r1", "r2"], [joined]], "the run it joined");
+    }),
+
+    runtimeCase("a message with what is no part is refused, and nothing is admitted", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const malformed = [{ type: "conformance" }, { fallback: "no kind" }, "text"] as unknown as MessagePart[];
+
+      for (const [index, bad] of malformed.entries()) {
+        let refused = false;
+        try {
+          await s.within(w.runtime.dispatch({ requestId: "r1", conversation, prompt: "hello", parts: [part("fine"), bad] }, w.app.context()), "dispatch(r1)");
+        } catch {
+          refused = true;
+        }
+        if (!refused) throw new Error(`${GROUP}: a message whose part ${index} is ${JSON.stringify(bad)} was admitted; a runtime refuses it`);
+      }
+      await s.quiet();
+      w.none((e) => e.name !== "agent.dispatched" || e.payload.admission.requestId === "r1", "admission or run of a refused message");
+      // Nothing was kept of it: the same request with parts is a new message.
+      expect(await w.send({ requestId: "r1", conversation, prompt: "hello", parts: [part("fine")] }), { kind: "started", requestId: "r1" }, "the same request, with a part");
+      expect((await w.result("r1")).parts, [part("fine")], "its parts");
+    }),
+
+    runtimeCase("a ref's origin is not taken from dispatch: a conversation the runtime did not delegate has none", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const forged: ConversationRef = { ...conversation, origin: { key: "conformance:someone-else", agent: conversation.agent, conversationId: "424242" } };
+
+      await w.send({ requestId: "r1", conversation: forged, prompt: "hold" });
+      await s.within(s.fixture.hold.started, "the hold tool to start");
+      const seen = s.fixture.hold.conversation();
+      expect([seen?.key, seen?.conversationId, seen?.origin], [conversation.key, conversation.conversationId, undefined], "the conversation its tool read");
+      s.fixture.hold.release();
+      expect((await w.result("r1")).kind, "completed", "result");
+    }),
+
     runtimeCase("cancelling the caller's context stops the wait, not the run; agent.settled still arrives", async (s) => {
       const w = await s.worker();
       const conversation = await s.fixture.conversation();
@@ -442,6 +526,8 @@ interface Worker {
   app: App;
   runtime: AgentRuntime;
   dispatch(requestId: string, prompt: string, conversation: ConversationRef, ctx?: AppContext, sender?: Sender): Promise<Admission>;
+  /** `runtime.dispatch(request)` in the worker's context, bounded. */
+  send(request: AgentRequest): Promise<Admission>;
   /** `dispatch` with `whenBusy: "steer"`. */
   steer(requestId: string, prompt: string, conversation: ConversationRef): Promise<Admission>;
   event<K extends AgentEventName>(name: K, match: (payload: AppEvents[K]) => boolean): Promise<AppEvents[K]>;
@@ -528,6 +614,7 @@ function createSubject(fixture: AgentRuntimeFixture, workers: Worker[], timeoutM
         runtime: agentRuntime,
         dispatch: (requestId, prompt, conversation, ctx, sender) =>
           within(agentRuntime.dispatch({ requestId, conversation, prompt, ...(sender !== undefined && { sender }) }, ctx ?? app.context()), `dispatch(${requestId})`),
+        send: (request) => within(agentRuntime.dispatch(request, app.context()), `dispatch(${request.requestId})`),
         steer: (requestId, prompt, conversation) =>
           within(agentRuntime.dispatch({ requestId, conversation, prompt, whenBusy: "steer" }, app.context()), `steer(${requestId})`),
         event: (name, match) => waitFor(() => find(name, match)[0], `${name} matching the case`),

@@ -51,7 +51,7 @@ import {
   type Tx,
 } from "@earendil-works/pi-durable";
 import type { Logger } from "@pikit/core";
-import { type AgentDefinition, type AgentSkill, type ConversationRef, SKILL_TOOL, skillsProblem, type TurnConfig } from "@pikit/contracts";
+import { type AgentDefinition, type AgentSkill, type ConversationOrigin, type ConversationRef, SKILL_TOOL, skillsProblem, type TurnConfig } from "@pikit/contracts";
 
 /** A tool the durable runtime runs: pi-durable's (`defineTool`). */
 export type DurableTool = ToolRegistration;
@@ -69,11 +69,12 @@ type JsonObject = { [key: string]: JsonValue };
 
 /**
  * What pikit knows of a conversation that pi-durable does not: its `ConversationRef` minus the id
- * (`key`, `agent`, and `channel` once a ref gave one). Written when a message is admitted, so a
- * settlement found later (a run resumed after a restart) can be announced with its conversation, and a
- * run sees its channel whatever ref reached it.
+ * (`key`, `agent`, `channel` once a ref gave one, and `origin` for a delegated one). Written when a
+ * message is admitted, so a settlement found later (a run resumed after a restart) can be announced with
+ * its conversation, and a run sees its channel and origin whatever ref reached it. `origin` is written
+ * only by the delegation, when it creates the conversation (`delegation.ts`), never from a ref.
  */
-export const ConversationDoc = defineDoc<{ key: string; agent: string; channel?: string }>({
+export const ConversationDoc = defineDoc<{ key: string; agent: string; channel?: string; origin?: ConversationOrigin }>({
   kind: "pikit.conversation",
   version: 1,
   scope: "conversation",
@@ -126,9 +127,20 @@ export interface AgentConfigSource {
   scope(conversationId: ConversationId, context: ChordContext): Promise<ChordContext>;
 }
 
-/** `ref` with the conversation's recorded channel, which wins over a ref's own (a conversation's channel never changes). */
-export function withChannel(ref: ConversationRef, channel: string | undefined): ConversationRef {
-  return channel === undefined || channel === ref.channel ? ref : { ...ref, channel };
+/**
+ * `ref` as its conversation's record (`ConversationDoc`) has it: the recorded channel wins over a ref's
+ * own (a conversation's channel never changes), and the origin is the recorded one or none, whatever
+ * the ref says (only the runtime fixes it).
+ */
+export function asRecorded(ref: ConversationRef, recorded: { channel?: string | undefined; origin?: ConversationOrigin | undefined }): ConversationRef {
+  const { origin: _given, ...own } = ref;
+  const channel = recorded.channel ?? ref.channel;
+  return { ...own, ...(channel !== undefined && { channel }), ...(recorded.origin !== undefined && { origin: copyOrigin(recorded.origin) }) };
+}
+
+/** A plain copy of an origin (a document's draft or a ref's): its four fields, nothing else. */
+export function copyOrigin(origin: ConversationOrigin): ConversationOrigin {
+  return { key: origin.key, agent: origin.agent, conversationId: origin.conversationId, ...(origin.channel !== undefined && { channel: origin.channel }) };
 }
 
 /** The effective state: the agent's initial state with the stored updates over it, a copy. */
@@ -199,7 +211,7 @@ export class AgentConfigs {
    * and make its `pi.agent` what `prepare` gives for `state` (installing the tools it names). Writes
    * `pi.agent` only when it differs, so an unchanged agent adds nothing to the transcript. The
    * definition owns `pi.agent` (SPEC §6): a `configure()` made on the conversation directly is undone
-   * here. Returns the conversation as a run sees it: `ref` with the recorded channel.
+   * here. Returns the conversation as a run sees it: `ref` with the recorded channel and origin.
    */
   async apply(
     tx: Tx,
@@ -214,7 +226,8 @@ export class AgentConfigs {
     if (recorded.agent !== ref.agent) recorded.agent = ref.agent;
     // A conversation belongs to one channel for good: the first ref with one records it.
     if (recorded.channel === undefined && ref.channel !== undefined) recorded.channel = ref.channel;
-    const conversation = withChannel(ref, recorded.channel);
+    // Its origin is the delegation's to write, before this; a ref's is ignored.
+    const conversation = asRecorded(ref, recorded);
 
     const turn = this.turn(agent, conversation, state, logger);
     const own = this.install(agent.name, turn.tools);

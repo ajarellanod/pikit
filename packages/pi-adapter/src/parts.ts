@@ -7,13 +7,18 @@
  *
  *   execute: async (args) => withParts({ output: [{ type: "text", text: "Asked." }], control: { terminate: true } }, [question])
  *
- * A part is checked where it is written (a kind, a fallback, JSON): a tool that gives a malformed one
- * fails its call, so the model and the operator see why. Reading skips what is not a part.
+ * A message's own parts (`AgentRequest.parts`) are kept with it, in its input entry (`pikit.input`,
+ * `{ parts }` in its data, next to its sender), and come before the tools' in its run's result
+ * (`partsOfInput`).
+ *
+ * A part is checked where it is written (a kind, a fallback, JSON: `checkedParts`): a tool that gives a
+ * malformed one fails its call, so the model and the operator see why, and a message with one is
+ * refused. Reading skips what is not a part.
  */
 
 import type { JsonValue } from "@earendil-works/chord";
 import type { ToolExecutionResult } from "@earendil-works/pi-durable";
-import { isJsonObject, type MessagePart } from "@pikit/contracts";
+import { isJsonObject, type MessagePart, partProblem } from "@pikit/contracts";
 import type { DurableMessage } from "./result.ts";
 
 /** The key of a tool result's `details` that carries its parts. */
@@ -26,23 +31,37 @@ export const PARTS_DETAIL = "pikit.parts";
  * the running ones the tool reported (`api.details`), as pi-durable's own results do.
  */
 export function withParts<R extends ToolExecutionResult>(result: R, parts: readonly MessagePart[]): Omit<R, "details"> & { details: { readonly [key: string]: JsonValue } } {
-  const checked = parts.map((part, index) => {
-    // As JSON, the way the transcript keeps it (an `undefined` field goes); what JSON cannot hold throws.
-    let copy: unknown;
-    try {
-      copy = JSON.parse(JSON.stringify(part) ?? "null");
-    } catch (error) {
-      throw new TypeError(`withParts: part ${index} is not JSON (${error instanceof Error ? error.message : String(error)})`);
-    }
-    const problem = partProblem(copy);
-    if (problem !== undefined) throw new TypeError(`withParts: part ${index} ${problem}`);
-    return copy as MessagePart;
-  });
+  const checked = checkedParts(parts, "withParts");
   const details = result.details;
   if (details !== undefined && !isJsonObject(details)) throw new TypeError("withParts: the result's details must be a JSON object to carry parts");
   const carried: { readonly [key: string]: JsonValue } = { ...(details as { readonly [key: string]: JsonValue } | undefined), [PARTS_DETAIL]: checked as unknown as JsonValue };
   const { details: _replaced, ...rest } = result;
   return { ...rest, details: carried };
+}
+
+/**
+ * `parts` as JSON keeps them (an `undefined` field goes), each checked (`partProblem`): what the
+ * transcript stores. Throws a `TypeError` that starts with `who` when one is not JSON or is no part.
+ */
+export function checkedParts(parts: readonly unknown[], who: string): MessagePart[] {
+  if (!Array.isArray(parts)) throw new TypeError(`${who}: parts are a list of parts`);
+  return parts.map((part, index) => {
+    let copy: unknown;
+    try {
+      copy = JSON.parse(JSON.stringify(part) ?? "null");
+    } catch (error) {
+      throw new TypeError(`${who}: part ${index} is not JSON (${error instanceof Error ? error.message : String(error)})`);
+    }
+    const problem = partProblem(copy);
+    if (problem !== undefined) throw new TypeError(`${who}: part ${index} ${problem}`);
+    return copy as MessagePart;
+  });
+}
+
+/** The parts an input entry carries (`{ parts }` in its data: `AgentRequest.parts`), in order; what is no part is skipped. */
+export function partsOfInput(data: unknown): MessagePart[] {
+  const parts = isJsonObject(data) ? data.parts : undefined;
+  return Array.isArray(parts) ? parts.filter((part): part is MessagePart => partProblem(part) === undefined) : [];
 }
 
 /** The parts a tool result gives (`withParts`), in order; none for an error result or any other message. */
@@ -51,12 +70,4 @@ export function partsOfToolResult(message: DurableMessage): MessagePart[] {
   const details: unknown = message.details;
   const parts = isJsonObject(details) ? details[PARTS_DETAIL] : undefined;
   return Array.isArray(parts) ? parts.filter((part): part is MessagePart => partProblem(part) === undefined) : [];
-}
-
-/** What is wrong with `part`, or `undefined`. */
-function partProblem(part: unknown): string | undefined {
-  if (!isJsonObject(part)) return "is not a JSON object";
-  if (typeof part.type !== "string" || part.type === "") return "has no type (its kind, non-empty text)";
-  if (typeof part.fallback !== "string") return `"${part.type}" has no fallback (the text it folds into where it is not drawn)`;
-  return undefined;
 }

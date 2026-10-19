@@ -26,6 +26,7 @@
  * for what another component produces and every channel must draw or fold.
  */
 
+import { isJsonObject } from "./json.ts";
 import type { ChannelTransport } from "./outbound.ts";
 
 /**
@@ -39,6 +40,18 @@ export interface AppMessageParts {}
 export type MessagePart = {
   [K in keyof AppMessageParts]: { type: K; fallback: string } & AppMessageParts[K];
 }[keyof AppMessageParts];
+
+/**
+ * What is wrong with `part` as a part, or `undefined`: a JSON object with a kind (`type`, non-empty
+ * text) and a `fallback` (text). Its kind's own fields are its kind's to check. The one check: a tool's
+ * parts (runtime-pi's `withParts`) and a message's (`AgentRequest.parts`, checked by the runtime) use it.
+ */
+export function partProblem(part: unknown): string | undefined {
+  if (!isJsonObject(part)) return "is not a JSON object";
+  if (typeof part.type !== "string" || part.type === "") return "has no type (its kind, non-empty text)";
+  if (typeof part.fallback !== "string") return `"${part.type}" has no fallback (the text it folds into where it is not drawn)`;
+  return undefined;
+}
 
 /** A message before a transport cuts it: its markdown text and its parts, in order. */
 export interface MessageContent {

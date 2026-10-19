@@ -4,13 +4,16 @@
  * assistant delegates to the helper: the task is a child conversation in the same object's storage
  * (pi-durable's subagents), driven by the same alarm. Waited for, its answer is the call's; not waited
  * for, a background task reports it to the assistant, whose answer is announced like any other; the
- * assistant lists it and cancels it, and hears once that it stopped.
+ * assistant lists it and cancels it, and hears once that it stopped. The child knows the conversation
+ * it works for (its origin), and what it asks the person comes back with the assistant's answer.
  */
 
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type ActorMailbox, type ConversationRef, defineAgent } from "@pikit/contracts";
+import { type ActorMailbox, CONVERSATION, type ConversationOrigin, type ConversationRef, defineAgent, type MessagePart } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { holdTool, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
+import { defineTool, type ToolRegistration, withParts } from "@pikit/pi-adapter/tools";
+import Type from "typebox";
 import { afterEach, expect, it } from "vitest";
 import { vi } from "vitest";
 import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
@@ -24,7 +27,12 @@ afterEach(async () => {
   await resetObjects();
 });
 
-type Result = { requestId: string; text: string | undefined; tools: string[] };
+type Result = { requestId: string; text: string | undefined; tools: string[]; parts?: readonly MessagePart[] | undefined };
+
+/** The question the helper's `ask` asks. */
+const QUESTION = { type: "question", fallback: "Go ahead? Answer yes or no." } as unknown as MessagePart;
+/** The origin each call of the helper's `ask` read from its conversation. */
+const origins: (ConversationOrigin | undefined)[] = [];
 
 /** The text of the tool results a run added. */
 const toolResults = (messages: readonly unknown[]): string[] =>
@@ -42,7 +50,17 @@ function agents(held: { released: Promise<void> }) {
         void held.released.then(() => resolve("released"));
       }),
   );
-  const helper = defineAgent({ name: "helper", model: "faux/scripted", tools: [hold] });
+  const ask = defineTool({
+    name: "ask",
+    description: "Asks the person",
+    parameters: Type.Object({}),
+    replay: "safe",
+    execute: async (_args, _api, context) => {
+      origins.push(context.value(CONVERSATION)?.origin);
+      return withParts({ output: [{ type: "text", text: "Asked." }], control: { terminate: true } }, [QUESTION]);
+    },
+  }) as unknown as ToolRegistration;
+  const helper = defineAgent({ name: "helper", model: "faux/scripted", tools: [hold, ask] });
   const provider = scriptedProvider();
   return [
     defineComponent({ name: "agents-fixture", setup: (pikit) => [assistant, helper].forEach((agent) => pikit.provideKeyed("agent.definition", agent.name, agent)) }),
@@ -59,7 +77,7 @@ function channelActor(results: Result[]) {
       const runtime = pikit.use("agent.runtime");
       const conversations = pikit.use("agent.conversations");
       const known = new Map<string, string>();
-      pikit.on("agent.settled", (result) => void results.push({ requestId: result.requestId, text: result.text, tools: toolResults(result.messages) }));
+      pikit.on("agent.settled", (result) => void results.push({ requestId: result.requestId, text: result.text, tools: toolResults(result.messages), parts: result.parts }));
       return {
         start() {
           inbox.get().handle("test.message", async (key, message, ctx) => {
@@ -151,6 +169,22 @@ it("the assistant lists the task it did not wait for and cancels it; it hears on
     await worker.send(key, { id: "m4", text: `call: delegate_tasks ${JSON.stringify({ id })}` });
     await vi.waitFor(() => expect(of("m4")?.tools).toEqual([`- ${id}: the agent "helper", aborted`]), { timeout: 10_000 });
     expect(results.filter((each) => each.requestId.startsWith("delegate-result:"))).toHaveLength(1);
+  } finally {
+    await worker.stop();
+  }
+});
+
+it("a background task's child works for the assistant's conversation (its origin), and its question comes back with the assistant's answer", async () => {
+  const results: Result[] = [];
+  origins.length = 0;
+  compose(results, { released: Promise.resolve() });
+  const worker = await workerApp();
+  const key = `test:${crypto.randomUUID()}`;
+  try {
+    await worker.send(key, { id: "m1", text: 'call: delegate {"agent":"helper","task":"call: ask {}","wait":false}' });
+    await vi.waitFor(() => expect(results.map((each) => each.requestId.split(":")[0])).toEqual(["m1", "delegate-result"]), { timeout: 10_000 });
+    expect(origins).toEqual([expect.objectContaining({ key, agent: "assistant" })]);
+    expect(results[1]?.parts).toEqual([QUESTION]);
   } finally {
     await worker.stop();
   }

@@ -22,6 +22,11 @@ day that decision changes; it is not to be built. From the architecture audit's 
   `delegate`), recorded by `conversations.registry` with the key's first resolve and kept through
   resets, so a component reads it without parsing a key ([channel context](channel-context.md)).
   Answers still find their chat by the key alone.
+- **A delegated conversation records where it comes from**: `ConversationRef.origin`, the
+  conversation a person or a channel opened and its tree of delegations descends from, written by the
+  runtime's delegation when it creates the child and never by a ref. Code acting for the person behind
+  a task (memory, scheduled prompts, approvals) reads `originOf(conversation)`; the child's own key
+  (`delegate:…`) still names only the task.
 - **So answers keep finding their chat by the key**, and the proposal below is not needed: no
   component changes a key, Cloudflare's owner stays `idFromName` of the channel's key (C1, C2), and
   `conversation.resolve` is not planned ([pipeline anchors](pipeline-anchors.md)).

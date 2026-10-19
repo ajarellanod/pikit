@@ -186,7 +186,7 @@ component.
 - **Pi is the only agent runtime.** pikit runs its agents on Pi and on nothing else: `runtime-pi`
   (through the adapter) is the one provider of the runtime's contracts (`agent.runtime`,
   `agent.conversations`, `agent.submissions`, `agent.observe`, `model.complete`, `AGENT_STATE`,
-  `RUN_REQUESTS`),
+  `CONVERSATION` with a delegated conversation's origin, `RUN_REQUESTS`),
   for good. No second agent runtime (another SDK, a hosted agent) comes behind them. They exist so
   that components never import Pi, not to make the runtime swappable, so they never wait for a second
   provider: their stability is decided here. *Why:* P1, Pi is the agent; a second loop would make

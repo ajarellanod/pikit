@@ -104,7 +104,8 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   `agent.failed` with `{ code: reason, message: detail }`. `messages` are the model messages from the
   first input's `pi.user` entry to the answer (system entries excluded), and, when a tool ended the run
   (`control.terminate`), the results of the calls that answer made, written after it; `parts` are
-  those its successful tool results carry (`withParts`, `parts.ts`: a tool's `details` under
+  those its inputs' `pikit.input` entries carry (`AgentRequest.parts`), in the order it took them,
+  then those its successful tool results carry (`withParts`, `parts.ts`: a tool's `details` under
   `pikit.parts`), in order, kept in `answers` too; `usage` sums their assistant
   and tool-result usage, what pi-durable adds to `pi.usage`. A withdrawn input is logged aborted in
   `answers` and not announced. Events wait for the admissions' `agent.dispatched`/
@@ -144,8 +145,9 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 - **Contexts.** `toChord` re-attaches a pikit context's signal for Chord. Tasks run in the
   Harness's context (the app's values); a dispatching caller's values reach the run's events, not its
   tools.
-- **Senders.** A request with a `sender` is submitted as an input entry of kind `pikit.input` whose
-  data is `{ sender }` (pi-durable's `InputEntry`, #10407): in the submission's own commit, carried by a
+- **Senders and parts.** A request with a `sender` or `parts` (each checked, `checkedParts`: one that
+  is no part refuses the request) is submitted as an input entry of kind `pikit.input` whose data is
+  `{ sender?, parts? }` (pi-durable's `InputEntry`, #10407): in the submission's own commit, carried by a
   queued input's `pi.inbox` item, kept in the transcript. `RUN_REQUESTS` reads the run's inputs
   (`pi.live.run.inputs`) when asked, each one's request id from its submission and its sender from its
   entry: steers that joined the run included, and the same after a reopened Harness resumes it. An
@@ -158,7 +160,12 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   registry (`pikit.delegation`) before pi-durable opens. `start` returns the task's id (the call's
   task id); `list`, `steer` and `cancel` read the parent's own `pikit.delegations`, so a conversation
   controls only its tasks; the reporter fixes the (bounded) result there only after every recorded
-  steer is answered, and reports a cancelled task as stopped.
+  steer is answered, and reports a cancelled task as stopped. A child's `pikit.conversation` gets its
+  `origin` (the parent's, or the parent) in the commit that creates it, before `apply`; every ref the
+  runtime builds takes the origin from that record (`asRecorded`), never from a given ref. A completed
+  outcome carries the parts of the child's run that answered it (`runParts` over `tx.scanEntries`; the
+  task's inputs that share the last one's answer), and the reporter's `dispatch` brings them to the
+  parent (`AgentRequest.parts`).
 
 ## Submissions (`submissions.ts`, `answers.ts`)
 

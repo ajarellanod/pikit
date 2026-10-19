@@ -16,7 +16,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentConversations, type AgentDefinition, type ConversationRef, RUN_REQUESTS, type RunRequest, type SqlDatabase } from "@pikit/contracts";
+import { type AgentConversations, type AgentDefinition, CONVERSATION, type ConversationRef, RUN_REQUESTS, type RunRequest, type SqlDatabase } from "@pikit/contracts";
 import type { AgentRuntimeFixture } from "@pikit/contracts/testing";
 import { modelsFrom } from "../models.ts";
 import { createDurableRuntime } from "../runtime.ts";
@@ -47,8 +47,10 @@ export function createRuntimeFixture(runtime: ComponentDefinition[], records: Ru
   const released = new Promise<void>((resolve) => (release = resolve));
   const holdStarted = new Promise<void>((resolve) => (started = resolve));
   let requests: readonly RunRequest[] | undefined;
+  let seen: ConversationRef | undefined;
   const hold = holdTool(async (context) => {
     requests = await context.value(RUN_REQUESTS)?.list(context);
+    seen = context.value(CONVERSATION);
     started();
     await new Promise<void>((resolve, reject) => {
       const signal = context.abortSignal;
@@ -110,7 +112,7 @@ export function createRuntimeFixture(runtime: ComponentDefinition[], records: Ru
     components: [...records.components, support.agents, support.provider, probe, ...runtime],
     model: agent.model,
     conversation,
-    hold: { started: holdStarted, release: () => release(), requests: () => requests },
+    hold: { started: holdStarted, release: () => release(), requests: () => requests, conversation: () => seen },
     holdAtEnd() {
       const armed = gate();
       ending = armed.gate;

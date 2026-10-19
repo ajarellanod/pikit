@@ -7,7 +7,7 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import type { ConversationRef, RunSettlement, SqlDatabase, SqlValue } from "@pikit/contracts";
+import type { ConversationRef, MessagePart, RunSettlement, SqlDatabase, SqlValue } from "@pikit/contracts";
 import { silentLogger } from "@pikit/core";
 import { databaseFile, openWorker, releasableHold, scriptedAgent, scriptedProvider, type Worker } from "./test-support.ts";
 
@@ -314,6 +314,30 @@ test("runs settled while their log could not be written are logged once at the n
   await third.runtime.whenIdle(third.ctx);
   expect(await answers(third)).toHaveLength(3);
   expect(third.results()).toEqual([]);
+});
+
+test("a message's parts, in a run whose log a crash never wrote, are logged with it once at the next start, as live", async () => {
+  const db = records();
+  const asked = { type: "question", fallback: "Pay acme 10?" } as unknown as MessagePart;
+  const first = await db.worker({ db: crashingLog(takes("r1")) });
+  const conversation = await first.conversation();
+  await first.runtime.dispatch({ requestId: "r1", conversation, prompt: "one", parts: [asked] }, first.ctx);
+  await settledInDurable(first, conversation, "r1");
+  await first.runtime.whenIdle(first.ctx);
+  expect(await answers(first)).toEqual([]);
+  await first.close();
+
+  const next = await db.worker();
+  await next.runtime.inspect(next.ctx);
+  expect((await next.result("r1")).parts).toEqual([asked]);
+  await next.runtime.whenIdle(next.ctx);
+  expect((await answers(next)).map((run) => [run.requestId, run.parts])).toEqual([["r1", [asked]]]);
+
+  // Redelivered with other parts: a duplicate, which brings none and logs nothing again.
+  const other = { type: "question", fallback: "Another?" } as unknown as MessagePart;
+  expect(await next.runtime.dispatch({ requestId: "r1", conversation, prompt: "one", parts: [other] }, next.ctx)).toEqual({ kind: "duplicate", requestId: "r1" });
+  await next.runtime.whenIdle(next.ctx);
+  expect((await answers(next)).map((run) => run.parts)).toEqual([[asked]]);
 });
 
 /** Every model request fails with "scripted failure" (not retried). */

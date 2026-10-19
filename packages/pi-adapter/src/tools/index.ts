@@ -30,7 +30,7 @@
 export { defineExtension, defineTool, wrapTool } from "@earendil-works/pi-durable";
 // A tool's parts for its run's answer (`AgentResult.parts`): its result carries them.
 export { PARTS_DETAIL, withParts } from "../parts.ts";
-export { AGENT_DELEGATION, RESULT_LIMIT, RESULT_REQUEST_PREFIX, resultPrompt } from "../delegation.ts";
+export { AGENT_DELEGATION, partsNote, RESULT_LIMIT, RESULT_REQUEST_PREFIX, resultPrompt } from "../delegation.ts";
 export type { AgentDelegation, BackgroundDelegation, DelegatedOutcome, DelegatedTask, DelegationStatus } from "../delegation.ts";
 export type { Extension, ToolDiagnostic, ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 // What `agent.tool` holds: a `ToolRegistration` and the operator's one line about it (`summary`).

@@ -28,10 +28,15 @@
  *   The runtime is its only writer: giving up on messages is `abandon`, the runtime's own.
  * - **Agents** are applied by `AgentConfigs` (`agent.ts`): each conversation's `pi.agent` selects the
  *   agent's tool extension and the extensions it names (`agent.extension`, resolved through `extension`).
- * - **Senders**: a request with a `sender` is submitted as an input entry of kind `pikit.input` carrying
- *   it (pi-durable's `InputEntry`): one commit with the input, in the transcript for good. A run's
- *   tools, sections and hooks read `RUN_REQUESTS`: the run's inputs (`pi.live.run.inputs`) as they are
- *   when asked, each with the sender its entry carries.
+ * - **Senders and parts**: a request with a `sender` or `parts` (checked first: a malformed part refuses
+ *   it) is submitted as an input entry of kind `pikit.input` carrying them (pi-durable's `InputEntry`):
+ *   one commit with the input, in the transcript for good. A run's tools, sections and hooks read
+ *   `RUN_REQUESTS`: the run's inputs (`pi.live.run.inputs`) as they are when asked, each with the sender
+ *   its entry carries; the run's result has the parts of its inputs' entries before its tools'
+ *   (`result.ts`), so a reconciliation after a crash logs them as a live settlement would, once.
+ * - **Origins** (`ConversationRef.origin`): written in a delegated conversation's `pikit.conversation`
+ *   by the delegation that creates it (`delegation.ts`), and given with every ref the runtime builds
+ *   from that record (`asRecorded`): a ref given to `dispatch` never sets one.
  * - **The answer as it is written** (`agent.partial`): pi-durable commits the response being generated to
  *   the conversation's `pi.live` (`generation.message`, itself throttled by `progress.partialIntervalMs`);
  *   the runtime re-emits its text from those commits, at most once per `partialEveryMs`, while the run
@@ -84,11 +89,12 @@ import {
   type SqlDatabase,
 } from "@pikit/contracts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState, withChannel } from "./agent.ts";
+import { AgentConfigs, AgentStateDoc, asRecorded, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
 import { createAnswerLog } from "./answers.ts";
 import { AGENT_DELEGATION, createDelegation } from "./delegation.ts";
 import { runContext, toChord } from "./context.ts";
 import { harnessEnv } from "./execution.ts";
+import { checkedParts } from "./parts.ts";
 import type { WorkspaceProvider } from "./types.ts";
 import { isSettledInput, type SettledInput, settlementOf, toResult } from "./result.ts";
 import { openDurableStorage } from "./sql.ts";
@@ -790,7 +796,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     const harness = open ?? (await harnessOf(events));
     const recorded = await harness.snapshot(ConversationDoc, id, toChord(events));
     if (recorded === undefined || recorded.key === "") return undefined;
-    const ref = withChannel({ key: recorded.key, agent: recorded.agent, conversationId: String(id) }, recorded.channel);
+    const ref = asRecorded({ key: recorded.key, agent: recorded.agent, conversationId: String(id) }, recorded);
     refs.set(id, ref);
     return ref;
   };
@@ -1002,6 +1008,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       let ref = given;
       const { requestId } = request;
       const sender = senderOf(request);
+      const parts = request.parts === undefined ? [] : checkedParts(request.parts, `dispatch(${requestId})`);
       const agent = definitionOf(ref);
       const harness = await harnessOf(ctx);
       const id = conversationIdOf(ref);
@@ -1016,7 +1023,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           const existing = await conversation.commit(async (tx) => {
             const found = await tx.submissionByRequest(id, requestId);
             if (found !== undefined) {
-              ref = withChannel(given, (await tx.doc(ConversationDoc, id)).channel);
+              ref = asRecorded(given, await tx.doc(ConversationDoc, id));
               return found;
             }
             const stored = copyJson(await tx.doc(AgentStateDoc, id)) as { [key: string]: JsonValue };
@@ -1046,8 +1053,13 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
               content: inputOf(request),
               requestId,
               ...(request.whenBusy === "steer" && { whenBusy: "steer" }),
-              // A sender is placed with the input, in its entry (pi-durable's `InputEntry`): one commit, kept in the transcript.
-              ...(sender !== undefined && { entry: { kind: INPUT_KIND, data: { sender: { channel: sender.channel, id: sender.id } } } }),
+              // A sender and parts are placed with the input, in its entry (pi-durable's `InputEntry`): one commit, kept in the transcript.
+              ...((sender !== undefined || parts.length > 0) && {
+                entry: {
+                  kind: INPUT_KIND,
+                  data: { ...(sender !== undefined && { sender: { channel: sender.channel, id: sender.id } }), ...(parts.length > 0 && { parts: parts as unknown as JsonValue }) },
+                },
+              }),
             };
             const submission = await conversation.submit(draft, toChord(ctx));
             const status = admitting.get(key) ?? (await submission.status(toChord(ctx))).status;

@@ -73,6 +73,32 @@ export interface ConversationRef {
    * recorded (a test).
    */
   channel?: string;
+  /**
+   * Where a delegated conversation comes from: the conversation a person or a channel opened, from
+   * which its tree of delegations descends (a task delegated from a delegated task has the origin of
+   * the one that delegated it). Absent in a conversation that is not delegated: it is its own origin.
+   * Read it with `originOf`, never `ref.origin ?? ref` by hand.
+   *
+   * The runtime fixes it when it creates the delegated conversation, from the delegating one's record,
+   * and records it with the conversation for good, as the channel: a run sees it (`CONVERSATION`,
+   * `PrepareContext`, the `workspace` it asks for), also after a restart. It never comes from a ref
+   * given to the runtime (`dispatch` ignores one's) nor from the model. It is for code that acts for
+   * the person behind a delegated task: whose memory, where a scheduled prompt or an approval belongs.
+   * Not carried by `agent.submissions` (its settlements and `answers`) nor by `agent.observe`.
+   */
+  origin?: ConversationOrigin;
+}
+
+/** A conversation's origin (`ConversationRef.origin`): a ref with no origin of its own. */
+export type ConversationOrigin = Omit<ConversationRef, "origin">;
+
+/**
+ * The conversation `ref` descends from: its `origin` when it is delegated, else `ref` itself, either
+ * way without an `origin` field (`key`, `agent`, `conversationId`, and `channel` when known).
+ */
+export function originOf(ref: ConversationRef): ConversationOrigin {
+  const { origin, ...own } = ref;
+  return origin ?? own;
 }
 
 /**
@@ -99,7 +125,7 @@ type TurnChanges = { [K in keyof TurnConfig]?: TurnConfig[K] | undefined };
 
 /** What `prepare` knows besides the state. Fields are added with the features that need them. */
 export interface PrepareContext {
-  /** The conversation the run belongs to, with its `channel` when one is recorded. */
+  /** The conversation the run belongs to, with its `channel` when one is recorded and its `origin` when it is delegated. */
   conversation: ConversationRef;
 }
 
@@ -314,6 +340,16 @@ export interface AgentRequest {
    * producer that authenticates no one).
    */
   sender?: Sender;
+  /**
+   * Parts the message brings to the answer of the run that takes it (`AgentResult.parts`): what the
+   * person must see with that answer that the message's producer, not the run, has (a question a
+   * delegated task asked, which its report carries to the delegating conversation). Each one a part
+   * (`partProblem`): the runtime refuses the message otherwise, and nothing is admitted. The runtime
+   * keeps them with the message, durably, so the run's result has them once, whichever worker ends it;
+   * a duplicate brings nothing. Whoever builds the request bounds their number and size, as images'.
+   * Absent or empty: none.
+   */
+  parts?: readonly MessagePart[];
 }
 
 /** What happened to a message, known as soon as it is durable in the runtime's conversation. */
@@ -346,10 +382,11 @@ export interface AgentResult {
   /** The run's final answer, when it produced one. */
   text?: string;
   /**
-   * The parts the run's tools gave (`parts.ts`), in the order their results were written: what its
-   * answer carries besides its text (a question to draw as buttons). Answer delivery sends a completed
-   * run's with its text, also when it has none. A tool gives them through its result (runtime-pi:
-   * `withParts`, `@pikit/pi-adapter/tools`). Absent: none.
+   * What its answer carries besides its text (a question to draw as buttons, `parts.ts`): first the
+   * parts of the messages it took (`AgentRequest.parts`), in the order it took them, then the parts its
+   * tools gave, in the order their results were written. Answer delivery sends a completed run's with
+   * its text, also when it has none. A tool gives them through its result (runtime-pi: `withParts`,
+   * `@pikit/pi-adapter/tools`). Absent: none.
    */
   parts?: readonly MessagePart[];
   /** What the run added to the transcript. */

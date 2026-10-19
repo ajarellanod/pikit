@@ -39,6 +39,17 @@ What pi-durable does not know is pikit's agents. The runtime adds that layer
   extensions and skills; its key and agent recorded, so a reopened Harness builds it again).
 - **Its message has a sender**, the delegating agent (`{ channel: "delegate", id }`, an
   `InputEntry`), which its tools and hooks read (`RUN_REQUESTS`).
+- **It knows whom it works for**: its record holds its origin (`ConversationRef.origin`), the
+  conversation a person or a channel opened and the tree descends from (the parent's origin, or the
+  parent), written by the delegation in the commit that creates it and never taken from a ref or the
+  model. Its tools, hooks, sections and `prepare` see it in `CONVERSATION`, also after a restart, and
+  read it with `originOf`: memory-recall's person, tool-schedule's key, extension-approvals'
+  conversation are the chat's, not the task's. `agent.submissions` and `agent.observe` do not carry it.
+- **What it asks the person reaches them**: a completed task's outcome carries the parts of the
+  child's run that answered it (a question of `askUser` or `request_approval`). The `delegate` call
+  that waits gives them with its result (`withParts`); a background report brings them to the parent
+  (`AgentRequest.parts`, kept with the message and given with the answer of the parent's run that
+  takes it, before its tools' parts, once). The parent's agent reads them as shown (`partsNote`).
 - **A background answer goes through `dispatch`**, not straight into the parent's inbox as in the
   example: so it is logged in `answers` and announced, and the parent's channel delivers the parent's
   answer to the person. Request id `delegate-result:<reporter task id>`: a rerun admits it once.

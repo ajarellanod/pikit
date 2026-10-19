@@ -32,6 +32,17 @@
  *   task is reported stopped whatever the child answered, once; each submit to the child checks the
  *   mark after it, so no run started by a submit escapes a cancel.
  *
+ * - **The child's origin** (`ConversationRef.origin`) is written in its record when it is created, from
+ *   the parent's: the parent's own origin when the parent is delegated too, else the parent. Its tools,
+ *   hooks and sections see it in `CONVERSATION`, so they act for the person behind the tree (whose
+ *   memory, where an approval or a scheduled prompt belongs: `originOf`). Nothing else sets it.
+ * - **The child's parts** reach the person: a completed task's outcome carries the parts of the child's
+ *   run that answered it (its messages' and tools' parts, as a run's result has them: a `question` its
+ *   `askUser` or `request_approval` asked), so `run`'s caller can give them with its tool result
+ *   (`withParts`), and a background task's report brings them to the parent's run that takes it
+ *   (`AgentRequest.parts`), whose answer the parent's channel delivers. The report's request id makes a
+ *   rerun of the report a duplicate: they reach the parent's answers once.
+ *
  * Everything happens in the parent's storage: on a server as in a Durable Object (Cloudflare, celld),
  * with no call between actors.
  */
@@ -46,12 +57,14 @@ import {
   type ConversationHandle,
   type InputSubmissionDraft,
   type SettledSubmissionRecord,
+  type TaskId,
   type ToolExecutionApi,
   type Tx,
 } from "@earendil-works/pi-durable";
 import { type AppContext, type ContextKey, createContextKey } from "@pikit/core";
-import { type AgentDefinition, type AgentRequest, type ConversationRef, isAgentUnavailable, type Sender } from "@pikit/contracts";
-import { ConversationDoc } from "./agent.ts";
+import { type AgentDefinition, type AgentRequest, type ConversationOrigin, type ConversationRef, isAgentUnavailable, type MessagePart, type Sender } from "@pikit/contracts";
+import { ConversationDoc, copyOrigin } from "./agent.ts";
+import { isSettledInput, runParts, type SettledInput } from "./result.ts";
 import { INPUT_KIND } from "./submissions.ts";
 
 /** A task for another agent. */
@@ -71,8 +84,11 @@ export interface DelegatedTask {
   sender?: Sender;
 }
 
-/** How a task ended. */
-export type DelegatedOutcome = { kind: "completed"; text: string } | { kind: "failed"; message: string } | { kind: "aborted" };
+/**
+ * How a task ended. A completed one's `parts` are those of the child's run that answered it (its
+ * `AgentResult.parts`: what it asked the person, a question), in order; absent: none.
+ */
+export type DelegatedOutcome = { kind: "completed"; text: string; parts?: MessagePart[] } | { kind: "failed"; message: string } | { kind: "aborted" };
 
 /** Where a background task is. */
 export type DelegationStatus = "running" | "completed" | "failed" | "aborted";
@@ -138,8 +154,11 @@ type Delegation = {
   /** A cancel was asked: it is reported stopped. */
   cancelled?: true;
   /** How it ended, bounded, fixed in the reporter's commit. */
-  result?: DelegatedOutcome;
+  result?: RecordedOutcome;
 };
+
+/** What `pikit.delegations` keeps of an outcome (`boundedOutcome`): no parts, which the report carries. */
+type RecordedOutcome = { kind: "completed"; text: string } | { kind: "failed"; message: string } | { kind: "aborted" };
 
 /** Per tool task of the parent, what its background start created: a rerun finds it. */
 const DelegationsDoc = defineDoc<{ [toolTaskId: string]: Delegation }>({
@@ -180,9 +199,16 @@ async function answerOf(tx: Tx, answer: EntryId): Promise<string> {
   return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 }
 
-/** How a settled input ended, as `DelegatedOutcome`. */
-async function outcomeOf(tx: Tx, settled: SettledSubmissionRecord): Promise<DelegatedOutcome> {
-  if (settled.status === "done" && settled.type === "input" && settled.answer !== undefined) return { kind: "completed", text: await answerOf(tx, settled.answer) };
+/**
+ * How a settled input of `child` ended, as `DelegatedOutcome`; a completed one with the parts of the run
+ * that answered it: `run`, that run's inputs the delegation submitted (default: the input alone).
+ */
+async function outcomeOf(tx: Tx, child: ConversationId, settled: SettledSubmissionRecord, run?: readonly SettledInput[]): Promise<DelegatedOutcome> {
+  if (settled.status === "done" && settled.type === "input" && settled.answer !== undefined) {
+    const inputs = run ?? (isSettledInput(settled) ? [settled] : []);
+    const parts = await runParts((query, limit, cursor) => tx.scanEntries({ conversationId: child, ...query }, limit, cursor), inputs);
+    return { kind: "completed", text: await answerOf(tx, settled.answer), ...(parts.length > 0 && { parts }) };
+  }
   if (settled.reason === "aborted") return { kind: "aborted" };
   // A failed run's detail is its error, as pi-durable recorded it.
   const detail = settled.detail;
@@ -190,10 +216,20 @@ async function outcomeOf(tx: Tx, settled: SettledSubmissionRecord): Promise<Dele
   return { kind: "failed", message: message ?? settled.reason ?? "it did not answer" };
 }
 
+/**
+ * What an agent reads of the parts a task's answer brings (`DelegatedOutcome.parts`): the person sees
+ * them with its own answer, so it must not repeat them; their fallbacks say what they are. Empty for none.
+ */
+export function partsNote(parts: readonly MessagePart[] | undefined): string {
+  if (parts === undefined || parts.length === 0) return "";
+  const fallbacks = parts.map((part) => (part as { fallback: string }).fallback.trim()).filter((text) => text !== "");
+  return `\n\n[The person is shown what follows with your answer, as it is: do not repeat it.]${fallbacks.length === 0 ? "" : `\n\n${fallbacks.join("\n\n")}`}`;
+}
+
 /** What the parent's agent reads when a task it did not wait for ends. */
 export function resultPrompt(agent: string, outcome: DelegatedOutcome): string {
   if (outcome.kind === "completed") {
-    return `[The agent "${agent}" finished the task you delegated to it. Its answer follows: carry on with it, and tell the person what they need from it.]\n\n${outcome.text === "" ? "(nothing)" : outcome.text}`;
+    return `[The agent "${agent}" finished the task you delegated to it. Its answer follows: carry on with it, and tell the person what they need from it.]\n\n${outcome.text === "" ? "(nothing)" : outcome.text}${partsNote(outcome.parts)}`;
   }
   if (outcome.kind === "failed") return `[The agent "${agent}" could not do the task you delegated to it: ${outcome.message}. Tell the person, or do it another way.]`;
   return `[The task you delegated to the agent "${agent}" was stopped before it answered.]`;
@@ -206,8 +242,35 @@ const steerOf = (steer: Steer, sender: JsonSender | undefined): InputSubmissionD
 
 const clip = (text: string) => (text.length > RESULT_LIMIT ? `${text.slice(0, RESULT_LIMIT)} [...]` : text);
 
-const boundedOutcome = (outcome: DelegatedOutcome): DelegatedOutcome =>
+/** What `list` keeps of an outcome: its text or failure, bounded; never its parts (the report carries them). */
+const boundedOutcome = (outcome: DelegatedOutcome): RecordedOutcome =>
   outcome.kind === "completed" ? { kind: "completed", text: clip(outcome.text) } : outcome.kind === "failed" ? { kind: "failed", message: clip(outcome.message) } : outcome;
+
+/**
+ * In `tx`: the origin of a conversation `parent` delegates from, as its record has it: its own origin
+ * when it is delegated too, else itself.
+ */
+async function originFrom(tx: Tx, parent: ConversationId): Promise<ConversationOrigin> {
+  const recorded = await tx.doc(ConversationDoc, parent);
+  if (recorded.origin !== undefined) return copyOrigin(recorded.origin);
+  return { key: recorded.key, agent: recorded.agent, conversationId: String(parent), ...(recorded.channel !== undefined && { channel: recorded.channel }) };
+}
+
+/** In `tx`: a new conversation for a task, owned by `owner`, recorded with `origin`, and run as `agent` (`options.apply`). */
+async function createChild(
+  tx: Tx,
+  options: Pick<DelegationOptions, "apply">,
+  owner: TaskId,
+  origin: ConversationOrigin,
+  task: DelegatedTask,
+  agent: AgentDefinition,
+): Promise<ConversationId> {
+  const created = await tx.createConversation({ ownership: { kind: "task", taskId: owner } });
+  // Before `apply`, which gives the ref as recorded: the origin is the delegation's to write, never a ref's.
+  (await tx.doc(ConversationDoc, created.id)).origin = origin;
+  await options.apply(tx, created.id, { key: task.key, agent: task.agent, conversationId: String(created.id), channel: task.channel }, agent);
+  return created.id;
+}
 
 const statusOf = (record: Delegation): DelegationStatus => record.result?.kind ?? (record.cancelled === true ? "aborted" : "running");
 
@@ -268,7 +331,14 @@ export function createDelegation(options: DelegationOptions) {
                 }
                 last = steer.requestId;
               }
-              outcome = await outcomeOf(tx, (await tx.submissionByRequest(child, last)) as SettledSubmissionRecord);
+              const final = (await tx.submissionByRequest(child, last)) as SettledSubmissionRecord;
+              // The run that answered it took the task's inputs that share its answer (a steer that joined it).
+              const run: SettledInput[] = [];
+              for (const requestId of [`delegate:${id}`, ...(record?.steers ?? []).map((steer) => steer.requestId)]) {
+                const submitted = await tx.submissionByRequest(child, requestId);
+                if (submitted !== undefined && isSettledInput(submitted) && submitted.status === "done" && final.status === "done" && submitted.answer === final.answer) run.push(submitted);
+              }
+              outcome = await outcomeOf(tx, child, final, run.length === 0 ? undefined : run.sort((a, b) => a.id - b.id));
             }
             if (record !== undefined) record.result = boundedOutcome(outcome);
             return { status: "running", checkpoint: { phase: "report", outcome } };
@@ -280,11 +350,19 @@ export function createDelegation(options: DelegationOptions) {
       report: async (reporter, runtime, context) => {
         if (reporter.state.checkpoint.phase !== "report") return;
         const { parent, agent } = reporter.input;
+        const { outcome } = reporter.state.checkpoint;
         const ctx = options.events.derive(() => context);
         try {
-          // Through the runtime: logged in `answers` and announced, so the parent's channel delivers its answer.
+          // Through the runtime: logged in `answers` and announced, so the parent's channel delivers its answer,
+          // with the child's parts (a question it asked). Its request id makes a rerun a duplicate.
           await options.dispatch(
-            { requestId: `${RESULT_REQUEST_PREFIX}${reporter.id}`, conversation: parent, prompt: resultPrompt(agent, reporter.state.checkpoint.outcome), sender: { channel: "delegate", id: agent } },
+            {
+              requestId: `${RESULT_REQUEST_PREFIX}${reporter.id}`,
+              conversation: parent,
+              prompt: resultPrompt(agent, outcome),
+              sender: { channel: "delegate", id: agent },
+              ...(outcome.kind === "completed" && outcome.parts !== undefined && outcome.parts.length > 0 && { parts: outcome.parts }),
+            },
             ctx,
           );
         } catch (error) {
@@ -317,16 +395,14 @@ export function createDelegation(options: DelegationOptions) {
         // A rerun of this call finds the child it created.
         const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
         if (existing !== undefined) return existing.id;
-        const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
-        await options.apply(tx, created.id, { key: task.key, agent: task.agent, conversationId: String(created.id), channel: task.channel }, agent);
-        return created.id;
+        return createChild(tx, options, api.taskId, await originFrom(tx, api.conversationId), task, agent);
       }, context);
       // A UI watching the parent finds the child under the call.
       await api.details({ conversationId: child } as JsonValue, context);
       const handle = await api.conversation(child, context);
       if (handle === undefined) return { kind: "failed", message: "its conversation is gone" };
       const settled = await (await handle.submit(inputOf(task.task, `delegate:${api.taskId}`, plainSender(task.sender)), context)).wait(context);
-      return api.commit((tx) => outcomeOf(tx, settled), context);
+      return api.commit((tx) => outcomeOf(tx, child, settled), context);
     },
 
     async start(api, task, context) {
@@ -342,19 +418,18 @@ export function createDelegation(options: DelegationOptions) {
         // Both tasks belong to the parent conversation and are background: its stops and idle waits pass them by.
         const background = { ownership: { kind: "conversation" }, background: true } as const;
         const anchor = await tx.createTask(Anchor, null, background);
-        const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
-        await options.apply(tx, child.id, { key: task.key, agent: task.agent, conversationId: String(child.id), channel: task.channel }, agent);
+        const child = await createChild(tx, options, anchor, await originFrom(tx, api.conversationId), task, agent);
         const input: ReporterInput = {
           id,
-          child: child.id as number,
+          child: child as number,
           parent: { key: recorded.key, agent: recorded.agent, conversationId: String(api.conversationId) },
           agent: task.agent,
           task: task.task,
           ...(sender !== undefined && { sender }),
         };
         await tx.createTask(Reporter, input, background);
-        started[id] = { child: child.id as number, agent: task.agent, ...(sender !== undefined && { sender }) };
-        return child.id;
+        started[id] = { child: child as number, agent: task.agent, ...(sender !== undefined && { sender }) };
+        return child;
       }, context);
       await api.details({ conversationId: child } as JsonValue, context);
       // Submitted before the id is returned, so no steer reaches the child before its task.

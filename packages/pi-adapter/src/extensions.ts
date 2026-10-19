@@ -12,9 +12,10 @@
  *   pikit.provideKeyed("agent.extension", "memory", defineExtension({ name: "memory", sections: [...] }));
  *   defineAgent({ name: "assistant", model: "anthropic/claude-sonnet-4-5", extensions: ["memory"] });
  *
- * Its tools run, like every tool of an agent, with `CONVERSATION` and `AGENT_STATE` in their context.
- * A section or a hook sees pi-durable's conversation id; the conversation's key and agent are its
- * `ConversationDoc` (`input.read.snapshot(ConversationDoc, input.conversationId, context)`).
+ * Its tools, sections and hooks run, like every tool of an agent, with `CONVERSATION`, `AGENT_STATE`
+ * and `RUN_REQUESTS` in their context (`originOf(CONVERSATION)` for the person behind a delegated
+ * task). The conversation's record is also its `ConversationDoc`
+ * (`input.read.snapshot(ConversationDoc, input.conversationId, context)`).
  *
  * Neutral: it runs on every target.
  */

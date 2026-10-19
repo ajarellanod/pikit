@@ -82,19 +82,36 @@ interface AgentRuntime {
 }
 ```
 
-- `AgentRequest` is `{ requestId, conversation, prompt, images?, whenBusy?, sender? }`. `ConversationRef` is
-  `{ key, agent, conversationId, channel? }`: the channel's key, the agent's name, the runtime's
+- `AgentRequest` is `{ requestId, conversation, prompt, images?, whenBusy?, sender?, parts? }`. `ConversationRef` is
+  `{ key, agent, conversationId, channel?, origin? }`: the channel's key, the agent's name, the runtime's
   conversation, and the channel the conversation belongs to for good (`telegram`, `http`, `dashboard`,
   `delegate`). `conversations.registry` records the channel with the key's first resolve; the runtime
   records it with the conversation, so a run sees it (`CONVERSATION`, `PrepareContext`, its `workspace`)
   even when the ref that reached it has none (an operator's action). It is for treating a channel's
   conversations apart (a directory, a prompt), never for finding where an answer goes. Settlements
   (`AgentResult`, `agent.submissions`) do not carry it.
+- `origin` (`ConversationOrigin`: a ref without an origin of its own) is where a delegated
+  conversation comes from: the conversation a person or a channel opened, from which its tree of
+  delegations descends (two delegations deep, still that one). Absent in a conversation that is not
+  delegated; read it with `originOf(ref)` (`ref.origin`, else `ref` without the field). The runtime
+  fixes it when its delegation creates the conversation, from the delegating one's record, and records
+  it with the conversation for good: a run sees it (`CONVERSATION`, `PrepareContext`, its
+  `workspace`), also after a restart. It never comes from a ref: `dispatch` ignores a ref's (the suite
+  checks it), and the model has no way to give one. It is for code that acts for the person behind a
+  delegated task (memory-recall's person, tool-schedule's key, extension-approvals' conversation).
+  `agent.submissions` (settlements, `answers`) and `agent.observe` do not carry it.
 - `sender` (`Sender`, `{ channel, id }`) is who sent the message, as its producer established it:
   `admitInbound` gives the message's actor (`{ channel, id: actor.id }`), admin-api the operator
   (`{ channel: "dashboard", id }`), tool-delegate's tasks the delegating agent (`{ channel: "delegate",
   id }`). The runtime keeps it with the message, durably, and gives it to the run that takes the
   message (`RUN_REQUESTS`, below); it is not in the result nor in `agent.submissions`.
+- `parts` ([Parts](#parts)) are what the message brings to the answer of the run that takes it: what the
+  person must see with that answer that the producer, not the run, has (a delegated task's question,
+  which its report carries to the delegating conversation). Each must be a part (`partProblem`: a
+  kind and a fallback, JSON), or the message is refused and nothing is admitted. The runtime keeps them
+  with the message, durably (runtime-pi: in its `pikit.input` entry, with the sender), so the run's
+  result has them once whichever worker ends it, and a reconciliation after a crash logs them as a live
+  settlement would; a duplicate brings none. Whoever builds the request bounds them, as images.
 - `dispatch` resolves once the message is durable in the runtime (a channel's acknowledgement point),
   not when it is answered. Cancelling `ctx` never stops a run.
 - The same `requestId` in one conversation is `duplicate`: nothing runs. This is pikit's inbound
@@ -106,10 +123,12 @@ interface AgentRuntime {
   `agent.failed`, with an `AgentResult` (`requestId` that started it, every `requestIds` it answered,
   `text`, `parts`, `messages`, `usage`, `error`), and is recorded in `agent.submissions.answers`. A run
   resumed after a crash has no caller, which is why.
-- `parts` are the parts the run's tools gave ([Parts](#parts)), in the order their results were
-  written. runtime-pi collects them from its tool results: a tool returns `withParts(result, parts)`
-  (`@pikit/pi-adapter/tools`), which checks each part and carries them in the result's `details`
-  (`pikit.parts`); a tool that ends the run (`control.terminate`) gives an answer of parts and no text.
+- A result's `parts` ([Parts](#parts)) are first those of the messages the run took
+  (`AgentRequest.parts`), in the order it took them (a steer's with the run it joins), then those its
+  tools gave, in the order their results were written. runtime-pi collects a tool's from its result: a
+  tool returns `withParts(result, parts)` (`@pikit/pi-adapter/tools`), which checks each part and
+  carries them in the result's `details` (`pikit.parts`); a tool that ends the run
+  (`control.terminate`) gives an answer of parts and no text.
 - Events `agent.dispatched` (every admission) and `agent.started` (with `resumed`) are emitted too, and
   `agent.partial` (`{ conversation, requestId, text }`) while a run goes: the text so far of the response
   the model is writing, for a preview (a placeholder a channel edits). runtime-pi re-emits it from
@@ -120,7 +139,12 @@ interface AgentRuntime {
 Provider: runtime-pi (on pi-durable, through `@pikit/pi-adapter`'s `createDurableRuntime`), the only
 one for good: Pi is the only agent runtime (SPEC §3.3), as for every runtime contract below.
 Suite: `createAgentRuntimeConformance`, run by runtime-pi with and without `wakeups`, by the adapter,
-and in workerd; it also checks a runtime refuses to start with two stewards (`stewardProblem`).
+and in workerd; it also checks a runtime refuses to start with two stewards (`stewardProblem`), that a
+message's parts reach its run's result in order and once (a duplicate brings none, a steer's go with
+the run it joins), that a message with what is no part is refused with nothing admitted, and that
+`dispatch` takes no origin from a ref (its fixture's `hold` reports the `CONVERSATION` it read). Its
+in-memory double shows each of these cases fails a runtime that breaks it. That a delegated
+conversation gets its origin is the delegation's, tested by the adapter's `delegation.test.ts`.
 
 ### `agent.conversations`
 
@@ -169,7 +193,8 @@ the system prompt sections and hooks (generation, tool, compaction) of its agent
   a reset. A tool reads it with `context.value(AGENT_STATE)`. Suite: `createAgentStateConformance`
   (run in the adapter's `prepare.test.ts`).
 - `CONVERSATION` ([conversation-context.ts](../packages/contracts/src/conversation-context.ts)): the
-  run's `ConversationRef`, for a tool that needs to know whose run it is in.
+  run's `ConversationRef` as the runtime records it (its `channel`, and its `origin` when delegated),
+  for code that needs to know whose run it is in; `originOf(CONVERSATION)` for the person behind it.
 - `RUN_REQUESTS` ([run-requests.ts](../packages/contracts/src/run-requests.ts)): `list(ctx)`, the
   requests the run in progress takes (its starter, the follow-ups queued with it, the steers that
   joined it), each with its `sender`, read when asked; empty with no run going. Whose memory, which
@@ -220,7 +245,14 @@ message)` (only while running, from the sender the task started with: it joins t
 a steer that comes after its last tool round runs next and is what the one report answers; never
 lost) and `cancel(api, id)` (aborts the child; reported to the parent as stopped once; again, or once
 ended, it changes nothing and returns the status). Foreground delegations are the call's, not
-listed. Used by tool-delegate. Tested by the adapter's `delegation.test.ts` and the workerd lane.
+listed. Every child conversation is recorded with its origin (`ConversationRef.origin`: the parent's
+origin, or the parent), written by the delegation alone. A completed task's outcome carries the
+parts of the child's run that answered it (`DelegatedOutcome.parts`: a question its `askUser` or
+`request_approval` asked): tool-delegate gives them with its result (`withParts`) when it waits, and a
+background task's report brings them to the parent (`AgentRequest.parts`, with `partsNote` in its
+prompt), so they reach the person with the answer of the parent's run that takes it, once. `list`
+keeps the answer's text, not its parts. Used by tool-delegate. Tested by the adapter's
+`delegation.test.ts` and the workerd lane.
 
 No suite (see [building-components.md](../features/building-components.md), "Contracts without a
 suite").
@@ -403,7 +435,9 @@ question as buttons). A kind of part is declared by the component that introduce
 merging on `AppMessageParts`; the core declares none. A kind shared by components that must not
 know each other is vocabulary, declared in the contracts: `question` ([question.ts](../packages/contracts/src/question.ts),
 below). `MessagePart` is
-`{ type, fallback }` and the kind's fields. Every part has a `fallback` text. A transport draws the
+`{ type, fallback }` and the kind's fields. Every part has a `fallback` text; `partProblem(part)` is the
+one check of that shape (runtime-pi's `withParts` and `dispatch` use it). A run's parts come from its
+tools and from the messages it took (`AgentRequest.parts`, above). A transport draws the
 kinds in its `draws`; every other part is folded into the text as its fallback, after the text, a
 paragraph each, before the split, and the drawn ones go with the last piece. `messagePieces(transport,
 { text, parts })` is the one place that does it (answer delivery's direct path and outbound-durable call
@@ -873,7 +907,9 @@ interface ApprovalStore {
 
 Provider: approvals-sql (`storage.sql`, one actor `approvals-sql:approvals` through `actor.mailbox`;
 server). Users: extension-approvals (`request_approval`, a `beforeTool` claim, an `inbound.normalize`
-stage that records answers), admin-approvals (`/admin/api/approvals`). Suite:
+stage that records answers; it asks for, and claims from, the conversation's origin, so a delegated
+agent's approval is the chat's and any conversation of that tree may use it, none of another),
+admin-approvals (`/admin/api/approvals`). Suite:
 `createApprovalsConformance` (approvals-sql's `conformance.ts`).
 
 ### `memory` (declared by memory-sql, [contract.ts](../registry/components/memory-sql/files/src/pikit/memory-sql/contract.ts))
@@ -897,7 +933,8 @@ Per agent and person; `remember` idempotent by id; a text with a known credentia
 never echoed; committed before `remember` resolves. Provider: memory-sql (`storage.sql` of one actor
 per person, `memory:<person>`, reached through `actor.mailbox`; on Cloudflare the person's Durable
 Object). Users: memory-recall (the `memory` extension: a stable section, `remember`, `forget`,
-`recall`), memory-summaries (a summary of each quiet conversation, from the answers feed). Suite:
+`recall`; the person is the key of the conversation's origin, so a delegated agent keeps its own
+memory of the person behind the task), memory-summaries (a summary of each quiet conversation, from the answers feed). Suite:
 `createMemoryConformance`, on memory-sql over mailbox-local's double and over storage-do and
 actors-do in the workerd lane. One provider: `experimental`.
 
@@ -910,7 +947,8 @@ conversation: `schedule` (idempotent by id), `get`, `list` (by key, by id prefix
 `handle`, the one tick handler. Ticks never early, at least once with their identity (`tick`, the
 scheduled time), missed ones by the job's policy, an `at` job ended with its tick, jobs durable across
 restarts. Provider: scheduler-sql, its only one (`experimental`). Users: scheduler-admit (the handler:
-each tick admitted into its existing conversation, sender `scheduler`), tool-schedule,
+each tick admitted into its existing conversation, sender `scheduler`), tool-schedule (the key of
+the conversation's origin: a delegated agent's prompt comes back to the chat, answered by its agent),
 scheduler-routines, each with a copy of `contract.ts`. Suite: `createSchedulerConformance`
 (scheduler-sql's `conformance.ts`). Server only.
 
