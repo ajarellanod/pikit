@@ -1,14 +1,14 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "storage-do",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "The app's portable SQL (storage.sql) and SQLite (storage.sqlite) database in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",
   "targets": [
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -19,7 +19,7 @@
     "storage.sqlite"
   ],
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

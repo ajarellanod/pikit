@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "provider-faux",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Fake models for tests only, with no network, key or cost: `faux/echo` answers `faux: <your message>`; `faux/scripted` calls a tool when told `call: <tool> <json>` and shows the system prompt it got (`echo-system`).",
   "targets": [
     "server",
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -22,7 +22,7 @@
     "faux"
   ],
   "dependencies": {
-    "@pikit/pi-adapter": "0.0.0"
+    "@pikit/pi-adapter": "0.0.1"
   },
   "files": [
     {

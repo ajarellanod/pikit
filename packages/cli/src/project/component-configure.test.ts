@@ -17,8 +17,8 @@ afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true 
 
 const installed = (apps?: { worker: string }) => ({
   registry: "builtin",
-  version: "0.0.0",
-  requires: { pikit: "0.0.0" },
+  version: "0.0.1",
+  requires: { pikit: "0.0.1" },
   files: {},
   dependencies: {},
   addedDependencies: [],

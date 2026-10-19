@@ -152,7 +152,7 @@ test(".gitignore ships .dev.vars.example and keeps secrets, state and Bun's lock
   writeFileSync(join(repo, ".gitignore"), templateGitignore(pikits));
   const ignored = (file: string) => git("check-ignore", "-q", file).exitCode === 0;
   for (const file of [".dev.vars", ".env", ".env.local", "bun.lock", "bun.lockb", ".wrangler/state", "node_modules/x"]) expect([file, ignored(file)]).toEqual([file, true]);
-  for (const file of [".dev.vars.example", "package-lock.json", "wrangler.jsonc", "vendor/pikit-core-0.0.0-x.tgz", "src/dashboard/bun.lock"]) expect([file, ignored(file)]).toEqual([file, false]);
+  for (const file of [".dev.vars.example", "package-lock.json", "wrangler.jsonc", "vendor/pikit-core-0.0.1-x.tgz", "src/dashboard/bun.lock"]) expect([file, ignored(file)]).toEqual([file, false]);
 });
 
 test("the README has the button, every secret, the five steps after deploying, costs and security", () => {
@@ -260,7 +260,7 @@ test.skipIf(!E2E)(
       for (const pattern of TOKEN_PATTERNS) expect([file, pattern.test(withoutDummies)]).toEqual([file, false]);
     }
     const lock = JSON.parse(readFileSync(join(out, "package-lock.json"), "utf8"));
-    expect(lock.packages["node_modules/@pikit/core"].resolved).toMatch(/^file:vendor\/pikit-core-0\.0\.0-[0-9a-f]{10}\.tgz$/);
+    expect(lock.packages["node_modules/@pikit/core"].resolved).toMatch(/^file:vendor\/pikit-core-0\.0\.1-[0-9a-f]{10}\.tgz$/);
 
     // A clean copy, as Workers Builds clones it: npm ci from scratch, with an empty cache.
     const clean = join(temp(), "clone");

@@ -1,7 +1,7 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "router-rules",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Routing rules: send each conversation to an agent by channel, chat or sender",
   "description": "Each conversation goes to the agent of the first rule it matches: rules in config, edited live from the dashboard.",
   "targets": [
@@ -9,8 +9,8 @@
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -23,7 +23,7 @@
   "provides": [],
   "settings": "settings",
   "dependencies": {
-    "@pikit/contracts": "0.0.0",
+    "@pikit/contracts": "0.0.1",
     "typebox": "1.3.27"
   },
   "files": [

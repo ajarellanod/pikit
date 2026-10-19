@@ -105,14 +105,14 @@ test("new refuses a non-empty directory and an unknown preset before writing any
 test("new refuses a preset component that does not run on a new project's target, before writing anything", async () => {
   const registry = temp();
   const manifest = (name: string, targets: string[]) => ({
-    name, version: "0.0.0", description: name, targets, requires: { pikit: "0.0.0", capabilities: [] },
+    name, version: "0.0.1", description: name, targets, requires: { pikit: "0.0.1", capabilities: [] },
     optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }],
   });
   const index: Record<string, unknown> = {};
   for (const [name, targets] of [["secrets-env", ["server"]], ["channel-edge", ["durable"]]] as const) {
     mkdirSync(join(registry, "components", name), { recursive: true });
     writeFileSync(join(registry, "components", name, "component.json"), JSON.stringify(manifest(name, [...targets])));
-    index[name] = { version: "0.0.0", description: name, targets, path: `components/${name}` };
+    index[name] = { version: "0.0.1", description: name, targets, path: `components/${name}` };
   }
   writeFileSync(join(registry, "registry.json"), JSON.stringify({ version: 1, components: index }));
   mkdirSync(join(registry, "presets"));
@@ -356,7 +356,7 @@ test("a project cloned on another machine resolves its builtin registry here, an
   expect(manifest.registries).toEqual({ default: "builtin" });
   expect(Object.keys(manifest.components)).toEqual(["log-events"]);
   // The kit it accepts, which a later add checks before it changes the project's kit.
-  expect(manifest.components["log-events"].requires).toEqual({ pikit: "0.0.0", contracts: "0.0.0" });
+  expect(manifest.components["log-events"].requires).toEqual({ pikit: "0.0.1", contracts: "0.0.1" });
   // Its tarballs are this CLI's: the kit it did not record is this CLI's now.
   expect(manifest.kit).toEqual(kitCommit() === undefined ? undefined : { commit: kitCommit() });
 }, 60_000);
@@ -376,7 +376,7 @@ test("add keeps each installed file's base, named by its hash; remove deletes th
   // Another component installed a file with the same content: its base stays with it.
   const [shared, { hash: sharedHash }] = Object.entries(files)[0] as [string, { hash: string }];
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
-  manifest.components["log-copy"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { "src/copy.ts": { hash: sharedHash } }, dependencies: {}, environment: [] };
+  manifest.components["log-copy"] = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: { "src/copy.ts": { hash: sharedHash } }, dependencies: {}, environment: [] };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   writeFileSync(join(dir, "src", "copy.ts"), readFileSync(join(dir, shared)));
 
@@ -425,7 +425,7 @@ function agentProject(tools: string[]): string {
   }
   const manifest = emptyManifest();
   const toolFile = "src/pikit/tool-bash/index.ts";
-  manifest.components["tool-bash"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { [toolFile]: { hash: hashOf(files[toolFile] ?? "") } }, dependencies: {}, environment: [] };
+  manifest.components["tool-bash"] = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: { [toolFile]: { hash: hashOf(files[toolFile] ?? "") } }, dependencies: {}, environment: [] };
   writeProjectManifest(dir, manifest);
   return dir;
 }

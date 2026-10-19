@@ -12,7 +12,7 @@ export const PIKIT_ROOT = join(import.meta.dir, "..", "..", "..");
 /** The registry `pikit new` and `pikit add` use when no `--registry` is given. */
 export const DEFAULT_REGISTRY = join(PIKIT_ROOT, "registry");
 
-/** The kit packages a project depends on, vendored until they are published (`project/vendor.ts`). */
+/** The kit packages a project depends on, vendored from here: they are not on npm (`project/vendor.ts`). */
 export const PACKAGES_DIR = join(PIKIT_ROOT, "packages");
 
 /** The kit's repository online, which the installer clones (`installer/install.sh`, `PIKIT_REPO`). */

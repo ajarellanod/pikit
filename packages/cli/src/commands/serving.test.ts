@@ -52,7 +52,7 @@ function registry(): string {
   const components: Record<string, { manifest: Record<string, unknown>; setup: string }> = {
     "conversations-fake": { manifest: { provides: ["conversations.registry"] }, setup: '    pikit.provide("conversations.registry", {});' },
     "channel-fake": {
-      manifest: { provides: ["http.route"], requires: { pikit: "0.0.0", capabilities: ["conversations.registry"] } },
+      manifest: { provides: ["http.route"], requires: { pikit: "0.0.1", capabilities: ["conversations.registry"] } },
       setup: '    pikit.use("conversations.registry");\n    pikit.provideKeyed("http.route", "POST /fake", () => new Response(null));',
     },
     "router-fake": { manifest: {}, setup: '    pikit.pipeline("route.resolve", (value) => value, { id: "rules" });' },
@@ -65,11 +65,11 @@ function registry(): string {
     mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
     writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), component(name, setup));
     const full = {
-      name, version: "0.0.0", description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
+      name, version: "0.0.1", description: name, targets: ["server"], requires: { pikit: "0.0.1", capabilities: [] },
       optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...manifest,
     };
     writeFileSync(join(dir, "component.json"), JSON.stringify(full));
-    index[name] = { version: "0.0.0", description: name, targets: full.targets, path: `components/${name}` };
+    index[name] = { version: "0.0.1", description: name, targets: full.targets, path: `components/${name}` };
   }
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   return root;

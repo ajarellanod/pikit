@@ -92,7 +92,7 @@ test("each half declares in its own App; a component in both Apps declares its w
 
 /** A registry of these manifests only (targets durable), for what the repository's cannot show yet. */
 function fakeRegistry(manifests: Partial<Manifest>[]): Registry {
-  const full = manifests.map((m) => ({ version: "0.0.0", description: m.name, targets: ["durable"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {}, files: [], ...m }) as Manifest);
+  const full = manifests.map((m) => ({ version: "0.0.1", description: m.name, targets: ["durable"], requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {}, files: [], ...m }) as Manifest);
   return {
     names: () => full.map((m) => m.name),
     manifest: (name: string) => {
@@ -105,7 +105,7 @@ function fakeRegistry(manifests: Partial<Manifest>[]): Registry {
 
 test("a provider is offered in the App that misses it: one that goes only in the object's App does not serve the Worker's", () => {
   const half = (requires: string[]) => ({ provides: [], requires, optional: [] });
-  const channel = { name: "channel-x", requires: { pikit: "0.0.0", capabilities: ["storage.kv"] }, apps: { worker: "worker" }, halves: { default: half(["storage.kv"]), worker: half(["storage.kv"]) } };
+  const channel = { name: "channel-x", requires: { pikit: "0.0.1", capabilities: ["storage.kv"] }, apps: { worker: "worker" }, halves: { default: half(["storage.kv"]), worker: half(["storage.kv"]) } };
   const objectOnly = fakeRegistry([channel, { name: "storage-kv-object", provides: ["storage.kv"] }]);
   expect(offeredProviders(objectOnly, ["channel-x"], [], ["durable"])).toEqual([{ component: "storage-kv-object", capability: "storage.kv", for: "channel-x", why: "required" }]);
   // Installed already, it still does not serve the Worker's App: nothing there to offer, `pikit add` warns.
@@ -155,12 +155,12 @@ test("a required capability with two providers is named with its candidates too:
 test("a narrow capability's one provider is brought, and serves the portable one it provides too: providers first, nothing left to choose", () => {
   // As storage.sqlite (SQLite's dialect) beside storage.sql: the outbox needs the narrow one, which only
   // the SQLite provider has; the key-value store the portable one, which a Postgres provider has too.
-  const kv = { name: "storage-kv-x", targets: ["server"], provides: ["storage.kv"], requires: { pikit: "0.0.0", capabilities: ["storage.sql"] } };
-  const outbox = { name: "outbound-x", targets: ["server"], provides: ["outbound.queue"], requires: { pikit: "0.0.0", capabilities: ["storage.sqlite"] } };
-  const channel = { name: "channel-x", targets: ["server"], requires: { pikit: "0.0.0", capabilities: ["storage.kv"] }, optional: { capabilities: ["outbound.queue"] } };
+  const kv = { name: "storage-kv-x", targets: ["server"], provides: ["storage.kv"], requires: { pikit: "0.0.1", capabilities: ["storage.sql"] } };
+  const outbox = { name: "outbound-x", targets: ["server"], provides: ["outbound.queue"], requires: { pikit: "0.0.1", capabilities: ["storage.sqlite"] } };
+  const channel = { name: "channel-x", targets: ["server"], requires: { pikit: "0.0.1", capabilities: ["storage.kv"] }, optional: { capabilities: ["outbound.queue"] } };
   const sqlite = { name: "storage-lite", targets: ["server"], provides: ["storage.sql", "storage.sqlite"] };
   const postgres = { name: "storage-pg", targets: ["server"], provides: ["storage.sql"] };
-  const conversations = { name: "conversations-x", targets: ["server"], requires: { pikit: "0.0.0", capabilities: ["storage.kv"] } };
+  const conversations = { name: "conversations-x", targets: ["server"], requires: { pikit: "0.0.1", capabilities: ["storage.kv"] } };
   const fake = fakeRegistry([kv, outbox, channel, conversations, sqlite, postgres]);
   expect(offeredProviders(fake, ["channel-x"], [], ["server"])).toEqual([
     { component: "storage-lite", capability: "storage.sqlite", for: "outbound-x", why: "required" },
@@ -264,7 +264,7 @@ test("a capability a registry declares resolves as the kit's: an offered compone
   const half = (provides: string[], requires: string[] = []) => ({ provides, requires, optional: [] });
   const channel = { name: "channel-x", optional: { capabilities: ["outbound.queue"] } };
   // The outbox requires memory.store, in its object's half only.
-  const outbox = { name: "outbound-x", provides: ["outbound.queue"], requires: { pikit: "0.0.0", capabilities: ["memory.store"] } };
+  const outbox = { name: "outbound-x", provides: ["outbound.queue"], requires: { pikit: "0.0.1", capabilities: ["memory.store"] } };
   const memory = { name: "memory-sql", provides: ["memory.store"], declares: { kinds: ["memory"], capabilities: { "memory.store": MEMORY } } };
   const one = fakeRegistry([channel, outbox, memory]);
   expect(offeredProviders(one, ["channel-x"], [], ["durable"])).toEqual([
@@ -312,14 +312,14 @@ test("a capability a registry declares `offer` is offered to what can use it; a 
 test("a provider whose component was declined stays for an accepted one that still requires what it provides, never for an optional need", () => {
   const half = (provides: string[], requires: string[] = [], optional: string[] = []) => ({ provides, requires, optional });
   const fake = fakeRegistry([
-    { name: "channel-x", targets: ["server", "durable"], requires: { pikit: "0.0.0", capabilities: ["storage.kv"] }, optional: { capabilities: ["outbound.queue"] } },
-    { name: "storage-kv-x", targets: ["server", "durable"], provides: ["storage.kv"], requires: { pikit: "0.0.0", capabilities: ["storage.sql"] } },
-    { name: "outbound-x", targets: ["server", "durable"], provides: ["outbound.queue"], requires: { pikit: "0.0.0", capabilities: ["storage.sqlite"] } },
+    { name: "channel-x", targets: ["server", "durable"], requires: { pikit: "0.0.1", capabilities: ["storage.kv"] }, optional: { capabilities: ["outbound.queue"] } },
+    { name: "storage-kv-x", targets: ["server", "durable"], provides: ["storage.kv"], requires: { pikit: "0.0.1", capabilities: ["storage.sql"] } },
+    { name: "outbound-x", targets: ["server", "durable"], provides: ["outbound.queue"], requires: { pikit: "0.0.1", capabilities: ["storage.sqlite"] } },
     { name: "storage-lite", targets: ["server", "durable"], provides: ["storage.sql", "storage.sqlite"] },
     { name: "storage-pg", targets: ["server", "durable"], provides: ["storage.sql"] },
     { name: "tool-y", targets: ["server", "durable"], optional: { capabilities: ["storage.sql"] } },
     // Requires storage.sql in its Worker half only.
-    { name: "edge-x", targets: ["durable"], apps: { worker: "worker" }, halves: { default: half([]), worker: half([], ["storage.sql"]) }, requires: { pikit: "0.0.0", capabilities: ["storage.sql"] } },
+    { name: "edge-x", targets: ["durable"], apps: { worker: "worker" }, halves: { default: half([]), worker: half([], ["storage.sql"]) }, requires: { pikit: "0.0.1", capabilities: ["storage.sql"] } },
     { name: "storage-both", targets: ["durable"], provides: ["storage.sql"], apps: { worker: "default" } },
   ]);
   const [sqlite, kv, outbox] = offeredProviders(fake, ["channel-x"], [], ["server"]);

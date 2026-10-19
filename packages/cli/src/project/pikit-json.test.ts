@@ -24,7 +24,7 @@ test("a written file reads back as it was: keys in one order, files sorted; anot
     ...emptyManifest(),
     components: {
       "tool-fake": {
-        registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" },
+        registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" },
         files: { "src/b.ts": { hash: "sha256:b" }, "src/a.ts": { hash: "sha256:a" } }, dependencies: {}, addedDependencies: [], environment: [],
       },
     },
@@ -42,7 +42,7 @@ test("a written file reads back as it was: keys in one order, files sorted; anot
 
 test("a pikit.json that does not have the schema's shape is refused, naming the file and the path of each bad field", () => {
   const project = temp();
-  const component = { registry: "default", version: 1, requires: { pikit: "0.0.0" }, files: {}, dependencies: {}, addedDependencies: [], environment: [], note: "mine" };
+  const component = { registry: "default", version: 1, requires: { pikit: "0.0.1" }, files: {}, dependencies: {}, addedDependencies: [], environment: [], note: "mine" };
   writeFileSync(join(project, PIKIT_JSON), JSON.stringify({ ...emptyManifest(), components: { "tool-fake": component } }));
   expect(() => readProjectManifest(project)).toThrow(
     "pikit.json does not have the shape this CLI reads:\n  /components/tool-fake/note: is not a known field\n  /components/tool-fake/version: must be string",
@@ -73,7 +73,7 @@ test("a registry is recorded as builtin, relative inside the project, else as gi
 
 test("the packages remove may take out are those add put in package.json", () => {
   const record: InstalledComponent = {
-    registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, files: {}, dependencies: { hono: "4.13.9", "left-pad": "1.3.0" }, devDependencies: { wrangler: "4.143.0" },
+    registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, files: {}, dependencies: { hono: "4.13.9", "left-pad": "1.3.0" }, devDependencies: { wrangler: "4.143.0" },
     addedDependencies: ["hono"], environment: [],
   };
   expect(ownedDependencies(record)).toEqual({ dependencies: ["hono"], devDependencies: [] });

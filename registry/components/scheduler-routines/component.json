@@ -1,14 +1,14 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "scheduler-routines",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Routines: prompts on a cron schedule, written in pikit.config.ts",
   "description": "Routines: prompts on a cron schedule in a conversation, written in the project's config (reviewed and versioned with it), made the scheduler's jobs at each start: added, changed and removed, never touching another component's.",
   "targets": [
     "server"
   ],
   "requires": {
-    "pikit": "0.0.0",
+    "pikit": "0.0.1",
     "capabilities": [
       "scheduler"
     ]

@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "memory-sql",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "What each agent remembers of each person, across their conversations: one actor per person, its storage.sql. Declares and provides memory.",
   "targets": [
     "server",
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": [
       "storage.sql",
       "actor.mailbox",
@@ -35,10 +35,10 @@
     }
   },
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "devDependencies": {
-    "@pikit/pi-adapter": "0.0.0"
+    "@pikit/pi-adapter": "0.0.1"
   },
   "files": [
     {

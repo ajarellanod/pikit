@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "log-events",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "One structured log line per operational event: what reached which agent, how each run ended, how long it took and what it cost.",
   "targets": [
     "server",
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -17,7 +17,7 @@
   },
   "provides": [],
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

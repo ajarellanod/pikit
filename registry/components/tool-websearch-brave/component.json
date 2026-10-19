@@ -1,7 +1,7 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "tool-websearch-brave",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Web search: your agent searches the web with Brave Search (needs an API key)",
   "description": "The `websearch` tool, for the agents that name it: searches the web with the Brave Search API, whose key the model never sees.",
   "targets": [
@@ -9,8 +9,8 @@
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": [
       "secrets"
     ]
@@ -27,11 +27,11 @@
     }
   },
   "dependencies": {
-    "@pikit/pi-adapter": "0.0.0",
+    "@pikit/pi-adapter": "0.0.1",
     "typebox": "1.3.27"
   },
   "devDependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

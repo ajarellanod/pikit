@@ -31,8 +31,8 @@ function registry() {
   const source = join(component, "files", "src", "pikit", name, "index.ts");
   write(source, "export const value = 1;\n");
   const manifest: Manifest = {
-    name, version: "0.0.0", description: name, targets: ["server"],
-    requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {},
+    name, version: "0.0.1", description: name, targets: ["server"],
+    requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {},
     files: [{ source: "files/src", target: "src" }],
   };
   const index: RegistryIndex = { version: 1, components: { [name]: { version: manifest.version, description: name, targets: manifest.targets, path: `components/${name}` } } };
@@ -75,7 +75,7 @@ test("sources cannot escape lexically, link to an external tree, or contain a sy
     const manifest = { ...f.manifest, files: [{ source, target: "src/new.ts" }] };
     write(join(f.component, "component.json"), JSON.stringify(manifest));
     expect(() => openRegistry(f.root).files(f.name)).toThrow(/leaves/);
-    expect(checkManifest(manifest, f.component, f.name, "0.0.0", "0.0.0", "0.0.0").some((p) => p.includes("leaves"))).toBe(true);
+    expect(checkManifest(manifest, f.component, f.name, "0.0.1", "0.0.1", "0.0.1").some((p) => p.includes("leaves"))).toBe(true);
   }
   write(join(f.component, "component.json"), JSON.stringify(f.manifest));
   const src = join(f.component, "files", "src");

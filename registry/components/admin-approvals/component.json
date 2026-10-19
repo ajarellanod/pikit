@@ -1,14 +1,14 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "admin-approvals",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "The dashboard's routes for approvals: list them, and approve or reject one as an operator, held to the approvers like anyone; the conversation that asked is told once.",
   "targets": [
     "server"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": [
       "approvals",
       "agent.runtime"
@@ -23,7 +23,7 @@
     "http.route"
   ],
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

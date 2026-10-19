@@ -35,7 +35,7 @@ function publish(root: string, version: string, files: Record<string, string>, f
   mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
   for (const [file, text] of Object.entries({ "index.ts": INDEX, ...files })) writeFileSync(join(dir, "files", "src", "pikit", name, file), text);
   const manifest = {
-    name, version, description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
+    name, version, description: name, targets: ["server"], requires: { pikit: "0.0.1", capabilities: [] },
     optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...fields,
   };
   writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));

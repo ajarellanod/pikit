@@ -41,9 +41,9 @@ function project(check: string | undefined, declared = check !== undefined): str
   }
   const manifest = emptyManifest();
   for (const name of ["checked", "deployment-fake"]) {
-    manifest.components[name] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
+    manifest.components[name] = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
   }
-  if (declared) manifest.components.checked = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [], hooks: { doctor: "src/pikit/checked/doctor.ts" } };
+  if (declared) manifest.components.checked = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: {}, dependencies: {}, environment: [], hooks: { doctor: "src/pikit/checked/doctor.ts" } };
   writeProjectManifest(dir, manifest);
   return dir;
 }
@@ -129,7 +129,7 @@ test("only an app component (its index.ts has a default export) is said to be mi
   writeFileSync(join(dir, "src/pikit/forgotten/index.ts"), 'import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({ name: "forgotten", setup() {} });\n');
   const manifest = readProjectManifest(dir);
   for (const name of ["agents-tool", "forgotten"]) {
-    manifest.components[name] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
+    manifest.components[name] = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
   }
   writeProjectManifest(dir, manifest);
 

@@ -1,14 +1,14 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "expose-cloudflare-tunnel",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Cloudflare Tunnel: a public HTTPS URL for a server project, only the paths you list",
   "description": "A public HTTPS URL for a server project by a Cloudflare Tunnel: `pikit expose` makes the tunnel, its routes and its DNS record on your Cloudflare domain, and `pikit up` runs cloudflared beside the app; only the paths you list are public.",
   "targets": [
     "server"
   ],
   "requires": {
-    "pikit": "0.0.0",
+    "pikit": "0.0.1",
     "capabilities": []
   },
   "optional": {

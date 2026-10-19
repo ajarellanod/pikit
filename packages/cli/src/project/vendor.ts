@@ -1,17 +1,18 @@
 /**
- * The kit packages in a project, until they are published.
+ * The kit packages in a project.
  *
- * `@pikit/core`, `@pikit/contracts` and `@pikit/pi-adapter` are not on npm yet. The CLI
- * packs them from its own checkout into the project's `vendor/` (`bun pm pack`), and the project
+ * `@pikit/core`, `@pikit/contracts` and `@pikit/pi-adapter` are not on npm: a release is a git tag of
+ * this repository. The CLI packs them from its own checkout into the project's `vendor/` (`bun pm pack`), and the project
  * depends on the tarballs with `file:vendor/<tarball>`. Everything then resolves inside the project
  * directory, so `bun install --frozen-lockfile` works in a Docker build too.
  *
- * A packed package names its kit dependencies by version (`@pikit/core: 0.0.0`), which npm does
+ * A packed package names its kit dependencies by version (`@pikit/core: 0.0.1`), which npm does
  * not have, so `overrides` points every kit package at its tarball. That also keeps exactly one
  * copy of `@pikit/core` in `node_modules`: two copies would mean two sets of capability contracts.
  *
- * The version stays `0.0.0` until the kit is published, so a tarball's name also carries a hash of
- * the package's files (`pikit-core-0.0.0-<hash>.tgz`). A project whose tarballs are another kit's
+ * The version is the release's, and two checkouts of one version may still differ (`main` after the
+ * tag, local changes), so a tarball's name also carries a hash of the package's files
+ * (`pikit-core-0.0.1-<hash>.tgz`). A project whose tarballs are another kit's
  * gets this CLI's when a component is added (`refreshKit`): the component and the core it needs come
  * from the same checkout. That is not assumed safe for the components already installed: P7 promises
  * only the core's 1.x, and the contracts stay 0.x on their own schedule (SPEC K8). So each installed
@@ -44,7 +45,7 @@ export function isKitPackage(name: string): boolean {
   return name in KIT_PACKAGES;
 }
 
-/** `pikit-core-0.0.0`: the name `bun pm pack` gives a kit package's tarball, without `.tgz`. */
+/** `pikit-core-0.0.1`: the name `bun pm pack` gives a kit package's tarball, without `.tgz`. */
 function packedName(name: string): string {
   const dir = KIT_PACKAGES[name];
   if (dir === undefined) throw new Error(`${name} is not a kit package`);
@@ -75,7 +76,7 @@ export function kitHash(name: string): string {
   return hash;
 }
 
-/** `file:vendor/pikit-core-0.0.0-<hash>.tgz`: this checkout's tarball of the kit package. */
+/** `file:vendor/pikit-core-0.0.1-<hash>.tgz`: this checkout's tarball of the kit package. */
 export function kitSpecifier(name: string): string {
   return `file:${VENDOR_DIR}/${packedName(name)}-${kitHash(name)}.tgz`;
 }
@@ -165,7 +166,7 @@ function pointAtKit(pkg: PackageJson, specifier: (kit: string) => string): { ven
 let commit: { value: string | undefined } | undefined;
 
 /**
- * The kit's identity until it is published: the commit of this CLI's checkout, `-dirty` when a kit
+ * The kit's identity beyond its version: the commit of this CLI's checkout, `-dirty` when a kit
  * package has uncommitted changes. Undefined when the checkout is not in Git.
  */
 export function kitCommit(): string | undefined {

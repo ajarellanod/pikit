@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "tool-write",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",
   "targets": [
     "server",
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": [
       "execution"
     ]
@@ -28,10 +28,10 @@
     }
   },
   "dependencies": {
-    "@pikit/pi-adapter": "0.0.0"
+    "@pikit/pi-adapter": "0.0.1"
   },
   "devDependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

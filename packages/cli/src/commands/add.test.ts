@@ -51,13 +51,13 @@ async function pikitAnsweringEnter(args: string[], cwd: string, question: string
 function otherKitProject(installed: string[] = [], kit?: string): string {
   const dir = temp();
   const manifest = emptyManifest(undefined, kit);
-  for (const name of installed) manifest.components[name] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
+  for (const name of installed) manifest.components[name] = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
   writeProjectManifest(dir, manifest);
   mkdirSync(join(dir, "vendor"));
   const overrides: Record<string, string> = {};
   for (const [name, packageDir] of Object.entries(KIT_PACKAGES)) {
-    overrides[name] = `file:vendor/pikit-${packageDir}-0.0.0-0000000000.tgz`;
-    writeFileSync(join(dir, "vendor", `pikit-${packageDir}-0.0.0-0000000000.tgz`), "another kit");
+    overrides[name] = `file:vendor/pikit-${packageDir}-0.0.1-0000000000.tgz`;
+    writeFileSync(join(dir, "vendor", `pikit-${packageDir}-0.0.1-0000000000.tgz`), "another kit");
   }
   const dependencies = { "@pikit/core": overrides["@pikit/core"] };
   writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "other-kit", dependencies, overrides }, null, 2)}\n`);
@@ -88,11 +88,11 @@ function fakeRegistry(extra: Record<string, string>, fields: Record<string, unkn
     if (!source.startsWith("files/src/")) files.push({ source, target });
   }
   const manifest = {
-    name: "tool-fake", version: "0.0.0", description: "tool-fake", targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
+    name: "tool-fake", version: "0.0.1", description: "tool-fake", targets: ["server"], requires: { pikit: "0.0.1", capabilities: [] },
     optional: { capabilities: [] }, provides: [], dependencies: {}, files, ...fields,
   };
   writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));
-  const index = { "tool-fake": { version: "0.0.0", description: "tool-fake", targets: ["server"], path: "components/tool-fake" } };
+  const index = { "tool-fake": { version: "0.0.1", description: "tool-fake", targets: ["server"], path: "components/tool-fake" } };
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   return root;
 }
@@ -199,7 +199,7 @@ test("a reinstall that fails puts back the bases it replaced, and removes those 
   const file = "src/pikit/log-events/index.ts";
   const hash = hashOf("the older log-events\n");
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
-  manifest.components["log-events"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { [file]: { hash } }, dependencies: {}, environment: [] };
+  manifest.components["log-events"] = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: { [file]: { hash } }, dependencies: {}, environment: [] };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   mkdirSync(join(dir, "src", "pikit", "log-events"), { recursive: true });
   writeFileSync(join(dir, file), "the older log-events\n");
@@ -223,7 +223,7 @@ test("a reinstall that fails puts back a file it deleted, in a directory a new f
   const files = { [`${own}index.ts`]: "export default {};\n", [`${own}sub/old.ts`]: "the older tool-fake\n" };
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
   manifest.components["tool-fake"] = {
-    registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], dependencies: {}, environment: [],
+    registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], dependencies: {}, environment: [],
     files: Object.fromEntries(Object.entries(files).map(([file, text]) => [file, { hash: hashOf(text) }])),
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
@@ -244,21 +244,21 @@ test("a reinstall that fails puts back a file it deleted, in a directory a new f
 
 test("a component that does not accept this CLI's contracts is refused before anything is written", async () => {
   const dir = otherKitProject();
-  const registry = fakeRegistry({}, { requires: { pikit: "0.0.0", contracts: "^9.0.0", capabilities: [] } });
+  const registry = fakeRegistry({}, { requires: { pikit: "0.0.1", contracts: "^9.0.0", capabilities: [] } });
   const before = snapshot(dir);
   const run = await runCli(["add", "tool-fake", "--registry", registry, "--yes"], dir);
   expect(run.code).toBe(1);
-  expect(run.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.0");
+  expect(run.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.1");
   expect(snapshot(dir)).toEqual(before);
 });
 
 test("a component that does not accept this CLI's adapter is refused before anything is written", async () => {
   const dir = otherKitProject();
-  const registry = fakeRegistry({}, { requires: { pikit: "0.0.0", adapter: "^9.0.0", capabilities: [] } });
+  const registry = fakeRegistry({}, { requires: { pikit: "0.0.1", adapter: "^9.0.0", capabilities: [] } });
   const before = snapshot(dir);
   const run = await runCli(["add", "tool-fake", "--registry", registry, "--yes"], dir);
   expect(run.code).toBe(1);
-  expect(run.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.0");
+  expect(run.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.1");
   expect(snapshot(dir)).toEqual(before);
 });
 
@@ -266,7 +266,7 @@ test("a component that depends on the contracts or the adapter without saying wh
   const dir = otherKitProject();
   const before = snapshot(dir);
   for (const [pkg, field] of [["@pikit/contracts", "contracts"], ["@pikit/pi-adapter", "adapter"]]) {
-    const registry = fakeRegistry({}, { dependencies: { [pkg as string]: "0.0.0" } });
+    const registry = fakeRegistry({}, { dependencies: { [pkg as string]: "0.0.1" } });
     for (const force of [[], ["--force"]]) {
       const run = await runCli(["add", "tool-fake", "--registry", registry, "--yes", ...force], dir);
       expect(run.code).toBe(1);
@@ -304,11 +304,11 @@ function registryOf(components: Record<string, [string, Record<string, unknown>]
     mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
     writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), code);
     const manifest = {
-      name, version: "0.0.0", description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
+      name, version: "0.0.1", description: name, targets: ["server"], requires: { pikit: "0.0.1", capabilities: [] },
       optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...fields,
     };
     writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));
-    index[name] = { version: "0.0.0", description: name, targets: ["server"], path: `components/${name}` };
+    index[name] = { version: "0.0.1", description: name, targets: ["server"], path: `components/${name}` };
   }
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   return root;
@@ -339,7 +339,7 @@ test("what is installed provides what the project composes: a registry's compone
 test("a completed add clears its marker before reporting a failed doctor", async () => {
   const dir = composingProject();
   const registry = registryOf({
-    "tool-fake": [component("tool-fake", 'pikit.use("storage.kv");'), { requires: { pikit: "0.0.0", capabilities: ["storage.kv"] } }],
+    "tool-fake": [component("tool-fake", 'pikit.use("storage.kv");'), { requires: { pikit: "0.0.1", capabilities: ["storage.kv"] } }],
   });
   const run = await runCli(["add", "tool-fake", "--registry", registry, "--yes"], dir);
   expect(run.code).toBe(1);
@@ -378,12 +378,12 @@ test("on a project that does not compose, nothing is offered nor guessed, and it
 test("a kit an installed component does not accept is refused before any write, each one named; --force replaces it", async () => {
   const dir = otherKitProject();
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
-  const record = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, files: {}, addedDependencies: [], environment: [] };
+  const record = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, files: {}, addedDependencies: [], environment: [] };
   manifest.components = {
     "tool-core": { ...record, requires: { pikit: ">=1.0.0" }, dependencies: {} },
-    "tool-fine": { ...record, requires: { pikit: "0.0.0", contracts: "0.0.0" }, dependencies: { "@pikit/contracts": "0.0.0" } },
-    "tool-newer": { ...record, requires: { pikit: "0.0.0", contracts: "^0.1.0" }, dependencies: { "@pikit/contracts": "0.1.0" } },
-    "tool-newer-adapter": { ...record, requires: { pikit: "0.0.0", adapter: "^0.2.0" }, dependencies: { "@pikit/pi-adapter": "0.2.0" } },
+    "tool-fine": { ...record, requires: { pikit: "0.0.1", contracts: "0.0.1" }, dependencies: { "@pikit/contracts": "0.0.1" } },
+    "tool-newer": { ...record, requires: { pikit: "0.0.1", contracts: "^0.1.0" }, dependencies: { "@pikit/contracts": "0.1.0" } },
+    "tool-newer-adapter": { ...record, requires: { pikit: "0.0.1", adapter: "^0.2.0" }, dependencies: { "@pikit/pi-adapter": "0.2.0" } },
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
@@ -396,7 +396,7 @@ test("a kit an installed component does not accept is refused before any write, 
   );
   expect(refused.err).toContain("pass --force to replace the kit anyway");
   expect(refused.err).not.toContain("tool-fine");
-  expect(refused.out).not.toContain("log-events 0.0.0 from");
+  expect(refused.out).not.toContain("log-events 0.0.1 from");
   expect(snapshot(dir)).toEqual(before);
 
   // Forced, it goes on to the kit refresh (the install then fails here, and everything is put back).
@@ -419,7 +419,7 @@ test("the plan says when the registry has uncommitted changes", async () => {
   git("add", "-A");
   expect(git("commit", "-qm", "registry").exitCode).toBe(0);
   const clean = await runCli(["add", "tool-fake", "--registry", registry], dir);
-  expect(clean.out).toMatch(/tool-fake 0\.0\.0 from .* at [0-9a-f]{40}\n/);
+  expect(clean.out).toMatch(/tool-fake 0\.0\.1 from .* at [0-9a-f]{40}\n/);
   expect(clean.err).not.toContain("uncommitted changes");
 
   writeFileSync(join(registry, "components", "tool-fake", "files", "src", "pikit", "tool-fake", "index.ts"), "export default { edited: true };\n");
@@ -452,7 +452,7 @@ test("a component that would write the project's own records is refused, --force
   mkdirSync(join(dir, ".git"));
   writeFileSync(join(dir, ".git", "config"), "[core]\n");
   const before = snapshot(dir);
-  for (const target of ["package.json", ".git/config", "vendor/pikit-core-0.0.0-0000000000.tgz", "Pikit.json"]) {
+  for (const target of ["package.json", ".git/config", "vendor/pikit-core-0.0.1-0000000000.tgz", "Pikit.json"]) {
     const run = await runCli(["add", "tool-fake", "--yes", "--force", "--registry", fakeRegistry({ "files/payload": target })], dir);
     expect(run.code).toBe(1);
     expect(run.err).toContain(`tool-fake: the file target "${target}" is the project's own`);
@@ -484,7 +484,7 @@ test.skipIf(!CLI_IN_GIT)("a project whose kit is newer than this CLI's is refuse
   expect(refused.code).toBe(1);
   expect(refused.err).toContain(`this project's kit (vendor/) comes from pikit ${newer}, which this CLI's checkout`);
   expect(refused.err).toContain("pass --force to replace the kit anyway");
-  expect(refused.out).not.toContain("log-events 0.0.0 from");
+  expect(refused.out).not.toContain("log-events 0.0.1 from");
   expect(snapshot(dir)).toEqual(before);
 
   // Forced, it goes on to the kit refresh (the install then fails here, and everything is put back).
@@ -557,7 +557,7 @@ test("a refusal for the second name leaves nothing written, and no plan shown", 
     const run = await runCli(["add", "log-events", second, "--yes"], dir);
     expect(run.code).toBe(1);
     expect(run.err).toContain(second === "tool-bash" ? "tool-bash is already installed" : "no-such-component");
-    expect(run.out).not.toContain("log-events 0.0.0 from");
+    expect(run.out).not.toContain("log-events 0.0.1 from");
     expect(snapshot(dir)).toEqual(before);
   }
 }, 60_000);
@@ -568,8 +568,8 @@ test("several names whose `bun install` fails are all put back, under one marker
   const before = snapshot(dir);
   const run = await runCli(["add", "log-events", "router-basic", "--yes"], dir);
   expect(run.code).toBe(1);
-  expect(run.out).toContain("log-events 0.0.0 from");
-  expect(run.out).toContain("router-basic 0.0.0 from");
+  expect(run.out).toContain("log-events 0.0.1 from");
+  expect(run.out).toContain("router-basic 0.0.1 from");
   expect(run.err).toContain("`bun install` failed");
   expect(run.err.split("nothing was added").length).toBe(2);
   const after = snapshot(dir);

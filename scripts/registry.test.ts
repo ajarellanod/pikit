@@ -205,7 +205,7 @@ test("imports: a server-only kit export (@pikit/pi-adapter/node) needs targets [
   const f = await fixture();
   f.append("index.ts", `import type { LocalExecutionOptions } from "@pikit/pi-adapter/node";`);
   f.append("sample.test.ts", `import "@pikit/pi-adapter/testing";`);
-  f.writeManifest({ ...f.manifest(), requires: { ...f.manifest().requires, adapter: "0.0.0" }, dependencies: { "@pikit/pi-adapter": "0.0.0" } });
+  f.writeManifest({ ...f.manifest(), requires: { ...f.manifest().requires, adapter: "0.0.1" }, dependencies: { "@pikit/pi-adapter": "0.0.1" } });
   await generate(f.root);
   expect((await validate(f.root)).problems).toEqual([]);
 
@@ -272,7 +272,7 @@ test("devDependencies: what only its tests import, never a dependency, nor a ran
   expect(await problems(f)).toContain(`only its tests import "hono": list it in devDependencies, not dependencies`);
 
   // No requires.adapter: the component runs without it.
-  f.writeManifest({ ...f.manifest(), dependencies: {}, devDependencies: { "@pikit/pi-adapter": "0.0.0", hono: "4.13.9" } });
+  f.writeManifest({ ...f.manifest(), dependencies: {}, devDependencies: { "@pikit/pi-adapter": "0.0.1", hono: "4.13.9" } });
   await generate(f.root);
   expect(await problems(f)).toBe("");
 
@@ -291,7 +291,7 @@ test("devDependencies: exact versions, none of its dependencies, never the core;
   expect(await problems(f)).toContain("component.json /devDependencies/wrangler: must match pattern");
 
   f.append("index.ts", `import type { Hono } from "hono";`);
-  f.writeManifest({ ...f.manifest(), dependencies: { hono: "4.13.9" }, devDependencies: { hono: "4.13.9", "@pikit/core": "0.0.0" } });
+  f.writeManifest({ ...f.manifest(), dependencies: { hono: "4.13.9" }, devDependencies: { hono: "4.13.9", "@pikit/core": "0.0.1" } });
   await generate(f.root);
   const found = await problems(f);
   expect(found).toContain(`"hono" is in both dependencies and devDependencies: a package its shipped files import is a dependency`);

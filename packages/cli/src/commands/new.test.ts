@@ -43,12 +43,12 @@ function registry(presets: Record<string, string>): string {
       `import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({ name: "${name}", setup() {} });\n`,
     );
     const manifest = {
-      name, version: "0.0.0", description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
+      name, version: "0.0.1", description: name, targets: ["server"], requires: { pikit: "0.0.1", capabilities: [] },
       optional: { capabilities: optional }, provides, ...(modelProviders !== undefined && { modelProviders }),
       dependencies: {}, files: [{ source: "files/src", target: "src" }],
     };
     writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));
-    index[name] = { version: "0.0.0", description: name, targets: ["server"], path: `components/${name}` };
+    index[name] = { version: "0.0.1", description: name, targets: ["server"], path: `components/${name}` };
   }
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   mkdirSync(join(root, "presets"));
@@ -130,7 +130,7 @@ test("--ui brings admin-api, and the defaults for admin.auth and settings that t
 test("--ui with other providers of admin.auth and settings: decided by what their manifests declare in each App of the target", () => {
   const nothing = { provides: [], requires: [], optional: [] };
   const fake = (manifests: Partial<Manifest>[]): Registry => {
-    const full = manifests.map((m) => ({ version: "0.0.0", description: m.name, targets: ["server", "durable"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {}, files: [], ...m }) as Manifest);
+    const full = manifests.map((m) => ({ version: "0.0.1", description: m.name, targets: ["server", "durable"], requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {}, files: [], ...m }) as Manifest);
     return { names: () => full.map((m) => m.name), manifest: (name: string) => full.find((m) => m.name === name) as Manifest } as unknown as Registry;
   };
   const registry = fake([

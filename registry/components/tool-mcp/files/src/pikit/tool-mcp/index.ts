@@ -60,7 +60,7 @@ export const DEFAULT_TIMEOUT_MS = 60_000;
 /** What a server's name in config may hold: it starts the names of its tools. */
 const SERVER_NAME = /^[A-Za-z0-9_-]+$/;
 /** How the client introduces itself to servers. */
-export const CLIENT = { name: "pikit", version: "0.0.0" };
+export const CLIENT = { name: "pikit", version: "0.0.1" };
 /** The `storage.kv` namespace of the kept listings: the component's name. */
 const NAMESPACE = "tool-mcp";
 

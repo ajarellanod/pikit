@@ -29,10 +29,10 @@ function registry(components: Record<string, string | Partial<Manifest> | undefi
     const fields = typeof spec === "string" ? { title: spec } : (spec ?? {});
     const manifest: Manifest = {
       name,
-      version: "0.0.0",
+      version: "0.0.1",
       description: name,
       targets: ["server"],
-      requires: { pikit: "0.0.0", capabilities: [] },
+      requires: { pikit: "0.0.1", capabilities: [] },
       optional: { capabilities: [] },
       provides: [],
       dependencies: {},
@@ -40,7 +40,7 @@ function registry(components: Record<string, string | Partial<Manifest> | undefi
       ...fields,
     };
     writeFileSync(join(root, "components", name, "component.json"), JSON.stringify(manifest));
-    index[name] = { version: "0.0.0", description: name, targets: manifest.targets, path: `components/${name}` };
+    index[name] = { version: "0.0.1", description: name, targets: manifest.targets, path: `components/${name}` };
   }
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   mkdirSync(join(root, "presets"));
@@ -174,7 +174,7 @@ test("registry validate reports unknown components, duplicates and answers with 
 });
 
 test("registry validate reports a preset that does not compose on its target, and each answer that does not", () => {
-  const requires = (capabilities: string[]) => ({ requires: { pikit: "0.0.0", capabilities } });
+  const requires = (capabilities: string[]) => ({ requires: { pikit: "0.0.1", capabilities } });
   const root = registry(
     {
       "secrets-env": { provides: ["secrets"] },

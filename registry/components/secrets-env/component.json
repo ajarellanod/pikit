@@ -1,14 +1,14 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "secrets-env",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Secrets from the process environment.",
   "targets": [
     "server"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -18,7 +18,7 @@
     "secrets"
   ],
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

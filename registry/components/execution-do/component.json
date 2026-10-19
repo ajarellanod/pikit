@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "execution-do",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "The agent's workspace and shell inside its Durable Object, on Cloudflare: files in the object's SQL, a bash without processes, git with fenced pushes, and node in QuickJS.",
   "targets": [
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -23,8 +23,8 @@
   ],
   "dependencies": {
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
-    "@pikit/contracts": "0.0.0",
-    "@pikit/pi-adapter": "0.0.0",
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
     "diff": "8.0.4",
     "isomorphic-git": "1.42.3",
     "just-bash": "3.4.2",

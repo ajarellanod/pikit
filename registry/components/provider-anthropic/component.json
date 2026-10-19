@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "provider-anthropic",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Anthropic's Claude models for your agents. An agent names one as `anthropic/<modelId>`, for example `anthropic/claude-sonnet-4-6`.",
   "targets": [
     "server",
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -22,7 +22,7 @@
     "anthropic"
   ],
   "dependencies": {
-    "@pikit/pi-adapter": "0.0.0"
+    "@pikit/pi-adapter": "0.0.1"
   },
   "files": [
     {

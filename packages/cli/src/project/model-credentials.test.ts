@@ -22,8 +22,8 @@ test("a provider's key variable is its component's first secret one, as pikit.js
   dirs.push(dir);
   const installed = (environment: InstalledComponent["environment"]): InstalledComponent => ({
     registry: "default",
-    version: "0.0.0",
-    requires: { pikit: "0.0.0" },
+    version: "0.0.1",
+    requires: { pikit: "0.0.1" },
     addedDependencies: [],
     files: {},
     dependencies: {},

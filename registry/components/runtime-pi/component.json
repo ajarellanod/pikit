@@ -1,16 +1,16 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "runtime-pi",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
   "targets": [
     "server",
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": [
       "storage.sqlite"
     ]
@@ -40,8 +40,8 @@
     "agent.command"
   ],
   "dependencies": {
-    "@pikit/contracts": "0.0.0",
-    "@pikit/pi-adapter": "0.0.0",
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
     "typebox": "1.3.27"
   },
   "files": [

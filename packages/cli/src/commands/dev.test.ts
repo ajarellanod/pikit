@@ -36,11 +36,11 @@ function project(model: string, store: boolean, providers = true): string {
   const dir = mkdtempSync(join(tmpdir(), "pikit-dev-test-"));
   dirs.push(dir);
   const manifest = emptyManifest(undefined, undefined, ["server"]);
-  manifest.components["deployment-fake"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
+  manifest.components["deployment-fake"] = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
   const groq = model.startsWith("groq/");
   const key = groq ? "GROQ_API_KEY" : KEY;
   if (providers) {
-    manifest.components["provider-test"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [{ name: key, secret: true, required: false }] };
+    manifest.components["provider-test"] = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: {}, dependencies: {}, environment: [{ name: key, secret: true, required: false }] };
   }
   writeProjectManifest(dir, manifest);
   writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "dev" }, null, 2)}\n`);

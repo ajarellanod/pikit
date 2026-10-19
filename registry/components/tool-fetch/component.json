@@ -1,7 +1,7 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "tool-fetch",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Web pages: your agent reads a web page or an API (the fetch tool)",
   "description": "The `fetch` tool, for the agents that name it: one HTTP(S) request to a web page or an API, with HTML as readable text and links, JSON pretty-printed, and binary content refused.",
   "targets": [
@@ -9,8 +9,8 @@
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -25,11 +25,11 @@
     }
   },
   "dependencies": {
-    "@pikit/pi-adapter": "0.0.0",
+    "@pikit/pi-adapter": "0.0.1",
     "typebox": "1.3.27"
   },
   "devDependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

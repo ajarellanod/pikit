@@ -12,14 +12,14 @@ import { checkLockfile } from "./lockfile.ts";
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
-const KIT = "file:vendor/pikit-core-0.0.0-abcdef1234.tgz";
+const KIT = "file:vendor/pikit-core-0.0.1-abcdef1234.tgz";
 const PACKAGE = {
   name: "project",
   dependencies: { "@pikit/core": KIT, hono: "^4.6.0", "left-pad": "1.3.0" },
   devDependencies: { wrangler: "4.143.0" },
   optionalDependencies: { "fsevents": "*" },
   // An override replaces what a dependency's own descriptor would resolve to: the lock keeps both as written.
-  overrides: { "@pikit/core": KIT, "@pikit/contracts": "file:vendor/pikit-contracts-0.0.0-0123456789.tgz", hono: "4.7.1" },
+  overrides: { "@pikit/core": KIT, "@pikit/contracts": "file:vendor/pikit-contracts-0.0.1-0123456789.tgz", hono: "4.7.1" },
 };
 
 /** As Bun 1.4.2 writes it for PACKAGE (trailing commas; packages resolved to versions the specifiers only allow). */
@@ -43,12 +43,12 @@ const LOCK = `{
     },
   },
   "overrides": {
-    "@pikit/contracts": "file:vendor/pikit-contracts-0.0.0-0123456789.tgz",
+    "@pikit/contracts": "file:vendor/pikit-contracts-0.0.1-0123456789.tgz",
     "@pikit/core": "${KIT}",
     "hono": "4.7.1",
   },
   "packages": {
-    "@pikit/core": ["@pikit/core@vendor/pikit-core-0.0.0-abcdef1234.tgz", {}, "sha512-AAAA"],
+    "@pikit/core": ["@pikit/core@vendor/pikit-core-0.0.1-abcdef1234.tgz", {}, "sha512-AAAA"],
 
     "hono": ["hono@4.7.1", "", {}, "sha512-BBBB"],
 

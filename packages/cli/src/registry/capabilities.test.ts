@@ -18,10 +18,10 @@ import type { Manifest } from "./manifest.ts";
 
 const manifest = (name: string, fields: { provides?: string[]; requires?: string[]; optional?: string[]; declares?: Manifest["declares"] }): Manifest => ({
   name,
-  version: "0.0.0",
+  version: "0.0.1",
   description: name,
   targets: ["server"],
-  requires: { pikit: "0.0.0", capabilities: fields.requires ?? [] },
+  requires: { pikit: "0.0.1", capabilities: fields.requires ?? [] },
   optional: { capabilities: fields.optional ?? [] },
   provides: fields.provides ?? [],
   dependencies: {},

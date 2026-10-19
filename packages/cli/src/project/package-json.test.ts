@@ -27,9 +27,9 @@ const starter = (): PackageJson => ({
 });
 
 test("a kit package only a component's tests import goes with the kit, in dependencies; other dev dependencies stay dev", () => {
-  const manifest = { dependencies: { typebox: "1.3.27" }, devDependencies: { "@pikit/pi-adapter": "0.0.0", wrangler: "4.143.0" } };
+  const manifest = { dependencies: { typebox: "1.3.27" }, devDependencies: { "@pikit/pi-adapter": "0.0.1", wrangler: "4.143.0" } };
   expect(projectDependencies(manifest)).toEqual({
-    dependencies: { typebox: "1.3.27", "@pikit/pi-adapter": "0.0.0" },
+    dependencies: { typebox: "1.3.27", "@pikit/pi-adapter": "0.0.1" },
     devDependencies: { wrangler: "4.143.0" },
   });
   expect(projectDependencies({ dependencies: {} })).toEqual({ dependencies: {}, devDependencies: {} });
@@ -89,8 +89,8 @@ test("removing dev dependencies takes them out of devDependencies only, and says
 
 const installed = (dependencies: Record<string, string>, devDependencies?: Record<string, string>): InstalledComponent => ({
   registry: "default",
-  version: "0.0.0",
-  requires: { pikit: "0.0.0" },
+  version: "0.0.1",
+  requires: { pikit: "0.0.1" },
   files: {},
   dependencies,
   ...(devDependencies !== undefined && { devDependencies }),
@@ -102,7 +102,7 @@ test("remove takes out a dev dependency no remaining component declares, as eith
   const dir = temp();
   const project = emptyManifest(undefined, undefined, ["durable"]);
   // What remains once deployment-cloudflare is gone.
-  project.components["storage-do"] = installed({ "@pikit/contracts": "0.0.0" });
+  project.components["storage-do"] = installed({ "@pikit/contracts": "0.0.1" });
   expect(unneededDependencies(dir, project, ["wrangler"])).toEqual(["wrangler"]);
 
   // Another deployment that declares it too keeps it; so does one that has it as a dependency.

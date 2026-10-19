@@ -1,14 +1,14 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "deployment-cloudflare",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Runs a pikit project on Cloudflare: the Worker and its Durable Objects running the project's two Apps, wrangler.jsonc, and the commands `pikit up | down | logs | status | dev` delegate to.",
   "targets": [
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -16,7 +16,7 @@
   },
   "provides": [],
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "devDependencies": {
     "wrangler": "4.143.0"

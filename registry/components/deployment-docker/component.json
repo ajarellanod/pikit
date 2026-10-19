@@ -1,14 +1,14 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "deployment-docker",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Runs a pikit project in Docker on a server: the image (with git), the container, the process entrypoint, its logs, the commands `pikit up | down | restart | logs | status` delegate to, and self-improvement's deployer, a second service started by the same `pikit up`, which merges, checks and deploys what an operator approves and rolls back when unhealthy.",
   "targets": [
     "server"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -16,7 +16,7 @@
   },
   "provides": [],
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

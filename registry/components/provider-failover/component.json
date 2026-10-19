@@ -1,16 +1,16 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "provider-failover",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Models that fail over to others: a chain of models of your providers, named `failover/<chain>`, answers with the first that is not failing (rate or usage limits, refused credentials, outages).",
   "targets": [
     "server",
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -28,8 +28,8 @@
     "failover"
   ],
   "dependencies": {
-    "@pikit/contracts": "0.0.0",
-    "@pikit/pi-adapter": "0.0.0",
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
     "typebox": "1.3.27"
   },
   "files": [

@@ -44,7 +44,7 @@ function project(): string {
 function logEventsRegistry(): string {
   const root = temp();
   cpSync(join(DEFAULT_REGISTRY, "components", "log-events"), join(root, "components", "log-events"), { recursive: true });
-  const index = { "log-events": { version: "0.0.0", description: "log-events", targets: ["server", "durable"], path: "components/log-events" } };
+  const index = { "log-events": { version: "0.0.1", description: "log-events", targets: ["server", "durable"], path: "components/log-events" } };
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   return root;
 }
@@ -143,11 +143,11 @@ test("remove takes out only the packages add put in package.json: one the projec
   const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
   writeFileSync(join(dir, "package.json"), `${JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, "is-odd": "3.0.1", "left-pad": "1.3.0" } }, null, 2)}\n`);
   const registry = logEventsRegistry();
-  editLogEvents(registry, { dependencies: { "@pikit/contracts": "0.0.0", "is-odd": "3.0.1", "left-pad": "1.3.0" } });
+  editLogEvents(registry, { dependencies: { "@pikit/contracts": "0.0.1", "is-odd": "3.0.1", "left-pad": "1.3.0" } });
   // Another component put left-pad there; the project had @pikit/contracts and is-odd.
   const manifest = readManifest(dir);
   manifest.components["tool-other"] = {
-    registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, files: {}, dependencies: { "left-pad": "1.3.0" }, addedDependencies: ["left-pad"], environment: [],
+    registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, files: {}, dependencies: { "left-pad": "1.3.0" }, addedDependencies: ["left-pad"], environment: [],
   };
   // Known already: add records a registry it does not know.
   manifest.registries.local = registry;
@@ -203,7 +203,7 @@ test("a reinstall keeps a file the user modified that the new version no longer 
   editLogEvents(registry, {}, { "extra.ts": undefined });
   const reinstall = await runCli(["add", "log-events", "--registry", registry, "--yes", "--force"], dir);
   expect(reinstall.code).toBe(0);
-  expect(reinstall.err).toContain("log-events 0.0.0 no longer ships src/pikit/log-events/extra.ts, which you modified: it is kept");
+  expect(reinstall.err).toContain("log-events 0.0.1 no longer ships src/pikit/log-events/extra.ts, which you modified: it is kept");
   expect(reinstall.out).not.toContain("deletes, no longer shipped");
   expect(readFileSync(extra, "utf8")).toBe("export const extra = 2; // mine\n");
   // Still recorded as installed, with its base: remove and a future upgrade see it as the user's edit.
@@ -226,7 +226,7 @@ test("what was installed for a component goes with it, and then doctor reports w
   writeFileSync(join(dir, file), "export const extra = 1;\n");
   const manifest = readManifest(dir);
   manifest.components["tool-extra"] = {
-    installedFor: ["log-events"], registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { [file]: { hash: hashOf("export const extra = 1;\n") } }, dependencies: {}, environment: [],
+    installedFor: ["log-events"], registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: { [file]: { hash: hashOf("export const extra = 1;\n") } }, dependencies: {}, environment: [],
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   // Built in two pieces: this test's own imports are checked (scripts/boundaries.ts).
@@ -253,7 +253,7 @@ async function withProviderFor(dir: string, content = "export const extra = 1;\n
   writeFileSync(join(dir, file), content);
   const manifest = readManifest(dir);
   manifest.components["tool-extra"] = {
-    installedFor: ["log-events"], registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { [file]: { hash: hashOf("export const extra = 1;\n") } }, dependencies: {}, environment: [],
+    installedFor: ["log-events"], registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: { [file]: { hash: hashOf("export const extra = 1;\n") } }, dependencies: {}, environment: [],
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   return { file, manifest };

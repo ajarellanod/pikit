@@ -1,7 +1,7 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "channel-google-chat",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Google Chat: chat with your agent in Google Chat spaces, group chats and DMs",
   "description": "A Google Chat app of your own (a Workspace add-on) answers in each message's thread: Thinking… written as the model writes, tables and code as cards, photos and files read, questions asked with buttons and forms. On a server or on Cloudflare.",
   "targets": [
@@ -9,9 +9,9 @@
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": [
       "secrets",
       "conversations.registry",
@@ -77,8 +77,8 @@
   },
   "settings": "settings",
   "dependencies": {
-    "@pikit/contracts": "0.0.0",
-    "@pikit/pi-adapter": "0.0.0",
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
     "typebox": "1.3.27"
   },
   "files": [

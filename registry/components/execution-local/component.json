@@ -1,14 +1,14 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "execution-local",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "The agent's tools work on this server: its filesystem and its shell, whose commands start without the server's secrets.",
   "targets": [
     "server"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "adapter": "0.0.0",
+    "pikit": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -19,7 +19,7 @@
     "execution.shell"
   ],
   "dependencies": {
-    "@pikit/pi-adapter": "0.0.0",
+    "@pikit/pi-adapter": "0.0.1",
     "typebox": "1.3.27"
   },
   "files": [

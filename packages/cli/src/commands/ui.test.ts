@@ -71,7 +71,7 @@ function registry(files: Record<string, string>): string {
     writeFileSync(
       join(dir, "component.json"),
       JSON.stringify({
-        name, version: "0.1.0", description: name, targets, requires: { pikit: "0.0.0", capabilities: [] },
+        name, version: "0.1.0", description: name, targets, requires: { pikit: "0.0.1", capabilities: [] },
         optional: { capabilities: [] }, provides: alternative === undefined ? [] : [alternative], ...APPS[name], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...view,
       }),
     );

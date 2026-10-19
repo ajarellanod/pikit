@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "channel-telegram",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Telegram: chat with your agent from the Telegram app",
   "description": "Talk to your agent in Telegram: send your bot a message, get the answer in the chat.",
   "targets": [
     "server"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": [
       "secrets",
       "conversations.registry",
@@ -26,7 +26,7 @@
   },
   "provides": [],
   "dependencies": {
-    "@pikit/contracts": "0.0.0",
+    "@pikit/contracts": "0.0.1",
     "typebox": "1.3.27"
   },
   "files": [

@@ -88,7 +88,7 @@ test("an example tool's replay is checked but not written", async () => {
     },
   });
   const generated = await describeComponent(component, "server");
-  const manifest = { provides: ["agent.tool"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
+  const manifest = { provides: ["agent.tool"], requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
   expect(checkDrift(manifest, generated)).toEqual(['the agent.tool "poke" has replay "undefined"; every tool declares "safe" or "unsafe"']);
 });
 
@@ -102,7 +102,7 @@ test("the model.provider keys setup provides are generated, so pikit new can che
   });
   const generated = await describeComponent(provider, "server");
   expect(generated).toEqual({ provides: ["model.provider"], requires: [], optional: [], modelProviders: ["alpha", "beta"] });
-  const manifest = { provides: ["model.provider"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
+  const manifest = { provides: ["model.provider"], requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
   expect(checkDrift(manifest, generated)).toEqual([
     'modelProviders drifted from setup: component.json has nothing, setup declares ["alpha","beta"]; run `bun run registry generate`',
   ]);

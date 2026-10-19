@@ -18,8 +18,8 @@ const registry = openRegistry(DEFAULT_REGISTRY);
 /** A component's `pikit.json` record, with what `environment` says (its manifest's, by default). */
 const record = (name: string, environment = registry.manifest(name).environment ?? []): InstalledComponent => ({
   registry: "default",
-  version: "0.0.0",
-  requires: { pikit: "0.0.0" },
+  version: "0.0.1",
+  requires: { pikit: "0.0.1" },
   addedDependencies: [],
   files: {},
   dependencies: {},

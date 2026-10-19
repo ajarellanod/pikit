@@ -2,7 +2,7 @@
   "version": 1,
   "components": {
     "actors-do": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Reaches each conversation's Durable Object from the Worker, and wakes components in it on its one alarm: actor.mailbox, actor.inbox and wakeups on Cloudflare.",
       "targets": [
         "durable"
@@ -10,7 +10,7 @@
       "path": "components/actors-do"
     },
     "admin-api": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The operator's HTTP API: the composition, conversations, transcripts, live events, messages, abort and reset; serves the dashboard's built files. On Cloudflare the Worker serves it, reaching each conversation's Durable Object and listing them from an index.",
       "targets": [
         "server",
@@ -19,7 +19,7 @@
       "path": "components/admin-api"
     },
     "admin-approvals": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The dashboard's routes for approvals: list them, and approve or reject one as an operator, held to the approvers like anyone; the conversation that asked is told once.",
       "targets": [
         "server"
@@ -27,7 +27,7 @@
       "path": "components/admin-approvals"
     },
     "admin-auth-token": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Who is an operator: a request carrying the bearer token PIKIT_ADMIN_TOKEN. What admin routes (the dashboard) ask before answering.",
       "targets": [
         "server",
@@ -36,7 +36,7 @@
       "path": "components/admin-auth-token"
     },
     "admin-proposals": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The dashboard's side of the agent's changes to itself: the proposals that `proposals` holds (proposals-local on a server, proposals-github on Cloudflare) listed with their diff and checks, approved or rejected there by an operator; and a Settings section saying whether they can be made and approved now, with the deploys that follow.",
       "targets": [
         "server",
@@ -45,7 +45,7 @@
       "path": "components/admin-proposals"
     },
     "agents-folders": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Your agents and skills from folders (src/agents/<name>/, src/skills/<name>/): `pikit agents` writes src/extensions/agents.ts from them, and doctor fails while it is out of date.",
       "targets": [
         "server",
@@ -54,7 +54,7 @@
       "path": "components/agents-folders"
     },
     "agents-live": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live.",
       "targets": [
         "server",
@@ -63,7 +63,7 @@
       "path": "components/agents-live"
     },
     "approvals-sql": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Stores approvals of exact actions (an action's hash, who may decide, its expiry) on storage.sql, owned by one actor: decided once by an allowed approver, claimed at most once by the call that runs it.",
       "targets": [
         "server"
@@ -71,7 +71,7 @@
       "path": "components/approvals-sql"
     },
     "channel-google-chat": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "A Google Chat app of your own (a Workspace add-on) answers in each message's thread: Thinking… written as the model writes, tables and code as cards, photos and files read, questions asked with buttons and forms. On a server or on Cloudflare.",
       "targets": [
         "server",
@@ -80,7 +80,7 @@
       "path": "components/channel-google-chat"
     },
     "channel-http": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
       "targets": [
         "server",
@@ -89,7 +89,7 @@
       "path": "components/channel-http"
     },
     "channel-telegram": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Talk to your agent in Telegram: send your bot a message, get the answer in the chat.",
       "targets": [
         "server"
@@ -97,7 +97,7 @@
       "path": "components/channel-telegram"
     },
     "channel-telegram-webhook": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.",
       "targets": [
         "durable"
@@ -105,7 +105,7 @@
       "path": "components/channel-telegram-webhook"
     },
     "channel-web": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object.",
       "targets": [
         "server",
@@ -114,7 +114,7 @@
       "path": "components/channel-web"
     },
     "conversations-file": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The conversation registry in one JSON file: which Pi session each conversation is in now.",
       "targets": [
         "server"
@@ -122,7 +122,7 @@
       "path": "components/conversations-file"
     },
     "conversations-kv": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The conversation registry in storage.kv: which Pi session each conversation is in now, on a server or in a Durable Object.",
       "targets": [
         "server",
@@ -131,7 +131,7 @@
       "path": "components/conversations-kv"
     },
     "credentials-do": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The model providers' credentials on Cloudflare, API keys and subscription logins (OAuth) alike, kept by one Durable Object that every conversation asks; an expiring token is refreshed once, under that object's lock. `pikit configure --login` uploads a login made on your machine.",
       "targets": [
         "durable"
@@ -139,7 +139,7 @@
       "path": "components/credentials-do"
     },
     "credentials-file": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The model providers' credentials in one JSON file, readable only by its owner (mode `0600`).",
       "targets": [
         "server"
@@ -147,7 +147,7 @@
       "path": "components/credentials-file"
     },
     "deployment-celld": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Runs a pikit project of the durable target on your own machines with celld (self-hosted Durable Objects): the Worker and its objects, wrangler.jsonc, the commands `pikit up | down | logs | status | dev` delegate to, a CI deploy script, and the nodes' templates.",
       "targets": [
         "durable"
@@ -155,7 +155,7 @@
       "path": "components/deployment-celld"
     },
     "deployment-cloudflare": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Runs a pikit project on Cloudflare: the Worker and its Durable Objects running the project's two Apps, wrangler.jsonc, and the commands `pikit up | down | logs | status | dev` delegate to.",
       "targets": [
         "durable"
@@ -163,7 +163,7 @@
       "path": "components/deployment-cloudflare"
     },
     "deployment-docker": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Runs a pikit project in Docker on a server: the image (with git), the container, the process entrypoint, its logs, the commands `pikit up | down | restart | logs | status` delegate to, and self-improvement's deployer, a second service started by the same `pikit up`, which merges, checks and deploys what an operator approves and rolls back when unhealthy.",
       "targets": [
         "server"
@@ -171,7 +171,7 @@
       "path": "components/deployment-docker"
     },
     "email-resend": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "`email.send` with Resend's API: one email to one person, from the sender in EMAIL_FROM. Variables only (RESEND_API_KEY, EMAIL_FROM), so both targets.",
       "targets": [
         "server",
@@ -180,7 +180,7 @@
       "path": "components/email-resend"
     },
     "email-ses": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "`email.send` with Amazon SES v2: one email to one person, from the sender in EMAIL_FROM, each request signed with SigV4 over Web Crypto (no AWS SDK). Variables only, so both targets.",
       "targets": [
         "server",
@@ -189,7 +189,7 @@
       "path": "components/email-ses"
     },
     "execution-do": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The agent's workspace and shell inside its Durable Object, on Cloudflare: files in the object's SQL, a bash without processes, git with fenced pushes, and node in QuickJS.",
       "targets": [
         "durable"
@@ -197,7 +197,7 @@
       "path": "components/execution-do"
     },
     "execution-gondolin": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Each conversation's tools work in a Linux micro-VM of its own (Gondolin, over QEMU): a real shell that cannot read the server's files or other conversations', with its files on the host, no network but the hosts you allow, and secrets the guest never sees.",
       "targets": [
         "server"
@@ -205,7 +205,7 @@
       "path": "components/execution-gondolin"
     },
     "execution-local": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The agent's tools work on this server: its filesystem and its shell, whose commands start without the server's secrets.",
       "targets": [
         "server"
@@ -213,7 +213,7 @@
       "path": "components/execution-local"
     },
     "execution-remote": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per conversation, from a server or a Cloudflare Durable Object.",
       "targets": [
         "server",
@@ -222,7 +222,7 @@
       "path": "components/execution-remote"
     },
     "execution-serve": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "A sandbox host: the sandboxes of this App's workspace provider (execution-gondolin's VMs), over HTTP for execution-remote, behind a shared token.",
       "targets": [
         "server"
@@ -230,7 +230,7 @@
       "path": "components/execution-serve"
     },
     "expose-cloudflare-tunnel": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "A public HTTPS URL for a server project by a Cloudflare Tunnel: `pikit expose` makes the tunnel, its routes and its DNS record on your Cloudflare domain, and `pikit up` runs cloudflared beside the app; only the paths you list are public.",
       "targets": [
         "server"
@@ -238,7 +238,7 @@
       "path": "components/expose-cloudflare-tunnel"
     },
     "extension-approvals": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Tools in config run only with a person's approval of that exact call: the agent asks with request_approval (a question in the chat), the answer is recorded by code as its channel authenticated the sender, and the approved call runs once.",
       "targets": [
         "server"
@@ -246,7 +246,7 @@
       "path": "components/extension-approvals"
     },
     "extension-house-rules": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "House rules for the agents that name them: the rules in config as a system prompt section, the tools in config refused before they run, and tools kept for some senders refused for the others.",
       "targets": [
         "server",
@@ -255,7 +255,7 @@
       "path": "components/extension-house-rules"
     },
     "extension-pikit-self": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The agents that name it know what they are: a system prompt section with how pikit works, how each part of them is changed and where the docs are, and what runs now, read from the running App.",
       "targets": [
         "server",
@@ -264,7 +264,7 @@
       "path": "components/extension-pikit-self"
     },
     "health-registry": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process.",
       "targets": [
         "server",
@@ -273,7 +273,7 @@
       "path": "components/health-registry"
     },
     "log-events": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "One structured log line per operational event: what reached which agent, how each run ended, how long it took and what it cost.",
       "targets": [
         "server",
@@ -282,7 +282,7 @@
       "path": "components/log-events"
     },
     "mailbox-local": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Hands a channel's message to the actor that owns its conversation, in the same app: actor.mailbox and actor.inbox on a server.",
       "targets": [
         "server"
@@ -290,7 +290,7 @@
       "path": "components/mailbox-local"
     },
     "memory-recall": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The memory extension for the agents that name it: a stable section with what they kept about the person they talk to, and the tools remember, forget and recall, over memory.",
       "targets": [
         "server",
@@ -299,7 +299,7 @@
       "path": "components/memory-recall"
     },
     "memory-sql": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "What each agent remembers of each person, across their conversations: one actor per person, its storage.sql. Declares and provides memory.",
       "targets": [
         "server",
@@ -308,7 +308,7 @@
       "path": "components/memory-sql"
     },
     "memory-summaries": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Summarizes each conversation that went quiet into the memory of its person, credentials redacted: read from the answers feed with a cursor, woken by wakeups, idempotent across retries and restarts.",
       "targets": [
         "server"
@@ -316,7 +316,7 @@
       "path": "components/memory-summaries"
     },
     "outbound-durable": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Every answer is stored before it is sent, then delivered in order per conversation, retried, and sent again after a crash.",
       "targets": [
         "server",
@@ -325,7 +325,7 @@
       "path": "components/outbound-durable"
     },
     "proposals-github": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "proposals as GitHub pull requests (Cloudflare): a pikit/self/* branch the steward pushes gets its pull request, which an operator merges or closes from the dashboard; GitHub reached through the github contract (repo-github-app, repo-github-token); and the project's CI workflow. Dormant until GitHub is connected, after deploying.",
       "targets": [
         "durable"
@@ -333,7 +333,7 @@
       "path": "components/proposals-github"
     },
     "proposals-local": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "proposals on a server, with nothing to set up: branches pikit/self/* of a git repository in the app's state volume, which the steward clones and pushes to with plain git; an approval is recorded for the deployer next to the app (deployment-docker), which merges, checks, deploys and rolls back.",
       "targets": [
         "server"
@@ -341,7 +341,7 @@
       "path": "components/proposals-local"
     },
     "provider-anthropic": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Anthropic's Claude models for your agents. An agent names one as `anthropic/<modelId>`, for example `anthropic/claude-sonnet-4-6`.",
       "targets": [
         "server",
@@ -350,7 +350,7 @@
       "path": "components/provider-anthropic"
     },
     "provider-failover": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Models that fail over to others: a chain of models of your providers, named `failover/<chain>`, answers with the first that is not failing (rate or usage limits, refused credentials, outages).",
       "targets": [
         "server",
@@ -359,7 +359,7 @@
       "path": "components/provider-failover"
     },
     "provider-faux": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Fake models for tests only, with no network, key or cost: `faux/echo` answers `faux: <your message>`; `faux/scripted` calls a tool when told `call: <tool> <json>` and shows the system prompt it got (`echo-system`).",
       "targets": [
         "server",
@@ -368,7 +368,7 @@
       "path": "components/provider-faux"
     },
     "provider-openai": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "OpenAI's models for your agents, with an API key or a ChatGPT subscription (Sign in with ChatGPT). An agent names one as `openai/<modelId>`, for example `openai/gpt-5.5`.",
       "targets": [
         "server",
@@ -377,7 +377,7 @@
       "path": "components/provider-openai"
     },
     "provider-openai-compatible": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The models of any endpoint that speaks OpenAI's chat completions (vLLM, Ollama, LM Studio, a gateway), for your agents. An agent names one as `<id>/<model>`, for example `ollama/llama3.1:8b`.",
       "targets": [
         "server",
@@ -386,7 +386,7 @@
       "path": "components/provider-openai-compatible"
     },
     "provider-openrouter": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The models OpenRouter serves, for your agents. An agent names one as `openrouter/<vendor>/<model>`, for example `openrouter/z-ai/glm-5.3-flash`.",
       "targets": [
         "server",
@@ -395,7 +395,7 @@
       "path": "components/provider-openrouter"
     },
     "repo-github-app": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`repo.github`), its credentials sealed at rest. No token is pasted anywhere.",
       "targets": [
         "durable"
@@ -403,7 +403,7 @@
       "path": "components/repo-github-app"
     },
     "repo-github-token": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The project's GitHub access (`repo.github`) from a fine-grained token you made, the GITHUB_TOKEN secret, and the repository, a setting changed in the dashboard's Settings → GitHub: for a project run from the CLI or on a server.",
       "targets": [
         "server",
@@ -412,7 +412,7 @@
       "path": "components/repo-github-token"
     },
     "router-basic": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Every message goes to one agent: `defaultAgent`.",
       "targets": [
         "server",
@@ -421,7 +421,7 @@
       "path": "components/router-basic"
     },
     "router-rules": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Each conversation goes to the agent of the first rule it matches: rules in config, edited live from the dashboard.",
       "targets": [
         "server",
@@ -430,7 +430,7 @@
       "path": "components/router-rules"
     },
     "runtime-pi": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
       "targets": [
         "server",
@@ -439,7 +439,7 @@
       "path": "components/runtime-pi"
     },
     "scheduler-admit": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Admits each tick of the scheduler as a message in its job's existing conversation, from the scheduler (never a person), once per tick; the conversation's own channel delivers the answer.",
       "targets": [
         "server"
@@ -447,7 +447,7 @@
       "path": "components/scheduler-admit"
     },
     "scheduler-routines": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Routines: prompts on a cron schedule in a conversation, written in the project's config (reviewed and versioned with it), made the scheduler's jobs at each start: added, changed and removed, never touching another component's.",
       "targets": [
         "server"
@@ -455,7 +455,7 @@
       "path": "components/scheduler-routines"
     },
     "scheduler-sql": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The scheduler: jobs that run a prompt at a time or on a cron schedule (5 fields, in a time zone) in a conversation that exists, kept in storage.sql and woken by wakeups; each tick delivered at least once, with a policy for ticks missed while stopped.",
       "targets": [
         "server"
@@ -463,7 +463,7 @@
       "path": "components/scheduler-sql"
     },
     "secrets-env": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Secrets from the process environment.",
       "targets": [
         "server"
@@ -471,7 +471,7 @@
       "path": "components/secrets-env"
     },
     "secrets-workers": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Secrets from the Worker's env on Cloudflare: its secrets and variables, never its bindings.",
       "targets": [
         "durable"
@@ -479,7 +479,7 @@
       "path": "components/secrets-workers"
     },
     "server-bun": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The HTTP server of the server target: Hono on `Bun.serve`.",
       "targets": [
         "server"
@@ -487,7 +487,7 @@
       "path": "components/server-bun"
     },
     "settings-store": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Stores the settings components declare (the agent's prompt, model and tools, the default agent), validated against their schemas, and serves them to the dashboard's Settings dialog (/admin/api/settings). On Cloudflare one object keeps them, and each conversation's object reads it when used.",
       "targets": [
         "server",
@@ -496,7 +496,7 @@
       "path": "components/settings-store"
     },
     "storage-do": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The app's portable SQL (storage.sql) and SQLite (storage.sqlite) database in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",
       "targets": [
         "durable"
@@ -504,7 +504,7 @@
       "path": "components/storage-do"
     },
     "storage-kv-sql": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",
       "targets": [
         "server",
@@ -513,7 +513,7 @@
       "path": "components/storage-kv-sql"
     },
     "storage-sqlite": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The app's portable SQL (storage.sql) and SQLite (storage.sqlite) database in one file, through node:sqlite: records components keep across restarts.",
       "targets": [
         "server"
@@ -521,7 +521,7 @@
       "path": "components/storage-sqlite"
     },
     "tool-ask-user": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The `askUser` tool, for the agents that name it: one question (yes or no, a choice, several, text, a date) that ends the run, drawn as buttons or a form by a channel that can (Google Chat) and sent as text by any other; the answer comes back as a message.",
       "targets": [
         "server",
@@ -530,7 +530,7 @@
       "path": "components/tool-ask-user"
     },
     "tool-bash": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Pi's own `bash` tool, for the agents that name it: it runs a shell command in the working directory and returns its output (the last lines when it is long), with an optional timeout.",
       "targets": [
         "server",
@@ -539,7 +539,7 @@
       "path": "components/tool-bash"
     },
     "tool-delegate": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The `delegate` tool, for the agents that name it: a task handed to another agent of the project, in a child conversation on pi-durable's subagents, answered now or later as a message; and `delegate_tasks`, `delegate_steer`, `delegate_cancel` for the tasks not waited for.",
       "targets": [
         "server",
@@ -548,7 +548,7 @@
       "path": "components/tool-delegate"
     },
     "tool-edit": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Pi's own `edit` tool, for the agents that name it: it replaces exact pieces of text in a file, each one unique in it.",
       "targets": [
         "server",
@@ -557,7 +557,7 @@
       "path": "components/tool-edit"
     },
     "tool-fetch": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The `fetch` tool, for the agents that name it: one HTTP(S) request to a web page or an API, with HTML as readable text and links, JSON pretty-printed, and binary content refused.",
       "targets": [
         "server",
@@ -566,7 +566,7 @@
       "path": "components/tool-fetch"
     },
     "tool-mcp": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The tools of remote MCP servers (Streamable HTTP), for the agents that name them: each tool named in config becomes the agent tool <server>_<tool>.",
       "targets": [
         "server",
@@ -575,7 +575,7 @@
       "path": "components/tool-mcp"
     },
     "tool-read": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.",
       "targets": [
         "server",
@@ -584,7 +584,7 @@
       "path": "components/tool-read"
     },
     "tool-schedule": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The `schedule`, `listSchedules` and `cancelSchedule` tools, for the agents that name them: a prompt that comes back to the agent's own conversation once at a time or on a cron schedule, listed and cancelled only there.",
       "targets": [
         "server"
@@ -592,7 +592,7 @@
       "path": "components/tool-schedule"
     },
     "tool-websearch-brave": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "The `websearch` tool, for the agents that name it: searches the web with the Brave Search API, whose key the model never sees.",
       "targets": [
         "server",
@@ -601,7 +601,7 @@
       "path": "components/tool-websearch-brave"
     },
     "tool-write": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",
       "targets": [
         "server",
@@ -610,7 +610,7 @@
       "path": "components/tool-write"
     },
     "wakeups-timers": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Wakes your components at the time they ask for, retrying failed handlers: wakeups as in-process timers on a server.",
       "targets": [
         "server"
@@ -618,7 +618,7 @@
       "path": "components/wakeups-timers"
     },
     "workspace-local": {
-      "version": "0.0.0",
+      "version": "0.0.1",
       "description": "Each agent's tools work in a directory of their own, inside execution: order, not isolation.",
       "targets": [
         "server"

@@ -1,7 +1,7 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "admin-proposals",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Self-improvement: approve the agent's changes to itself from the dashboard",
   "description": "The dashboard's side of the agent's changes to itself: the proposals that `proposals` holds (proposals-local on a server, proposals-github on Cloudflare) listed with their diff and checks, approved or rejected there by an operator; and a Settings section saying whether they can be made and approved now, with the deploys that follow.",
   "targets": [
@@ -9,8 +9,8 @@
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": [
       "proposals"
     ]
@@ -29,7 +29,7 @@
   "view": "view",
   "settings": "settings",
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

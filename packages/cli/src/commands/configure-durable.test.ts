@@ -62,7 +62,7 @@ function project(url: string | undefined, env: Record<string, string> = { PIKIT_
   const dir = mkdtempSync(join(tmpdir(), "pikit-configure-durable-"));
   dirs.push(dir);
   const manifest = emptyManifest(undefined, undefined, ["durable"]);
-  const record = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
+  const record = { registry: "default", version: "0.0.1", requires: { pikit: "0.0.1" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
   manifest.components["deployment-fake"] = record;
   manifest.components["provider-test"] = { ...record, environment: [{ name: "SUB_API_KEY", secret: true, required: false }] };
   writeProjectManifest(dir, manifest);

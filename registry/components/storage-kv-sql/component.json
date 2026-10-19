@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "storage-kv-sql",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",
   "targets": [
     "server",
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": [
       "storage.sql"
     ]
@@ -21,7 +21,7 @@
     "storage.kv"
   ],
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

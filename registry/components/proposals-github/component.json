@@ -1,15 +1,15 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "proposals-github",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Self-improvement on GitHub: the agent's changes as pull requests",
   "description": "proposals as GitHub pull requests (Cloudflare): a pikit/self/* branch the steward pushes gets its pull request, which an operator merges or closes from the dashboard; GitHub reached through the github contract (repo-github-app, repo-github-token); and the project's CI workflow. Dormant until GitHub is connected, after deploying.",
   "targets": [
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": [
       "repo.github"
     ]
@@ -24,7 +24,7 @@
     "worker": "default"
   },
   "dependencies": {
-    "@pikit/contracts": "0.0.0",
+    "@pikit/contracts": "0.0.1",
     "typebox": "1.3.27"
   },
   "files": [

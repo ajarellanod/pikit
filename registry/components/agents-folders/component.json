@@ -1,7 +1,7 @@
 {
   "$schema": "../../schema/component.schema.json",
   "name": "agents-folders",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "title": "Agent folders: each agent a folder, its prompt and skills as files",
   "description": "Your agents and skills from folders (src/agents/<name>/, src/skills/<name>/): `pikit agents` writes src/extensions/agents.ts from them, and doctor fails while it is out of date.",
   "targets": [
@@ -9,8 +9,8 @@
     "durable"
   ],
   "requires": {
-    "pikit": "0.0.0",
-    "contracts": "0.0.0",
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": []
   },
   "optional": {
@@ -27,7 +27,7 @@
     }
   },
   "dependencies": {
-    "@pikit/contracts": "0.0.0"
+    "@pikit/contracts": "0.0.1"
   },
   "files": [
     {

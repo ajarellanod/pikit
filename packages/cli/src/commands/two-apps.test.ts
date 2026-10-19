@@ -78,7 +78,7 @@ function registry(): string {
     },
     "channel-fake": {
       manifest: {
-        requires: { pikit: "0.0.0", capabilities: ["secrets"] },
+        requires: { pikit: "0.0.1", capabilities: ["secrets"] },
         provides: ["http.route"],
         apps: { worker: "worker" },
         halves: { default: HALF([], ["secrets"]), worker: HALF(["http.route"], ["secrets"]) },
@@ -96,11 +96,11 @@ function registry(): string {
     mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
     for (const [file, text] of Object.entries(files)) writeFileSync(join(dir, "files", "src", "pikit", name, file), text);
     const full = {
-      name, version: "0.0.0", description: name, targets: ["server", "durable"], requires: { pikit: "0.0.0", capabilities: [] },
+      name, version: "0.0.1", description: name, targets: ["server", "durable"], requires: { pikit: "0.0.1", capabilities: [] },
       optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...manifest,
     };
     writeFileSync(join(dir, "component.json"), JSON.stringify(full));
-    index[name] = { version: "0.0.0", description: name, targets: full.targets, path: `components/${name}` };
+    index[name] = { version: "0.0.1", description: name, targets: full.targets, path: `components/${name}` };
   }
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   return root;

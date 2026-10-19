@@ -51,7 +51,7 @@ function component(root: string, name: string, target: string, version = "0.1.0"
   writeFileSync(
     join(dir, "component.json"),
     JSON.stringify({
-      name, version, description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, provides: [],
+      name, version, description: name, targets: ["server"], requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] }, provides: [],
       generated: ["web-files.ts"], ui: { source: "web", target }, dependencies: {}, files: [{ source: "files/src", target: "src" }],
     }),
   );

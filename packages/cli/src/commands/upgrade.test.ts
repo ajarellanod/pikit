@@ -55,7 +55,7 @@ function publish(root: string, name: string, version: string, files: Record<stri
     writeFileSync(join(dir, "files", "src", "pikit", name, file), text);
   }
   const manifest = {
-    name, version, description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
+    name, version, description: name, targets: ["server"], requires: { pikit: "0.0.1", capabilities: [] },
     optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...fields,
   };
   writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));
@@ -227,38 +227,38 @@ test("the environment block follows the new version; a dependency it adds is add
 
 test("a version this CLI's contracts do not satisfy is refused before any write; --force upgrades to it", async () => {
   const { dir, registry } = await installed({});
-  publish(registry, "tool-fake", "0.2.0", { "index.ts": INDEX("tool-fake", "// 0.2.0") }, { requires: { pikit: "0.0.0", contracts: "^9.0.0", capabilities: [] } });
+  publish(registry, "tool-fake", "0.2.0", { "index.ts": INDEX("tool-fake", "// 0.2.0") }, { requires: { pikit: "0.0.1", contracts: "^9.0.0", capabilities: [] } });
   const before = snapshot(dir);
   const refused = await runCli(["upgrade", "--yes"], dir);
   expect(refused.code).toBe(1);
-  expect(refused.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.0");
+  expect(refused.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.1");
   expect(snapshot(dir)).toEqual(before);
 
   const forced = await runCli(["upgrade", "--yes", "--force"], dir);
-  expect(forced.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.0; --force: going ahead");
+  expect(forced.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.1; --force: going ahead");
   expect(forced.code).toBe(0);
-  expect(record(dir).requires).toEqual({ pikit: "0.0.0", contracts: "^9.0.0" });
+  expect(record(dir).requires).toEqual({ pikit: "0.0.1", contracts: "^9.0.0" });
   expect(read(dir, own("index.ts"))).toBe(INDEX("tool-fake", "// 0.2.0"));
 }, 60_000);
 
 test("an adapter range this CLI's does not satisfy needs --force; a missing range is refused even with it", async () => {
   const { dir, registry } = await installed({});
-  publish(registry, "tool-fake", "0.2.0", {}, { dependencies: { "@pikit/pi-adapter": "0.0.0" } });
+  publish(registry, "tool-fake", "0.2.0", {}, { dependencies: { "@pikit/pi-adapter": "0.0.1" } });
   const before = snapshot(dir);
   const missing = await runCli(["upgrade", "--yes", "--force"], dir);
   expect(missing.code).toBe(1);
   expect(missing.err).toContain("tool-fake's component.json: dependencies lists @pikit/pi-adapter, but requires.adapter does not say which versions it works with");
   expect(snapshot(dir)).toEqual(before);
 
-  publish(registry, "tool-fake", "0.2.0", {}, { requires: { pikit: "0.0.0", adapter: "^9.0.0", capabilities: [] } });
+  publish(registry, "tool-fake", "0.2.0", {}, { requires: { pikit: "0.0.1", adapter: "^9.0.0", capabilities: [] } });
   const refused = await runCli(["upgrade", "--yes"], dir);
   expect(refused.code).toBe(1);
-  expect(refused.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.0");
+  expect(refused.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.1");
   expect(snapshot(dir)).toEqual(before);
   const forced = await runCli(["upgrade", "--yes", "--force"], dir);
-  expect(forced.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.0; --force: going ahead");
+  expect(forced.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.1; --force: going ahead");
   expect(forced.code).toBe(0);
-  expect(record(dir).requires).toEqual({ pikit: "0.0.0", adapter: "^9.0.0" });
+  expect(record(dir).requires).toEqual({ pikit: "0.0.1", adapter: "^9.0.0" });
 }, 60_000);
 
 test("providers are offered by what the project will compose: an up-to-date provider counts, one whose new version drops the capability does not", async () => {
@@ -349,8 +349,8 @@ function otherKitProject(): string {
   mkdirSync(join(dir, "vendor"));
   const overrides: Record<string, string> = {};
   for (const [name, packageDir] of Object.entries(KIT_PACKAGES)) {
-    overrides[name] = `file:vendor/pikit-${packageDir}-0.0.0-0000000000.tgz`;
-    writeFileSync(join(dir, "vendor", `pikit-${packageDir}-0.0.0-0000000000.tgz`), "another kit");
+    overrides[name] = `file:vendor/pikit-${packageDir}-0.0.1-0000000000.tgz`;
+    writeFileSync(join(dir, "vendor", `pikit-${packageDir}-0.0.1-0000000000.tgz`), "another kit");
   }
   writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "other-kit", dependencies: { "@pikit/core": overrides["@pikit/core"] }, overrides }, null, 2)}\n`);
   writeFileSync(join(dir, "bun.lock"), "the lockfile of the other kit\n");
