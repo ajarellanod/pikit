@@ -43,6 +43,7 @@ pikit add <component>...                     # and remove, upgrade, doctor, logs
 | `templates/` | "Deploy to Cloudflare" templates, made from `pikit new` |
 | `samples/http` | a fixture: an agent over HTTP composed straight from `registry/`, with its scenario tests |
 | `tests/workerd` | the Cloudflare components' suites inside workerd, on a real Durable Object |
+| `tests/acceptance` | registry components composed in one App across contracts (`bun test`) |
 | `installer/` | `install.sh` and its tests |
 | `features/` | a design note per feature, built (`completed/`) or not; kit follow-ups |
 | `docs/` | upstream proposals to Pi (`docs/upstream/`), architecture audits |

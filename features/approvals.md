@@ -117,6 +117,20 @@ chat. Running unmodified Pi coding-agent extensions was dropped with the move to
 pi-durable's own extensions have that API is to check.
 
 ## Open questions
+- **Approvals inside a delegation.** A delegated agent (tool-delegate) runs in a child conversation
+  that no channel delivers for, and today its approvals cannot be completed (shown by
+  `tests/acceptance/team-bases.test.ts`, the second test): its `request_approval` ends the child's
+  run with a question part, but a background task's report carries only the child's answer text, so
+  the parent's chat never sees the question; the approval's `requestedBy` is the child (channel
+  `delegate`), so admin-approvals tells the child of an operator's decision, and that answer is logged
+  under the child's key, which nobody delivers; and the claim is scoped to the asking conversation,
+  so neither the parent nor a new delegation (a new child) can use it, while the old task has ended
+  and cannot be steered. What works today: the delegating agent asks in its own conversation and
+  makes the gated call itself (or schedules it there), the first test of the same file. Which way to
+  go: the report carrying the child's parts to the parent (the question then reaches the chat, but
+  the approval stays the child's), a delegated agent's approvals proposed for the parent conversation
+  (its `requestedBy`, and a claim the parent's delegation may make for its child), or approvals made
+  a capability only top-level agents use?
 - Is the approval of a self-change (SPEC §6) an `approvals` decision, or the git host's
   review, with the dashboard as its surface?
 - Once Pi's durable tasks exist, do decisions stay in a pikit table, or become Pi's task records

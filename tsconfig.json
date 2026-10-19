@@ -6,6 +6,7 @@
     "registry/components/*/*.test.ts",
     "scripts/**/*.ts",
     "installer/**/*.ts",
-    "samples/**/*.ts"
+    "samples/**/*.ts",
+    "tests/acceptance/**/*.ts"
   ]
 }

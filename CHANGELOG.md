@@ -408,3 +408,7 @@ there.
 - `bun test` (every package and component), the workerd lane (`bun run test:workerd`: the Cloudflare
   components in real Durable Objects, eviction mid-run included), and `PIKIT_E2E=1` end-to-end tests:
   a project made by `pikit new` answers a message, on a server and in workerd.
+- `tests/acceptance/team-bases.test.ts`: delegation, approvals and the scheduler composed in one App
+  that restarts mid-flow (a background delegation, a payment approved in the coordinator's own
+  conversation, paid once by a scheduled prompt), and what does not compose yet: an approval asked by
+  a delegated agent (`features/approvals.md`, open questions).
