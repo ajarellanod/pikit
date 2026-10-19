@@ -17,9 +17,9 @@
  * supersedes it.
  *
  * Targets: `server` and `durable`, the same provider on both. A ChatGPT login needs
- * `model.credentials` to keep its tokens (`pikit configure --login` refuses without one), and pi-ai
- * reaches the OAuth flow only for a stored OAuth credential: where nothing provides
- * `model.credentials` (Cloudflare), the provider takes keys only.
+ * `model.credentials` to keep its tokens (`pikit configure --login` refuses without one):
+ * credentials-file on a server, credentials-do on Cloudflare (which also bundles pi-ai's OAuth flow,
+ * and refreshes a token once for every conversation).
  */
 
 import { defineComponent } from "@pikit/core";

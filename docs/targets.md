@@ -18,7 +18,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | `execution` | `execution-local`: the machine's files and shell | `execution-do`: files in the object's SQL, a simulated shell |
 | Telegram | `channel-telegram` (long polling) | `channel-telegram-webhook` (two halves) |
 | HTTP API channel | `channel-http` | none yet |
-| Model logins | `credentials-file` (OAuth or keys) | API keys only (no `model.credentials` provider) |
+| Model logins | `credentials-file` (OAuth or keys) | `credentials-do` (OAuth or keys, in one object; a login made on your machine, uploaded by `pikit configure --login`), or API keys as Worker secrets |
 
 This page does not list every component's targets: a component says them itself. Its
 `component.json`'s `targets` is where it runs (`pikit add` refuses another), and its README's
@@ -142,7 +142,7 @@ so. deployment-cloudflare's README has the rules ("Rolling back").
   and no `exec`, and `down` deletes data (deployment-cloudflare's README).
 
 What a component cannot do on a target is in that component's README: channel-http (no Worker half
-yet), provider-anthropic, provider-openai and credentials-file (no subscription login on Cloudflare), execution-do
+yet), credentials-file (a file: credentials-do on Cloudflare), execution-do
 (its simulated shell), admin-api (on Cloudflare, no Delivery view).
 
 Moving a project to the other target is swapping those components, never changing an agent, a route

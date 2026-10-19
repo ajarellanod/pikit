@@ -44,7 +44,9 @@ it into the app.
   `execution` nor `workspace` is installed (the tools that work on files and commands:
   `ENVIRONMENT_TOOLS` in `index.ts`), and when an agent's provider has no credentials at all. That
   last check makes no network call and refreshes nothing: it only asks whether a credential is stored
-  or an environment variable set.
+  or an environment variable set. With `model.credentials` installed it only warns: a login can be
+  stored while the app runs (credentials-do's upload on Cloudflare reaches an object running this
+  App, so a refused start would leave no way in), and the agent's runs fail until one is.
 - **Target:** `server` and `durable`. On Cloudflare it goes in the conversation object's App, with
   `actors-do` for `wakeups` ("Cloudflare" below).
 - **Installs to:** `src/pikit/runtime-pi/`.

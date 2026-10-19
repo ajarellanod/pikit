@@ -666,6 +666,26 @@ async function talk(components: Parameters<typeof defineApp>[0]["components"]) {
   };
 }
 
+test("with model.credentials installed and nothing stored yet, it starts with a warning; a login stored while it runs lets the agent answer", async () => {
+  const { storage, agents } = testComponents();
+  const stored: Record<string, Credential> = {};
+  const warned: string[] = [];
+  const logger = { ...silentLogger, warn: (message: string) => void warned.push(message) };
+  const answers = new Map<string, string | undefined>();
+  const seen = observer();
+  const settledBy = defineComponent({ name: "answers", setup: (pikit) => pikit.on("agent.settled", (result) => void answers.set(result.requestId, result.text)) });
+  const app = await defineApp({ components: [storage, agents, keyedProvider, credentialsHolding(stored), runtimePi, seen.component, settledBy], logger }).create();
+  await app.start();
+  expect(warned.some((line) => line.includes('provider "faux", which has no credentials'))).toBe(true);
+
+  stored.faux = { type: "api_key", key: "made-up-key" };
+  const conversation = await seen.conversation("test:late-login");
+  await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context());
+  for (let i = 0; i < 200 && !answers.has("r1"); i++) await Bun.sleep(10);
+  expect(answers.get("r1")).toBe("answer: hello");
+  await app.stop();
+});
+
 test("it builds the models with model.credentials: a stored key lets the agent answer", async () => {
   const { storage, agents } = testComponents();
   const credentials = credentialsHolding({ faux: { type: "api_key", key: "made-up-key" } });

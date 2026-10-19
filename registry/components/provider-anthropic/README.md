@@ -6,8 +6,8 @@ Anthropic's Claude models for your agents. An agent names one as `anthropic/<mod
 - **Provides:** `model.provider`, under the key `anthropic`.
 - **Requires:** nothing. The agent runtime reads credentials from `model.credentials` when it is
   installed.
-- **Targets:** `server` and `durable`. On `durable` (Cloudflare), API keys only ("Cloudflare"
-  below).
+- **Targets:** `server` and `durable`. On `durable` (Cloudflare), a subscription login needs
+  `credentials-do` ("Cloudflare" below).
 - **Installs to:** `src/pikit/provider-anthropic/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi).
 
@@ -42,13 +42,24 @@ refresh would rotate the token the Pi CLI holds.
 
 ## Cloudflare
 
-On `durable`, API keys only: a Claude subscription login stays a server's. A login is kept by
-`model.credentials`, which nothing provides on Cloudflare (`pikit configure --login` refuses without
-one), and pi-ai reaches its OAuth flow only for a stored OAuth credential; that flow loads with an
-import no bundler follows, so a Worker could not refresh a subscription's tokens anyway. The
-component is the same on both targets. An API key needs nothing of it: set `ANTHROPIC_API_KEY` as a Worker secret (`wrangler secret put
-ANTHROPIC_API_KEY`), which `secrets-workers` reads. Workload identity federation reads a token
-file, so it is a server's too.
+The component is the same on both targets. An API key needs nothing of it: set `ANTHROPIC_API_KEY`
+as a Worker secret (`wrangler secret put ANTHROPIC_API_KEY`, or `.env`, which `pikit up` uploads),
+which `secrets-workers` reads.
+
+A Claude Pro/Max login works on `durable` with `credentials-do` (`pikit add credentials-do`): one
+Durable Object keeps the tokens, and an expiring token is refreshed once for every conversation,
+under that object's lock (refresh tokens rotate: two refreshes at once would revoke one another's).
+After `pikit up`, `pikit configure --login anthropic` logs in on your machine (the code login: open a
+URL, paste the code the page shows) and uploads the tokens to the deployed app. pi-ai's OAuth flow,
+which it loads with an import no bundler follows, is bundled by credentials-do
+(`@pikit/pi-adapter/oauth-flows`). `pikit dev` (wrangler dev) has objects of its own: it takes the
+API key.
+
+**Check Anthropic's terms first:** whether a personal Claude subscription may serve a deployed bot,
+other people or automated traffic is for its terms to say, and they change. An API key is
+Anthropic's way for a deployed app.
+
+Workload identity federation reads a token file, so it is a server's.
 
 ## Tests
 
@@ -56,7 +67,9 @@ file, so it is a server's too.
 request and reads no credential: it checks the provider, and that without `model.credentials` a key
 configures it. In the pikit repository,
 the workerd lane (`tests/workerd/test/provider-anthropic.workerd.ts`) composes it with runtime-pi in
-a real Durable Object, where an agent answers from a fake Anthropic API with a key from `secrets`.
+a real Durable Object, where an agent answers from a fake Anthropic API with a key from `secrets`;
+`tests/workerd/test/credentials-do.workerd.ts`, with a subscription login whose token is refreshed
+once against a fake OAuth endpoint.
 
 `component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
 the test "what setup declares" pins it.

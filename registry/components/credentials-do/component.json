@@ -1,0 +1,67 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "credentials-do",
+  "version": "0.0.0",
+  "title": "Model credentials on Cloudflare: API keys and subscription logins, kept by one object",
+  "description": "The model providers' credentials on Cloudflare, API keys and subscription logins (OAuth) alike, kept by one Durable Object that every conversation asks; an expiring token is refreshed once, under that object's lock. `pikit configure --login` uploads a login made on your machine.",
+  "targets": [
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": [
+      "storage.sql",
+      "actor.inbox",
+      "actor.mailbox"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "admin.auth"
+    ]
+  },
+  "provides": [
+    "model.credentials",
+    "http.route"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "model.credentials"
+      ],
+      "requires": [
+        "storage.sql",
+        "actor.inbox",
+        "actor.mailbox"
+      ],
+      "optional": []
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth"
+      ]
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
