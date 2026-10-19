@@ -1,0 +1,35 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "memory-recall",
+  "version": "0.0.0",
+  "description": "The memory extension for the agents that name it: a stable section with what they kept about the person they talk to, and the tools remember, forget and recall, over memory.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": [
+      "memory"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "agent.extension"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

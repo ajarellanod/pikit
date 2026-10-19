@@ -74,7 +74,7 @@ export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
  * registry declares (`RegistryDeclared`): the registry's, not the kit's, described by their
  * component.json and added by `registryCatalogue`.
  */
-type RegistryDeclared = "approvals" | "scheduler";
+type RegistryDeclared = "approvals" | "memory" | "scheduler";
 type Real<K> = Exclude<K & string, `test.${string}` | RegistryDeclared>;
 
 type Catalogue = { [K in Real<keyof AppCapabilities>]: CapabilityEntry<"single"> } & {

@@ -30,7 +30,8 @@ and the target: `server` is a long-lived process, `durable` an actor per convers
 Installed components are in `src/pikit/<name>/`, each with a README and its tests; the project's own
 are in `src/extensions/`. If the feature has a design note (`{{PIKIT_ROOT}}/features/<feature>.md`),
 read it first: it names the contract, what must be guaranteed and the tests that prove it
-(`{{PIKIT_ROOT}}/features/memory.md` is a complete build guide).
+(`{{PIKIT_ROOT}}/features/memory.md` is a complete worked example, built as `memory-sql`,
+`memory-recall` and `memory-summaries`).
 
 ## 1. Pick the contract
 
@@ -105,7 +106,7 @@ preset (`{{PIKIT_ROOT}}/features/building-components.md`, "How big a component i
 | Model provider | `provider-openrouter`, `provider-openai-compatible`, `provider-faux` | a pi-ai provider as `model.provider` by its id, `modelProviders`, the key's variable first in `environment` |
 | Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2) |
 | Not an app component: a command and a service beside the app | `expose-cloudflare-tunnel` | `commands`, `compose` (a Compose file `deployment-docker` runs), a `doctor` step, a fake of a platform's API |
-| A feature of your own kind | `{{PIKIT_ROOT}}/features/memory.md` | `declares`, a contract file, an actor per owner with `call` |
+| A feature of your own kind | `memory-sql` (`{{PIKIT_ROOT}}/features/memory.md`) | `declares`, a contract file and its suite, an actor per owner with `call` |
 
 Installed ones are in `src/pikit/`, each with its README; the rest are in the registry the CLI uses
 (`pikit add <name> --yes` to read one in place, `pikit remove <name>` after).

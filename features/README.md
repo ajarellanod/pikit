@@ -37,7 +37,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [cli-features](cli-features.md) | ⭐ | `pikit new` with several channels and a step of features (dashboard, multi-agent, subagents, MCP…); several channels, features and groups of them (agents from the dashboard) built; subagents not | Yes: the launch |
 | [import-from-openclaw-hermes](import-from-openclaw-hermes.md) | ⭐ | `pikit import`: persona, skills, memories, channels from an existing setup | No |
 | [learned-skills](learned-skills.md) | ⭐ | Skills the agent writes from experience, through the self-change gate | No; builds on SPEC §6 |
-| [memory](memory.md) | ⭐ | Memory and user profiles across conversations and channels; written as a build guide | No |
+| [memory](memory.md) | ⭐ | Memory across conversations and channels: v1 built (`memory-sql`, `memory-recall`, `memory-summaries`); profiles, linking, full-text search not | No |
 | [pairing](pairing.md) | ⭐ | Unknown senders approved by the owner from the chat | No |
 | [rich-content](rich-content.md) | ⭐ | Images, files and buttons; the shape is decided, kept in its file | No |
 | [sandboxed-execution](sandboxed-execution.md) | ⭐ | Commands in a container, VM or remote host | Partly: SPEC §6 requires `execution-cloudflare-sandbox`, specified there |

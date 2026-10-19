@@ -247,6 +247,32 @@
       ],
       "path": "components/mailbox-local"
     },
+    "memory-recall": {
+      "version": "0.0.0",
+      "description": "The memory extension for the agents that name it: a stable section with what they kept about the person they talk to, and the tools remember, forget and recall, over memory.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/memory-recall"
+    },
+    "memory-sql": {
+      "version": "0.0.0",
+      "description": "What each agent remembers of each person, across their conversations: one actor per person, its storage.sql. Declares and provides memory.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/memory-sql"
+    },
+    "memory-summaries": {
+      "version": "0.0.0",
+      "description": "Summarizes each conversation that went quiet into the memory of its person, credentials redacted: read from the answers feed with a cursor, woken by wakeups, idempotent across retries and restarts.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/memory-summaries"
+    },
     "outbound-durable": {
       "version": "0.0.0",
       "description": "Every answer is stored before it is sent, then delivered in order per conversation, retried, and sent again after a crash.",

@@ -24,22 +24,22 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 |---|---|---|---|---|
 | `agent.runtime` | single | runtime-pi | admin-api, admin-approvals, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, scheduler-admit | `createAgentRuntimeConformance` |
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
-| `agent.submissions` | single | runtime-pi | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
-| `agent.observe` | single | runtime-pi | admin-api, channel-web | `createAgentObserveConformance` |
+| `agent.submissions` | single | runtime-pi | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
+| `agent.observe` | single | runtime-pi | admin-api, channel-web, memory-summaries | `createAgentObserveConformance` |
 | `agent.definition` | keyed | the project | admin-api?, agents-live?, channel-web?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-schedule, tool-websearch-brave, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
-| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
+| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, memory-recall | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, scheduler-admit | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, repo-github-app, scheduler-sql, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, approvals-sql, channel-google-chat, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | approvals-sql, channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-web?, settings-store? | `createMailboxConformance` |
-| `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, outbound-durable, scheduler-sql, channel-web?, runtime-pi? | `createWakeupsConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, approvals-sql, channel-google-chat, channel-telegram-webhook, channel-web, memory-sql, repo-github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | approvals-sql, channel-telegram-webhook, memory-sql, repo-github-app, admin-api?, channel-google-chat?, channel-web?, settings-store? | `createMailboxConformance` |
+| `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
@@ -48,7 +48,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
 | `email.send` | single | email-resend, email-ses | channel-web? | `createEmailSenderConformance` |
-| `model.complete` | single | runtime-pi | admin-api?, channel-web? | `createModelCompleteConformance` |
+| `model.complete` | single | runtime-pi | memory-summaries, admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `execution` | single | execution-do, execution-local | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
@@ -56,6 +56,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `approvals` | single | approvals-sql | admin-approvals, extension-approvals | `createApprovalsConformance` (approvals-sql's `conformance.ts`) |
 | `workspace` | single | workspace-local | channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
+| `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web),
@@ -838,10 +839,10 @@ Crypto, `AWS_SES_*`). Consumer: channel-web's accounts (being built). Suite:
 A registry adds a capability without changing the CLI: the defining component declares it in
 `component.json` (`declares.capabilities`, and `declares.kinds` for a new prefix), keeps its type in a
 file of its own (declaration merging on `AppCapabilities`), and ships a suite. Another component that
-uses it carries an identical copy of that file. Redeclaring a kit capability is refused.
-[features/memory.md](../features/memory.md) is the worked example. This repository type-checks as one
-program, so the capabilities its own components declare are named in `RegistryDeclared`
-(`capabilities.ts`), which keeps them out of the kit's catalogue type.
+uses it carries an identical copy of that file. Redeclaring a kit capability is refused. This
+repository type-checks as one program, so the kit's catalogue type leaves out what its registry
+declares (`RegistryDeclared` in [capabilities.ts](../packages/cli/src/registry/capabilities.ts));
+a project's own registry needs nothing of the kind.
 
 ### `approvals` (declared by approvals-sql, [contract.ts](../registry/components/approvals-sql/files/src/pikit/approvals-sql/contract.ts))
 
@@ -874,6 +875,31 @@ Provider: approvals-sql (`storage.sql`, one actor `approvals-sql:approvals` thro
 server). Users: extension-approvals (`request_approval`, a `beforeTool` claim, an `inbound.normalize`
 stage that records answers), admin-approvals (`/admin/api/approvals`). Suite:
 `createApprovalsConformance` (approvals-sql's `conformance.ts`).
+
+### `memory` (declared by memory-sql, [contract.ts](../registry/components/memory-sql/files/src/pikit/memory-sql/contract.ts))
+
+What an agent remembers of each person, across that person's conversations
+([features/memory.md](../features/memory.md), the worked example).
+
+```ts
+type MemoryScope = { agent: string; person: string };
+type Memory = { id: string; kind: "fact" | "summary"; text: string; createdAt: number };
+interface MemoryStore {
+  list(scope, kind, limit, ctx): Promise<Memory[]>;     // the newest `limit` of `kind`, oldest first
+  remember(scope, memory, ctx): Promise<void>;          // idempotent by id
+  forget(scope, id, ctx): Promise<void>;                // an unknown id is fine
+  search(scope, query, limit, ctx): Promise<Memory[]>;  // both kinds, text contains query, newest first
+}
+```
+
+Per agent and person; `remember` idempotent by id; a text with a known credential's shape
+(`credentialSettingProblem`), an empty one or one over 4000 characters refused, keeping nothing and
+never echoed; committed before `remember` resolves. Provider: memory-sql (`storage.sql` of one actor
+per person, `memory:<person>`, reached through `actor.mailbox`; on Cloudflare the person's Durable
+Object). Users: memory-recall (the `memory` extension: a stable section, `remember`, `forget`,
+`recall`), memory-summaries (a summary of each quiet conversation, from the answers feed). Suite:
+`createMemoryConformance`, on memory-sql over mailbox-local's double and over storage-do and
+actors-do in the workerd lane. One provider: `experimental`.
 
 ### `scheduler` (declared by scheduler-sql, [contract.ts](../registry/components/scheduler-sql/files/src/pikit/scheduler-sql/contract.ts))
 

@@ -260,6 +260,15 @@ there.
   answer as its channel authenticated the sender, and a `beforeTool` claim lets the exact approved
   call run once. `admin-approvals`: `/admin/api/approvals` to list and decide as `dashboard:<operator>`,
   the asking conversation told once (`approval-decided:<id>`).
+- Memory (`features/memory.md`), a registry-declared contract, `memory` (kind `memory-`):
+  `memory-sql` (server and durable) declares and provides it, one actor per person (`memory:<person>`,
+  `actor.mailbox` calls; on Cloudflare the person's Durable Object), per agent and person, idempotent
+  by id, a known credential's shape refused; its suite `createMemoryConformance` (also in workerd).
+  `memory-recall` (server and durable): the `memory` extension, a stable section of the person's facts
+  and conversation summaries, `remember` (replay safe by call id), `forget`, `recall`.
+  `memory-summaries` (server): summarizes each conversation quiet for `idleMinutes` into its person's
+  memory, from the answers feed with a cursor and one wakeup, once across retries and restarts,
+  credentials redacted before the model and before keeping.
 - Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`; git in its image; with
   `proposals-local`, self-improvement's deployer as a second compose service started by the same
   `pikit up`, the only one with the Docker socket: it merges an approved head into `main`, runs the
@@ -394,8 +403,8 @@ there.
   with `declares`; reference; durability through contracts, `startAnswerDelivery`, actor calls; suite;
   `registry validate`, `pikit add`). `.agents/skills/pikit-extension`: agent behaviour as an
   `agent.extension` (sections, hooks, documents, tools, testing with the scripted faux model).
-- `features/memory.md` is a build guide: per-person memory as a store with an actor per person
-  (`ActorMailbox.call`) and an extension (a stable section, an idempotent `remember`).
+- `features/memory.md` describes memory as built (memory-sql, memory-recall, memory-summaries) and
+  stays the worked example of a feature of its own kind: a registry-declared contract, an actor per owner.
 - `bun test` (every package and component), the workerd lane (`bun run test:workerd`: the Cloudflare
   components in real Durable Objects, eviction mid-run included), and `PIKIT_E2E=1` end-to-end tests:
   a project made by `pikit new` answers a message, on a server and in workerd.
