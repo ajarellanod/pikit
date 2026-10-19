@@ -22,7 +22,8 @@
  *   that this component keeps from the runtime's events (a message dispatched, a run started, settled
  *   or failed, a reset) and, when the App starts, from what `agent.observe` holds.
  * - **Delivery, when an `outbound.queue` is installed:** the pieces not delivered yet (`pending`) and
- *   those that settled (`receipts`, read after a cursor), as the queue keeps them; never their text.
+ *   those that settled (`receipts`, read after a cursor), as the queue keeps them, each with the
+ *   conversation it answers; never their text.
  * - **Slash commands** are the App's `agent.command`s, listed and run in a conversation (as an action:
  *   its key's current one) by `runAgentCommand`. admin-api registers two of Pi's built-ins, through the
  *   same capability: `/new` (Pi's "Start a new session": the key's reset, `conversations.registry`'s

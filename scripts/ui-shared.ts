@@ -25,7 +25,7 @@ export const DASHBOARD = join(import.meta.dir, "../registry/dashboard/files");
 /** `src/lib/` files of `@pikit/lib-ui` (`utils.ts` is shadcn's: shared, not in the item). */
 export const LIB_UI: readonly string[] = ["activity.ts", "format.ts", "messages.ts", "names.ts", "sounds.ts", "sources.ts", "theme.ts", "transcript.ts"];
 /** `src/lib/` files of `@pikit/admin-client`. */
-export const ADMIN_CLIENT: readonly string[] = ["admin-api.ts", "api.ts", "chats.tsx", "router.tsx", "settings.ts", "shell.tsx", "views.ts"];
+export const ADMIN_CLIENT: readonly string[] = ["admin-api.ts", "api.ts", "chats.tsx", "composition.ts", "delivery-feed.ts", "delivery.ts", "router.tsx", "settings.ts", "shell.tsx", "views.ts"];
 /** shadcn's own `src/lib/` file: in neither item. */
 export const SHADCN_UTILS = "utils.ts";
 

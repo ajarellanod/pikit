@@ -54,7 +54,7 @@ Every `/admin/api/*` route asks `admin.auth` first and answers `401` without an 
 | `POST /admin/api/conversations/:id/rename` | the operator's title (as `/name`), from the sidebar's Rename |
 | `GET /admin/api/commands` | the App's `agent.command`s |
 | `POST /admin/api/conversations/:id/commands/:name` | run one in the conversation |
-| `GET /admin/api/delivery/pending`, `GET /admin/api/delivery/receipts` | `outbound.queue`'s, on a server |
+| `GET /admin/api/delivery/pending`, `GET /admin/api/delivery/receipts` | `outbound.queue`'s, on a server, each with the conversation it answers (`conversationId`) |
 | `GET /admin/*` | the built files; any path that is not a file gets `index.html` |
 
 Other components add their own under `/admin/api/<component>/…` (health-registry: `GET
@@ -130,17 +130,18 @@ repo-github-app's Connect sends its manifest).
 ## Views
 
 A view is a folder `src/dashboard/src/views/<id>/` whose `index.tsx` default-exports
-`defineView({ id, title, icon?, requires?, order?, pages })`
+`defineView({ id, title, icon?, requires?, order?, pages, badge? })`
 ([src/lib/views.ts](../registry/dashboard/files/src/lib/views.ts)). Views are found at build time
 (`import.meta.glob`), nothing loads at run time. The `id` must equal the folder's name, and every page
 path is under `/<id>`. A view shows only when every capability in `requires` has a provider in the
-App's composition (`visibleViews`, read from `GET /admin/api/app`).
+App's composition (`visibleViews`, read from `GET /admin/api/app`). Its `badge`, a component reading
+its own data, puts a dot on its sidebar icon (`SidebarDot`) while it has something to see. What the App
+is made of is no view: it is the Settings dialog's App section (below), and `/admin/` opens New chat.
 
 | View | `requires` | Where |
 |---|---|---|
 | `conversations` | `agent.observe` | the dashboard: New chat, each conversation, and Conversations (`/conversations/all`: every one, paged, searched, the archived ones), which the sidebar links (Conversations; "View all" under its 20 latest) |
-| `home` | none | the dashboard: Home, what the App is made of (first in the sidebar; `/admin/` opens New chat) |
-| `delivery` | `outbound.queue` | the dashboard |
+| `delivery` | `outbound.queue` | the dashboard: the answers stuck, not delivered or possibly delivered twice, per answer (an answer delivered is counted, never listed); a dot in the sidebar while one is stuck or was given up within a day |
 | `health-registry` | `health` | health-registry's `view/` |
 | `admin-proposals` | none (its routes need `proposals`) | admin-proposals' `view/`: the proposals, a page per proposal with its diff, checks and deploy, Approve / Reject |
 
@@ -156,7 +157,7 @@ component's view in it.
 | Item | Files | Who depends on it |
 |---|---|---|
 | `@pikit/lib-ui` | `activity`, `format`, `messages`, `names`, `sounds`, `sources`, `theme`, `transcript` (and shadcn's own `utils`, not in the item): no admin API | the pieces that use a helper (`bui`, `message`, `conversation`), the views |
-| `@pikit/admin-client` | `api`, `admin-api`, `chats`, `settings`, `views`, `router`, `shell`: the admin API's client and the shell | the views, the Settings dialog and its sections |
+| `@pikit/admin-client` | `api`, `admin-api`, `chats`, `composition`, `delivery`, `delivery-feed`, `settings`, `views`, `router`, `shell`: the admin API's client and the shell | the views, the Settings dialog and its sections |
 
 The shared pieces (`bui`, `message`, `error-note`, `markdown`, `markdown-engine`, `conversation`,
 `context-panel`, `tab-bar`, with `lib-ui`) take everything by props and never fetch, so a UI project
@@ -182,7 +183,9 @@ Prefer a new view over editing a base one: `pikit upgrade` merges the kit's chan
 
 ## Settings sections
 
-The Settings dialog (opened from the sidebar's foot) has the dashboard's own section, General, and one
+The Settings dialog (opened from the sidebar's foot) has the dashboard's own sections, General (the
+theme, the sounds: this browser's) and App (what the App is made of, read only: where it runs, its
+agents, its components by what they are for with each one's details and config, the wiring), and one
 per installed component with `"settings": "settings"` in `component.json`, copied to
 `src/dashboard/src/settings/<name>/` as a view is (`defineSettings`, `src/lib/settings.ts`), shown when
 its `requires` are provided. Its values are the component's settings (settings-store's

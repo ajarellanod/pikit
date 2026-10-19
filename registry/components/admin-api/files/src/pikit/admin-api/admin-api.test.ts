@@ -14,6 +14,7 @@ import Type from "typebox";
 import { MAX_IMAGE_BYTES, OPERATOR_NOTE } from "./api.ts";
 import { TITLE_SYSTEM, TITLE_TOKENS } from "./titles.ts";
 import { CSP } from "./assets.ts";
+import { conversationOfAnswer } from "./routes.ts";
 import adminApi from "./index.ts";
 import { agents, AUTH, auth, imageOf, PIXEL, Runtime, type Served, SESSION, serve, sse, ZERO } from "./runtime.test-support.ts";
 
@@ -721,17 +722,17 @@ const queue = defineComponent({
   },
 });
 
-test("delivery: what is not delivered yet and what settled, read from outbound.queue; never a piece's text", async () => {
+test("delivery: what is not delivered yet and what settled, read from outbound.queue, each with the conversation it answers; never a piece's text", async () => {
   const s = await started({}, [queue]);
 
   const pending = await s.fetch("/admin/api/delivery/pending?limit=10", { headers: AUTH });
   expect(pending.status).toBe(200);
-  expect(await pending.json()).toEqual({ items: PENDING, next: "p2" });
+  expect(await pending.json()).toEqual({ items: PENDING.map((piece) => ({ ...piece, conversationId: "c1" })), next: "p2" });
 
   const receipts = await s.fetch("/admin/api/delivery/receipts?limit=1", { headers: AUTH });
-  expect(await receipts.json()).toEqual({ items: [{ cursor: "r0", ...RECEIPTS[0] }], gap: false, next: "r0" });
+  expect(await receipts.json()).toEqual({ items: [{ cursor: "r0", ...RECEIPTS[0], conversationId: "c1" }], gap: false, next: "r0" });
   const after = await s.fetch("/admin/api/delivery/receipts?after=r0&limit=5", { headers: AUTH });
-  expect(await after.json()).toEqual({ items: [{ cursor: "r1", ...RECEIPTS[1] }], gap: false, next: "r1" });
+  expect(await after.json()).toEqual({ items: [{ cursor: "r1", ...RECEIPTS[1], conversationId: "c2" }], gap: false, next: "r1" });
   // Past the last one, the cursor stays where it was: read on from it later.
   const end = await s.fetch("/admin/api/delivery/receipts?after=r1", { headers: AUTH });
   expect(await end.json()).toEqual({ items: [], gap: false, next: "r1" });
@@ -740,6 +741,14 @@ test("delivery: what is not delivered yet and what settled, read from outbound.q
     expect({ path, status: (await s.fetch(path, { headers: AUTH })).status }).toEqual({ path, status: 400 });
   }
   expect((await s.fetch("/admin/api/delivery/pending")).status).toBe(401);
+});
+
+test("a delivery's conversation is its answer key's first part: the runtime's id; none for a key of another shape", () => {
+  expect(conversationOfAnswer("12:telegram:991")).toBe("12");
+  expect(conversationOfAnswer("7:dashboard:5f0c")).toBe("7");
+  expect(conversationOfAnswer("no-request")).toBeUndefined();
+  expect(conversationOfAnswer(":m1")).toBeUndefined();
+  expect(conversationOfAnswer("c1:")).toBeUndefined();
 });
 
 test("delivery without an outbound.queue: 404 not_installed, and the rest of the API as before", async () => {

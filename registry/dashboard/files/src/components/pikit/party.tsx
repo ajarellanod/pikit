@@ -1,16 +1,17 @@
 /**
  * Who a conversation is with (its party, `ApiConversation.party`): the channel it came through, the
  * person or chat on the other side, and the ids an operator may need. The dashboard shows it once per
- * conversation, never above each message: a chip in the conversation's header (`PartyChip`: the
- * channel's icon, the name, the detail muted) that opens its Details (every id with a copy button, a
- * link to where the channel shows that person), and the channel's icon before each row of the lists
+ * conversation, never above each message: an info button in the conversation's header (`PartyChip`:
+ * the icon alone, square like the header's other buttons, saying who it is in its label and tooltip)
+ * that opens its Details (the channel, the name and the detail, every id with a copy button, a link
+ * to where the channel shows that person), and the channel's icon before each row of the lists
  * (`ChannelIcon`). `CHANNELS` is the one place a channel's kind gets its icon and label.
  *
  * A conversation without a party (no key yet, or an older server) gets one made from its key
  * (`<kind>:<rest>`), so a raw key never shows as a name.
  */
 
-import { Antenna, ArrowUpRight, ChatLines, Check, Code, Copy, Globe, Telegram, User } from "iconoir-react";
+import { Antenna, ArrowUpRight, ChatLines, Check, Code, Copy, Globe, InfoCircle, Telegram, User } from "iconoir-react";
 import { Popover } from "radix-ui";
 import { type ComponentType, type SVGProps, useEffect, useState } from "react";
 import { Button } from "@/components/bui/Button";
@@ -119,7 +120,7 @@ function IdRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** The conversation's party in its header: a chip (icon, name, detail) that opens its Details. */
+/** The conversation's party in its header: an info button (who it is in its label and tooltip) that opens its Details. */
 export function PartyChip({ party }: { party: ApiParty }) {
   const [open, setOpen] = useState(false);
   // Without a name, the channel ("Telegram · support") is the title, said once.
@@ -133,13 +134,9 @@ export function PartyChip({ party }: { party: ApiParty }) {
           type="button"
           aria-label={`Details: ${said.join(", ")}`}
           title={said.join(" · ")}
-          className={`flex h-7 max-w-[min(320px,40vw)] min-w-0 items-center gap-1.5 rounded-[7px] px-2 text-[12.5px] transition-colors duration-100 ${open ? "bg-hover-2" : "hover:bg-hover"}`}
+          className={`flex size-7 shrink-0 items-center justify-center rounded-[7px] transition-colors duration-100 ${open ? "bg-hover-2 text-ink" : "text-ink-3 hover:bg-hover hover:text-ink"}`}
         >
-          <ChannelIcon kind={party.channel.kind} label={party.channel.label} className="text-ink-3" />
-          <span className="min-w-0 truncate">
-            <span className="font-medium text-ink-2">{title}</span>
-            {party.detail !== undefined && <span className="text-ink-3"> · {party.detail}</span>}
-          </span>
+          <InfoCircle width={16} height={16} strokeWidth={1.8} aria-hidden />
         </button>
       </Popover.Trigger>
       <Popover.Portal>

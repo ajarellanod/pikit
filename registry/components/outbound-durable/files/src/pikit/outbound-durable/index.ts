@@ -15,6 +15,8 @@
  *   feed through `receipts` (`Feed`, SPEC K3): what a component that must not miss a delivery reads.
  * - `pending` lists the pieces not settled yet, oldest first, without their text: what an operator sees waiting.
  * - Its tables carry a schema version (`outbound_durable_meta`), so an existing database gains new tables.
+ * - With a `health` provider, it reports `degraded` while an answer is stuck for over a minute or one was
+ *   given up within the hour, `up` otherwise (health.ts); without one, nothing changes.
  *
  * How this differs from a channel's direct delivery: @pikit/contracts' delivery.ts, in its header.
  *
@@ -28,6 +30,7 @@
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import Type from "typebox";
+import { createHealth } from "./health.ts";
 import { createQueue } from "./queue.ts";
 import { createStore } from "./store.ts";
 
@@ -48,6 +51,8 @@ export default defineComponent({
   setup(pikit, config) {
     const storage = pikit.use("storage.sqlite");
     const wakeups = pikit.use("wakeups");
+    // Optional: with it, the queue reports whether answers are stuck or given up (@pikit/contracts' health.ts).
+    const health = pikit.useOptional("health");
     let queue: ReturnType<typeof createQueue> | undefined;
 
     const running = () => {
@@ -73,6 +78,8 @@ export default defineComponent({
 
         // Deliveries outlive start: they get the app's context, not start's.
         const background: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
+        const reporter = health.get()?.reporter("outbound-durable");
+        const checker = reporter === undefined ? undefined : createHealth(store, reporter, background.logger);
         queue = createQueue({
           store,
           clock: ctx.clock,
@@ -82,8 +89,11 @@ export default defineComponent({
           housekeeping: prune,
           wakeups: wakeups.get(),
           ctx: background,
+          ...(checker !== undefined && { checkHealth: checker.check }),
         });
         queue.start();
+        // What the last process left (a piece stuck, one given up): said now; each run's end says it again.
+        await checker?.check(ctx.clock.now());
       },
       async stop(ctx) {
         const stopping = queue;

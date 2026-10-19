@@ -5,7 +5,30 @@ line names its area.
 
 ## Unreleased
 
-Nothing yet.
+### Dashboard (`registry/dashboard/`)
+
+- A conversation's header shows who it is with as an info button (the icon alone, square like the
+  header's other buttons; who it is in its label and tooltip); its Details popover is unchanged.
+- Home is no longer a view: what the App is made of (where it runs, its agents, its components by what
+  they are for with each one's details and config, the wiring) is the Settings dialog's **App**
+  section, the dashboard's own after General. `/home` is gone (`pikit upgrade` deletes its files); `/`
+  still opens New chat. `views/home/overview.ts` is `lib/composition.ts`, and `@pikit/home` is
+  `@pikit/app-settings`.
+- Delivery lists problems, per answer: the answers stuck (retrying, or waiting over a minute), those
+  not delivered (given up: why, when), and, folded, those possibly delivered twice; each opens its
+  conversation. With none, "Every answer was delivered", with how many were as far as the queue's
+  receipts go. The queue is read once for the whole dashboard (`lib/delivery.ts`, `delivery-feed.ts`).
+- A view may put a dot on its sidebar icon (`defineView`'s `badge`, `SidebarDot`): Delivery's while an
+  answer is stuck or was given up within a day.
+- A conversation shows a quiet note where an answer of it was given up or is stuck (`Not delivered:
+  <why>`), with a link to Delivery (on a server, where Delivery is read).
+
+### Components
+
+- admin-api: `/admin/api/delivery/pending` and `/receipts` give each piece the conversation it
+  answers (`conversationId`, from its answer key).
+- outbound-durable: with `health` installed, reports `degraded` while an answer is stuck for over a
+  minute or one was given up within the hour, `up` otherwise; never blocks or throws.
 
 ## 0.0.1 (2026-10-19)
 

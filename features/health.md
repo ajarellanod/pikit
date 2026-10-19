@@ -64,8 +64,9 @@ outage is not a component failure: Pi retries model calls itself (`RetryPolicy`)
   deployment-docker's healthcheck sends SIGTERM to PID 1 when `/health` answers 503, and the restart
   policy starts the app again (a refused connection or a timeout never does). Cloudflare has no
   process to restart: each object's App has its own health-registry, and nothing reads it yet.
-- **More reporters.** Only channel-telegram reports. Candidates: outbound-durable (deliveries
-  failing), a webhook channel's last set, tool-mcp's connections, runtime-pi's storage.
+- **More reporters.** channel-telegram, provider-failover and outbound-durable (degraded while an
+  answer is stuck for over a minute or was given up within the hour) report. Candidates: a webhook
+  channel's last set, tool-mcp's connections, runtime-pi's storage.
 - **A `health.changed` event**, if the dashboard's live view needs one (a notice, never the truth).
 - **What a component reports while it stops**, and whether a stopped component leaves the list.
 - **Self-improvement** (SPEC §6) reads it after a deploy: how long it waits, and on what status it

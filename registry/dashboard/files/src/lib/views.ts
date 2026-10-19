@@ -8,6 +8,7 @@
  *     icon: Brain,
  *     requires: ["memory"],               // shown only when these capabilities are installed
  *     pages: [{ path: "/memory", component: MemoryPage }],
+ *     badge: MemoryBadge,                 // optional: a dot on its sidebar item when it has something to show
  *   });
  *
  * A view whose `requires` are not all in the App's composition does not appear (SPEC §5). A component
@@ -36,6 +37,13 @@ export interface View {
   order?: number;
   /** Its pages; the first one is the sidebar's link. */
   pages: ViewPage[];
+  /**
+   * Shown on its sidebar item's icon (collapsed too) while the view shows in the sidebar: a component
+   * that reads what it needs (polled as a page polls: `useApi(path, every(ms))`) and renders
+   * `SidebarDot` (`bui/SidebarNav`) when the view has something the operator should see, nothing
+   * otherwise. Delivery's says an answer is stuck or was not delivered.
+   */
+  badge?: ComponentType;
 }
 
 export function defineView(view: View): View {

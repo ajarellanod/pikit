@@ -1,240 +1,211 @@
 /**
- * Delivery (SPEC §5): the answers' pieces not delivered yet (queued, being sent, waiting for a retry)
- * and those that settled (delivered, possibly twice, or abandoned), as the outbound queue keeps them.
- * Shown when an `outbound.queue` is installed (outbound-durable).
+ * Delivery (SPEC §5): the answers that did not reach their person yet (stuck: retrying, or waiting
+ * longer than a minute) or ever (abandoned: the queue gave them up), and, folded, those that may have
+ * reached it twice. Per answer, never per piece, as `lib/delivery.ts` works them out from the outbound
+ * queue (`lib/delivery-feed.ts`). An answer delivered is not listed: when nothing needs a look the page
+ * says so, with how many answers were delivered as far as the queue's receipts go (it prunes them).
+ * Each row opens its conversation. The sidebar's dot (`badge`) says an answer is stuck, or was given up
+ * within a day. Shown when an `outbound.queue` is installed (outbound-durable); there is nothing to
+ * retry from here (`outbound.queue` has no such operation): the queue retries on its own.
  */
 
-import { Activity, Antenna, ChatBubble, CheckCircle, Clock, DeliveryTruck, Hashtag, Repeat, SendDiagonal, Timer, WarningTriangle } from "iconoir-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ChatBubble, CheckCircle, Clock, DeliveryTruck, Hashtag, NavArrowDown, Repeat, Timer, WarningTriangle } from "iconoir-react";
+import { useState } from "react";
 import EmptyState from "@/components/bui/EmptyState";
-import { FilterChips, type PillTone } from "@/components/bui/FilterTable";
-import { Page, Section } from "@/components/bui/Page";
-import RecordsTable, { type RecordColumn, RecordMark, RecordName, RecordTag } from "@/components/bui/RecordsTable";
+import { Page, PageLoading, Section } from "@/components/bui/Page";
+import RecordsTable, { type RecordColumn } from "@/components/bui/RecordsTable";
+import { SidebarDot } from "@/components/bui/SidebarNav";
 import { StatusDot } from "@/components/bui/StatusDot";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { usePolling } from "@/lib/activity";
-import { api, type ApiPage, type ApiPendingPiece, type ApiReceipt, type ApiReceiptsPage, useApi } from "@/lib/api";
+import { ChannelIcon } from "@/components/pikit/party";
+import { useChats } from "@/lib/chats";
+import { type AnswerRef, type DeliveryProblems, type DuplicateAnswer, needsAttention, RECENT_MS, type StuckAnswer, type UndeliveredAnswer } from "@/lib/delivery";
+import { type DeliveryFeed, useDelivery } from "@/lib/delivery-feed";
 import { formatAgo } from "@/lib/format";
+import { Link, pagePath } from "@/lib/router";
 import { defineView } from "@/lib/views";
 
-/** Receipts kept in the page: the most recent ones. */
-const KEPT = 500;
+const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
+const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-/** Every receipt from the oldest the queue keeps, then each new one, every `everyMs` while the dashboard is active. */
-function useReceipts(everyMs: number) {
-  const [receipts, setReceipts] = useState<ApiReceipt[]>([]);
-  const [gap, setGap] = useState(false);
-  const [error, setError] = useState<Error>();
-  const after = useRef<string>(undefined);
-  const live = useRef(true);
-  const reading = useRef(false);
-
-  const tick = useCallback(() => {
-    if (reading.current) return;
-    reading.current = true;
-    const readOn = async () => {
-      for (let pages = 0; pages < 20; pages++) {
-        const page = await api<ApiReceiptsPage>(`/delivery/receipts?limit=200${after.current === undefined ? "" : `&after=${encodeURIComponent(after.current)}`}`);
-        if (!live.current) return;
-        if (page.gap) setGap(true);
-        if (page.items.length > 0) setReceipts((kept) => [...kept, ...page.items].slice(-KEPT));
-        after.current = page.next ?? after.current;
-        if (page.items.length < 200) return;
-      }
-    };
-    readOn()
-      .then(() => live.current && setError(undefined))
-      .catch((thrown: unknown) => live.current && setError(thrown instanceof Error ? thrown : new Error(String(thrown))))
-      .finally(() => (reading.current = false));
-  }, []);
-
-  useEffect(() => {
-    live.current = true;
-    tick();
-    return () => {
-      live.current = false;
-    };
-  }, [tick]);
-  usePolling(tick, everyMs);
-
-  return { receipts, gap, error };
+/** The answer's conversation: its channel's icon, its title (the list's, else its key's), a link to it. */
+function ConversationCell({ answer }: { answer: AnswerRef }) {
+  const chats = useChats();
+  const known = answer.conversationId === undefined ? undefined : (chats.items ?? []).find((each) => each.conversationId === answer.conversationId);
+  const colon = answer.conversationKey.indexOf(":");
+  const name = known !== undefined ? chats.titleOf(known) : answer.conversationKey.slice(colon + 1) || answer.conversationKey;
+  return (
+    <span className="flex min-w-0 items-center gap-2" title={`${answer.conversationKey} (${answer.channel})`}>
+      <ChannelIcon kind={answer.channel.split(":")[0] ?? answer.channel} className="text-ink-3" />
+      {answer.conversationId === undefined ? (
+        <span className="records-name">{name}</span>
+      ) : (
+        <Link to={pagePath("/conversations", answer.conversationId)} className="records-name hover:underline">
+          {name}
+        </Link>
+      )}
+    </span>
+  );
 }
 
-type PendingFilter = "all" | ApiPendingPiece["state"];
-type SettledFilter = "all" | "delivered" | "twice" | "abandoned";
+const conversationColumn = <T extends AnswerRef>(): RecordColumn<T> => ({
+  key: "conversation",
+  label: "Conversation",
+  icon: <ChatBubble />,
+  width: 240,
+  sort: (a, b) => a.conversationKey.localeCompare(b.conversationKey),
+  cell: (answer) => <ConversationCell answer={answer} />,
+});
 
-const PENDING_TONE: Record<ApiPendingPiece["state"], PillTone> = { queued: "neutral", sending: "blue", retrying: "orange" };
+const stuckColumns: RecordColumn<StuckAnswer>[] = [
+  conversationColumn<StuckAnswer>(),
+  {
+    key: "state",
+    label: "State",
+    icon: <Timer />,
+    width: 160,
+    cell: (answer) => (
+      <StatusDot
+        tone={answer.retrying ? "orange" : "neutral"}
+        title={
+          answer.retrying
+            ? `Tried; it goes again on its own${answer.possibleDuplicate ? ". Its next send may repeat one that reached the platform" : ""}`
+            : "Not tried yet: its channel has no transport attached, or it waits behind another answer of its conversation"
+        }
+      >
+        {answer.retrying ? "retrying" : "waiting"}
+        {answer.possibleDuplicate && " · may repeat"}
+      </StatusDot>
+    ),
+  },
+  { key: "attempts", label: "Attempts", icon: <Repeat />, width: 100, end: true, cell: (answer) => answer.attempts },
+  { key: "error", label: "Last error", icon: <WarningTriangle />, width: 240, muted: (answer) => answer.lastError === undefined, title: (answer) => answer.lastError, cell: (answer) => answer.lastError ?? "—" },
+  {
+    key: "next",
+    label: "Next try",
+    icon: <Timer />,
+    width: 120,
+    muted: (answer) => answer.nextAttemptAt === undefined,
+    cell: (answer) => (answer.nextAttemptAt === undefined ? "—" : answer.nextAttemptAt <= Date.now() ? "due now" : formatAgo(answer.nextAttemptAt)),
+  },
+  { key: "since", label: "Since", icon: <Clock />, width: 130, sort: (a, b) => a.since - b.since, cell: (answer) => <span className="text-ink-2">{formatAgo(answer.since)}</span> },
+];
 
-/** How a receipt settled: delivered, possibly twice, or abandoned. */
-const outcomeOf = (receipt: ApiReceipt): Exclude<SettledFilter, "all"> =>
-  receipt.outcome.kind === "abandoned" ? "abandoned" : receipt.outcome.possibleDuplicate ? "twice" : "delivered";
-const OUTCOME: Record<Exclude<SettledFilter, "all">, { label: string; tone: PillTone }> = {
-  delivered: { label: "delivered", tone: "green" },
-  twice: { label: "possibly twice", tone: "orange" },
-  abandoned: { label: "abandoned", tone: "red" },
-};
+const undeliveredColumns: RecordColumn<UndeliveredAnswer>[] = [
+  conversationColumn<UndeliveredAnswer>(),
+  { key: "reason", label: "Why", icon: <WarningTriangle />, width: 300, title: (answer) => answer.reason, cell: (answer) => answer.reason },
+  {
+    key: "pieces",
+    label: "Pieces",
+    icon: <Hashtag />,
+    width: 170,
+    cell: (answer) => (
+      <span className="text-ink-2">
+        {answer.abandoned} not delivered{answer.delivered > 0 && `, ${answer.delivered} delivered`}
+      </span>
+    ),
+  },
+  { key: "attempts", label: "Attempts", icon: <Repeat />, width: 100, end: true, cell: (answer) => answer.attempts },
+  { key: "when", label: "Given up", icon: <Clock />, width: 130, sort: (a, b) => a.at - b.at, cell: (answer) => <span className="text-ink-2">{formatAgo(answer.at)}</span> },
+];
 
-/** The conversation a piece is for: its key without the channel, the channel as a tag. */
-function conversationColumns<T extends { conversationKey: string; channel: string; index: number }>(): RecordColumn<T>[] {
-  const name = (row: T) => row.conversationKey.slice(row.conversationKey.indexOf(":") + 1) || row.conversationKey;
-  return [
-    {
-      key: "conversation",
-      label: "Conversation",
-      icon: <ChatBubble />,
-      width: 210,
-      sort: (a, b) => a.conversationKey.localeCompare(b.conversationKey),
-      title: (row) => row.conversationKey,
-      cell: (row) => (
-        <>
-          <RecordMark name={name(row)} />
-          <RecordName>{name(row)}</RecordName>
-        </>
-      ),
-    },
-    { key: "channel", label: "Channel", icon: <Antenna />, width: 110, sort: (a, b) => a.channel.localeCompare(b.channel), cell: (row) => <RecordTag>{row.channel}</RecordTag> },
-    { key: "piece", label: "Piece", icon: <Hashtag />, width: 80, end: true, cell: (row) => row.index + 1 },
-  ];
+const duplicateColumns: RecordColumn<DuplicateAnswer>[] = [
+  conversationColumn<DuplicateAnswer>(),
+  { key: "pieces", label: "Pieces", icon: <Hashtag />, width: 140, end: true, cell: (answer) => answer.pieces },
+  { key: "when", label: "Delivered", icon: <Clock />, width: 140, sort: (a, b) => a.at - b.at, cell: (answer) => <span className="text-ink-2">{formatAgo(answer.at)}</span> },
+];
+
+/** How many answers were delivered, as far as the receipts the queue keeps go, said honestly. */
+function deliveredLine(feed: DeliveryFeed, problems: DeliveryProblems): string {
+  if (!feed.caughtUp) return "Reading the queue's receipts.";
+  const onTheirWay = problems.onTheirWay > 0 ? ` ${plural(problems.onTheirWay, "answer")} on ${problems.onTheirWay === 1 ? "its" : "their"} way now.` : "";
+  if (problems.since === undefined) return `No answer delivered in the receipts the queue keeps.${onTheirWay}`;
+  const pruned = feed.gap ? " Some were pruned before this page read them: more were delivered than counted." : " Older ones are pruned.";
+  return `${plural(problems.delivered, "answer")} delivered since ${when.format(problems.since)}, as far as the queue's receipts go.${pruned}${onTheirWay}`;
+}
+
+/** The answers that may have reached their person twice: a line, the table on demand. */
+function Duplicates({ answers }: { answers: DuplicateAnswer[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Section
+      title="Possibly delivered twice"
+      meta={answers.length}
+      tools={
+        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="btn btn-outline btn-xs text-ink-2 hover:text-ink">
+          {open ? "Hide" : "Show"}
+          <NavArrowDown width={13} height={13} strokeWidth={2.2} className="transition-transform duration-300" style={{ transform: open ? "rotate(180deg)" : undefined }} />
+        </button>
+      }
+    >
+      <p className="text-[12.5px] text-ink-3">
+        Delivered, after a send the platform may have received (a timeout, a restart): the person may have seen a piece twice. Nothing to do.
+      </p>
+      {open && <RecordsTable label="Answers possibly delivered twice" columns={duplicateColumns} rows={answers} rowKey={(answer) => answer.key} maxHeight={360} empty={null} />}
+    </Section>
+  );
 }
 
 function DeliveryPage() {
-  const pending = useApi<ApiPage<ApiPendingPiece>>("/delivery/pending?limit=500", 5000);
-  const { receipts, gap, error } = useReceipts(5000);
-  const [pendingFilter, setPendingFilter] = useState<PendingFilter>("all");
-  const [settledFilter, setSettledFilter] = useState<SettledFilter>("all");
-  const waiting = pending.data?.items ?? [];
-  const settled = [...receipts].reverse();
-  const counted = (outcome: Exclude<SettledFilter, "all">) => receipts.filter((receipt) => outcomeOf(receipt) === outcome).length;
-  const waitingCount = (state: ApiPendingPiece["state"]) => waiting.filter((piece) => piece.state === state).length;
+  const { feed, problems } = useDelivery(true, 10_000);
+  const description = "The answers that did not reach their person yet (stuck, retrying) or ever (abandoned), and those that may have reached it twice. An answer delivered is not listed. Never their text.";
 
-  const pendingColumns: RecordColumn<ApiPendingPiece>[] = [
-    ...conversationColumns<ApiPendingPiece>(),
-    {
-      key: "state",
-      label: "State",
-      icon: <Activity />,
-      width: 170,
-      sort: (a, b) => a.state.localeCompare(b.state),
-      cell: (piece) => (
-        <StatusDot tone={PENDING_TONE[piece.state]} title={piece.possibleDuplicate ? "Its next send may repeat one that reached the platform" : undefined}>
-          {piece.state}
-          {piece.possibleDuplicate && " · may repeat"}
-        </StatusDot>
-      ),
-    },
-    { key: "attempts", label: "Attempts", icon: <Repeat />, width: 110, end: true, cell: (piece) => piece.attempts },
-    {
-      key: "next",
-      label: "Next try",
-      icon: <Timer />,
-      width: 120,
-      muted: (piece) => piece.nextAttemptAt === undefined,
-      sort: (a, b) => (a.nextAttemptAt ?? 0) - (b.nextAttemptAt ?? 0),
-      cell: (piece) => (piece.nextAttemptAt === undefined ? "—" : piece.nextAttemptAt <= Date.now() ? "due now" : formatAgo(piece.nextAttemptAt)),
-    },
-    { key: "error", label: "Last error", icon: <WarningTriangle />, width: 150, muted: (piece) => piece.lastError === undefined, title: (piece) => piece.lastError, cell: (piece) => piece.lastError ?? "—" },
-    { key: "stored", label: "Stored", icon: <Clock />, width: 120, sort: (a, b) => a.storedAt - b.storedAt, cell: (piece) => <span className="text-ink-2">{formatAgo(piece.storedAt)}</span> },
-  ];
+  if (feed.unavailable !== undefined) {
+    return (
+      <Page eyebrow="Delivery" title="Nothing to read here" description={description}>
+        <p className="text-[13px] text-ink-3">{feed.unavailable}</p>
+      </Page>
+    );
+  }
+  if (problems === undefined) {
+    if (feed.error !== undefined) {
+      return (
+        <Page eyebrow="Delivery">
+          <ErrorNote error={feed.error} title="The queue cannot be read" />
+        </Page>
+      );
+    }
+    return <PageLoading eyebrow="Delivery" />;
+  }
 
-  const settledColumns: RecordColumn<ApiReceipt>[] = [
-    ...conversationColumns<ApiReceipt>(),
-    {
-      key: "outcome",
-      label: "Outcome",
-      icon: <CheckCircle />,
-      width: 150,
-      cell: (receipt) => <StatusDot tone={OUTCOME[outcomeOf(receipt)].tone}>{OUTCOME[outcomeOf(receipt)].label}</StatusDot>,
-    },
-    { key: "attempts", label: "Attempts", icon: <Repeat />, width: 110, end: true, cell: (receipt) => receipt.attempts },
-    {
-      key: "why",
-      label: "Why",
-      icon: <WarningTriangle />,
-      width: 250,
-      muted: (receipt) => receipt.outcome.kind !== "abandoned",
-      title: (receipt) => (receipt.outcome.kind === "abandoned" ? receipt.outcome.reason : undefined),
-      cell: (receipt) => (receipt.outcome.kind === "abandoned" ? receipt.outcome.reason : "—"),
-    },
-    { key: "when", label: "When", icon: <Clock />, width: 120, sort: (a, b) => a.at - b.at, cell: (receipt) => <span className="text-ink-2">{formatAgo(receipt.at)}</span> },
-  ];
-
+  const count = problems.stuck.length + problems.undelivered.length;
+  const line = deliveredLine(feed, problems);
   return (
-    <Page
-      eyebrow="Delivery"
-      title={pending.data === undefined ? undefined : waiting.length === 0 ? "Every answer went out" : `${waiting.length} ${waiting.length === 1 ? "piece" : "pieces"} not delivered yet`}
-      description="The answers' pieces as the outbound queue keeps them: those it still holds (never tried, being sent, or waiting to be sent again) and the latest that settled. Never their text."
-    >
-      <Section
-        title="Not delivered yet"
-        meta={pending.data === undefined ? undefined : waiting.length}
-        tools={
-          <FilterChips
-            label="Show the pieces that are"
-            value={pendingFilter}
-            onChange={setPendingFilter}
-            filters={[
-              { key: "all", label: "All", count: waiting.length },
-              { key: "queued", label: "Queued", tone: "neutral", count: waitingCount("queued") },
-              { key: "sending", label: "Sending", tone: "blue", count: waitingCount("sending") },
-              { key: "retrying", label: "Retrying", tone: "orange", count: waitingCount("retrying") },
-            ]}
-          />
-        }
-      >
-        {pending.error !== undefined && <ErrorNote error={pending.error} title="The queue cannot be read" />}
-        <RecordsTable
-          label="Pieces not delivered yet"
-          columns={pendingColumns}
-          rows={pendingFilter === "all" ? waiting : waiting.filter((piece) => piece.state === pendingFilter)}
-          rowKey={(piece) => `${piece.idempotencyKey}#${piece.index}`}
-          maxHeight={420}
-          empty={
-            pending.data === undefined ? (
-              <EmptyState icon={<Timer />} title="Reading the queue" />
-            ) : waiting.length === 0 ? (
-              <EmptyState icon={<SendDiagonal />} title="Nothing waiting" hint="Every answer went out." />
-            ) : (
-              <EmptyState icon={<SendDiagonal />} title={`No piece is ${pendingFilter}`} hint="Pick another filter to see the others." />
-            )
-          }
-        />
-      </Section>
+    <Page eyebrow="Delivery" title={count === 0 ? "Every answer was delivered" : `${plural(count, "answer")} not delivered`} description={description}>
+      {feed.error !== undefined && <ErrorNote error={feed.error} title="The queue cannot be read now: this is what it said last" />}
+      {feed.pendingMore && <p className="text-[12.5px] text-ink-3">The queue holds more pieces than this page reads: only the oldest are shown.</p>}
 
-      <Section
-        title="Settled"
-        meta="the latest, newest first"
-        tools={
-          <FilterChips
-            label="Show the pieces that were"
-            value={settledFilter}
-            onChange={setSettledFilter}
-            filters={[
-              { key: "all", label: "All", count: receipts.length },
-              { key: "delivered", label: "Delivered", tone: "green", count: counted("delivered") },
-              { key: "twice", label: "Possibly twice", tone: "orange", count: counted("twice") },
-              { key: "abandoned", label: "Abandoned", tone: "red", count: counted("abandoned") },
-            ]}
-          />
-        }
-      >
-        {error !== undefined && <ErrorNote error={error} title="The receipts cannot be read" />}
-        {gap && <p className="text-[12.5px] text-ink-3">Older receipts were pruned by the queue before they were read.</p>}
-        <RecordsTable
-          label="Pieces delivered or given up"
-          columns={settledColumns}
-          rows={settledFilter === "all" ? settled : settled.filter((receipt) => outcomeOf(receipt) === settledFilter)}
-          rowKey={(receipt) => receipt.cursor}
-          empty={
-            receipts.length === 0 ? (
-              <EmptyState icon={<CheckCircle />} title="Nothing settled yet" hint="No answer has gone through the queue yet." />
-            ) : (
-              <EmptyState icon={<CheckCircle />} title={`No piece ${settledFilter === "twice" ? "was possibly delivered twice" : `was ${settledFilter}`}`} hint="Pick another filter to see the others." />
-            )
-          }
-        />
-      </Section>
+      {count === 0 && (
+        <div className="records-shell">
+          <EmptyState icon={<CheckCircle />} title="Nothing stuck, nothing given up" hint={line} />
+        </div>
+      )}
+
+      {problems.stuck.length > 0 && (
+        <Section title="Stuck" meta="not delivered yet: the queue keeps trying on its own">
+          <RecordsTable label="Answers not delivered yet" columns={stuckColumns} rows={problems.stuck} rowKey={(answer) => answer.key} maxHeight={420} empty={null} />
+        </Section>
+      )}
+
+      {problems.undelivered.length > 0 && (
+        <Section title="Not delivered" meta="given up by the queue: they will not be sent">
+          <RecordsTable label="Answers not delivered" columns={undeliveredColumns} rows={problems.undelivered} rowKey={(answer) => answer.key} maxHeight={420} empty={null} />
+        </Section>
+      )}
+
+      {problems.duplicates.length > 0 && <Duplicates answers={problems.duplicates} />}
+
+      {count > 0 && <p className="text-[12.5px] text-ink-3">{line}</p>}
     </Page>
   );
+}
+
+/** The sidebar's dot: an answer stuck (orange), or one given up within a day (red). */
+function DeliveryBadge() {
+  const { feed, problems } = useDelivery(true);
+  if (problems === undefined || feed.readAt === undefined || !needsAttention(problems, feed.readAt)) return null;
+  const undelivered = problems.undelivered.some((answer) => feed.readAt !== undefined && feed.readAt - answer.at <= RECENT_MS);
+  return <SidebarDot tone={undelivered ? "red" : "orange"} label={undelivered ? "An answer was not delivered" : "An answer is stuck"} />;
 }
 
 export default defineView({
@@ -244,4 +215,5 @@ export default defineView({
   requires: ["outbound.queue"],
   order: 30,
   pages: [{ path: "/delivery", component: DeliveryPage, fill: true }],
+  badge: DeliveryBadge,
 });

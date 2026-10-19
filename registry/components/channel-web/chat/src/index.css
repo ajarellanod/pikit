@@ -908,7 +908,7 @@ a:focus-visible .animated-underline::after {
 
 /* -- the chat's type: 10% larger than the rest of the dashboard -------------
  * `chat-text-13` is 13px, times the scale `.chat` sets (a conversation, the new chat's page): the thread,
- * its composer and the composer's menus. Outside a `.chat` (a code block on Home) it is
+ * its composer and the composer's menus. Outside a `.chat` (a code block in Settings' App section) it is
  * 13px. */
 
 .chat {

@@ -384,6 +384,11 @@ export interface ApiResetResponse {
 /** A piece of an answer not delivered yet (`outbound.queue`'s `pending`). Never its text. */
 export interface ApiPendingPiece {
   idempotencyKey: string;
+  /**
+   * The conversation it answers, as this API names it (`:id`): from a run's answer key
+   * (`answerKey`: `${conversationId}:${requestId}`); absent for a key of another shape.
+   */
+  conversationId?: string;
   /** Which of the answer's pieces: 0 is the first. */
   index: number;
   channel: string;
@@ -404,6 +409,8 @@ export interface ApiPendingPiece {
 export interface ApiReceipt {
   cursor: string;
   idempotencyKey: string;
+  /** As `ApiPendingPiece.conversationId`. */
+  conversationId?: string;
   index: number;
   channel: string;
   conversationKey: string;

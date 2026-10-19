@@ -1,8 +1,8 @@
 /**
  * The dashboard's shell, in Beautiful UI's harness layout: the operator signs in with the token once
  * (a session cookie, `lib/api.ts`), then a sidebar (the App's menu, New chat, Conversations, the views
- * the App's composition allows, Home first, the latest conversations and "View all" when there are
- * more), a main pane with the conversations opened as
+ * the App's composition allows, each with its dot when it has something to see (`View.badge`), the
+ * latest conversations and "View all" when there are more), a main pane with the conversations opened as
  * tabs (and New chat's while it shows; each one closes), and a side panel a page may fill (a
  * conversation's Context). A page that loads with a session still open goes straight in, and `/` opens
  * New chat.
@@ -146,8 +146,17 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       .filter((view) => view.id !== "conversations")
       .map((view): SidebarItem => {
         const Icon = view.icon;
+        const Badge = view.badge;
         const to = view.pages[0]?.path ?? `/${view.id}`;
-        return { key: view.id, label: view.title, icon: Icon === undefined ? null : <Icon />, active: found?.view.id === view.id, href: `${BASE}${to}`, onSelect: () => navigate(to) };
+        return {
+          key: view.id,
+          label: view.title,
+          icon: Icon === undefined ? null : <Icon />,
+          ...(Badge !== undefined && { badge: <Badge /> }),
+          active: found?.view.id === view.id,
+          href: `${BASE}${to}`,
+          onSelect: () => navigate(to),
+        };
       }),
   ];
 

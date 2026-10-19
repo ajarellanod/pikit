@@ -115,7 +115,26 @@ sqlite3 .pikit/pikit.db "SELECT key, state, attempts, last_error FROM outbound_d
 ```
 
 Delivered pieces are kept 7 days, abandoned ones 30, with their reason. Each delivery emits
-`outbound.delivered`, each abandonment `outbound.abandoned` (and an error in the logs).
+`outbound.delivered`, each abandonment `outbound.abandoned` (and an error in the logs). The
+dashboard's Delivery shows the answers stuck, given up or possibly delivered twice, from `pending`
+and `receipts` (through admin-api, on a server).
+
+## Health
+
+With a `health` provider (`health-registry`; optional: without one nothing changes), it reports as
+`outbound-durable`:
+
+| Its records hold | It reports |
+|---|---|
+| an answer with a piece held over a minute (failing and retrying, waiting for a rate limit, or for a transport) | `degraded`: `2 answers not delivered for over a minute (last error: transient: 502 Bad Gateway)` |
+| an answer with a piece given up within the hour | `degraded`: `1 answer given up in the last hour (permanent: Forbidden: bot was blocked by the user)` |
+| neither | `up` |
+
+It checks at start and whenever a delivery run ends, and asks for a run when its report would change
+with no delivery (a piece reaching the minute, an abandonment leaving the hour). A check never throws
+and never holds a delivery: one that cannot read the records is logged and leaves the last report.
+The reason holds the platform's words, never an answer's text. `degraded` never makes the App
+`down`. On Cloudflare each conversation's Durable Object reports for its own outbox.
 
 ## Config
 
@@ -140,7 +159,8 @@ not sent by anyone; empty the table first if that matters.
 Copied with the component, they run in your project: the `outbound.queue` conformance suite (order,
 each retry to the millisecond, rate limits, abandonment, restarts, detach, receipts), the lifecycle
 suite, the feed suite over the receipts with their pruning, a database from before receipts, what
-`pending` shows of an interrupted send and a long failure, its page sizes, the
+`pending` shows of an interrupted send and a long failure, its page sizes, what it reports to
+`health` (stuck, given up, back up, a check that fails), the
 convergence suite (the process killed after each of its commits in turn: every piece still delivered,
 in order, with one receipt, and every repeated send marked a possible duplicate), and a test that kills
 a process with SIGKILL during a send and checks the next process delivers it. pikit's workerd lane

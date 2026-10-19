@@ -16,6 +16,12 @@
       "description": "The dashboard's client of pikit's admin API (the session, useApi, live events), its conversations, views, settings, router and shell."
     },
     {
+      "name": "app-settings",
+      "type": "registry:file",
+      "title": "app-settings",
+      "description": "pikit's app-settings piece of the dashboard."
+    },
+    {
       "name": "chat-actions",
       "type": "registry:file",
       "title": "chat-actions",
@@ -110,12 +116,6 @@
       "type": "registry:file",
       "title": "delivery",
       "description": "The dashboard's delivery view."
-    },
-    {
-      "name": "home",
-      "type": "registry:file",
-      "title": "home",
-      "description": "The dashboard's home view."
     },
     {
       "name": "admin-proposals-settings",

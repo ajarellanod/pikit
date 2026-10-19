@@ -294,6 +294,24 @@ export function createStore(db: SqlDatabase) {
       return rows.length > size && last !== undefined ? { items: items.map(toPending), next: String(last.seq) } : { items: items.map(toPending) };
     },
 
+    /**
+     * What `health` reads (`health.ts`): the open pieces, oldest first (their key, when stored, why their
+     * last try failed), and the pieces given up since `since`, the latest first, with why.
+     */
+    async healthRows(since: number): Promise<{ open: { key: string; createdAt: number; lastError?: string }[]; abandoned: { key: string; reason: string; at: number }[] }> {
+      const open = await db.query<{ key: string; created_at: number; last_error: string | null }>(
+        "SELECT key, created_at, last_error FROM outbound_durable_pieces WHERE state IN ('pending', 'sending') ORDER BY seq",
+      );
+      const abandoned = await db.query<{ key: string; last_error: string | null; settled_at: number }>(
+        "SELECT key, last_error, settled_at FROM outbound_durable_pieces WHERE state = 'abandoned' AND settled_at >= ? ORDER BY settled_at DESC, seq DESC",
+        [since],
+      );
+      return {
+        open: open.map((row) => ({ key: row.key, createdAt: row.created_at, ...(row.last_error !== null && { lastError: row.last_error }) })),
+        abandoned: abandoned.map((row) => ({ key: row.key, reason: row.last_error ?? "", at: row.settled_at })),
+      };
+    },
+
     /** `OutboundQueue.receipts.read`: receipts after `after`, and whether some after it were pruned. */
     async readReceipts(after: string | undefined, limit: number): Promise<FeedPage<DeliveryReceipt>> {
       if (!Number.isInteger(limit) || limit < 1) throw new Error(`outbound-durable: limit must be an integer of at least 1, got ${limit}`);

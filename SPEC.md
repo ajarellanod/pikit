@@ -391,10 +391,11 @@ Channels cannot admit a `dashboard:` request id: `admitInbound` rejects it befor
 captures identity before normalization/routing, so in-place mutation cannot turn it into one.
 
 **What it shows and does.**
-- The composition: components, capabilities and their providers, pipelines, the config without
-  secrets.
+- The composition, in the Settings dialog's App section: components, capabilities and their
+  providers, pipelines, the config without secrets.
 - Conversations: their agent, their runs and tasks; a run's messages, tool calls and result.
-- Delivery: what is queued, sent, retried, abandoned or possibly duplicated.
+- Delivery: the answers that did not reach their person yet (stuck, retrying) or ever (abandoned),
+  and possible duplicates; every answer delivered is not listed.
 - Health: what is up, degraded or failing.
 - Actions, each through an existing contract, never around one: abort a run, reset a
   conversation, answer an approval (when `approvals` exists), talk to an agent.

@@ -20,12 +20,12 @@ pikit doctor                         # what the App provides: what a view may re
 ```
 
 The base views are the references: `conversations` (a list, a live page over server-sent events,
-actions) and `home` (one read, tabs: what the App is made of). Read `src/dashboard/src/lib/api.ts` (`api`, `post`,
+actions) and `delivery` (polled reads folded per answer, sections only for problems, a sidebar dot). Read `src/dashboard/src/lib/api.ts` (`api`, `post`,
 `useApi`, `follow`), `activity.ts` (`usePolling`, `every`), `views.ts` (`defineView`) and
 `router.tsx` (`Link`, `navigate`, `pagePath`).
 
 **Add a view; do not edit a base one.** `pikit upgrade` merges the kit's changes into the base views
-(`conversations`, `home`, `delivery`) and the files of `src/lib/` and `src/components/`; every
+(`conversations`, `delivery`) and the files of `src/lib/` and `src/components/`; every
 file you edit is a file that can conflict. To show more about conversations, write a new view that
 imports what the base views and pieces export (`agentsOf` from `@/lib/chats`, `useLive` from
 `@/components/pikit/conversation` over `adminSource(id)` from `@/views/conversations/source`,
@@ -82,6 +82,7 @@ export default defineView({
   requires: ["health"],           // capabilities that must be provided for it to show
   order: 20,
   pages: [{ path: "/health-registry", component: HealthPage }],
+  badge: HealthBadge,             // optional: renders `SidebarDot` (bui/SidebarNav) while there is something to see
 });
 ```
 
@@ -100,7 +101,7 @@ export default defineView({
   it says now, then sections with `FilterChips` (a dot and a count each), a `RecordsTable` (columns
   with a glyph, sorting, a numbered gutter; its count is the section's figure or its chips'; with `paging` the server's pages, a footer "Showing 1-20 of 57" and `Pagination`; `RecordMark`,
   `RecordTag`, `TagList` in its cells), `StatusDot` for a state (a dot and the label in ink, never a filled pill), `EmptyState` when nothing shows, `SearchField`, `Field` for a form's field (its label, a red asterisk when required, "(optional)" when not, a hint, an error; every field has a placeholder),
-  `CodeBlock` for JSON; health-registry's and the base `delivery` and `home` views are
+  `CodeBlock` for JSON; health-registry's and the base `delivery` view are
   examples. Also `Badge` (a small quiet tag, or tinted), `Chip`, `Button`, `Switch`, `ContextCards` (a card per
   source: title, figure, text, a chip that opens it), `ToolChips`, `LoadingState`. shadcn's in `src/components/ui/` (in the same
   colours), and the pieces in `src/components/pikit/` (`ErrorNote`, `MessageView`). Use the tokens'

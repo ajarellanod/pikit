@@ -1,18 +1,20 @@
 /**
  * The Settings dialog, opened from the sidebar's foot: a large modal with a search box and the
- * sections, grouped, on the left, and the chosen section's rows on the right. The first section is the
- * dashboard's own, General (its theme, its sounds: this browser's, `localStorage`, nothing of the
- * service's); then one per installed component that brings one (`src/settings/<component>/`,
+ * sections, grouped, on the left, and the chosen section's rows on the right. The first sections are the
+ * dashboard's own: General (its theme, its sounds: this browser's, `localStorage`, nothing of the
+ * service's) and App (what the App is made of, read only: `app-settings.tsx`); then one per installed
+ * component that brings one (`src/settings/<component>/`,
  * `lib/settings.ts`), shown when the App provides what it requires. A change applies to the next run.
  * A section may open another (`useOpenSettingsSection`); the shell opens one by its id (`section`: the
  * page's `?settings=<id>`). Its frame, navigation and rows are the shared `settings-shell` and
  * `settings-rows`.
  */
 
-import { Computer, HalfMoon, Settings, SunLight } from "iconoir-react";
+import { Computer, Cube, HalfMoon, Settings, SunLight } from "iconoir-react";
 import { Dialog } from "radix-ui";
 import { useMemo } from "react";
 import { Switch } from "@/components/bui/Switch";
+import { AppSettings } from "@/components/pikit/app-settings";
 import { Segmented, SettingsHeading, SettingsRow } from "@/components/pikit/settings-rows";
 import { SETTINGS_FRAME_STYLE, type SettingsEntry, SettingsPanels, settingsFrameClass, useSettingsChoice } from "@/components/pikit/settings-shell";
 import type { ApiApp } from "@/lib/api";
@@ -45,14 +47,23 @@ function GeneralSettings() {
   );
 }
 
-/** The dashboard's own section: first, kept in this browser. */
+/** The dashboard's own sections: first General, kept in this browser; then App, what the App is made of. */
 const GENERAL: SettingsSectionDefinition = { id: "general", title: "General", icon: Settings, group: "Dashboard", order: 0, keywords: ["theme", "dark", "light", "sounds", "appearance"], component: GeneralSettings };
+const APP: SettingsSectionDefinition = {
+  id: "app",
+  title: "App",
+  icon: Cube,
+  group: "Dashboard",
+  order: 1,
+  keywords: ["composition", "components", "agents", "tools", "capabilities", "wiring", "pipelines", "routes", "config", "cloudflare", "server"],
+  component: AppSettings,
+};
 
 /** A section as the shared navigation lists it: its group by `groupOf`. */
 const entryOf = (section: SettingsSectionDefinition): SettingsSectionDefinition & SettingsEntry => ({ ...section, group: groupOf(section) });
 
 export function SettingsDialog({ app, open, onOpenChange, section }: { app: ApiApp; open: boolean; onOpenChange: (open: boolean) => void; section?: string }) {
-  const all = useMemo(() => [GENERAL, ...visibleSettings(app)].map(entryOf), [app]);
+  const all = useMemo(() => [GENERAL, APP, ...visibleSettings(app)].map(entryOf), [app]);
   const choice = useSettingsChoice(all, open, section);
   const Section = choice.current?.component;
 

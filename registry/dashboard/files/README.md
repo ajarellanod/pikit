@@ -2,13 +2,14 @@
 
 The operator's view of this pikit service (SPEC §5): its conversations, the most recently active
 first, one of them live (the transcript, the answer being written, the tools running), abort and
-reset, the cost, and what the App is made of (**Home**). It is yours: a shadcn/ui project (Vite, React, Tailwind
-v4) whose source you change like any other file of the project.
+reset, the cost, the answers that did not reach their person (**Delivery**), and what the App is made
+of (Settings' **App**). It is yours: a shadcn/ui project (Vite, React, Tailwind v4) whose source you
+change like any other file of the project.
 
 It looks like [Beautiful UI](https://www.beautifului.dev/harness)'s harness: a sidebar (the App's menu
 with **Settings**, the theme, the interaction sounds and sign out; **New chat**; **Conversations**; the views,
-**Home** first; the 20 latest conversations by their names, searchable, then **View all** when there are
-more), the conversations you opened as tabs (New chat's too: each one
+each with a dot on its icon when it has something to see (`badge`); the 20 latest conversations by their
+names, searchable, then **View all** when there are more), the conversations you opened as tabs (New chat's too: each one
 closes, and closing the last leaves a fresh New chat), a chat (the transcript, the answer streaming in as
 markdown through [Comark](https://comark.dev), the model's thinking and tool calls folded together
 between two texts, a message shown the moment it is sent) and its composer, and a **Context** panel.
@@ -34,9 +35,18 @@ kept in this browser.
   actions are buttons, never commands: stop (the send button), reset (the menu), images and web
   search (**+**), the assistant (the picker), the views (the sidebar). On New chat a command says it
   runs in a conversation.
-- **A conversation's top bar** has no figures: the **Context** button and the **…** menu (Reset,
-  confirmed). **Context** shows the images sent in the conversation and its sources (what its web
-  searches and fetches returned: title, address, snippet), as far as its transcript is read here.
+- **A conversation's top bar** has no figures: an info button (who it is with: the channel, the name
+  and the detail, the ids to copy, a link to where its channel shows them), the **Context** button
+  and the **…** menu (Reset, confirmed). **Context** shows the images sent in the conversation and its
+  sources (what its web searches and fetches returned: title, address, snippet), as far as its
+  transcript is read here. An answer of the conversation the outbound queue gave up, or holds stuck,
+  is a quiet note in the thread (`Not delivered: <why>`), with a link to Delivery.
+- **Delivery** (with an `outbound.queue`, on a server): only the problems, per answer, never per
+  piece: the answers stuck (retrying, or waiting over a minute), those not delivered (given up: why
+  and when), and, folded, those possibly delivered twice; each row opens its conversation. With none,
+  "Every answer was delivered", with how many were as far as the queue's receipts go (it prunes them).
+  Its dot in the sidebar: an answer stuck, or one given up within a day. There is no retry button:
+  the queue retries on its own.
 - **Tasks**: Beautiful UI's Tasks panel (`TaskRows`) is where durable tasks and subagents will show
   (pi-durable's `taskGraph()`), once pikit builds them (`features/subagents.md`); a run's tool calls
   are the chips in the chat.
@@ -53,6 +63,11 @@ switches and selects save at once; a text or a prompt with its own Save.
 
 - **General** (Dashboard) is the dashboard's own: the theme and the interaction sounds, kept in this
   browser. Nothing of the service changes.
+- **App** (Dashboard), the dashboard's own too, read only: what the App is made of. Where it runs and
+  talks, in one line; its agents (the steward marked), each with its model and tools; its components
+  by what they are for, each opening under its row with what it provides and to whom, what it needs
+  and from whom, and its config (redacted); and, folded, the wiring (choices of providers, what
+  nothing provides, the pipelines' stages, every route and command with its provider).
 - **One section per installed component that brings one** (`src/settings/<component>/`, installed
   with it by `pikit add`), shown when the App provides what it requires: router-basic's **Agent**
   (which agent answers by default, and that agent's system prompt, model and tools). Their values
@@ -131,7 +146,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/components/pikit/` | pieces the views share: a transcript (`turnsOf`, `Reply`, `UserBubble`, `MessageView`), an error, the sign-in |
 | `src/components/pikit/conversation.tsx`, `context-panel.tsx`, `tab-bar.tsx` | a conversation's view over a `ConversationSource` (its transcript, live events, send, stop: `ConversationView`, `useLive`, `useTranscript`, `useSentMessages`), the Context panel, the tabs: by props only, shared with channel-web's chat page |
 | `src/components/pikit/chat-actions.tsx` | a conversation's menu (Rename, Archive or Restore, Delete) and its dialogs, for the sidebar's rows, the Conversations rows and the conversation's header |
-| `src/components/pikit/party.tsx` | who a conversation is with (`ApiConversation.party`, else made from its key): `PartyChip` in its header (the channel's icon, the name, the detail) opening its Details (the ids, each with a copy button, a link to where its channel shows them), and `ChannelIcon` before each row of the sidebar and the Conversations page; `CHANNELS` maps a channel's kind to its icon and label |
+| `src/components/pikit/party.tsx` | who a conversation is with (`ApiConversation.party`, else made from its key): `PartyChip`, an info button in its header (who it is in its label and tooltip), opening its Details (the channel, the name, the detail, the ids, each with a copy button, a link to where its channel shows them), and `ChannelIcon` before each row of the sidebar and the Conversations page; `CHANNELS` maps a channel's kind to its icon and label |
 | `src/index.css` | the one stylesheet: Beautiful UI's tokens (light and dark), shadcn's variables mapped onto them |
 | `src/lib/api.ts` | calls to the admin API (the session), `signIn` / `signOut`, `useApi`, live events (`follow`) |
 | `src/lib/activity.ts` | whether you are there: `useActive`, `usePolling`, `every` (slower on Cloudflare) |
@@ -140,10 +155,12 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/settings/<component>/index.tsx` | a component's section of the Settings dialog (below) |
 | `src/lib/settings.ts` | how sections are found and when they show (`defineSettings`), a component's settings (`useSettings`) |
 | `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General, and `SchemaSettings`; `settings.tsx` re-exports the rows and controls |
+| `src/components/pikit/app-settings.tsx`, `src/lib/composition.ts` | Settings' App section: where the App runs and talks, its agents, its components by what they are for, each one's details under its row, and the wiring, folded; worked out in `composition.ts` |
 | `src/components/pikit/settings-shell.tsx`, `settings-rows.tsx` | a settings dialog's frame and navigation (`SettingsPanels`, `useSettingsChoice`), its rows and controls (`SettingsHeading`, `SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`): by props only, shared with channel-web's chat page |
 | `src/lib/router.tsx` | the pages under `/admin` |
 | `src/views/conversations/` | New chat (`new-chat.tsx`), Conversations (`list.tsx`, `/conversations/all`: every conversation, a page at a time, a search by title or key, the archived ones), a conversation (the shared view over the admin API, `source.ts`, with its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names) |
-| `src/views/home/` | Home: where the App runs and talks, its agents, its components by what they are for (`overview.ts`), one at the side (`panel.tsx`: what it provides and needs, its config), and the wiring, folded (`wiring.tsx`) |
+| `src/views/delivery/` | Delivery: the answers stuck, not delivered, possibly twice; its sidebar dot (`badge`) |
+| `src/lib/delivery.ts`, `delivery-feed.ts` | the outbound queue per answer (`problemsOf`: stuck, not delivered, possibly twice, how many delivered), and the queue read once for the whole dashboard (`useDelivery`: the view, its dot, a conversation's notes) |
 | `src/lib/chats.tsx` | the conversations the sidebar lists (the 20 latest), the tabs, the titles (the API's: a key's, shared by the conversations a reset left behind), the commands' notes (`useChats`, `agentsOf`) |
 | `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, its commands, the views, `newChat`, a conversation's menu (`conversationActions`), `TabActions`, `SidePanel` |
 | `src/lib/transcript.ts`, `sources.ts` | a conversation's JSON (`TranscriptEntry`, `LiveEvent`) and its live state (`reduce`); what the Context panel reads of a transcript |
@@ -153,14 +170,14 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 
 `src/lib/` is two shadcn items: `@pikit/lib-ui` (`activity`, `format`, `messages`, `names`, `sounds`,
 `sources`, `theme`, `transcript`: no admin API) and `@pikit/admin-client` (`api`, `admin-api`, `chats`,
-`settings`, `views`, `router`, `shell`). Beautiful UI's primitives and the pieces `message`,
+`composition`, `delivery`, `delivery-feed`, `settings`, `views`, `router`, `shell`). Beautiful UI's primitives and the pieces `message`,
 `error-note`, `markdown`, `conversation`, `context-panel` and `tab-bar` import only `lib-ui` and take
 their data by props, so another UI project can carry them.
 
 ## Add a view
 
 A view is a folder of `src/views/`, found when the dashboard is built. **Prefer a new view to
-editing a base one** (`conversations`, `home`, `delivery`): `pikit upgrade` merges the kit's
+editing a base one** (`conversations`, `delivery`): `pikit upgrade` merges the kit's
 changes into the base views, and a file you did not touch never conflicts. To show something more
 about conversations, add a view of your own (`src/views/my-conversations/`) that reuses the base
 pieces they export (`useLive` from `components/pikit/conversation.tsx` over `adminSource(id)` from
@@ -184,10 +201,11 @@ export default defineView({
 });
 ```
 
-A view appears in the sidebar with its icon (iconoir, MIT; never a paid set) and its page in the main
-pane, padded and scrolling (`fill: true` on a page: it fills the pane and scrolls itself, as the chat
+A view appears in the sidebar with its icon (iconoir, MIT; never a paid set), with a dot on it while
+its `badge` says so (a component reading its own data and rendering `SidebarDot`, as Delivery's does),
+and its page in the main pane, padded and scrolling (`fill: true` on a page: it fills the pane and scrolls itself, as the chat
 does). Build it from `src/components/bui/` (Beautiful UI's look) or `src/components/ui/` (shadcn's,
-in the same colours). An operator's page as the base views are (`delivery`, `home`): `Page`
+in the same colours). An operator's page as the base view `delivery` is: `Page`
 and `Section` (`fill: true`), `FilterChips`, a `RecordsTable` (paged with `paging`: its footer and `Pagination`), `StatusDot`, `EmptyState`, `CodeBlock`; a form's fields in `Field` (label, required or optional mark, hint, error).
 
 Its data comes from admin routes its component registers through `http.route` (`GET

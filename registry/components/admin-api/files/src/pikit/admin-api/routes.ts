@@ -23,6 +23,8 @@
  * - Live events are server-sent events over a plain streaming response, a comment every
  *   `heartbeatMs`; the stream ends when the client goes away, the backend's events end, or the server
  *   stops. A browser's `EventSource` cannot send the token: the dashboard reads it with `fetch`.
+ * - Delivery's pieces and receipts name the conversation each answers (`conversationId`), read from
+ *   its answer key (`conversationOfAnswer`), so the dashboard opens it.
  */
 
 import type { AppContext, Handle, Pikit } from "@pikit/core";
@@ -197,6 +199,17 @@ const facts = (message: { attachments?: unknown[]; webSearch?: boolean }) => ({
 
 /** The request id of an operator's message: the client's, or a new one. */
 const requestIdOf = (given: string | undefined): string => given ?? `${DASHBOARD_REQUEST_PREFIX}${crypto.randomUUID()}`;
+
+/**
+ * The conversation a run's answer key (`answerKey`: `${conversationId}:${requestId}`) is for, as this
+ * API names it; `undefined` for a key of another shape. The runtime's ids hold no `:` (pi-durable mints
+ * them), and the queue is read only where the API's ids are the runtime's: on a server (on Cloudflare
+ * each conversation's queue is in its own object, which this API does not list).
+ */
+export function conversationOfAnswer(key: string): string | undefined {
+  const colon = key.indexOf(":");
+  return colon > 0 && colon < key.length - 1 ? key.slice(0, colon) : undefined;
+}
 
 /**
  * `events` as server-sent events, a comment every `heartbeatMs`; cancelling the response stops them.
@@ -405,6 +418,12 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     }
   };
 
+  /** A piece or a receipt with the conversation its answer is for, when its key names one. */
+  const withConversation = <T extends { idempotencyKey: string }>(item: T): T & { conversationId?: string } => {
+    const conversationId = conversationOfAnswer(item.idempotencyKey);
+    return conversationId === undefined ? item : { ...item, conversationId };
+  };
+
   api("GET /admin/api/delivery/pending", async (request) => {
     const outbound = options.queue();
     if (outbound === undefined) return failure(404, "not_installed", options.noQueue);
@@ -412,7 +431,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     if ("problem" in page) return failure(400, "invalid_request", page.problem);
     const result = await paged(page.cursor, () => outbound.pending(page));
     if (result instanceof Response) return result;
-    return json<ApiPage<ApiPendingPiece>>(200, result as ApiPage<ApiPendingPiece>);
+    return json<ApiPage<ApiPendingPiece>>(200, { ...result, items: result.items.map(withConversation) });
   });
 
   api("GET /admin/api/delivery/receipts", async (request) => {
@@ -423,7 +442,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     if ("problem" in page) return failure(400, "invalid_request", page.problem);
     const read = await paged(after, () => outbound.receipts.read(after, page.limit ?? 100));
     if (read instanceof Response) return read;
-    const items = read.items.map(({ cursor, fact }) => ({ cursor, ...fact }) as ApiReceipt);
+    const items = read.items.map(({ cursor, fact }): ApiReceipt => ({ cursor, ...withConversation(fact) }));
     const next = items.at(-1)?.cursor ?? after;
     return json<ApiReceiptsPage>(200, { items, gap: read.gap, ...(next !== undefined && { next }) });
   });

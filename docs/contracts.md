@@ -46,7 +46,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
-| `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
+| `health` | single | health-registry | channel-telegram?, outbound-durable?, provider-failover?, server-bun? | `createHealthConformance` |
 | `email.send` | single | email-resend, email-ses | channel-web? | `createEmailSenderConformance` |
 | `model.complete` | single | runtime-pi | memory-summaries, admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |

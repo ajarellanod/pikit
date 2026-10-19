@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { NavArrowDown, NavArrowRight, Search, Settings, SidebarCollapse, Xmark } from "iconoir-react";
 import { ActionsMenu, type ActionsMenuItem, MenuPopover } from "./ActionsMenu";
+import { type PillTone, TONE_DOT } from "./FilterTable";
 import GlideMenu from "./GlideMenu";
 
 export { MenuRow, MenuSeparator } from "./ActionsMenu";
@@ -8,7 +9,8 @@ export { MenuRow, MenuSeparator } from "./ActionsMenu";
 /* ---------------------------------------------------------
  * SIDEBAR NAV
  * Beautiful UI's harness sidebar, fed by the app: the workspace
- * (its mark and name), primary navigation, a searchable list of
+ * (its mark and name), primary navigation (an item's icon may
+ * carry a dot, `SidebarDot`: its page has something to see), a searchable list of
  * the most recent chats (at most `SIDEBAR_CHATS`, each with its
  * actions menu, `ActionsMenu`; "View all" below them when there
  * are more: the app's page of every chat, archived ones too), a menu
@@ -24,6 +26,8 @@ export type SidebarItem = {
   icon: ReactNode;
   /** a short figure at the row's end */
   count?: string;
+  /** on the icon's corner, collapsed too: a `SidebarDot` when the page has something to see */
+  badge?: ReactNode;
   active?: boolean;
   /** the link's target, for a new tab; a plain click calls `onSelect` */
   href?: string;
@@ -78,8 +82,17 @@ function GlideGroup({ children }: { children: ReactNode }) {
   );
 }
 
+/** A small dot in a state's colour, for an item's `badge`; `label` says why, to a screen reader and in a tooltip. */
+export function SidebarDot({ label, tone = "red" }: { label: string; tone?: PillTone }) {
+  return (
+    <span title={label} className="block size-2 rounded-full ring-2 ring-canvas" style={{ background: TONE_DOT[tone] }}>
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 function RailButton({ item }: { item: SidebarItem }) {
-  const { icon, label, active = false, count, href, onSelect } = item;
+  const { icon, label, active = false, count, badge, href, onSelect } = item;
   return (
     <a
       data-row
@@ -92,6 +105,8 @@ function RailButton({ item }: { item: SidebarItem }) {
       <span className={`flex size-5 shrink-0 items-center justify-center [&_svg]:size-[18px] ${active ? "text-ink" : "text-ink-2"}`}>{icon}</span>
       <span className={`sidebar-copy ml-1.5 min-w-0 flex-1 truncate text-[14px] font-medium ${active ? "text-ink" : "text-ink-2"}`}>{label}</span>
       {count && <span className="sidebar-copy mr-2 shrink-0 text-[12px] font-medium tabular-nums text-ink-3">{count}</span>}
+      {/* after the label (read after it), drawn on the icon's corner */}
+      {badge !== undefined && <span className="absolute top-1 left-[22px]">{badge}</span>}
     </a>
   );
 }

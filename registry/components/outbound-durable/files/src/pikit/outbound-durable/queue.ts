@@ -52,6 +52,8 @@ export interface QueueOptions {
   wakeups: Wakeups;
   /** The app's context, for the requests made outside a run (an enqueue, an attach). */
   ctx: AppContext;
+  /** Reports to `health` when a run ends (`health.ts`); when the report may change with no run. Never throws. */
+  checkHealth?(now: number): Promise<number | undefined>;
 }
 
 interface InFlight {
@@ -265,6 +267,9 @@ export function createQueue(options: QueueOptions) {
         next = clock.now() + BACKOFF_MS[0];
       }
       if (stopped) return;
+      // Health may change with no run (a piece reaching the minute): the next run comes by then.
+      const changes = await options.checkHealth?.(clock.now());
+      if (changes !== undefined) next = next === undefined ? changes : Math.min(next, changes);
       if (next !== undefined) await wakeups.at(WAKEUP, next, ctx);
     } finally {
       running = undefined;

@@ -13,7 +13,9 @@ import { capitalizeFirst } from "../registry/dashboard/files/src/lib/format.ts";
 import { assistantName } from "../registry/dashboard/files/src/lib/names.ts";
 import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/lib/sources.ts";
 import { INITIAL, type LiveState, reduce } from "../registry/dashboard/files/src/lib/transcript.ts";
-import { groupsOf, providersOf, summaryOf, usersOf, wiringOf } from "../registry/dashboard/files/src/views/home/overview.ts";
+import type { ApiPendingPiece, ApiReceipt } from "../registry/dashboard/files/src/lib/admin-api.ts";
+import { groupsOf, placeOf, providersOf, summaryOf, usersOf, wiringOf } from "../registry/dashboard/files/src/lib/composition.ts";
+import { EMPTY_TALLY, needsAttention, problemsOf, RECENT_MS, STUCK_AFTER_MS, tallyReceipts } from "../registry/dashboard/files/src/lib/delivery.ts";
 import { generated, OUTPUT } from "./ui-registry.ts";
 
 const REPO = join(import.meta.dir, "..");
@@ -241,7 +243,7 @@ test("an answer that ended between two snapshots (a reconnect) stays as last see
   expect(streamed.entries).toEqual([{ id: "12", kind: "message", messages: [partial("Hello")] }]);
 });
 
-test("Home groups the components by what they are for, sums the App up in a line, and shows only the wiring worth a look", () => {
+test("Settings' App section groups the components by what they are for, sums the App up in a line, and shows only the wiring worth a look", () => {
   const component = (name: string, provides: string[] = [], requires: string[] = [], optional: string[] = []) => ({ name, provides, requires, optional });
   const app = {
     version: 1,
@@ -277,6 +279,7 @@ test("Home groups the components by what they are for, sums the App up in a line
     ["Dashboard and admin", ["admin-api"]],
     ["Other", ["mystery"]],
   ]);
+  expect(placeOf(app.target)).toBe("Cloudflare");
   expect(summaryOf(app, 1)).toBe("Talks on Telegram and this dashboard, with 1 agent and 2 tools: 9 components in all.");
   expect(summaryOf(app, undefined)).toBe("Talks on Telegram and this dashboard, with 2 tools: 9 components in all.");
 
@@ -309,4 +312,84 @@ test("a table's states and tags read with a capital first letter, the rest as wr
   expect(capitalizeFirst("")).toBe("");
   const element = { type: "span" };
   expect(capitalizeFirst(element)).toBe(element);
+});
+
+test("Delivery lists answers, not pieces, and only those with a problem: stuck, not delivered, possibly twice; the rest are counted", () => {
+  const now = 10 * 60_000;
+  const piece = (key: string, index: number, change: Partial<ApiPendingPiece> = {}): ApiPendingPiece => ({
+    idempotencyKey: key,
+    conversationId: key.slice(0, key.indexOf(":")),
+    index,
+    channel: "telegram",
+    conversationKey: `telegram:${key.split(":")[0]}`,
+    state: "queued",
+    attempts: 0,
+    possibleDuplicate: false,
+    storedAt: now - 1_000,
+    ...change,
+  });
+  let cursor = 0;
+  const receipt = (key: string, index: number, outcome: ApiReceipt["outcome"], at: number): ApiReceipt => ({
+    cursor: String(++cursor),
+    idempotencyKey: key,
+    conversationId: key.slice(0, key.indexOf(":")),
+    index,
+    channel: "telegram",
+    conversationKey: `telegram:${key.split(":")[0]}`,
+    attempts: outcome.kind === "abandoned" ? 3 : 1,
+    outcome,
+    at,
+  });
+  const delivered = (possibleDuplicate = false) => ({ kind: "delivered" as const, platformMessageId: "m", possibleDuplicate });
+
+  const pending = [
+    // On its way: stored a second ago, never tried.
+    piece("1:a", 0),
+    // Retrying: stuck at once, whatever its age; its two pieces are one answer.
+    piece("2:b", 0, { state: "retrying", attempts: 2, nextAttemptAt: now + 30_000, lastError: "transient: 502", storedAt: now - 20_000 }),
+    piece("2:b", 1, { storedAt: now - 20_000 }),
+    // Waiting longer than a minute, never tried (no transport): stuck.
+    piece("3:c", 0, { storedAt: now - STUCK_AFTER_MS - 1 }),
+    // Its first piece was delivered, the second waits: not counted as delivered.
+    piece("4:d", 1),
+  ];
+  // Fed in two reads, as the feed is read on from its cursor.
+  let tally = tallyReceipts(EMPTY_TALLY, [receipt("5:e", 0, delivered(), 1_000), receipt("5:e", 1, delivered(), 1_100), receipt("4:d", 0, delivered(), 2_000)]);
+  const before = tally;
+  tally = tallyReceipts(tally, [
+    receipt("6:f", 0, delivered(), 3_000),
+    receipt("6:f", 1, { kind: "abandoned", reason: "permanent: bot was blocked by the user" }, 3_100),
+    receipt("7:g", 0, { kind: "abandoned", reason: "not delivered within 24 hours" }, 4_000),
+    receipt("8:h", 0, delivered(true), 5_000),
+    receipt("6:f", 2, { kind: "abandoned", reason: "permanent: bot was blocked by the user" }, 3_200),
+  ]);
+  expect(before.delivered.size).toBe(2);
+  expect(tallyReceipts(tally, [])).toBe(tally);
+
+  const problems = problemsOf(pending, tally, now);
+  expect(problems.stuck.map((answer) => [answer.key, answer.retrying, answer.pieces])).toEqual([
+    ["3:c", false, 1],
+    ["2:b", true, 2],
+  ]);
+  expect(problems.stuck[1]).toMatchObject({ conversationId: "2", attempts: 2, lastError: "transient: 502", nextAttemptAt: now + 30_000, since: now - 20_000 });
+  expect(problems.onTheirWay).toBe(2);
+  // The latest given up first, with why, when, and how much of it got through.
+  expect(problems.undelivered.map((answer) => [answer.key, answer.reason, answer.abandoned, answer.delivered])).toEqual([
+    ["7:g", "not delivered within 24 hours", 1, 0],
+    ["6:f", "permanent: bot was blocked by the user", 2, 1],
+  ]);
+  expect(problems.undelivered[1]?.at).toBe(3_100);
+  expect(problems.duplicates.map((answer) => [answer.key, answer.pieces])).toEqual([["8:h", 1]]);
+  // Delivered whole: 5:e and 8:h; 4:d still waits, 6:f was cut.
+  expect(problems.delivered).toBe(2);
+  expect(problems.since).toBe(1_000);
+
+  expect(needsAttention(problems, now)).toBe(true);
+  // A day after the last one was given up, with nothing stuck, the dot goes; the page still lists it.
+  const later = 4_000 + RECENT_MS + 1;
+  const quiet = problemsOf([piece("1:a", 0, { storedAt: later - 1_000 })], tally, later);
+  expect(quiet.stuck).toEqual([]);
+  expect(quiet.undelivered).toHaveLength(2);
+  expect(needsAttention(quiet, later)).toBe(false);
+  expect(needsAttention(problemsOf([], EMPTY_TALLY, now), now)).toBe(false);
 });

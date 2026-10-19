@@ -47,8 +47,8 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | `POST /admin/api/conversations/:id/rename` | `{ title }`: the operator's title, cleaned (`cleanTitle`), as `/name` sets it, on any conversation (current or not) → `200`, the conversation titled; nothing left once cleaned `400` |
 | `GET /admin/api/commands` | `{ items: [{ name, description, argumentHint? }] }`: the App's slash commands (`agent.command`), by name |
 | `POST /admin/api/conversations/:id/commands/:name` | `{ args? }`: the command run in the conversation → `200 { text? }`, a note for the operator |
-| `GET /admin/api/delivery/pending?limit&cursor` | what is not delivered yet (with an `outbound.queue`, on a server) |
-| `GET /admin/api/delivery/receipts?after&limit` | what settled (with an `outbound.queue`, on a server) |
+| `GET /admin/api/delivery/pending?limit&cursor` | what is not delivered yet (with an `outbound.queue`, on a server), each piece with the conversation it answers (`conversationId`, from its answer key) |
+| `GET /admin/api/delivery/receipts?after&limit` | what settled (with an `outbound.queue`, on a server), each with its `conversationId` likewise |
 
 - `limit` is 1 to 500 (50 when absent); `cursor` is the `next` of the previous page. Either one wrong
   is `400`.

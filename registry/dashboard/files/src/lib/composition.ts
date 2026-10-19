@@ -1,11 +1,12 @@
 /**
- * What Home says of the App's composition (`ApiApp`), worked out here with no imports but types, so the
- * kit's tests read it as it is: its components by what they are for, the line that sums it up, and the
- * wiring worth a look (a capability with a choice of providers, a keyed one, one nobody provides, the
+ * What the Settings dialog's App section (`components/pikit/app-settings.tsx`) says of the App's
+ * composition (`ApiApp`), worked out here with no imports but types, so the kit's tests read it as it
+ * is: where it runs, its components by what they are for, the line that sums it up, and the wiring
+ * worth a look (a capability with a choice of providers, a keyed one, one nobody provides, the
  * pipelines' stages).
  */
 
-import type { ApiApp } from "../../lib/admin-api.ts";
+import type { ApiApp } from "./admin-api.ts";
 
 export type Component = ApiApp["components"][number];
 

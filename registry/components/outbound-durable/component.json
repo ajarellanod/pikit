@@ -16,7 +16,9 @@
     ]
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "health"
+    ]
   },
   "provides": [
     "outbound.queue"
