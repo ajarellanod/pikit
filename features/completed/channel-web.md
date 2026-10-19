@@ -84,8 +84,8 @@ runs (`"all"` or none: a server, everything local; `"one"`: a Durable Object), a
 settings-store do.
 
 ### Accounts: better-auth
-- `better-auth` pinned (1.7.7), imported from `better-auth/minimal` (no Kysely). Reference clone:
-  `/Users/alex/Projects/Personal/better-auth` at v1.7.7.
+- `better-auth` pinned (1.7.7), imported from `better-auth/minimal` (no Kysely). Reference:
+  `better-auth/better-auth` at v1.7.7.
 - **Its database** is a custom adapter over `storage.sql` (`createAdapterFactory`): tables
   `channel_web_user`, `channel_web_session`, `channel_web_account`, `channel_web_verification` (model
   names mapped), created in `start` / at first use with `CREATE TABLE IF NOT EXISTS` in the SQL subset
