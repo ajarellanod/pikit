@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
-import { agent, BUNFIG, introduction, NEEDS_DASHBOARD, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterExtensions, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
+import { agent, BUNFIG, gitignore, introduction, NEEDS_DASHBOARD, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterExtensions, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
 
 test("a project is ready for a registry of its own and a dashboard: tsc and bun test leave registry/ and src/dashboard/ out, and its lib has ES2023", () => {
   const config = JSON.parse(tsconfig()) as { compilerOptions: { lib: string[] }; exclude: string[] };
@@ -108,6 +108,18 @@ test("the README says what `pikit up` does by the installed deployment, never by
   expect(none).toContain("there is none");
   expect(upText(["channel-http"])).toBeUndefined();
   expect(upText(["deployment-docker"])).toBe("run it in Docker");
+
+  // On durable, `pikit dev` is the deployment's too: wrangler dev on Cloudflare, celld dev with celld.
+  const celld = readme("a", ["deployment-celld"], "durable");
+  expect(celld).toContain("pikit up          # or deploy it to your celld fleet (deployment-celld): then pikit status, logs");
+  expect(celld).toContain("pikit dev         # run it here on one celld node (celld dev), reloading on change");
+  expect(readme("a", ["deployment-cloudflare"], "durable")).toContain("pikit dev         # run it here in workerd (wrangler dev), reloading on change");
+});
+
+test("a durable project ignores what wrangler and celld keep locally, and the config a celld deploy derives with the secrets in it", () => {
+  const durable = gitignore("durable");
+  for (const line of [".dev.vars*", ".wrangler/", ".celld/", "wrangler.celld.jsonc"]) expect(durable.split("\n")).toContain(line);
+  expect(gitignore("server")).not.toContain("celld");
 });
 
 test("the README says where pikit comes from and where the kit is, as pikit new writes it", () => {

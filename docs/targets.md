@@ -8,22 +8,22 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | | `server` | `durable` |
 |---|---|---|
 | Model | one long-lived process | one actor (Durable Object) per conversation, evicted between events |
-| Provider today | `deployment-docker` | `deployment-cloudflare` |
+| Provider today | `deployment-docker` | `deployment-cloudflare`; `deployment-celld` (your machines, celld) |
 | Apps in `pikit.config.ts` | one (default export) | two: the object's (default) and the Worker's (`worker`) |
 | Requests arrive at | `server-bun` (Hono on `Bun.serve`, port 3000) | the Worker (deployment-cloudflare's host), then RPC to an object |
 | `storage.sql`, `storage.sqlite` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
 | `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `actors-do`: RPC to `idFromName(key)` (`scope` `"one"`) |
 | `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `actors-do`: rows over the object's one alarm, in slices |
 | `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-workers`: the Worker's `env` |
-| `execution` | `execution-local`: the machine's files and shell | `execution-do`: files in the object's SQL, a simulated shell |
+| `execution` | `execution-local`: the machine's files and shell; or `execution-gondolin`: a Linux micro-VM per conversation (QEMU), its files on the host | `execution-do`: files in the object's SQL, a simulated shell; or `execution-remote`: a real shell in a sandbox of a host running `execution-serve` (a server, e.g. with execution-gondolin) |
 | Telegram | `channel-telegram` (long polling) | `channel-telegram-webhook` (two halves) |
-| HTTP API channel | `channel-http` | none yet |
-| Model logins | `credentials-file` (OAuth or keys) | API keys only (no `model.credentials` provider) |
+| HTTP API channel | `channel-http` | `channel-http` (two halves: routes in the Worker, the wait in the object) |
+| Model logins | `credentials-file` (OAuth or keys) | `credentials-do` (OAuth or keys, in one object; a login made on your machine, uploaded by `pikit configure --login`), or API keys as Worker secrets |
 
 This page does not list every component's targets: a component says them itself. Its
 `component.json`'s `targets` is where it runs (`pikit add` refuses another), and its README's
 **Targets** line why not elsewhere, and whether that is for good (channel-telegram's long polling
-needs a process) or not built yet (channel-http has no Worker half). A component on both targets
+needs a process) or not built yet. A component on both targets
 says how it differs, if it does, in its README ("On each target").
 
 `registry validate` refuses `node:*` or `bun:*` imports in the shipped files of a component that
@@ -71,8 +71,9 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
   The object is never stopped: it is evicted without warning (K6). Its RPC methods are `health()`,
   `deliver(type, key, message)`, `call(type, key, message)`, `stream(type, key, message)` and `alarm()`.
 - **Halves.** A component that must be in both Apps has a Worker half (`apps.worker` in
-  `component.json`). channel-telegram-webhook (route in the Worker, handler in the object) and admin-api
-  (routes in the Worker, answers in the objects) have two; actors-do, secrets-workers and
+  `component.json`). channel-telegram-webhook (route in the Worker, handler in the object), channel-http
+  (routes in the Worker, admission and the wait for the answer in the object, inside the call's RPC)
+  and admin-api (routes in the Worker, answers in the objects) have two; actors-do, secrets-workers and
   admin-auth-token go in both as they are. See [concepts.md](concepts.md#the-two-apps-on-cloudflare).
 - **actor.mailbox / actor.inbox.** In the Worker, `send` and `call` are RPCs to the object
   `idFromName(key)`; in an object, its own key is a local call. A handler resolves once the message is
@@ -111,15 +112,15 @@ A `deployment-*` component runs the App instead of running in it: no default exp
 [deployment-module.ts](../packages/cli/src/project/deployment-module.ts)); `dev` and `exec` are
 optional exports. A project has exactly one.
 
-| Function | deployment-docker | deployment-cloudflare |
-|---|---|---|
-| `up` | `beforeDeploy` hooks, `docker compose up --detach --build --wait` | login check, `beforeDeploy` hooks, `wrangler deploy --tag migrations:<last tag> --secrets-file` (`.env`), wait until `/health` answers from the new version (3 min), roll back if it says its App does not start or never answers (not across a Durable Object migration), then `afterDeploy` hooks |
-| `down` | `docker compose down` (the volume stays) | `wrangler delete` (deletes every object's data; only at a terminal) |
-| `restart` | `docker compose restart` | not exported |
-| `logs` | `docker compose logs [--follow] [--tail N]` | `wrangler tail` (always follows) |
-| `status` | containers, `/health`, `/ready` | `wrangler deployments list`, `/health` |
-| `dev` | not exported (the CLI runs `main.ts --watch`) | `wrangler dev` |
-| `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | not exported |
+| Function | deployment-docker | deployment-cloudflare | deployment-celld |
+|---|---|---|---|
+| `up` | `beforeDeploy` hooks, `docker compose up --detach --build --wait` | login check, `beforeDeploy` hooks, `wrangler deploy --tag migrations:<last tag> --secrets-file` (`.env`), wait until `/health` answers from the new version (3 min), roll back if it says its App does not start or never answers (not across a Durable Object migration), then `afterDeploy` hooks | `beforeDeploy` hooks, `build.command`, `celld deploy` of the config derived from `wrangler.jsonc` (`.env`'s secrets as `vars`), wait until `/health` answers the new `PIKIT_DEPLOYMENT` (3 min), roll back by restoring the bucket's previous pointer (S3-compatible buckets; not across a class change), then `afterDeploy` hooks |
+| `down` | `docker compose down` (the volume stays) | `wrangler delete` (deletes every object's data; only at a terminal) | `systemctl stop celld` on each node over SSH, one at a time (deletes nothing) |
+| `restart` | `docker compose restart` | not exported | not exported |
+| `logs` | `docker compose logs [--follow] [--tail N]` | `wrangler tail` (always follows) | `journalctl -u celld` on every node over SSH (`PIKIT_CELLD_SSH`) |
+| `status` | containers, `/health`, `/ready` | `wrangler deployments list`, `/health` | the last deploy from this machine, `celld diagnose --read-only`, `/health` |
+| `dev` | not exported (the CLI runs `main.ts --watch`) | `wrangler dev` | `celld dev` (one node, a local store) |
+| `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | not exported | not exported |
 
 Every UI project (a folder of `src/` with a `package.json`: the dashboard's `src/dashboard/`, a
 component's own such as channel-web's `src/chat/`) is built by every deploy: in a stage of the Docker
@@ -133,16 +134,21 @@ then the after-deploy scripts it is given (the Telegram webhook's). A rollback i
 classes (a new `migrations` tag) is never rolled back: Cloudflare cannot, and the deploy fails saying
 so. deployment-cloudflare's README has the rules ("Rolling back").
 
+On celld (deployment-celld), the same Apps run on your machines: nodes that share a bucket
+(R2, S3, GCS, Tigris; two at least), each with a fixed identity and disk, behind TLS. A CI job runs
+`node src/pikit/deployment-celld/deploy.mjs` (`ci/deploy.yml`) with the same wait and rollback; celld
+has no secrets yet, so they reach the Worker as `vars`, stored in the bucket. Its README has the
+rules and the node templates ("Running a fleet").
+
 ## What each target cannot do
 
 - **server**: no per-conversation isolation (one process holds every conversation); no horizontal
   scale (one process per storage); timers do not survive a restart by themselves.
-- **durable**: no processes or native binaries (a real Linux is another `execution` provider, not
-  built); no connection held between events (no long polling); no `restart`
+- **durable**: no processes or native binaries in the object (a real Linux is a sandbox on a server,
+  through `execution-remote`); no connection held between events (no long polling); no `restart`
   and no `exec`, and `down` deletes data (deployment-cloudflare's README).
 
-What a component cannot do on a target is in that component's README: channel-http (no Worker half
-yet), provider-anthropic, provider-openai and credentials-file (no subscription login on Cloudflare), execution-do
+What a component cannot do on a target is in that component's README: credentials-file (a file: credentials-do on Cloudflare), execution-do
 (its simulated shell), admin-api (on Cloudflare, no Delivery view).
 
 Moving a project to the other target is swapping those components, never changing an agent, a route

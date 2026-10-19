@@ -181,6 +181,13 @@ test("imports: only the adapter imports Pi", async () => {
   expect(await problems(f)).toContain(`imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi`);
 });
 
+test("imports: Gondolin is Earendil Works' but not Pi, so a component may import it", async () => {
+  const f = await fixture();
+  const gondolin = ["@earendil-works", "gondolin"].join("/");
+  f.append("index.ts", `import type { VM } from "${gondolin}";`);
+  expect(await problems(f)).not.toContain("only @pikit/pi-adapter imports Pi");
+});
+
 test("imports: node:* only when targets are exactly [\"server\"]; tests are exempt (SPEC §4)", async () => {
   const f = await fixture();
   f.append("index.ts", `import "node:path";`);

@@ -83,7 +83,8 @@
       "version": "0.0.0",
       "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
       "targets": [
-        "server"
+        "server",
+        "durable"
       ],
       "path": "components/channel-http"
     },
@@ -129,6 +130,14 @@
       ],
       "path": "components/conversations-kv"
     },
+    "credentials-do": {
+      "version": "0.0.0",
+      "description": "The model providers' credentials on Cloudflare, API keys and subscription logins (OAuth) alike, kept by one Durable Object that every conversation asks; an expiring token is refreshed once, under that object's lock. `pikit configure --login` uploads a login made on your machine.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/credentials-do"
+    },
     "credentials-file": {
       "version": "0.0.0",
       "description": "The model providers' credentials in one JSON file, readable only by its owner (mode `0600`).",
@@ -136,6 +145,14 @@
         "server"
       ],
       "path": "components/credentials-file"
+    },
+    "deployment-celld": {
+      "version": "0.0.0",
+      "description": "Runs a pikit project of the durable target on your own machines with celld (self-hosted Durable Objects): the Worker and its objects, wrangler.jsonc, the commands `pikit up | down | logs | status | dev` delegate to, a CI deploy script, and the nodes' templates.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/deployment-celld"
     },
     "deployment-cloudflare": {
       "version": "0.0.0",
@@ -179,6 +196,14 @@
       ],
       "path": "components/execution-do"
     },
+    "execution-gondolin": {
+      "version": "0.0.0",
+      "description": "Each conversation's tools work in a Linux micro-VM of its own (Gondolin, over QEMU): a real shell that cannot read the server's files or other conversations', with its files on the host, no network but the hosts you allow, and secrets the guest never sees.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/execution-gondolin"
+    },
     "execution-local": {
       "version": "0.0.0",
       "description": "The agent's tools work on this server: its filesystem and its shell, whose commands start without the server's secrets.",
@@ -186,6 +211,23 @@
         "server"
       ],
       "path": "components/execution-local"
+    },
+    "execution-remote": {
+      "version": "0.0.0",
+      "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per conversation, from a server or a Cloudflare Durable Object.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/execution-remote"
+    },
+    "execution-serve": {
+      "version": "0.0.0",
+      "description": "A sandbox host: the sandboxes of this App's workspace provider (execution-gondolin's VMs), over HTTP for execution-remote, behind a shared token.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/execution-serve"
     },
     "expose-cloudflare-tunnel": {
       "version": "0.0.0",

@@ -6,8 +6,8 @@ OpenAI's models for your agents, with an API key or a ChatGPT subscription. An a
 - **Provides:** `model.provider`, under the key `openai`.
 - **Requires:** nothing. The agent runtime reads credentials from `model.credentials` when it is
   installed.
-- **Targets:** `server` and `durable`. On `durable` (Cloudflare), API keys only ("Cloudflare"
-  below).
+- **Targets:** `server` and `durable`. On `durable` (Cloudflare), a ChatGPT login needs
+  `credentials-do` ("Cloudflare" below).
 - **Installs to:** `src/pikit/provider-openai/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi).
 
@@ -43,12 +43,22 @@ subscription; this login supersedes it.
 
 ## Cloudflare
 
-On `durable`, API keys only: a ChatGPT login stays a server's. A login is kept by
-`model.credentials`, which nothing provides on Cloudflare (`pikit configure --login` refuses without
-one), and pi-ai reaches its OAuth flow only for a stored OAuth credential; that flow loads with an
-import no bundler follows, so a Worker could not refresh a subscription's tokens anyway. The
-component is the same on both targets. Set `OPENAI_API_KEY` as a Worker secret (`wrangler secret
-put OPENAI_API_KEY`), which `secrets-workers` reads.
+The component is the same on both targets. With an API key, set `OPENAI_API_KEY` as a Worker secret
+(`wrangler secret put OPENAI_API_KEY`, or `.env`, which `pikit up` uploads), which `secrets-workers`
+reads.
+
+Sign in with ChatGPT works on `durable` with `credentials-do` (`pikit add credentials-do`): one
+Durable Object keeps the tokens, and an expiring token is refreshed once for every conversation,
+under that object's lock (refresh tokens rotate: two refreshes at once would revoke one another's).
+After `pikit up`, `pikit configure --login openai` signs in on your machine (the browser comes back to
+`127.0.0.1:1455` there) and uploads the tokens to the deployed app. pi-ai's OAuth flow, which it
+loads with an import no bundler follows, is bundled by credentials-do
+(`@pikit/pi-adapter/oauth-flows`). `pikit dev` (wrangler dev) has objects of its own: it takes the
+API key.
+
+**Check OpenAI's terms first:** whether a personal ChatGPT subscription may serve a deployed bot,
+other people or automated traffic is for its terms to say, and they change. An API key is OpenAI's
+way for a deployed app.
 
 ## Tests
 

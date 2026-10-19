@@ -9,8 +9,8 @@ const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 test("only the providers an agent names need credentials; when that is not known, all do", () => {
-  const checked = { ok: true as const, providers: { anthropic: false, faux: true }, store: "credentials-file", owners: {}, oauth: ["anthropic"] };
-  const rest = { owners: {}, oauth: ["anthropic"] };
+  const checked = { ok: true as const, providers: { anthropic: false, faux: true }, store: "credentials-file", owners: {}, oauth: ["anthropic"], remote: false };
+  const rest = { owners: {}, oauth: ["anthropic"], remote: false };
 
   expect(usedOnly(checked, new Set(["faux"]))).toEqual({ ok: true, providers: { faux: true }, store: "credentials-file", ...rest, unused: ["anthropic"] });
   expect(usedOnly(checked, new Set())).toEqual({ ok: true, providers: {}, store: "credentials-file", ...rest, unused: ["anthropic", "faux"] });

@@ -8,17 +8,25 @@
  * Both run `credentials.ts` with the project's own components (`model.credentials`). The login
  * itself is `pikit configure --login` (`commands/configure.ts`).
  *
+ * On `durable` there is no `exec`: the app's store (credentials-do) is its own Durable Object, reached
+ * through the deployed Worker's operator route (`credentialsRoute`) at the deployment's `url`, with
+ * `.env`'s `PIKIT_ADMIN_TOKEN`. A login is made here and uploaded there; nothing of it stays here.
+ * This machine's check then reports only its keys (`.env`, which `pikit up` uploads as secrets).
+ *
+ * The project's `pikit.config.ts` names no target (the deployment's entrypoint gives it), so it is
+ * `pikit.json`'s `targets` that says `durable`.
+ *
  * Only the providers an agent names in its `model` need credentials: an installed provider no agent
  * uses (the preset's `anthropic` while every agent is on `faux/scripted`) is reported `unused`, and
  * nothing asks for its key.
  */
 
-import type { AppExec } from "./deployment-module.ts";
-import type { CredentialsResult } from "./credentials.ts";
+import { type AppExec, deploymentUrl } from "./deployment-module.ts";
+import { type CredentialsResult, credentialsRoute, safeUploadUrl } from "./credentials.ts";
 import { modelProvider } from "./references.ts";
 import { type ProjectManifest, readProjectManifest } from "./pikit-json.ts";
 import type { ProbeResult } from "./probe.ts";
-import { probe, runScript, runScriptInApp } from "./run.ts";
+import { probe, projectEnv, runScript, runScriptInApp } from "./run.ts";
 import { CliError } from "../ui.ts";
 
 export type CheckedCredentials = Extract<CredentialsResult, { ok: true }> & {
@@ -34,7 +42,7 @@ export async function checkModelCredentials(projectDir: string, exec?: AppExec, 
   const inUse = used ?? (await providersInUse(projectDir));
   const result =
     exec === undefined
-      ? await runScript<CredentialsResult>("credentials.ts", projectDir, ["check"])
+      ? await runScript<CredentialsResult>("credentials.ts", projectDir, ["check", ...(credentialsAreRemote(projectDir) ? ["--remote"] : [])])
       : await runScriptInApp<CredentialsResult>(exec, "credentials.ts", ["check"]);
   if (!result.ok) throw new CliError(`could not read the model credentials${exec === undefined ? "" : " where the app runs"}: ${result.error}\nRun \`pikit doctor\`.`);
   return usedOnly(result, inUse);
@@ -92,6 +100,44 @@ export function keyVariableOf(components: ProjectManifest["components"], checked
  */
 export function canLogIn(checked: Pick<CheckedCredentials, "store" | "oauth">, providerId: string): boolean {
   return checked.store !== undefined && checked.oauth.includes(providerId);
+}
+
+/** Whether the project runs on `durable`, where `model.credentials` lives only in the deployed App. */
+export function credentialsAreRemote(projectDir: string): boolean {
+  return readProjectManifest(projectDir).targets.includes("durable");
+}
+
+/** The deployed app a `durable` project's logins go to: its URL and the operators' token, or why there is none. */
+export async function deployedApp(projectDir: string): Promise<{ url: string; token: string } | { why: string }> {
+  const url = await deploymentUrl(projectDir);
+  if (url === undefined) return { why: "the app was not deployed from this machine yet: run `pikit up` first" };
+  if (!safeUploadUrl(url)) return { why: `the deployed app answers at ${url}, which is not https: a credential is sent only over https` };
+  const token = projectEnv(projectDir).PIKIT_ADMIN_TOKEN;
+  if (token === undefined || token === "") return { why: "PIKIT_ADMIN_TOKEN is not set in .env: the deployed app's operator routes need it" };
+  return { url, token };
+}
+
+/**
+ * On `durable`, the providers the deployed app's `store` holds a credential for (each provider id: true),
+ * read from its operator route; or why it could not be read. No credential crosses: the route lists
+ * ids and types.
+ */
+export async function deployedCredentials(projectDir: string, store: string, fetcher: typeof fetch = fetch): Promise<{ stored: Record<string, boolean> } | { why: string }> {
+  const app = await deployedApp(projectDir);
+  if ("why" in app) return app;
+  let response: Response;
+  try {
+    response = await fetcher(credentialsRoute(app.url, store), { headers: { authorization: `Bearer ${app.token}` } });
+  } catch (error) {
+    return { why: `the deployed app could not be reached at ${app.url} (${error instanceof Error ? error.message : String(error)})` };
+  }
+  if (response.status === 401) return { why: "the deployed app refused PIKIT_ADMIN_TOKEN: is the one in .env the one deployed?" };
+  if (!response.ok) return { why: `the deployed app answered ${response.status} at ${credentialsRoute(app.url, store)}` };
+  const { credentials } = (await response.json().catch(() => ({}))) as { credentials?: unknown };
+  if (!Array.isArray(credentials)) return { why: "the deployed app answered no list of credentials" };
+  const stored: Record<string, boolean> = {};
+  for (const each of credentials) if (typeof (each as { providerId?: unknown })?.providerId === "string") stored[(each as { providerId: string }).providerId] = true;
+  return { stored };
 }
 
 /** How to set a provider's key, for a message: `set ANTHROPIC_API_KEY in .env`, or the component's README. */

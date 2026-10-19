@@ -27,6 +27,7 @@ here with the Pi version.
 | 16 | pi-durable | [No time on a submission](#16-no-time-on-a-submission) | pikit keeps admission times in `pikit.admissions` | low | note (here) |
 | 17 | pi-durable | [Conversations newest first](#17-conversations-newest-first) | The dashboard reads every page to show the latest conversations first | low | **partly shipped** in pi-durable 1.1.0 ([#10546](https://github.com/earendil-works/pi/issues/10546)): newest first by creation, not by last activity |
 | 18 | pi-durable | [Idle-context timer on workerd](#18-idle-context-timer-on-workerd) | A Durable Object would stay alive ten minutes after each run | medium | candidate issue (here); worked around in the adapter (also `documentRetentionMs`, new in 1.2.0) |
+| 19 | pi-ai | [OAuth refresh and `toAuth` in a bundle](#19-pi-ai-oauth-refresh-and-toauth-in-a-bundle) | A Worker carries every OAuth flow to use one subscription | medium | draft ([file](pi-ai-oauth-static-load.md)); worked around in the adapter (`oauth-flows.ts`) |
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
 ([storage-postgres](../../features/storage-postgres.md)). A Durable Object example is no longer one:
@@ -352,6 +353,20 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   pi-durable already does where it keeps none.
 - **To delete when it ships:** `WORKERS_SETTINGS` in `runtime.ts`; the workerd lane stays.
 - **If sent:** a concrete bug with a short repro and a one-line fix, the kind #10188 was.
+
+## 19. pi-ai: OAuth refresh and `toAuth` in a bundle
+- **Problem.** A stored OAuth credential reaches its provider's flow (`toAuth` at every request,
+  `refresh` before expiry) through `lazyOAuth`'s loader, an `import()` of a variable specifier that
+  first reads `import.meta.url.endsWith(…)`. In a Worker bundle `import.meta.url` is undefined (a
+  `TypeError`), and the module is not in the bundle anyway: a subscription cannot be used there.
+- **pikit meanwhile.** `bundleOAuthFlows()` (`packages/pi-adapter/src/oauth-flows.ts`) calls pi-ai's
+  `registerBunOAuthFlows()`, made for Bun binaries: every flow in the bundle. credentials-do calls
+  it; `oauth-flows.test.ts` proves it in a wrangler bundle on workerd.
+- **Ask.** Keep only `login` lazy (refresh and `toAuth` are a `fetch`), or one flow per subpath with
+  a per-provider registration; at least `import.meta.url?.`. Full text:
+  [pi-ai-oauth-static-load.md](pi-ai-oauth-static-load.md).
+- **If sent:** the `import.meta.url` crash is a concrete one-line bug; the rest is a design request,
+  for Discord first.
 
 ---
 

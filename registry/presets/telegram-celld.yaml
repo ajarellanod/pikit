@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=../schema/preset.schema.json
+# An agent in Telegram, on your own machines with celld (self-hosted Durable Objects, SPEC §4, C1):
+#   pikit new my-bot --target durable --preset telegram-celld
+#   pikit configure   # the bot's token, who may talk to it, the webhook's secret, the model's key; the fleet's bucket and URL
+#   pikit dev         # one local node (celld dev)
+#   pikit up          # deploy to the fleet, wait until /health answers the new deployment, then set the webhook
+# deployment-celld's README walks through it, and "Running a fleet" through the nodes.
+#
+# telegram-cloudflare's components with deployment-celld instead of deployment-cloudflare: the same
+# Apps run on both (features/deployment-celld.md). A base, not an alias: an alias only answers its
+# base's questions (`choose`), and telegram-cloudflare asks none of the deployment.
+title: "Telegram on your own machines (celld): a Durable Object per chat, a fleet you run"
+components:
+  - secrets-workers
+  - actors-do
+  - storage-do
+  - storage-kv-sql
+  - provider-openrouter
+  - runtime-pi
+  # After the runtime: the registry creates conversations through its `agent.conversations`.
+  - conversations-kv
+  - router-basic
+  - channel-telegram-webhook
+  - execution-do
+  - tool-read
+  - tool-write
+  - tool-edit
+  - tool-bash
+  - tool-fetch
+  - tool-websearch-brave
+  - extension-pikit-self
+  - deployment-celld
+# Asked only once the durable target has a second channel, as in telegram-cloudflare.
+choose:
+  - kind: channel
+    question: "Where do you want to talk to your agent?"
+    multiple: true
+# What `pikit new` offers to add, as in telegram-cloudflare. Self-improvement deploys each approved
+# proposal once merged: with deployment-celld's CI workflow (ci/deploy.yml), as Workers Builds does on
+# Cloudflare.
+features:
+  - router-rules
+  - [agents-live, router-rules, settings-store]
+  - tool-mcp
+  - health-registry
+  - [admin-proposals, proposals-github, repo-github-app]

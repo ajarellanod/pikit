@@ -1,0 +1,28 @@
+# deployment-celld: HTTPS in front of the fleet (README, "Running a fleet"). A template: pikit never
+# runs it. /etc/caddy/Caddyfile on the machine (or machines) the public name points at; Caddy gets and
+# renews the certificate itself (ports 80 and 443 open to the internet there, nodes/firewall.nft).
+#
+# PIKIT_CELLD_URL in the project's .env is https://<this name>: `pikit up` waits for /health there,
+# and the Telegram webhook is registered at <this name>/telegram.
+
+bot.example.com {
+	# Every node's public listener (CELLD_ADDR), on the private network. On a single machine:
+	# reverse_proxy 127.0.0.1:8080 { ... }.
+	reverse_proxy 10.0.0.11:8080 10.0.0.12:8080 10.0.0.13:8080 {
+		# Any node serves any conversation: it forwards to the conversation's owner.
+		lb_policy round_robin
+		# A node answers 503 while it drains (SIGTERM) and until a joining one settles: out of the pool.
+		health_uri /.well-known/celld/health
+		health_interval 5s
+		health_timeout 2s
+		health_status 200
+		# A node that refuses the connection (stopped, killed) is skipped: the request tries another.
+		lb_try_duration 10s
+		lb_try_interval 250ms
+		fail_duration 30s
+	}
+	# Caddy appends the client's address to X-Forwarded-For (the Worker reads its last entry) and sets
+	# X-Forwarded-Proto and X-Forwarded-Host (celld reads them with CELLD_TRUST_FORWARDED_HEADERS=1).
+	# Accept no X-Forwarded-For from clients as trusted: no `trusted_proxies` here.
+	encode zstd gzip
+}

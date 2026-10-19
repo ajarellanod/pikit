@@ -94,6 +94,5 @@ Nothing of Pi's: this is pikit's CLI.
 
 - Features that do not exist yet: subagents (`features/subagents.md`); a feature's views and settings
   sections installed only when the dashboard is.
-- Which features the launch presets offer on each target (Cloudflare has no `channel-http` yet, so
-  step 1 is never asked there).
+- Which features the launch presets offer on each target.
 - `pikit add` without names, in a terminal: the same step 2 for an existing project.

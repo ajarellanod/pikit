@@ -80,7 +80,7 @@ export interface ModelStep {
 export interface ModelInput {
   /** This machine's credentials, of the providers the agents name (`usedOnly`). */
   checked: CheckedCredentials;
-  /** Where the app runs (`pikit up`), when the deployment could check there. */
+  /** Where the app runs (`pikit up`), when the deployment could check there (on `durable`, the deployed app's store). */
   there: Readonly<Record<string, boolean>> | undefined;
   /** The installed components' records: a provider's key variable is its component's. */
   components: ProjectManifest["components"];
@@ -92,23 +92,28 @@ export interface ModelInput {
  * Per provider the agents name, where it has credentials and, when nowhere, how it can get them: a
  * login only where pi-ai has one and the project can store it (`canLogIn`), for `pikit up` when
  * the deployment checked where the app runs; an API key only in the variable its component declares.
+ * On `durable` (`checked.remote`) a login is made here and uploaded to the deployed app's store, so it
+ * is offered once that app answered (`there`), and never for `pikit dev` alone.
  */
 export function planModels({ checked, there, components, exec }: ModelInput): ModelStep[] {
   return Object.keys(checked.providers).map((id): ModelStep => {
     if (checked.providers[id] === true) return { id, has: "here", choices: [] };
     if (there?.[id] === true) return { id, has: "there", choices: [] };
-    const login = canLogIn(checked, id);
     const keyName = keyVariableOf(components, checked, id);
     const inApp = there !== undefined;
+    // On `durable` a login is uploaded to the deployed app's store: only once it answers (`there`).
+    const login = canLogIn(checked, id) && (!checked.remote || inApp);
     if (!login && keyName === undefined) return { id, has: "none", choices: [] };
     const choices: Choice<ModelChoice>[] = [
-      ...(!login
+      ...(login && checked.remote
+        ? [{ value: "up" as const, label: "Log in with your subscription, stored in the deployed app", hint: `OAuth here (code login: paste the code the page shows), uploaded to ${checked.store ?? "model.credentials"}; check the plan's terms allow a bot` }]
+        : !login
         ? []
         : inApp
           ? [{ value: "up" as const, label: "Log in with your subscription, for `pikit up`", hint: "OAuth, code login: open a URL, sign in, paste the code the page shows back here" }]
           : [{ value: "dev" as const, label: `Log in with your subscription${exec ? ", for `pikit dev` only" : ""}`, hint: LOGIN_HERE }]),
       ...(keyName !== undefined ? [{ value: "key" as const, label: "Paste an API key", hint: `stored in ${ENV_FILE} as ${keyName}; \`pikit up\` and \`pikit dev\` both read it` }] : []),
-      ...(login && inApp ? [{ value: "dev" as const, label: "Log in with your subscription, for `pikit dev` only", hint: `on this machine; ${LOGIN_HERE}` }] : []),
+      ...(login && inApp && !checked.remote ? [{ value: "dev" as const, label: "Log in with your subscription, for `pikit dev` only", hint: `on this machine; ${LOGIN_HERE}` }] : []),
       { value: "skip", label: "Skip for now" },
     ];
     return { id, has: "none", choices, ...(keyName !== undefined && { keyName }) };

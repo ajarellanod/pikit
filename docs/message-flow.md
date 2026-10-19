@@ -93,6 +93,16 @@ repeated `messageId` answers from `agent.submissions.get`, and `GET
 /v1/conversations/:id/messages/:messageId` reads it later. server-bun
 (`server-bun/files/src/pikit/server-bun/index.ts`) serves the routes.
 
+On Cloudflare its Worker half (`worker.ts`) serves the same routes: `http.authenticate`, the body
+read, the request id made, then `actor.mailbox.call("http:<conversationId>", "channel-http.message",
+…)`, an RPC to the conversation's object. There channel-http's object half answers the call
+(`backend.ts`): `admitInbound` as on a server (runtime-pi asks for `runtime-pi.drive` before
+`dispatch` resolves), then the wait for its request id's `agent.settled` / `agent.failed`, up to
+`replyTimeoutMs`, while the object's alarm drives the run. The wait is inside the call's RPC event, so
+the object keeps running for it; at the timeout the call answers `202`, the message already durable in
+the object. GET and reset are calls too (`channel-http.status`, `channel-http.reset`), answered from
+the object's `agent.submissions` and registry.
+
 ## On Cloudflare (`channel-telegram-webhook`)
 
 Two Apps (C1). The Worker's App has `secrets-workers`, `actors-do` and

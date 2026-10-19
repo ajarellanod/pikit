@@ -29,7 +29,10 @@
  * - `execution` and `workspace`, if installed: where tools work (each call on its conversation's
  *   workspace when a provider is installed, otherwise on `execution`);
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
- *   read only their environment variables (`ANTHROPIC_API_KEY`).
+ *   read only their environment variables (`ANTHROPIC_API_KEY`), and an agent whose provider has
+ *   none refuses the start. With it, a login can arrive while the app runs (credentials-do's upload
+ *   on Cloudflare reaches an object running this App): such an agent is a warning at start, and its
+ *   runs fail until a credential is stored.
  * - `secrets`, if installed: where those variables are read first, before the environment (on
  *   Cloudflare, the Worker's secrets, with no `process.env`);
  * - `wakeups`, if installed: runs are driven inside wakeups, in slices (SPEC §4.1, C4), for a host
@@ -394,10 +397,13 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             if (ref === undefined) throw new Error(`runtime-pi: agent "${name}" names model "${model}", which no model.provider provides`);
             // Checked without a network call or an OAuth refresh: is anything configured at all?
             if ((await made.checkAuth(ref.provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) === undefined) {
-              throw new Error(
+              const missing =
                 `runtime-pi: agent "${name}" uses provider "${ref.provider}", which has no credentials: ` +
-                  "log in to store one in model.credentials, or set the provider's API key in the environment",
-              );
+                "log in to store one in model.credentials, or set the provider's API key in the environment";
+              // A store can receive a login while the app runs, through this very App on Cloudflare
+              // (credentials-do's owner object runs it): refusing the start would leave no way in.
+              if (credentials.get() === undefined) throw new Error(missing);
+              ctx.logger.warn(`${missing}; its runs fail until one is stored`, { agent: name, provider: ref.provider });
             }
           }
           // The overrides an operator may set: the agents', among the models this App can run (those of

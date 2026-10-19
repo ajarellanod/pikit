@@ -15,6 +15,7 @@
     "./provider": "./src/provider.ts",
     "./providers/faux": "./src/providers/faux.ts",
     "./credentials": "./src/credentials.ts",
+    "./oauth-flows": "./src/oauth-flows.ts",
     "./wakeups": "./src/wakeups.ts",
     "./wakeups/testing": "./src/testing/wakeups.ts",
     "./testing": "./src/testing/index.ts",

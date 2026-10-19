@@ -114,6 +114,7 @@ const checked = (store: string | undefined, providers: Record<string, boolean> =
   owners: { anthropic: "provider-anthropic", openrouter: "provider-openrouter", "openai-compatible": "provider-openai-compatible", faux: "provider-faux" },
   // pi-ai has an OAuth login for Anthropic only, of these.
   oauth: ["anthropic"],
+  remote: false,
   unused: [],
 });
 
@@ -162,6 +163,18 @@ test("on a server without a deployment that runs the app, the login is here; whe
   expect(alone?.choices[0]?.label).toBe("Log in with your subscription");
   const unchecked = planModels({ checked: checked("credentials-file"), there: undefined, components, exec: true }).find((s) => s.id === "anthropic");
   expect(unchecked?.choices[0]?.label).toBe("Log in with your subscription, for `pikit dev` only");
+});
+
+test("on Cloudflare with credentials-do: a login uploaded to the deployed app once it answers, never for `pikit dev` alone; credentials there are not asked for again", () => {
+  const durable = { ...checked("credentials-do"), remote: true };
+  // Not deployed yet (or its route could not be read): keys only, for now.
+  expect(offered({ checked: durable, there: undefined, components, exec: false })).toEqual({ anthropic: ["key", "skip"], openrouter: ["key", "skip"], "openai-compatible": [] });
+  const deployed = { checked: durable, there: { openrouter: false }, components, exec: false };
+  expect(offered(deployed)).toEqual({ anthropic: ["up", "key", "skip"], openrouter: ["key", "skip"], "openai-compatible": [] });
+  const login = planModels(deployed).find((s) => s.id === "anthropic")?.choices[0];
+  expect(login?.label).toBe("Log in with your subscription, stored in the deployed app");
+  expect(login?.hint).toContain("uploaded to credentials-do");
+  expect(offered({ checked: durable, there: { anthropic: true }, components, exec: false }).anthropic).toBe("there");
 });
 
 test("on Cloudflare (no model.credentials to store a login): keys only, and no login is suggested", () => {

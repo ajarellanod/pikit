@@ -215,13 +215,14 @@ principle 11).
 **The honest rule.** A project is made for one target (`pikit new --target`, recorded in
 `pikit.json`'s `targets`). Most components declare both targets and are the same code on each. The
 few that touch how code lives come one per runtime model and say so in their `targets`:
-`channel-telegram` (long polling) and `channel-telegram-webhook` (C6), `channel-http` and
-`execution-local` (a process) and `execution-do` (C7), `storage-sqlite` and `storage-do`,
+`channel-telegram` (long polling) and `channel-telegram-webhook` (C6), `execution-local` (a
+process) and `execution-do` (C7), `storage-sqlite` and `storage-do`,
 `wakeups-timers` and `actors-do`. The required set (below) has a provider on each target
-for every capability it needs; a component outside it may exist for one target only (`channel-http`
-has no Cloudflare twin yet). A channel whose platform posts to it may be one code on both instead,
-choosing by `actor.inbox`'s scope: `channel-google-chat` hands each event to its handler in process on
-a server, and from its Worker's half to the conversation's object on Cloudflare. Moving a project to the other target is swapping those components,
+for every capability it needs; a component outside it may exist for one target only. A channel whose
+platform posts to it may be one code on both instead, choosing by `actor.inbox`'s scope:
+`channel-google-chat` hands each event to its handler in process on a server, and from its Worker's
+half to the conversation's object on Cloudflare; `channel-http` likewise, its object answering the
+Worker's call once the run answers or `replyTimeoutMs` passed. Moving a project to the other target is swapping those components,
 never changing an agent, a route or a contract.
 
 **A target is a runtime model; a provider is a `deployment-*` component.** A target (`targets` in a

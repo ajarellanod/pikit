@@ -1,4 +1,6 @@
 node_modules/
+# Downloaded tools for local checks (a celld binary for deployment-celld's end-to-end run); never committed.
+.tools/
 dist/
 .DS_Store
 samples/*/.pikit/

@@ -466,6 +466,14 @@ function withLines(status: Omit<Status, "lines">): Status {
 }
 
 /**
+ * Where the Worker answers, as the last `up` from this machine recorded it (`.pikit/`); `undefined`
+ * before one. Reads no account: `pikit configure --login` uploads a login there (credentials-do).
+ */
+export async function url(options: CommandOptions = {}): Promise<string | undefined> {
+  return readRecord(options.cwd ?? process.cwd())?.url;
+}
+
+/**
  * `pikit dev`: the Worker and its objects locally in workerd (`wrangler dev`), reloading on change,
  * with `.env` as its secrets. Resolves with wrangler's exit code.
  */

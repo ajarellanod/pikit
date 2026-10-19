@@ -9,8 +9,8 @@
  *
  * A message goes through the inbound path (@pikit/contracts' inbound.ts):
  * 1. `http.authenticate`: this channel's stage checks the bearer token. The pipeline is this
- *    component's own (declared below): how a sender proves who it is depends on the platform, so it
- *    is not a shared contract. A project extension adds a stage to it, as to any pipeline.
+ *    component's own (declared in `routes.ts`): how a sender proves who it is depends on the platform,
+ *    so it is not a shared contract. A project extension adds a stage to it, as to any pipeline.
  * 2. The body becomes an `InboundMessage`, and `admitInbound` takes it the way every channel does:
  *    `inbound.normalize`, `route.resolve` (a router picks the agent), the conversation
  *    `http:<conversationId>`, and `agent.runtime.dispatch`: Pi takes the message. An idle
@@ -47,40 +47,34 @@
  * Who a conversation is with, for the dashboard (its stage of `conversation.describe`): its client's
  * conversation id, all the channel knows of it.
  *
- * Target: `server` (it needs a server component to serve its route).
+ * Targets: `server` and `durable`. It never reads the target: in `start`, `actor.inbox`'s `scope` says
+ * where it runs.
+ * - **On a server** (`"all"`, or no `actor.inbox`): this export is everything. Its routes hand each
+ *   request to the backend in process (`createLocalBackend`, `backend.ts`).
+ * - **On Cloudflare** (`"one"`, each conversation's Durable Object): the Worker's half (`worker.ts`)
+ *   serves the routes and calls the conversation's object (`actor.mailbox.call`); here `actor.inbox`
+ *   answers those calls with the same local backend: the message is admitted in the object, and the
+ *   call waits for its answer there, inside the RPC's event (`answerCalls`). The routes are registered
+ *   here too, where no server serves them, and call their conversation's object as the Worker's do.
  */
 
-import { type AppContext, defineComponent, Halt } from "@pikit/core";
-import { admitInbound, type AgentResult, type ConversationParty, describeStage, foldParts, type InboundMessage, type RunSettlement } from "@pikit/contracts";
+import { defineComponent } from "@pikit/core";
+import { type AgentResult, type ConversationParty, describeStage } from "@pikit/contracts";
 import Type from "typebox";
-import { bearerToken, type Digest, digest, matches, MIN_TOKEN_LENGTH, TOKEN_SECRET } from "./auth.ts";
-import { CONVERSATION_ID, MESSAGE_ID, readMessageBody } from "./body.ts";
+import { type Digest, readToken } from "./auth.ts";
+import { answerCalls, createLocalBackend, createRemoteBackend, type HttpBackend } from "./backend.ts";
+import { CONVERSATION_ID } from "./body.ts";
 import { Replies } from "./replies.ts";
+import { CHANNEL, provideRoutes } from "./routes.ts";
 
-export const CHANNEL = "http";
-
-declare module "@pikit/core" {
-  interface AppPipelines {
-    /**
-     * Authenticates a request to this channel. A stage acts only on its own `channel` and leaves a
-     * rejection alone. A request is authenticated only when a stage says so: no verdict is a
-     * rejection.
-     */
-    "http.authenticate": {
-      channel: string;
-      request: Request;
-      verdict?: { kind: "authenticated"; actor: InboundMessage["actor"] } | { kind: "rejected"; reason: string };
-    };
-  }
-}
+export { CALL } from "./backend.ts";
+export { CHANNEL, conversationKey } from "./routes.ts";
+export { worker, WORKER_NAME } from "./worker.ts";
 
 const Config = Type.Object({
   /** How long a POST waits for the agent's answer before `202`. */
   replyTimeoutMs: Type.Integer({ minimum: 1, default: 120_000 }),
 });
-
-/** The conversation key of a client's conversation id. */
-export const conversationKey = (conversationId: string): string => `${CHANNEL}:${conversationId}`;
 
 /**
  * Who a conversation of this channel is with (`conversation.describe`): the client's own conversation
@@ -92,27 +86,6 @@ export function describeKey(key: string): ConversationParty | undefined {
   return { name: conversationId, detail: "HTTP API", ids: [{ label: "Conversation id", value: conversationId }] };
 }
 
-const json = (status: number, body: unknown): Response => Response.json(body, { status });
-const UNAUTHORIZED = (): Response =>
-  Response.json({ error: "unauthorized" }, { status: 401, headers: { "www-authenticate": 'Bearer realm="pikit"' } });
-
-/** A path segment, decoded; `""` (never a valid id) when its escapes are malformed (`%E0`): a 400, not a 500. */
-function segment(raw: string | undefined): string {
-  try {
-    return decodeURIComponent(raw ?? "");
-  } catch {
-    return "";
-  }
-}
-
-/** What a run's end means for one of its messages, as HTTP: the POST's answer, and the GET's. */
-function outcome(requestId: string, run: Pick<RunSettlement, "kind" | "text" | "parts" | "error">): Response {
-  // Its parts as their fallbacks, after its text: HTTP draws none.
-  if (run.kind === "completed") return json(200, { requestId, text: foldParts({ text: run.text ?? "", ...(run.parts !== undefined && { parts: run.parts }) }).text });
-  if (run.kind === "aborted") return json(409, { requestId, error: "aborted" });
-  return json(502, { requestId, error: run.error?.code ?? "failed" });
-}
-
 export default defineComponent({
   name: "channel-http",
   config: Config,
@@ -122,131 +95,49 @@ export default defineComponent({
     const runtime = pikit.use("agent.runtime");
     // Optional: with it, a message's outcome can be read later (GET), and a repeated POST answers it.
     const submissions = pikit.useOptional("agent.submissions");
+    // Where it runs (`scope`); in one key's actor, the routes reach their conversation through the mailbox.
+    const inbox = pikit.useOptional("actor.inbox");
+    const mailbox = pikit.useOptional("actor.mailbox");
     const replies = new Replies();
+    const local = createLocalBackend({
+      conversations: () => conversations.get(),
+      runtime: () => runtime.get(),
+      submissions: () => submissions.get(),
+      replies,
+      replyTimeoutMs: config.replyTimeoutMs,
+    });
     /** The token's digest, from start to stop. No token, no requests. */
     let token: Digest | undefined;
-
-    // This channel's authentication: it acts on its own requests and leaves a rejection alone.
-    pikit.pipeline(
-      "http.authenticate",
-      async (value) => {
-        if (value.channel !== CHANNEL || value.verdict?.kind === "rejected") return value;
-        const presented = bearerToken(value.request.headers.get("authorization"));
-        if (presented === undefined || token === undefined) return { ...value, verdict: { kind: "rejected", reason: "missing bearer token" } };
-        return (await matches(presented, token))
-          ? { ...value, verdict: { kind: "authenticated", actor: { id: CHANNEL } } }
-          : { ...value, verdict: { kind: "rejected", reason: "wrong bearer token" } };
-      },
-      { id: "channel-http-bearer", priority: 100 },
-    );
+    /** Where this App's routes send requests: in process, or the conversation's actor. */
+    let backend: HttpBackend = local;
 
     // Answers come from the runtime's events, for runs whoever started them.
     const deliver = (result: AgentResult): void => replies.answer(result);
     pikit.on("agent.settled", deliver);
     pikit.on("agent.failed", deliver);
 
-    /** Who sent `request`, if `http.authenticate` says it is authenticated. */
-    const authenticated = async (request: Request, ctx: AppContext): Promise<InboundMessage["actor"] | undefined> => {
-      const checked = await ctx.run("http.authenticate", { channel: CHANNEL, request });
-      return !(checked instanceof Halt) && checked.verdict?.kind === "authenticated" ? checked.verdict.actor : undefined;
-    };
-
-    pikit.provideKeyed("http.route", "POST /v1/messages", async (request, ctx) => {
-      const actor = await authenticated(request, ctx);
-      if (actor === undefined) return UNAUTHORIZED();
-      const read = await readMessageBody(request);
-      if ("problem" in read) return json(400, { error: "invalid_request", message: read.problem });
-      const { conversationId, text, messageId } = read.body;
-      const requestId = messageId ?? crypto.randomUUID();
-
-      const message: InboundMessage = {
-        id: requestId,
-        channel: CHANNEL,
-        conversationId,
-        actor,
-        text,
-      };
-      // The answer may come before dispatch returns: wait for it from right before dispatch.
-      let waiter: ReturnType<Replies["expect"]> | undefined;
-      const inbound = await admitInbound(ctx, message, {
-        conversations: conversations.get(),
-        runtime: runtime.get(),
-        key: conversationKey(conversationId),
-        beforeDispatch: (conversation) => {
-          // Called again when the key moved to a new conversation (its agent gone): the last one counts.
-          waiter?.cancel();
-          waiter = replies.expect(conversation.conversationId, requestId);
-        },
-      }).catch((error: unknown) => {
-        waiter?.cancel();
-        throw error;
-      });
-      if (inbound.kind !== "admitted") waiter?.cancel();
-      switch (inbound.kind) {
-        case "halted":
-          return json(inbound.pipeline === "inbound.normalize" ? 422 : 403, { requestId, error: "rejected", message: inbound.reason });
-        case "denied":
-          return json(403, { requestId, error: "denied", ...(inbound.reason !== undefined && { message: inbound.reason }) });
-        case "no_route":
-          return json(500, { requestId, error: "no_route" });
-        case "duplicate": {
-          // The client sent it again (a retry after a timeout): what became of it, when it is known.
-          const known = await submissions.get()?.get(inbound.conversation, requestId, ctx);
-          if (known === undefined) return json(409, { requestId, error: "duplicate" });
-          return known.kind === "pending" ? json(202, { requestId }) : outcome(requestId, known.run);
-        }
-        case "admitted":
-          break;
-      }
-      if (waiter === undefined) throw new Error("channel-http: admitted without waiting for the answer");
-
-      const answer = await waiter.wait(config.replyTimeoutMs, ctx.abortSignal);
-      if (answer.kind !== "answered") return json(202, { requestId });
-      return outcome(requestId, answer.result);
-    });
-
-    pikit.provideKeyed("http.route", "GET /v1/conversations/:id/messages/:messageId", async (request, ctx) => {
-      if ((await authenticated(request, ctx)) === undefined) return UNAUTHORIZED();
-      const record = submissions.get();
-      if (record === undefined) {
-        return json(501, { error: "not_supported", message: "this app keeps no record of messages' outcomes; install a runtime that provides agent.submissions (runtime-pi)" });
-      }
-      const [, , , id = "", , message = ""] = new URL(request.url).pathname.split("/");
-      const conversationId = segment(id);
-      const requestId = segment(message);
-      if (!new RegExp(CONVERSATION_ID).test(conversationId) || !new RegExp(MESSAGE_ID).test(requestId)) {
-        return json(400, { error: "invalid_request", message: "the conversation id or the message id is not valid" });
-      }
-      const conversation = await conversations.get().get(conversationKey(conversationId), ctx);
-      const known = conversation === undefined ? undefined : await record.get(conversation, requestId, ctx);
-      if (known === undefined) return json(404, { requestId, error: "not_found" });
-      return known.kind === "pending" ? json(202, { requestId }) : outcome(requestId, known.run);
-    });
-
-    pikit.provideKeyed("http.route", "POST /v1/conversations/:id/reset", async (request, ctx) => {
-      if ((await authenticated(request, ctx)) === undefined) return UNAUTHORIZED();
-      const conversationId = segment(new URL(request.url).pathname.split("/")[3]);
-      if (!new RegExp(CONVERSATION_ID).test(conversationId)) {
-        return json(400, { error: "invalid_request", message: "the conversation id is not valid" });
-      }
-      const reset = await conversations.get().reset(conversationKey(conversationId), undefined, ctx);
-      if (reset === undefined) return json(404, { error: "not_found" });
-      return json(200, { conversationId, previousRuntimeConversationId: reset.previousConversationId, runtimeConversationId: reset.newConversationId });
-    });
+    provideRoutes(pikit, { token: () => token, backend: () => backend });
 
     // Who its conversations are with, for the dashboard: the client's conversation id.
     pikit.pipeline("conversation.describe", describeStage({ describe: async (key) => describeKey(key) }), { id: "channel-http" });
 
     return {
       async start() {
-        // Fail at start: a channel that would refuse every request is a broken deployment.
-        const value = await secrets.get().get(TOKEN_SECRET);
-        if (value === undefined) throw new Error(`channel-http: the secret ${TOKEN_SECRET} is not set`);
-        if (value.length < MIN_TOKEN_LENGTH) throw new Error(`channel-http: the secret ${TOKEN_SECRET} is shorter than ${MIN_TOKEN_LENGTH} characters`);
-        token = await digest(value);
+        const read = await readToken((name) => secrets.get().get(name));
+        const actors = inbox.get();
+        if (actors !== undefined && actors.scope === "one") {
+          // One key's actor (a Durable Object): it answers the Worker's calls for its conversation, and
+          // its own routes, which no server serves, call their conversation's actor as the Worker's do.
+          const box = mailbox.get();
+          if (box === undefined) throw new Error("channel-http: in an App that is one conversation's actor, its routes reach their conversations through actor.mailbox, which is not installed");
+          answerCalls(actors, local);
+          backend = createRemoteBackend(() => box);
+        } else backend = local;
+        token = read;
       },
       stop() {
         token = undefined;
+        backend = local;
       },
     };
   },

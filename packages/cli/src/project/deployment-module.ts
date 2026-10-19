@@ -39,6 +39,12 @@ export interface DeploymentModule {
   dev?(args: { cwd: string }): Promise<number>;
   /** `AppExec`, where the app runs. */
   exec?(args: { cwd: string } & Parameters<AppExec>[0]): Promise<number>;
+  /**
+   * Where the deployed app answers (its base URL, `https://…`), as the last `up` from this machine
+   * recorded it; `undefined` before one. The CLI reaches the app's operator routes there
+   * (`pikit configure --login` on `durable` uploads a login to it).
+   */
+  url?(args: { cwd: string }): Promise<string | undefined>;
 }
 
 /** Every export of `DeploymentModule`, and whether each is required; tsc keeps the two in step. */
@@ -50,6 +56,7 @@ export const DEPLOYMENT_EXPORTS = {
   status: "required",
   dev: "optional",
   exec: "optional",
+  url: "optional",
 } as const satisfies { [K in keyof DeploymentModule]-?: {} extends Pick<DeploymentModule, K> ? "optional" : "required" };
 
 /** The commands `pikit <command>` delegates to the export of the same name. */
@@ -93,4 +100,17 @@ export async function deploymentExec(projectDir: string): Promise<AppExec | unde
   const exec = module.exec;
   if (typeof exec !== "function") return undefined;
   return (options) => (exec as (args: Record<string, unknown>) => Promise<number>)({ cwd: projectDir, ...options });
+}
+
+/**
+ * The deployment's `url`, bound to the project: where the deployed app answers, or `undefined` when no
+ * deployment component is installed, it exports no `url`, or nothing was deployed from here yet.
+ */
+export async function deploymentUrl(projectDir: string): Promise<string | undefined> {
+  const installed = Object.keys(readProjectManifest(projectDir).components).filter((name) => name.startsWith("deployment-"));
+  if (installed.length !== 1) return undefined;
+  const { module } = await loadDeployment(projectDir);
+  if (typeof module.url !== "function") return undefined;
+  const url: unknown = await (module.url as (args: { cwd: string }) => Promise<unknown>)({ cwd: projectDir });
+  return typeof url === "string" && url !== "" ? url : undefined;
 }

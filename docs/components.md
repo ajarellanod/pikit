@@ -99,6 +99,7 @@ hook gets a plain `io` (its config from `pikit.config.ts`, `get(name)` reading t
 In the registry today: `tool-mcp` has `doctor` and `beforeDeploy` (`deploy.ts` writes `seed.ts`,
 listed in `generated`); `channel-telegram-webhook` has `afterDeploy` (sets the Telegram webhook);
 `expose-cloudflare-tunnel` has `doctor` (no Cloudflare API token in `.env`);
+`deployment-celld` has `doctor` (`commands.ts`: celld and esbuild installed, the config derived from `wrangler.jsonc`, the bucket);
 `channel-google-chat` has `doctor` (on Cloudflare, its Worker half's config and the default export's
 agree on what both read);
 `admin-api` lists `dashboard-files.ts` in `generated` (written by the dashboard's build, not a hook).

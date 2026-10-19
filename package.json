@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@better-auth/test-utils": "1.7.7",
+    "@earendil-works/gondolin": "0.13.0",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@pikit/contracts": "workspace:*",
     "@pikit/core": "workspace:*",

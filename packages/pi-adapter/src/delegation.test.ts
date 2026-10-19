@@ -453,6 +453,28 @@ test("a child's origin is the conversation its tree descends from, two delegatio
   expect((await harness.snapshot(ConversationDoc, Number(conversation.conversationId) as ConversationId, toChord(w2.ctx)))?.origin).toBeUndefined();
 });
 
+test("a child's ref dropped from the runtime's bounded refs (refsKept) is read back from its record with its origin", async () => {
+  const held = hold();
+  const w = await (await records()).worker({ tools: { delegate, control, hold: held.tool }, runtime: { refsKept: 1 } });
+  const conversation = await w.conversation("assistant");
+  const other = await w.conversation("assistant");
+  const origin = originOf(conversation);
+  const id = await startTask(w, conversation, "r1");
+  await held.started;
+  expect(held.seen.origin).toEqual(origin);
+  Reflect.deleteProperty(held.seen, "origin");
+
+  // A steer makes the child's run call hold again; other conversations' runs take the one place meanwhile.
+  expect(await controlCall(w, conversation, "r2", { op: "steer", id, message: "hold" })).toBe("running");
+  await w.dispatch("o1", "hello", other);
+  await w.result("o1");
+  held.release();
+  await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+
+  expect(held.seen.agent).toBe("helper");
+  expect(held.seen.origin).toEqual(origin);
+});
+
 test("run: a completed task's outcome carries the parts of the child's run that answered it", async () => {
   const w = await (await records()).worker({ tools: { delegate, hold: hold().tool } });
   const conversation = await w.conversation("assistant");

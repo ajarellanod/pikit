@@ -56,7 +56,7 @@ test("pikit registry capabilities prints what each capability is and who provide
   const run = await runCli(["registry", "capabilities"], temp());
   expect(run.code).toBe(0);
   expect(run.out).toContain("execution  (single, @pikit/pi-adapter, experimental)");
-  expect(run.out).toContain("provided by: execution-do, execution-local");
+  expect(run.out).toContain("provided by: execution-do, execution-gondolin, execution-local");
   expect((await runCli(["registry", "bogus"], temp())).code).toBe(2);
 });
 
@@ -78,7 +78,7 @@ test("new with no directory asks only on a terminal; the presets it offers have 
   expect(readdirSync(parent)).toEqual([]);
 
   const presets = openRegistry(DEFAULT_REGISTRY).presets();
-  expect(presets.map((p) => p.name)).toEqual(["cloudflare-minimal", "http", "telegram", "telegram-cloudflare"]);
+  expect(presets.map((p) => p.name)).toEqual(["cloudflare-minimal", "http", "telegram", "telegram-celld", "telegram-cloudflare"]);
   for (const preset of presets) expect(preset.title).not.toBe(preset.name);
 });
 
