@@ -4,7 +4,11 @@
  * components, several at once) and what it can do (the dashboard and the preset's features), writes
  * the project, then runs the channel's own setup and the model's step, and offers to start it.
  * On Cloudflare, chosen in the menu or with the installer's `--target durable --preset
- * telegram-cloudflare`, it asks only the name and what it can do before writing the bot.
+ * telegram-cloudflare`, it writes the Telegram bot.
+ *
+ * The registry decides what each menu lists, and in which order: the test reads each menu as the
+ * wizard draws it and goes to an option by its label (a component's or preset's title), never by its
+ * position, and answers whichever questions the registry makes the wizard ask.
  *
  * Telegram is channel-telegram's `fake-telegram.test-support.ts`. Ctrl-C stops the wizard with nothing written;
  * `pikit new` with the same name continues with the project already there. The model key is a
@@ -14,7 +18,7 @@
  *   PIKIT_E2E=1 bun test packages/cli/src/e2e-wizard.test.ts
  */
 
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +41,23 @@ afterAll(async () => {
   rmSync(parent, { recursive: true, force: true });
 });
 
+/** A wizard a failed test left waiting at a question: stopped, so it does not outlive its test. */
+const running = new Set<{ kill: () => void }>();
+afterEach(() => {
+  for (const proc of running) proc.kill();
+  running.clear();
+});
+
+const registry = openRegistry(DEFAULT_REGISTRY);
+const CHANNELS = "Where do you want to talk to your agent?";
+const PRESETS = "Which preset do you start from?";
+const FEATURES = "What can it do?";
+
+/** What a menu shows of a title: the part before ": ", as the wizard's `option` (the rest is the hint). */
+const label = (title: string): string => title.split(": ")[0] as string;
+const componentLabel = (name: string): string => label(registry.manifest(name).title ?? name);
+const presetLabel = (name: string): string => label(registry.presets().find((preset) => preset.name === name)?.title ?? name);
+
 /** `pikit new` in a pseudo-terminal: what it printed, without colours, and a way to answer. */
 function wizard(env: Record<string, string> = {}, args: string[] = []) {
   let output = "";
@@ -46,16 +67,37 @@ function wizard(env: Record<string, string> = {}, args: string[] = []) {
     env: { ...process.env, ...env },
     terminal: { cols: 160, rows: 50, data: (_terminal, data) => void (output += decoder.decode(data)) },
   });
+  running.add(proc);
+  void proc.exited.then(() => running.delete(proc));
   const text = () => output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "");
   return {
     text,
-    /** Waits until `expected` appears after `from` characters of output; returns where it ends. */
-    async waitFor(expected: string, from = 0, timeoutMs = 60_000): Promise<number> {
+    /**
+     * Waits until `expected` appears after `from` characters of output; returns where it ends. Fails
+     * at once when `failOn` appears there instead.
+     */
+    async waitFor(expected: string, from = 0, timeoutMs = 60_000, failOn?: string): Promise<number> {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
-        const at = text().indexOf(expected, from);
+        const shown = text();
+        const at = shown.indexOf(expected, from);
         if (at >= 0) return at + expected.length;
-        if (proc.exitCode !== null || Date.now() > deadline) throw new Error(`never printed ${JSON.stringify(expected)}; printed:\n${text()}`);
+        const failed = failOn !== undefined && shown.includes(failOn, from);
+        if (failed || proc.exitCode !== null || Date.now() > deadline) throw new Error(`never printed ${JSON.stringify(expected)}; printed:\n${shown}`);
+        await Bun.sleep(20);
+      }
+    },
+    /** Waits until one of `questions` is asked after `from`; returns the first asked. */
+    async nextQuestion(questions: readonly string[], from = 0, timeoutMs = 60_000): Promise<string> {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const shown = text();
+        const asked = questions
+          .map((question) => ({ question, at: shown.indexOf(`◆  ${question}`, from) }))
+          .filter(({ at }) => at >= 0)
+          .sort((a, b) => a.at - b.at)[0];
+        if (asked !== undefined) return asked.question;
+        if (proc.exitCode !== null || Date.now() > deadline) throw new Error(`asked none of ${JSON.stringify(questions)}; printed:\n${shown}`);
         await Bun.sleep(20);
       }
     },
@@ -64,19 +106,66 @@ function wizard(env: Record<string, string> = {}, args: string[] = []) {
   };
 }
 
+const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const RIGHT = "\x1b[C";
 const SPACE = " ";
 
-/** Answers "Where should it run?" with the target at `down` arrows from the first, the server. */
-async function runOn(w: ReturnType<typeof wizard>, down: number): Promise<void> {
-  await w.waitFor("Where should it run?");
+/** Answers "Where should it run?" with `target`; returns where the answer is printed. */
+async function runOn(w: ReturnType<typeof wizard>, target: "server" | "durable"): Promise<number> {
   await w.waitFor("durable — on Cloudflare (Workers + Durable Objects)");
   expect(w.text()).toContain("server — a long-lived process (Docker on a VPS)");
-  await Bun.sleep(100);
-  w.type(DOWN.repeat(down));
-  await Bun.sleep(100);
-  w.type("\r");
+  return await answer(w, "Where should it run?", [target]);
+}
+
+/**
+ * The menu `question` as first drawn after `from`: each option's line after its marker (◻ unchecked,
+ * ◼ checked; or ○, and ● under the cursor, when one is picked), in order; and where the drawing ends.
+ */
+async function menu(w: ReturnType<typeof wizard>, question: string, from = 0): Promise<{ options: { marker: string; text: string }[]; end: number }> {
+  const start = await w.waitFor(`◆  ${question}`, from);
+  const end = await w.waitFor("Enter: confirm", start);
+  const options = w
+    .text()
+    .slice(start, end)
+    .split("\n")
+    .flatMap((line) => {
+      const match = /^│  ([◻◼○●]) (.*)$/.exec(line);
+      return match === null ? [] : [{ marker: match[1] as string, text: (match[2] as string).trimEnd() }];
+    });
+  return { options, end };
+}
+
+/** Whether an option's line is the label's: the label alone, or followed by its hint or its description. */
+const shows = (text: string, wanted: string): boolean => text === wanted || text.startsWith(`${wanted} (`) || text.startsWith(`${wanted} — `);
+
+/**
+ * Answers the menu `question` drawn after `from` with the options labelled `wanted`, found by label:
+ * one, reached with the arrows from the cursor (●); or several, going down from the first option (where
+ * clack's cursor starts) and pressing Space on each whose check differs from what is wanted. Returns
+ * where the answered question is printed; a refused answer ("Please select at least one option.")
+ * fails at once.
+ */
+async function answer(w: ReturnType<typeof wizard>, question: string, wanted: readonly string[], from = 0): Promise<number> {
+  const { options, end } = await menu(w, question, from);
+  const listed = options.map((option) => option.text);
+  const missing = wanted.filter((each) => !listed.some((text) => shows(text, each)));
+  if (missing.length > 0) throw new Error(`"${question}" does not list ${missing.join(", ")}: ${listed.join(" | ")}`);
+  if (options.some((option) => option.marker === "◻" || option.marker === "◼")) {
+    let cursor = 0;
+    for (const [at, option] of options.entries()) {
+      if ((option.marker === "◼") === wanted.some((each) => shows(option.text, each))) continue;
+      await keys(w, DOWN.repeat(at - cursor), SPACE);
+      cursor = at;
+    }
+  } else {
+    if (wanted.length !== 1) throw new Error(`"${question}" takes one answer, not ${wanted.length}`);
+    const cursor = options.findIndex((option) => option.marker === "●");
+    const to = options.findIndex((option) => shows(option.text, wanted[0] as string));
+    await keys(w, to > cursor ? DOWN.repeat(to - cursor) : UP.repeat(cursor - to));
+  }
+  await keys(w, "\r");
+  return await w.waitFor(`◇  ${question}`, end, 10_000, `▲  ${question}`);
 }
 
 /** Answers the keys one by one, as a person types them: a prompt redraws between two. */
@@ -88,21 +177,26 @@ async function keys(w: ReturnType<typeof wizard>, ...typed: string[]): Promise<v
 }
 
 /**
- * Answers the name and the server, then in the channels (several at once, HTTP checked) unchecks HTTP
- * and checks Telegram, and adds nothing in "What can it do?".
+ * Answers the name and the server, then in the channels (several at once, the preset's HTTP checked)
+ * unchecks HTTP and checks Telegram, and adds nothing in "What can it do?".
  */
 async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
   await w.waitFor("Name of your agent");
   w.type("my-bot\r");
-  await runOn(w, 0);
-  await w.waitFor("Where do you want to talk to your agent?");
-  const [channels] = openRegistry(DEFAULT_REGISTRY).slots("http", ["server"]);
-  const telegramAt = channels?.options.findIndex((o) => o.name === "channel-telegram") ?? -1;
-  expect(telegramAt).toBeGreaterThanOrEqual(0);
-  expect(channels?.options[0]?.name).toBe("channel-http"); // the cursor starts on the first, checked: the preset's
-  await keys(w, SPACE, DOWN.repeat(telegramAt), SPACE, "\r");
-  await w.waitFor("What can it do?");
-  await w.waitFor("Dashboard");
+  const at = await runOn(w, "server");
+  // Every channel of the registry that runs on a server, in the registry's order; the preset's checked.
+  const [channels] = registry.slots("http", ["server"]);
+  expect(channels?.defaults).toEqual(["channel-http"]);
+  expect(channels?.options.map((o) => o.name)).toContain("channel-telegram");
+  const { options } = await menu(w, CHANNELS, at);
+  expect(options.length).toBe(channels?.options.length ?? -1);
+  for (const [i, channel] of (channels?.options ?? []).entries()) {
+    expect(shows(options[i]?.text ?? "", componentLabel(channel.name))).toBe(true);
+    expect(options[i]?.marker).toBe(channels?.defaults.includes(channel.name) ? "◼" : "◻");
+  }
+  const answered = await answer(w, CHANNELS, [componentLabel("channel-telegram")], at);
+  await w.waitFor(FEATURES, answered);
+  await w.waitFor("Dashboard", answered);
   expect(w.text()).toContain("MCP tools");
   await keys(w, "\r");
 }
@@ -113,8 +207,8 @@ test.skipIf(!E2E)(
     const w = wizard();
     await w.waitFor("Name of your agent");
     w.type("my-bot\r");
-    await runOn(w, 0);
-    await w.waitFor("Where do you want to talk to your agent?");
+    await runOn(w, "server");
+    await w.waitFor(CHANNELS);
     await w.waitFor("Telegram");
     expect(w.text()).toContain("HTTP API");
     await Bun.sleep(100);
@@ -182,11 +276,7 @@ test.skipIf(!E2E)(
     at = await w.waitFor("BRAVE_API_KEY (Enter skips)", at);
     await Bun.sleep(100);
     w.type("\r");
-    at = await w.waitFor("Start it?", at);
-    await Bun.sleep(100);
-    w.type(DOWN.repeat(2));
-    await Bun.sleep(100);
-    w.type("\r");
+    await answer(w, "Start it?", ["Not now"], at);
 
     expect(await w.exited).toBe(0);
     expect(w.text()).toContain("Later: cd my-bot && pikit up");
@@ -207,14 +297,10 @@ test.skipIf(!E2E)(
     const w = wizard();
     await w.waitFor("Name of your agent");
     w.type("two-bot\r");
-    await runOn(w, 0);
-    await w.waitFor("Where do you want to talk to your agent?");
-    // HTTP stays checked; Telegram, the next one, is checked too.
-    await keys(w, DOWN, SPACE, "\r");
-    await w.waitFor("What can it do?");
-    const features = openRegistry(DEFAULT_REGISTRY).features("http", ["server"]).map((f) => f.name);
-    // After the dashboard, the first option.
-    await keys(w, DOWN.repeat(1 + features.indexOf("tool-mcp")), SPACE, "\r");
+    let at = await runOn(w, "server");
+    // HTTP stays checked; Telegram is checked too.
+    at = await answer(w, CHANNELS, [componentLabel("channel-http"), componentLabel("channel-telegram")], at);
+    await answer(w, FEATURES, [componentLabel("tool-mcp")], at);
     await w.waitFor("Created two-bot in");
     await w.waitFor("The same, in a script: pikit new two-bot --preset http --with channel-http --with channel-telegram --with tool-mcp\n");
     await w.waitFor("Configure it now?");
@@ -228,14 +314,20 @@ test.skipIf(!E2E)(
 );
 
 /**
- * Adds the dashboard in "What can it do?", then declines "Configure it now?" once the bot is written;
- * returns what the wizard printed.
+ * Answers what the registry makes the wizard ask after `from` for the Telegram bot on Cloudflare: the
+ * preset (when several run there), its channels (when several do: the preset's own, kept), and the
+ * dashboard in "What can it do?"; then declines "Configure it now?" once the bot is written. Returns
+ * what the wizard printed.
  */
-async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string): Promise<string> {
-  await w.waitFor("What can it do?");
-  await w.waitFor("Dashboard");
-  // The cursor starts on the first, the dashboard.
-  await keys(w, SPACE, "\r");
+async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string, from = 0): Promise<string> {
+  expect(registry.slots("telegram-cloudflare", ["durable"])[0]?.defaults).toEqual(["channel-telegram-webhook"]);
+  let at = from;
+  for (;;) {
+    const question = await w.nextQuestion([PRESETS, CHANNELS, FEATURES], at);
+    if (question === FEATURES) break;
+    at = await answer(w, question, [question === PRESETS ? presetLabel("telegram-cloudflare") : componentLabel("channel-telegram-webhook")], at);
+  }
+  await answer(w, FEATURES, ["Dashboard"], at);
   await w.waitFor(`Created ${name} in`, 0, 180_000);
   await w.waitFor("Configure it now?");
   await Bun.sleep(100);
@@ -257,11 +349,8 @@ test.skipIf(!E2E)(
     const w = wizard();
     await w.waitFor("Name of your agent");
     w.type("cf-bot\r");
-    await runOn(w, 1);
-    const text = await writtenNotConfigured(w, "cf-bot");
-    // One preset runs on Cloudflare and makes an agent you talk to: no question of presets.
-    expect(text).not.toContain("Which preset do you start from?");
-    expect(text).not.toContain("Where do you want to talk to your agent?"); // Cloudflare's one channel
+    const text = await writtenNotConfigured(w, "cf-bot", await runOn(w, "durable"));
+    // The preset's own channel, kept: nothing to add to the command.
     expect(text).toContain("The same, in a script: pikit new cf-bot --target durable --preset telegram-cloudflare --ui");
     expect(text).toContain("Later: cd cf-bot && pikit configure && pikit up");
   },
@@ -269,13 +358,14 @@ test.skipIf(!E2E)(
 );
 
 test.skipIf(!E2E)(
-  "the installer's --durable: pikit new --target durable --preset telegram-cloudflare asks only the name and what it can do",
+  "the installer's --durable: pikit new --target durable --preset telegram-cloudflare asks neither where it runs nor which preset",
   async () => {
     const w = wizard({}, ["--target", "durable", "--preset", "telegram-cloudflare"]);
     await w.waitFor("Name of your agent");
     w.type("flag-bot\r");
     const text = await writtenNotConfigured(w, "flag-bot");
     expect(text).not.toContain("Where should it run?");
+    expect(text).not.toContain(PRESETS);
     expect(text).toContain("The same, in a script: pikit new flag-bot --target durable --preset telegram-cloudflare --ui");
   },
   TIMEOUT,
