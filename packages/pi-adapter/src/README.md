@@ -19,6 +19,7 @@ gives components Pi's tools, models, MCP client and execution environments by su
 | `./api/<name>` | `api/<name>.ts` | pi-ai's lazy API wrappers for `createProvider` (`openAICompletionsApi`…), one subpath each, generated with the providers | every, but `bedrock-converse-stream` and `google-vertex` |
 | `./providers/faux` | `providers/faux.ts` | pi-ai 1.0's faux provider, for tests only (`provider-faux`) | every |
 | `./credentials` | `credentials.ts` | pi-ai's credential types; `loginInteraction(terminal)`, an `AuthInteraction` that answers every prompt type, `select` included | every |
+| `./oauth-flows` | `oauth-flows.ts` | `bundleOAuthFlows()`: pi-ai's OAuth flows (login, refresh, `toAuth`) registered statically, so a bundle (a Worker's) carries them; pi-ai otherwise loads them with an import no bundler follows (credentials-do calls it) | every |
 | `./wakeups` | `wakeups.ts` | the same as the root's wake-up functions | every |
 | `./testing` | `testing/index.ts` | `./testing/neutral`, plus `createPiRuntimeFixture` (a SQLite file), `sqliteStorage`, `openSqliteDatabase`, `testComponents` with a `storage.sql` in memory | server |
 | `./testing/neutral` | `testing/neutral.ts` | the scripted model and agent (`scriptedProvider`, `scriptedAgent`, `holdTool`, `recordingBash`), `createRuntimeFixture`, `interruptRun`, `testComponents`, `fakeConversations`, the `workspace` and `model.credentials` conformance suites | every |
@@ -231,6 +232,12 @@ when only timed work is left (a pending timer keeps a Durable Object from being 
 - `providers/anthropic.ts`: `anthropicProvider` (credential order: stored, `ANTHROPIC_API_KEY`,
   `ANTHROPIC_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, then workload identity federation). Its OAuth login
   first asks a `select` prompt (`browser` or `copy_code`): `loginInteraction` answers it.
+- `oauth-flows.ts`: pi-ai loads each OAuth flow with an `import()` of a variable specifier, which a
+  Worker's bundle does not carry: a stored OAuth credential could not be used or refreshed there.
+  `bundleOAuthFlows()` registers every flow statically (pi-ai's `registerBunOAuthFlows`), once per
+  isolate. `oauth-flows.test.ts` bundles a Worker with wrangler and refreshes a token in workerd
+  against a local fake (and shows the bundle without it carries no flow). Upstream:
+  `docs/upstream/pi-ai-oauth-static-load.md`.
 - `providers/<id>.ts`, `api/<name>.ts`: generated (`bun scripts/pi-providers.ts`), checked against
   pi-ai's `getBuiltinProviders()` and `builtinProviders()` by `scripts/pi-providers.test.ts`. Which
   need Node is decided by hand, from pi-ai's code, in `SERVER_ONLY_EXPORTS`: Bedrock (the AWS SDK,
