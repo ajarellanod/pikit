@@ -11,6 +11,8 @@
  * dashboard's own, listed first as soon as its message is dispatched, and its agent answers there. The
  * index object, which runs the same App, holds no conversation. And an operator's images, the most a
  * message carries on Cloudflare (1 MB), stored in a real object's SQLite, answered, and read back.
+ * A conversation whose runs fail (a model error) is listed and searched by its first message, from the
+ * moment it is dispatched.
  */
 
 import { BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
@@ -38,10 +40,10 @@ const auth = defineComponent({
   setup: (pikit) => pikit.provide("admin.auth", { verify: async (request) => (request.headers.get("authorization") === AUTH.authorization ? { id: "ops" } : undefined) } satisfies AdminAuth),
 });
 
-/** The scripted agent and model: each run answers `answer: <message>`. */
-function model(): ComponentDefinition[] {
+/** The scripted agent and model: each run answers `answer: <message>` (with `failing`, each model call fails). */
+function model(failing?: string): ComponentDefinition[] {
   const agent = scriptedAgent(holdTool(async () => "released"));
-  const provider = scriptedProvider();
+  const provider = scriptedProvider(failing === undefined ? {} : { fail: () => Promise.resolve(failing) });
   return [
     defineComponent({ name: "agents-fixture", setup: (pikit) => pikit.provideKeyed("agent.definition", agent.name, agent) }),
     defineComponent({ name: "provider-faux", setup: (pikit) => pikit.provideKeyed("model.provider", provider.id, provider) }),
@@ -274,6 +276,33 @@ it("slash commands in real objects: listed from the index object's App, run in t
     const fresh = await worker.fetch(path("new"), { method: "POST" });
     expect(fresh.status).toBe(200);
     expect((await worker.fetch(path("name"), { method: "POST", body: JSON.stringify({ args: "late" }) })).status).toBe(409);
+  } finally {
+    await worker.stop();
+  }
+});
+
+it("a conversation whose runs fail is listed by its first message from its dispatch, told to the index (searched by it)", async () => {
+  const answers: string[] = [];
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model("Provider is not configured: anthropic"), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
+  const worker = await workerApp();
+  const key = `test:${crypto.randomUUID()}`;
+  try {
+    await worker.send(key, "m1", "Plan a trip to Lisbon");
+    await vi.waitFor(
+      async () => {
+        const listed = (await (await worker.fetch("/admin/api/conversations?limit=1")).json()) as { items: { conversationId: string; title?: string }[] };
+        expect(listed.items).toMatchObject([{ conversationId: `${key}~1`, title: "Plan a trip to Lisbon" }]);
+      },
+      { timeout: 10_000 },
+    );
+    const found = async (q: string) =>
+      ((await (await worker.fetch(`/admin/api/conversations?q=${encodeURIComponent(q)}`)).json()) as { items: { conversationId: string }[] }).items.map((each) => each.conversationId);
+    expect(await found("A TRIP TO LISBON")).toEqual([`${key}~1`]);
+    // Its run failed: nothing answered, and the first message still names it.
+    expect(answers).toEqual([]);
+    await vi.waitFor(async () => expect(await (await worker.fetch(`/admin/api/conversations/${id(`${key}~1`)}`)).json()).toMatchObject({ title: "Plan a trip to Lisbon", busy: false }), {
+      timeout: 10_000,
+    });
   } finally {
     await worker.stop();
   }

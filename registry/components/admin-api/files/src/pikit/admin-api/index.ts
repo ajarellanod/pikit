@@ -32,7 +32,10 @@
  *   `titleModel`, else the agent's) titles it from its first message, in the background, once (tried
  *   once more after a later run if that failed): `titles.ts`. A reset's new conversation gets its own.
  *   `/name` replaces the current one's. They are kept with the index (`conversation-index.ts`) and
- *   listed with each conversation; one with no title yet is listed by its first message. Each change
+ *   listed with each conversation; one with no title yet is listed by its first message, from the moment
+ *   it is dispatched (`agent.dispatched`: a conversation whose runs all fail is never listed by its id).
+ *   A conversation named before its first run settles (`/name`: a channel that titles its own runs it)
+ *   costs no model call. Each change
  *   of the title a conversation is listed by is told to the index (`seen` with its `title`, as at
  *   start), which searches it (`?q=`): on Cloudflare the titles are the objects', not the index's.
  * - **Only a conversation's current one is talked to.** A message, an abort or a reset to a
@@ -64,12 +67,17 @@ import { Config } from "./config.ts";
 import { createConversationIndex, INDEX_KEY, type IndexedConversation } from "./conversation-index.ts";
 import { DASHBOARD_FILES } from "./dashboard-files.ts";
 import { provideRoutes } from "./routes.ts";
-import { createTitler } from "./titles.ts";
+import { createTitler, firstTextOf } from "./titles.ts";
 
 export { worker, WORKER_NAME } from "./worker.ts";
 
 /** Conversations read from `agent.observe` per page when the App starts, and sent to the index at once. */
 const BACKFILL_PAGE = 100;
+/**
+ * The transcript entries read when a message is dispatched to a conversation its first message does not
+ * name yet: a new one fits. A longer one (made before admin-api) is named at start (`untitled`).
+ */
+const FIRST_PAGE = 20;
 
 /** A conversation's first messages, oldest first: its transcript's last page (newest first), read through at most 50 pages. */
 async function firstMessages(observer: AgentObserver, conversationId: string, ctx: AppContext): Promise<readonly unknown[]> {
@@ -210,11 +218,38 @@ export default defineComponent({
         });
       }
     };
-    const active = (conversation: ConversationRef, ctx: AppContext) =>
-      seen([{ key: conversation.key, conversationId: conversation.conversationId, agent: conversation.agent, at: ctx.clock.now() }], ctx);
+    const active = (conversation: ConversationRef, ctx: AppContext, title?: string) =>
+      seen([{ key: conversation.key, conversationId: conversation.conversationId, agent: conversation.agent, at: ctx.clock.now(), ...(title !== undefined && { title }) }], ctx);
 
-    // In the caller's context, once the message is durable: the most reliable moment.
-    pikit.on("agent.dispatched", ({ conversation, admission }, ctx) => (admission.kind === "duplicate" ? undefined : active(conversation, ctx)));
+    /**
+     * Names `conversation` by its first message, once it is in the transcript (a message dispatched):
+     * the title it is listed by now when this named it, else `undefined` (it was named, or is not new).
+     * Never throws: a miss leaves it to its first run's title, or to the next start's.
+     */
+    const named = async ({ key, conversationId }: ConversationRef, ctx: AppContext): Promise<string | undefined> => {
+      try {
+        const now = await index.title(conversationId);
+        if (now.title !== undefined || now.firstMessage !== undefined) return undefined;
+        const page = await observe.get().transcript(conversationId, { limit: FIRST_PAGE }, ctx);
+        if (page === undefined || page.next !== undefined) return undefined;
+        const text = firstTextOf([...page.items].reverse().flatMap((entry) => entry.messages));
+        if (text === undefined || !(await index.firstMessage(conversationId, text))) return undefined;
+        return await listedTitle(index, conversationId);
+      } catch (error) {
+        ctx.logger.warn("admin-api: a conversation was not named by its first message; its first run's title names it", {
+          conversation: key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return undefined;
+      }
+    };
+
+    // In the caller's context, once the message is durable: the most reliable moment. A new conversation
+    // is named by its first message now, before any run (one that fails included) settles.
+    pikit.on("agent.dispatched", async ({ conversation, admission }, ctx) => {
+      if (admission.kind === "duplicate") return;
+      await active(conversation, ctx, await named(conversation, ctx));
+    });
     // On Cloudflare a run that is not resumed was dispatched in this object just before: one message fewer.
     pikit.on("agent.started", ({ conversation, resumed }, ctx) => (placement?.tellsStarted(resumed) === true ? active(conversation, ctx) : undefined));
     pikit.on("agent.settled", (result, ctx) => {

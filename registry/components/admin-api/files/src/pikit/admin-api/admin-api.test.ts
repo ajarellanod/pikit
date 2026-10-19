@@ -200,7 +200,7 @@ test("GET one conversation and its transcript; an unknown one is 404", async () 
   expect(await one.json()).toMatchObject({ conversationId: "c1", current: true });
 
   const transcript = await s.fetch("/admin/api/conversations/c1/transcript?limit=1", { headers: AUTH });
-  expect(await transcript.json()).toEqual({ items: [{ id: "e2", kind: "message", messages: [{ role: "assistant", content: "hello" }] }] });
+  expect(await transcript.json()).toEqual({ items: [{ id: "e2", kind: "message", messages: [{ role: "assistant", content: "hello" }] }], next: "1" });
 
   for (const path of ["/admin/api/conversations/nope", "/admin/api/conversations/nope/transcript", "/admin/api/conversations/%E0/transcript", "/admin/api/conversations/nope/events"]) {
     const response = await s.fetch(path, { headers: AUTH });
@@ -917,6 +917,49 @@ test("a run that failed or was aborted titles nothing, and without model.complet
   await bare.app.context().emit("agent.settled", settled("telegram:1", "c1", "hi"));
   await Bun.sleep(20);
   expect(await titleOf(bare, "c1")).toBeUndefined();
+});
+
+test("a conversation is named by its first message once it is dispatched, before any run settles (a failing one too); a model's title still replaces it; one named before its first run settles costs no model call", async () => {
+  const model = fakeModel(() => "Trip planning");
+  const s = await started({}, [model.component]);
+  const ref = (id: string, key: string) => ({ key, agent: "assistant", conversationId: id });
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  s.runtime.transcripts.set("c1", [{ id: "e1", kind: "message", messages: [{ role: "user", content: "plan a trip to Lisbon" }] }]);
+  const ctx = s.app.context();
+
+  await ctx.emit("agent.dispatched", { conversation: ref("c1", "telegram:1"), admission: { kind: "started", requestId: "m1" } });
+  expect(await titleOf(s, "c1")).toBe("Plan a trip to Lisbon");
+  // Searched by it, and its runs failing changes nothing.
+  const found = async (q: string) =>
+    ((await (await s.fetch(`/admin/api/conversations?q=${encodeURIComponent(q)}`, { headers: AUTH })).json()) as { items: { conversationId: string }[] }).items.map((each) => each.conversationId);
+  expect(await found("LISBON")).toEqual(["c1"]);
+  await ctx.emit("agent.failed", { ...settled("telegram:1", "c1", "plan a trip to Lisbon"), kind: "failed", error: { code: "model_error", message: "Provider is not configured" } });
+  expect(await titleOf(s, "c1")).toBe("Plan a trip to Lisbon");
+  expect(model.asked).toEqual([]);
+  // A later message names it no more; the first run that settles has a model title it, from that first message.
+  s.runtime.transcripts.set("c1", [{ id: "e2", kind: "message", messages: [{ role: "user", content: "and Porto?" }] }, ...(s.runtime.transcripts.get("c1") ?? [])]);
+  await ctx.emit("agent.dispatched", { conversation: ref("c1", "telegram:1"), admission: { kind: "started", requestId: "m2" } });
+  expect(await titleOf(s, "c1")).toBe("Plan a trip to Lisbon");
+  await ctx.emit("agent.settled", settled("telegram:1", "c1", "and Porto?", "m2"));
+  await until(async () => (await titleOf(s, "c1")) === "Trip planning", "the model's title");
+  expect(model.asked.map((each) => each.prompt)).toEqual(["plan a trip to Lisbon"]);
+  expect(await found("trip planning")).toEqual(["c1"]);
+
+  // Named (`/name`, as a channel that titles its own conversations does) before its first run settles: no model call.
+  s.runtime.add({ conversationId: "c2", key: "web:u:1", agent: "assistant" });
+  s.runtime.transcripts.set("c2", [{ id: "e1", kind: "message", messages: [{ role: "user", content: "hello there" }] }]);
+  await ctx.emit("agent.dispatched", { conversation: ref("c2", "web:u:1"), admission: { kind: "started", requestId: "m1" } });
+  await command(s, "c2", "name", { args: "Greetings" });
+  await ctx.emit("agent.settled", settled("web:u:1", "c2", "hello there"));
+  await Bun.sleep(20);
+  expect(model.asked.length).toBe(1);
+  expect(await titleOf(s, "c2")).toBe("Greetings");
+
+  // A conversation longer than a page when its message comes (made before admin-api): left to start's titling.
+  s.runtime.add({ conversationId: "c3", key: "telegram:3", agent: "assistant" });
+  s.runtime.transcripts.set("c3", Array.from({ length: 30 }, (_, i) => ({ id: `e${30 - i}`, kind: "message", messages: [{ role: "user", content: `message ${30 - i}` }] })));
+  await ctx.emit("agent.dispatched", { conversation: ref("c3", "telegram:3"), admission: { kind: "started", requestId: "m1" } });
+  expect(await titleOf(s, "c3")).toBeUndefined();
 });
 
 test("archive, unarchive, delete: the list only, any conversation; archived ones listed apart; unknown 404, an operator's only", async () => {

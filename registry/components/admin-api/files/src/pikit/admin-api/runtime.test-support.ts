@@ -111,7 +111,11 @@ export class Runtime {
     transcript: async (id, page) => {
       this.pages.push(page);
       const entries = this.transcripts.get(id);
-      return entries === undefined ? undefined : { items: entries.slice(0, page.limit ?? 50) };
+      if (entries === undefined) return undefined;
+      // The cursor is where the next page starts.
+      const from = page.cursor === undefined ? 0 : Number(page.cursor);
+      const end = from + (page.limit ?? 50);
+      return { items: entries.slice(from, end), ...(end < entries.length && { next: String(end) }) };
     },
     watch: (id, ctx) => this.follow(id, ctx),
     usage: async (id) => this.conversations.get(id)?.usage,

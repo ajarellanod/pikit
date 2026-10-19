@@ -134,9 +134,21 @@ characters, cut at a word). A failure (a model error, an answer with no title) i
 once more after a later run; then never (`TITLE_TRIES`). `/name` (or the dashboard's Rename,
 `POST …/rename`) replaces any title, and no model replaces the operator's. A title names one conversation: a reset (`/new`) starts one that gets its
 own from its own first message. Until a conversation has a title, its first message (cleaned the same
-way) names it, once a model was asked to title it. Titles are kept with the index (below) and come
-with each conversation (`title`). With a fake model
-(provider-faux) the title is its echo of the first message, cleaned.
+way) names it, from the moment it is dispatched (`agent.dispatched`: read from the transcript's first
+page, a new conversation's; one longer than that, made before admin-api, is titled at start): a
+conversation whose runs all fail (a model whose provider has no credentials) is listed by its first
+message, never by its id, and the first run that settles still has a model title it. A conversation
+named before its first run settles (`/name`, which a channel that titles its own conversations runs:
+channel-web) costs no model call: the operator's title is never replaced. Titles are kept with the
+index (below) and come with each conversation (`title`). With a fake model (provider-faux) the title
+is its echo of the first message, cleaned.
+
+**A channel's own titles.** A channel that titles its conversations (channel-web: the first message
+at once, a model's title after its first answer, the user's rename) keeps the dashboard's the same by
+running `/name` (`agent.command` `"name"`) with each one, in the conversation's App (on Cloudflare its
+object). The dashboard then lists the channel's title, and asks no model of its own: one title, one
+model call, per conversation. An operator's `/name` or Rename there changes only the dashboard's,
+until the channel names it again.
 
 ### Browser sessions
 
@@ -166,8 +178,8 @@ by its id.
 
 **Search** (`?q=`) is the index's too: each row also carries the title its conversation is listed by
 (a model's, the operator's, else its first message), lowercased, and `q` matches it or the key, any
-case (`%` and `_` literal). The conversation's App tells the index the title whenever it changes (a
-first message given to a model to title, a model's title, `/name`, a rename) and with each
+case (`%` and `_` literal). The conversation's App tells the index the title whenever it changes (its
+first message once dispatched, a model's title, `/name`, a rename) and with each
 conversation at start, so on Cloudflare, where titles are the objects', the index object searches
 them too. A conversation whose title changed while the index could not be told is found by its old
 title until its object starts again.
@@ -291,7 +303,8 @@ still answers.
   the tool); ids with `.` and `/`; redacted config; server-sent events; messages logged without their
   text; the commands (listed, run as actions, `404` / `409` / `422`, a project's own, logged by name)
   and admin-api's own through the `agent.command` suite; titles (made in the background after the first
-  run, once, retried once, `titleModel`, `/name` first); search (`q`: a model's title, a rename, `/name`,
+  run, once, retried once, `titleModel`, `/name` first; the first message naming it once dispatched, a
+  failing run's conversation too, a long one left to start, a named one costing no model call); search (`q`: a model's title, a rename, `/name`,
   a first message, the key; with `archived=1`; too long `400`).
 - `remote.test.ts`: the Worker's half over a fake platform whose every key is an App running the
   default export on `durable`: ids, the list from the index (order, pages, an object that does not
@@ -305,9 +318,9 @@ still answers.
   ones read.
 - `conversation-index.test.ts`: the index on SQLite (an upsert a late `seen` does not move back, one
   row per conversation, order, pages, cursors; titles: one model's try and one more, the operator's
-  first). `assets.test.ts`: the files served from the module,
+  first, the first message kept when dispatched). `assets.test.ts`: the files served from the module,
   pages for any other path, the CSP.
 - The kit's workerd lane runs both halves in real Durable Objects (`tests/workerd/test/admin-api.workerd.ts`),
-  a message with 1 MB of images stored and answered there among them, and the commands and a title
-  made in a real object. The sample (`samples/http/test/admin.test.ts`) titles a chat on the real
+  a message with 1 MB of images stored and answered there among them, the commands and a title
+  made in a real object, and a conversation whose run fails listed and searched by its first message. The sample (`samples/http/test/admin.test.ts`) titles a chat on the real
   runtime and runs `/compact` and `/name` there.

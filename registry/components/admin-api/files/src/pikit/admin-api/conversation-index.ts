@@ -38,6 +38,8 @@
  * On a server it is the App's (its conversation ids are unique); on Cloudflare the conversation's own
  * object's (where its runs settle and `/name` runs, and whose answer the Worker's list reads), by the
  * object's own id: the index object holds none.
+ * - Its first message names it from the moment it is dispatched (`firstMessage`, kept with no try
+ *   counted), so a conversation whose runs fail is never listed by its id.
  * - A model titles a conversation once, after its first run (`titling` claims a try, at most
  *   `TITLE_TRIES`, and keeps the text to title; `titled` writes the answer unless the operator named it
  *   meanwhile). Until it has a title, the text kept is what names it (`title`'s `firstMessage`).
@@ -99,6 +101,11 @@ export interface ConversationIndex {
    * and its first message as a model was asked to title it (`undefined` until one was).
    */
   title(conversationId: string): Promise<{ title?: string; firstMessage?: string }>;
+  /**
+   * Keeps `input`, the conversation's first message, as the text that names it until it has a title, and
+   * that a model is asked to title: unless one is kept already. Counts no try. Whether it kept it.
+   */
+  firstMessage(conversationId: string, input: string): Promise<boolean>;
   /** The operator's title for `conversationId` (`/name`): it replaces any, and no model replaces it. */
   name(conversationId: string, title: string): Promise<void>;
   /**
@@ -219,6 +226,14 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
     async title(conversationId) {
       const [row] = await (await db()).query<{ title: string | null; input: string | null }>(`SELECT title, input FROM ${TITLES} WHERE conversation = ?`, [conversationId]);
       return { ...(row?.title != null && { title: row.title }), ...(row?.input != null && { firstMessage: row.input }) };
+    },
+
+    async firstMessage(conversationId, input) {
+      const { changes } = await (await db()).run(
+        `INSERT INTO ${TITLES} (conversation, input) VALUES (?, ?) ON CONFLICT (conversation) DO UPDATE SET input = excluded.input WHERE ${TITLES}.input IS NULL`,
+        [conversationId, input],
+      );
+      return changes > 0;
     },
 
     async name(conversationId, title) {

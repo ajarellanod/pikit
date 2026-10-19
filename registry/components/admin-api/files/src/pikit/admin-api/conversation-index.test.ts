@@ -121,6 +121,18 @@ test("titles: a model titles a conversation once (one more try if that failed), 
   await titles.name("c4", "Named first");
   expect(await titles.titling("c4", "text")).toBeUndefined();
   expect(await titles.title("c4")).toEqual({ title: "Named first" });
+
+  // Its first message, kept when dispatched: it names it, counts no try, and is what a model titles.
+  expect(await titles.firstMessage("c5", "dispatched first")).toBe(true);
+  expect(await titles.firstMessage("c5", "a later one")).toBe(false);
+  expect(await titles.title("c5")).toEqual({ firstMessage: "dispatched first" });
+  expect(await titles.titling("c5", "the run's")).toEqual({ input: "dispatched first" });
+  expect(await titles.titling("c5", "the run's")).toEqual({ input: "dispatched first" });
+  expect(await titles.titling("c5", "the run's")).toBeUndefined();
+  // Named first: still named; a model titled it first: kept too.
+  expect(await titles.firstMessage("c4", "text")).toBe(true);
+  expect(await titles.title("c4")).toEqual({ title: "Named first", firstMessage: "text" });
+  expect(await titles.firstMessage("c2", "text")).toBe(false);
 });
 
 test("hide: archived ones are listed apart, deleted ones never; new activity lists either again, a backfill does not", async () => {
