@@ -1,0 +1,32 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "scheduler-admit",
+  "version": "0.0.0",
+  "title": "Scheduled prompts reach their conversation: each tick a message from the scheduler",
+  "description": "Admits each tick of the scheduler as a message in its job's existing conversation, from the scheduler (never a person), once per tick; the conversation's own channel delivers the answer.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": [
+      "scheduler",
+      "agent.runtime",
+      "conversations.registry"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

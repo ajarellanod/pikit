@@ -370,6 +370,30 @@
       ],
       "path": "components/runtime-pi"
     },
+    "scheduler-admit": {
+      "version": "0.0.0",
+      "description": "Admits each tick of the scheduler as a message in its job's existing conversation, from the scheduler (never a person), once per tick; the conversation's own channel delivers the answer.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/scheduler-admit"
+    },
+    "scheduler-routines": {
+      "version": "0.0.0",
+      "description": "Routines: prompts on a cron schedule in a conversation, written in the project's config (reviewed and versioned with it), made the scheduler's jobs at each start: added, changed and removed, never touching another component's.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/scheduler-routines"
+    },
+    "scheduler-sql": {
+      "version": "0.0.0",
+      "description": "The scheduler: jobs that run a prompt at a time or on a cron schedule (5 fields, in a time zone) in a conversation that exists, kept in storage.sql and woken by wakeups; each tick delivered at least once, with a policy for ticks missed while stopped.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/scheduler-sql"
+    },
     "secrets-env": {
       "version": "0.0.0",
       "description": "Secrets from the process environment.",
@@ -490,6 +514,14 @@
         "durable"
       ],
       "path": "components/tool-read"
+    },
+    "tool-schedule": {
+      "version": "0.0.0",
+      "description": "The `schedule`, `listSchedules` and `cancelSchedule` tools, for the agents that name them: a prompt that comes back to the agent's own conversation once at a time or on a cron schedule, listed and cancelled only there.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/tool-schedule"
     },
     "tool-websearch-brave": {
       "version": "0.0.0",

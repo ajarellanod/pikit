@@ -70,10 +70,11 @@ export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
 /**
  * The repository type-checks as one program, so the capabilities tests declare for themselves
  * (`test.store` in core's `app.test.ts`) merge into the same interfaces. They are not contracts:
- * the `test.` prefix keeps them out of the catalogue. Nor are those this registry's own components
- * declare (`RegistryDeclared`): their entries are in their `component.json` (`registryCatalogue`).
+ * the `test.` prefix keeps them out of the catalogue. Nor are the capabilities a component of this
+ * registry declares (`RegistryDeclared`): the registry's, not the kit's, described by their
+ * component.json and added by `registryCatalogue`.
  */
-type RegistryDeclared = "approvals";
+type RegistryDeclared = "approvals" | "scheduler";
 type Real<K> = Exclude<K & string, `test.${string}` | RegistryDeclared>;
 
 type Catalogue = { [K in Real<keyof AppCapabilities>]: CapabilityEntry<"single"> } & {

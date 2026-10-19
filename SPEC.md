@@ -135,7 +135,7 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 ### 3.2 What never enters the kernel
 
 Scheduling, approvals, health and degradation policy, deduplication, routing, storage, channels,
-delivery, the dashboard, self-knowledge and self-change. Each is a capability in `@pikit/contracts` and a component (the dashboard's UI
+delivery, the dashboard, self-knowledge and self-change. Each is a capability (in `@pikit/contracts`, or declared by the registry component that defines it, as scheduler-sql declares `scheduler`) and a component (the dashboard's UI
 is a project's choice over its component, `admin-api`, §5); what every component of one must do alike (admitting a
 message, delivering answers) is a contracts helper, its policy passed in by the component (§3.3). A
 new kernel export is a decision recorded here.

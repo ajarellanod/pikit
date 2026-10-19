@@ -1,0 +1,46 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "scheduler-sql",
+  "version": "0.0.0",
+  "title": "Scheduled prompts: jobs at a time or on a cron schedule, kept in storage.sql",
+  "description": "The scheduler: jobs that run a prompt at a time or on a cron schedule (5 fields, in a time zone) in a conversation that exists, kept in storage.sql and woken by wakeups; each tick delivered at least once, with a policy for ticks missed while stopped.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": [
+      "storage.sql",
+      "wakeups"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "scheduler"
+  ],
+  "declares": {
+    "capabilities": {
+      "scheduler": {
+        "mode": "single",
+        "stability": "experimental",
+        "summary": "Jobs that run a prompt in a conversation at a time or on a cron schedule: keep, list and cancel them, and handle their ticks."
+      }
+    }
+  },
+  "dependencies": {
+    "croner": "10.0.1"
+  },
+  "devDependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
