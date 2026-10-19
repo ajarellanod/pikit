@@ -58,6 +58,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
 | [conversation-routing](conversation-routing.md) | | Decided: a conversation is one chat of one channel; its key is never rewritten | No |
 | [deployment-celld](deployment-celld.md) | | The `durable` target on your own machines (celld, self-hosted Durable Objects): scale out without Cloudflare | No; it should come, as the self-hosted way to scale out |
+| [deployment-rivet](deployment-rivet.md) | | The `durable` target on Rivet Actors (self-hosted or Rivet Cloud): an alternative to celld, in Bun, with its own host layer (`-rivet`) and a SPEC §4 wording change first | No |
 | [deployment-systemd](deployment-systemd.md) | | Run as a systemd service, without Docker | No |
 | [deployment-targets](deployment-targets.md) | | Targets as runtime models; Vercel, E2B, exe.dev, Modal without closing deployment | No; the dashboard (SPEC §5) follows its rules |
 | [health](health.md) | | Components report failures; essential ones restart the process | Yes: SPEC §5 and §6 |
