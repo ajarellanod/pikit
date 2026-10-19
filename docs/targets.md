@@ -15,7 +15,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `actors-do`: RPC to `idFromName(key)` (`scope` `"one"`) |
 | `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `actors-do`: rows over the object's one alarm, in slices |
 | `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-workers`: the Worker's `env` |
-| `execution` | `execution-local`: the machine's files and shell; or `execution-gondolin`: a Linux micro-VM per conversation (QEMU), its files on the host | `execution-do`: files in the object's SQL, a simulated shell |
+| `execution` | `execution-local`: the machine's files and shell; or `execution-gondolin`: a Linux micro-VM per conversation (QEMU), its files on the host | `execution-do`: files in the object's SQL, a simulated shell; or `execution-remote`: a real shell in a sandbox of a host running `execution-serve` (a server, e.g. with execution-gondolin) |
 | Telegram | `channel-telegram` (long polling) | `channel-telegram-webhook` (two halves) |
 | HTTP API channel | `channel-http` | `channel-http` (two halves: routes in the Worker, the wait in the object) |
 | Model logins | `credentials-file` (OAuth or keys) | API keys only (no `model.credentials` provider) |
@@ -138,8 +138,8 @@ so. deployment-cloudflare's README has the rules ("Rolling back").
 
 - **server**: no per-conversation isolation (one process holds every conversation); no horizontal
   scale (one process per storage); timers do not survive a restart by themselves.
-- **durable**: no processes or native binaries (a real Linux is another `execution` provider, not
-  built); no connection held between events (no long polling); no `restart`
+- **durable**: no processes or native binaries in the object (a real Linux is a sandbox on a server,
+  through `execution-remote`); no connection held between events (no long polling); no `restart`
   and no `exec`, and `down` deletes data (deployment-cloudflare's README).
 
 What a component cannot do on a target is in that component's README: provider-anthropic, provider-openai and credentials-file (no subscription login on Cloudflare), execution-do

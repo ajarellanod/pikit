@@ -1,0 +1,46 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "execution-remote",
+  "version": "0.0.0",
+  "title": "Remote sandbox: your agent's files and shell in a sandbox on another machine (execution-serve)",
+  "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per conversation, from a server or a Cloudflare Durable Object.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": [
+      "secrets"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "execution",
+    "execution.shell",
+    "workspace"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "PIKIT_SANDBOX_TOKEN",
+      "secret": true,
+      "required": true,
+      "description": "The sandbox host's token, the same value as the host's (execution-serve); at least 32 characters (for example `openssl rand -hex 32`). Sent only to `endpoint`; never reaches a sandbox."
+    }
+  ]
+}

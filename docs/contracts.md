@@ -40,9 +40,9 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `actor.mailbox` | single | actors-do, mailbox-local | admin-api, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
 | `actor.inbox` | single | actors-do, mailbox-local | channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, outbound-durable, channel-web?, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `http.route` | keyed | admin-api, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, channel-web?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, repo-github-app, repo-github-token, tool-websearch-brave, execution-gondolin?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-remote, execution-serve, repo-github-app, repo-github-token, tool-websearch-brave, execution-gondolin?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
@@ -51,9 +51,9 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `model.complete` | single | runtime-pi | admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
-| `execution` | single | execution-do, execution-gondolin, execution-local | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
-| `execution.shell` | single | execution-do, execution-gondolin, execution-local | tool-bash | same |
-| `workspace` | single | execution-gondolin, workspace-local | channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
+| `execution` | single | execution-do, execution-gondolin, execution-local, execution-remote | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
+| `execution.shell` | single | execution-do, execution-gondolin, execution-local, execution-remote | tool-bash | same |
+| `workspace` | single | execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web),
@@ -647,7 +647,9 @@ Providers: execution-local (server: the machine's filesystem and shell), executi
 files in the object's SQL, a simulated shell with `git`, `curl`, `node` as host commands, C7),
 workspace-local (server: one directory per agent, or per channel of each agent from `ConversationRef.channel`,
 inside `execution`), execution-gondolin (server: all three, a Linux micro-VM per conversation keyed by
-`ConversationRef.conversationId`, its files on the host). Suites:
+`ConversationRef.conversationId`, its files on the host), execution-remote (both targets: all three in a
+sandbox of a host running execution-serve, over HTTP; a sandbox per Durable Object, or per conversation
+key on a server; its own protocol, `protocol.ts`, copied identically in both). Suites:
 `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`),
 `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`), and for a shell with `git`,
 `createWorkspaceGitConformance` (`@pikit/pi-adapter/execution/testing`): the steward's steps
