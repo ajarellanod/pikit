@@ -400,10 +400,16 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
               );
             }
           }
-          // The overrides an operator may set: the agents', among the models and tools this App has.
+          // The overrides an operator may set: the agents', among the models this App can run (those of
+          // the providers with credentials now; one logged in later shows its models after the next
+          // start) and its tools. A stored override naming another is left out when read (settings).
           const store = settings.get();
           if (store !== undefined) {
-            const modelNames = made.getModels().map((model) => `${model.provider}/${model.id}`);
+            const usable = await usableProviders(made, ctx);
+            const modelNames = made
+              .getModels()
+              .filter((model) => usable.has(model.provider))
+              .map((model) => `${model.provider}/${model.id}`);
             const live = directory.get() === undefined ? undefined : { tools: tools.keys(), skills: skills.keys() };
             store.declare("runtime-pi", overridesSchema(agents.keys().flatMap((name) => agents.get(name) ?? []), modelNames, live), {});
             declared = true;
@@ -605,6 +611,25 @@ function createDriver(
       stopping.abort(new Error("runtime-pi: stopping"));
     },
   };
+}
+
+/**
+ * The providers of `models` that have credentials now, checked as start checks the agents' (no network
+ * call, no OAuth refresh): one whose check fails counts as having none.
+ */
+async function usableProviders(models: Models, ctx: AppContext): Promise<Set<string>> {
+  const usable = new Set<string>();
+  for (const provider of new Set(models.getModels().map((model) => model.provider))) {
+    try {
+      if ((await models.checkAuth(provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) !== undefined) usable.add(provider);
+    } catch (error) {
+      ctx.logger.warn("runtime-pi: a provider's credentials could not be checked; its models are not offered to the overrides", {
+        provider,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return usable;
 }
 
 /** Resolves when `signal` aborts; never, without one. */

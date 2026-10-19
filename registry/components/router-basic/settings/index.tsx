@@ -5,7 +5,8 @@
  * definition, applied from its next run). With several agents, any one of them is edited here.
  *
  * What runtime-pi's schema says is all it reads: the agents (its properties), each one's definition
- * (the `default`s), the models the installed providers have and the tools and skills the definition
+ * (the `default`s), the models of the providers with credentials (as runtime-pi found them at start:
+ * a provider logged in since shows its models after the next start) and the tools and skills the definition
  * names (the options). It stores only what differs from the definition, so "Use default" takes an override
  * away. Each tool and skill says what it does in one line: `GET /admin/api/agents`' `tools` and `skills`
  * (a tool's `summary`, written where its component provides it; a skill's description).
@@ -148,7 +149,7 @@ function AgentSettings() {
               }}
             />
           </SettingsRow>
-          <SettingsRow label="Model" description="The model that answers, among those the installed providers have." htmlFor="settings-model">
+          <SettingsRow label="Model" description="The model that answers, among those of the providers with credentials." htmlFor="settings-model">
             <SelectControl
               id="settings-model"
               label="Model"

@@ -8,6 +8,7 @@
 import { expect, test } from "bun:test";
 import { type AppContext, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type AgentRuntime, type AgentTool, type ConversationRef, defineAgent, defineSkill, type Settings, SettingsError, type SettingsValue } from "@pikit/contracts";
+import type { Credential, CredentialStore } from "@pikit/pi-adapter";
 import { type ModelRequest, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
@@ -23,11 +24,14 @@ const notes = tool("notes");
 /**
  * `settings` in memory: what was declared, and what was stored, shared by every App of a test; and
  * `set`, an operator's change, validated against what was declared as settings-store's routes validate it.
+ * `get` reads as settings-store does: each stored top-level key over the defaults while the schema
+ * accepts it, a key a deploy made invalid left out (`dropped` counts them).
  */
 function memorySettings() {
   const stored = new Map<string, SettingsValue>();
   const declared = new Map<string, { schema: object; defaults: SettingsValue }>();
   let reads = 0;
+  const dropped: string[] = [];
   const provider: Settings = {
     declare(component, schema, defaults) {
       declared.set(component, { schema, defaults });
@@ -36,7 +40,13 @@ function memorySettings() {
       reads++;
       const found = declared.get(component);
       if (found === undefined) throw new SettingsError("unknown_component", component);
-      return structuredClone({ ...found.defaults, ...stored.get(component) }) as T;
+      let value: SettingsValue = { ...found.defaults };
+      for (const [key, each] of Object.entries(stored.get(component) ?? {})) {
+        const candidate = { ...value, [key]: each };
+        if (Value.Check(found.schema as never, candidate)) value = candidate;
+        else dropped.push(key);
+      }
+      return structuredClone(value) as T;
     },
   };
   return {
@@ -49,6 +59,7 @@ function memorySettings() {
     },
     schema: () => declared.get("runtime-pi")?.schema,
     reads: () => reads,
+    dropped: () => [...dropped],
     component: () => defineComponent({ name: "settings-test", setup: (pikit) => pikit.provide("settings", provider) }),
   };
 }
@@ -175,6 +186,63 @@ test("runtime-pi declares an override per agent, among the installed providers' 
     expect([fields.systemPrompt?.default, fields.model?.default, fields.tools?.default, fields.skills?.default]).toEqual(["Be brief.", "faux/scripted", ["lookup", "notes"], []]);
   } finally {
     await app.stop();
+  }
+}, 30_000);
+
+/** A `model.credentials` holding `stored`, in memory. */
+function credentialsHolding(stored: Record<string, Credential>) {
+  const store: CredentialStore = {
+    read: async (id) => stored[id],
+    list: async () => Object.entries(stored).map(([providerId, credential]) => ({ providerId, type: credential.type })),
+    modify: async (id, fn) => {
+      const next = await fn(stored[id]);
+      if (next !== undefined) stored[id] = next;
+      return next ?? stored[id];
+    },
+    delete: async (id) => void delete stored[id],
+  };
+  return defineComponent({ name: "credentials-test", setup: (pikit) => pikit.provide("model.credentials", store) });
+}
+
+test("only the models of providers with credentials are offered; an override naming another is left out when read, and the definition answers", async () => {
+  const settings = memorySettings();
+  const asked: string[] = [];
+  const faux = scriptedProvider({ id: "faux", onRequest: () => void asked.push("faux") });
+  // `alt` is configured only by a stored API key, as provider-anthropic by its key.
+  const alt = scriptedProvider({ id: "alt", apiKey: "made-up-key", onRequest: () => void asked.push("alt") });
+  const both = defineComponent({
+    name: "providers-test",
+    setup(pikit) {
+      pikit.provideKeyed("model.provider", "faux", faux);
+      pikit.provideKeyed("model.provider", "alt", alt);
+    },
+  });
+  const storage = sqliteStorage();
+  const modelChoices = () => {
+    const model = (settings.schema() as { properties: { assistant: { properties: { model: { anyOf?: { const: string }[]; const?: string } } } } }).properties.assistant.properties.model;
+    return model.anyOf?.map((each) => each.const) ?? [model.const];
+  };
+
+  // With alt's key stored: its models are offered, and an operator picks one.
+  const first = await started([storage, agents(), both, credentialsHolding({ alt: { type: "api_key", key: "made-up-key" } }), settings.component()]);
+  expect(modelChoices()).toContain("alt/scripted");
+  await settings.set("runtime-pi", { assistant: { model: "alt/scripted", systemPrompt: "Answer in French." } });
+  const conversation = await first.conversation("test:credentials");
+  expect(await first.ask(conversation, "r1", "hello")).toMatchObject({ kind: "completed" });
+  expect(asked.at(-1)).toBe("alt");
+  await first.app.stop();
+
+  // The next start has no key for alt: none of its models is offered, the stored override fails the
+  // schema when read and is left out, and the definition's model answers instead of a failing run.
+  const second = await started([storage, agents(), both, settings.component()]);
+  try {
+    expect(modelChoices()).toEqual(["faux/scripted"]);
+    expect(Value.Check(settings.schema() as never, { assistant: { model: "alt/scripted" } })).toBe(false);
+    expect(await second.ask(conversation, "r2", "hello again")).toMatchObject({ kind: "completed", text: "answer: hello again" });
+    expect(asked.at(-1)).toBe("faux");
+    expect(settings.dropped()).toContain("assistant");
+  } finally {
+    await second.app.stop();
   }
 }, 30_000);
 

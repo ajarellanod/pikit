@@ -7,10 +7,12 @@
  * `prepare(state)`. So a restart, a reopened Harness and an evicted object build the same agent.
  *
  * - **What can be overridden**, per agent: `systemPrompt`; `model`, one an installed `model.provider`
- *   has; `tools`, the tools on among the names its definition gives (a name it leaves out is off;
+ *   with credentials at start has (or the definition's own); `tools`, the tools on among the names its definition gives (a name it leaves out is off;
  *   tools `prepare` adds beyond the definition's stay); `skills`, the same among the skills its
  *   definition names (a catalog name, or a skill of its own by its name). The schema says which, from the App at start:
- *   a value outside it is refused when set, and left out when read (a deploy removed the model).
+ *   a value outside it is refused when set, and left out when read (a deploy removed the model, or its
+ *   provider's credentials): settings-store then leaves out the agent's whole override, logged, and the
+ *   definition applies.
  * - **Where it goes**: a definition with an override gets a `prepare` that runs its own, then puts the
  *   override over what it returned. A definition with none is the definition itself. An override the
  *   runtime cannot resolve (a model gone) makes the run use the definition, logged as `prepare`'s
@@ -71,7 +73,7 @@ export function overridesSchema(agents: readonly AgentDefinition[], models: read
           systemPrompt: Type.Optional(
             Type.String({ maxLength: MAX_PROMPT, title: "System prompt", description: "What the agent is told before every conversation.", default: agent.systemPrompt ?? "" }),
           ),
-          model: Type.Optional(choice([...new Set([...models, agent.model])].sort(), { title: "Model", description: "The model that answers, among the installed providers'.", default: agent.model })),
+          model: Type.Optional(choice([...new Set([...models, agent.model])].sort(), { title: "Model", description: "The model that answers, among those of the providers with credentials.", default: agent.model })),
           tools: Type.Optional(Type.Array(choice(tools, {}), { uniqueItems: true, title: "Tools", description: "The tools it may call, among those its definition names.", default: tools })),
           skills: Type.Optional(Type.Array(choice(skills, {}), { uniqueItems: true, title: "Skills", description: "The skills it knows, among those its definition names.", default: skills })),
         },

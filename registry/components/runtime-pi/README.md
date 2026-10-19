@@ -263,15 +263,21 @@ or must see each model request or tool call is an extension.
 ## Live overrides
 
 With `settings` installed (`settings-store`, installed with the dashboard), an operator changes an
-agent's **system prompt**, **model** (one an installed provider has), **tools** and **skills** (on or
+agent's **system prompt**, **model** (one a provider with credentials has), **tools** and **skills** (on or
 off, among those its definition names) from the dashboard's Settings, Agent (router-basic's section), with no
 deploy and no restart ([features/settings.md](https://github.com/ajarellanod/pikit/blob/main/features/settings.md)). The definition still owns the agent (SPEC §6): the
 overrides are data over it (`overrides.ts`).
 
 - **Declared at start** as runtime-pi's settings: one optional object per agent, its schema built from
-  the App (the installed providers' models, the tools and skills the definition names), its `default`s the
-  definition's (what the dashboard shows), its defaults none. A value outside it is refused when set,
-  and left out when read (a deploy removed the model).
+  the App (the models of the providers with credentials, the tools and skills the definition names), its
+  `default`s the definition's (what the dashboard shows), its defaults none. A value outside it is refused
+  when set, and left out when read (a deploy removed the model, or its provider's credentials: settings-store
+  leaves out that agent's whole override, logged, and the definition answers instead of every run failing).
+- **Only usable models are offered**: a provider counts when it has credentials at start (the same check
+  as an agent's provider: no network call, nothing refreshed: a stored credential or its API key in the
+  environment). A provider installed with no key offers none of its models. One logged in later (or whose
+  key is set later) shows its models after the next start; the agent's own definition's model is always
+  offered.
 - **Read** before every admission, every resume and `/compact`, and every run of the driving wakeup; on
   a server also at start. The agent of each model request is then the definition, `prepare` of the state,
   and the override over what `prepare` gave: a restart, a reopened Harness and an evicted object build
@@ -373,7 +379,9 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
 
 `overrides.test.ts` covers the live overrides (with a `settings` double): an override changing the next
 run's system prompt, model and tools, the same agent after a restart, and the definition again once it
-is taken away; the declared schema (the providers' models, the definition's tools and skills); an
+is taken away; the declared schema (the providers' models, the definition's tools and skills); only the
+models of providers with credentials offered, and an override naming another left out when read (the
+definition answers); an
 override over what `prepare` gives, skills turned off among the definition's.
 
 `live-agents.test.ts` covers the live agents (with a directory double): one made after start answering
