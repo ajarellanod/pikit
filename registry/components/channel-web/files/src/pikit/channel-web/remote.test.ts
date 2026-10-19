@@ -342,6 +342,27 @@ test("the policy, the agents and the search on the Worker: the accounts actor's 
   expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`]);
 });
 
+test("SUGGESTED on the Worker: /me's suggestedAgent is the accounts actor's dry run of its App's route.resolve (the Worker's App has no router); no conversation's object is made; none when not offered", async () => {
+  const { platform, worker: w } = await cloud({ agents: ["helper", "assistant"] });
+  platform.calls.length = 0;
+  const me = (await (await w.fetch(`${API}/me`, as("ana"))).json()) as { suggestedAgent?: string };
+  // The objects' router names assistant, one users may pick.
+  expect(me.suggestedAgent).toBe("assistant");
+  expect(platform.calls).toContain(`${ACCOUNTS_KEY} ${CALL.routed}`);
+  expect(platform.calls.every((each) => each.startsWith(`${ACCOUNTS_KEY} `))).toBe(true);
+  expect([...platform.objects.keys()]).toEqual([ACCOUNTS_KEY]);
+  expect((await platform.object(ACCOUNTS_KEY)).runtime.dispatched).toEqual([]);
+
+  // Not offered: none, and no dry run is asked for.
+  const { platform: other, worker: w2 } = await cloud({ agents: ["helper"] });
+  other.calls.length = 0;
+  expect(await (await w2.fetch(`${API}/me`, as("ana"))).json()).not.toHaveProperty("suggestedAgent");
+  const { platform: none, worker: w3 } = await cloud();
+  none.calls.length = 0;
+  expect(await (await w3.fetch(`${API}/me`, as("ana"))).json()).not.toHaveProperty("suggestedAgent");
+  expect(none.calls).not.toContain(`${ACCOUNTS_KEY} ${CALL.routed}`);
+});
+
 test("on the Worker images over 1 MB in all are 413 before any call; an object that cannot be reached is 503", async () => {
   const { platform, worker: w } = await cloud();
   const big = await w.fetch(`${API}/conversations`, post("ana", { text: "x", images: [imageOf(MAX_DURABLE_IMAGE_BYTES / 2), imageOf(MAX_DURABLE_IMAGE_BYTES / 2 + 1)] }));
@@ -377,6 +398,7 @@ test("only the accounts actor answers the index's calls: a conversation's object
     [CALL.forget, { userId: "ana" }],
     [CALL.config, {}],
     [CALL.rate, { userId: "ana" }],
+    [CALL.routed, { userId: "ana" }],
   ] as const) {
     const refused = await platform.mailbox.call(key, type, message, w.app.context()).catch((error: unknown) => error);
     expect({ type, code: (refused as ActorCallError).code }).toEqual({ type, code: "no_handler" });

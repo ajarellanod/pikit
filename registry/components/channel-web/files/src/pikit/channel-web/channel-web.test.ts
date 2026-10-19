@@ -718,6 +718,69 @@ test("AGENTS: the operator's agents users may pick (those that exist, described)
   expect(await (await c.served.fetch(`${API}/conversations/${picked.id}`, as("ana"))).json()).not.toHaveProperty("agent");
 });
 
+test("SUGGESTED: /me says the agent Routing would choose for the user's new chat (a dry run of route.resolve: nothing dispatched or made), only when it is one users may pick", async () => {
+  const agents = defineComponent({
+    name: "agents-test",
+    setup: (pikit) => {
+      pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "test/model" });
+      pikit.provideKeyed("agent.definition", "helper", { name: "helper", model: "test/model" });
+    },
+  });
+  const seen: { channel: string; conversationId: string; actor: string; text: string; id: string }[] = [];
+  let broken = false;
+  // ana goes to helper; ben is refused; cy to assistant (not offered); anyone else to the default.
+  const rules = defineComponent({
+    name: "rules-test",
+    setup: (pikit) =>
+      pikit.pipeline(
+        "route.resolve",
+        (value) => {
+          if (broken) throw new Error("settings unreadable");
+          const { message } = value;
+          seen.push({ channel: message.channel, conversationId: message.conversationId, actor: message.actor.id, text: message.text, id: message.id });
+          if (message.actor.id === "ana") return { ...value, decision: { agent: "helper", access: "allow" } };
+          if (message.actor.id === "ben") return { ...value, decision: { agent: "", access: "deny" } };
+          if (message.actor.id === "cy") return { ...value, decision: { agent: "assistant", access: "allow" } };
+          return value;
+        },
+        { priority: 10 },
+      ),
+  });
+  const settings = liveSettings();
+  const c = await chat({ components: [agents, rules, settings.component], config: { agents: ["assistant", "helper"] } });
+  c.accounts.add("cy");
+  const me = async (user: string) => (await (await c.served.fetch(`${API}/me`, as(user))).json()) as { suggestedAgent?: string };
+
+  expect((await me("ana")).suggestedAgent).toBe("helper");
+  // The message a new chat's first would be: the web channel, the user its actor, a new chat's conversation.
+  expect(seen).toHaveLength(1);
+  expect(seen[0]).toMatchObject({ channel: "web", actor: "ana", text: "" });
+  expect(seen[0]?.conversationId).toMatch(/^ana:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(seen[0]?.id).toMatch(/^web:/);
+  // A dry run: nothing dispatched, no conversation made.
+  expect(c.runtime.dispatched).toEqual([]);
+  expect(((await (await c.served.fetch(`${API}/conversations`, as("ana"))).json()) as { items: unknown[] }).items).toEqual([]);
+  // Denied: none. The default (router-test's assistant), offered: it.
+  expect(await me("ben")).not.toHaveProperty("suggestedAgent");
+  expect((await me("cy")).suggestedAgent).toBe("assistant");
+  // Routed to an agent no longer offered: none.
+  settings.set({ agents: ["helper"] });
+  expect(await me("cy")).not.toHaveProperty("suggestedAgent");
+  expect((await me("ana")).suggestedAgent).toBe("helper");
+  // A router that fails: /me answers without it, logged.
+  broken = true;
+  const failed = await c.served.fetch(`${API}/me`, as("ana"));
+  expect(failed.status).toBe(200);
+  expect(await failed.json()).not.toHaveProperty("suggestedAgent");
+  expect(c.served.logged.some((each) => each.message.includes("Routing would choose"))).toBe(true);
+  broken = false;
+  // No choice offered: no dry run at all.
+  settings.set({ agents: [] });
+  const runs = seen.length;
+  expect(await me("ana")).not.toHaveProperty("suggestedAgent");
+  expect(seen).toHaveLength(runs);
+});
+
 test("SEARCH: ?q= finds the user's own conversations whose title holds it, any case (accents too), paged, archived apart; never another user's; a wildcard is a character", async () => {
   const c = await chat({ config: { messagesPerMinute: 100 } });
   const ids: Record<string, string> = {};

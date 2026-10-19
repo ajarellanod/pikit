@@ -86,7 +86,12 @@ error text (a failed answer says so plainly).
 those that are agents now (a live one with its description); `POST /chat/api/conversations` takes one
 of them (`agent`, else `400`), and the conversation is made with it (`conversations.registry.resolve`
 before `admitInbound`): routing still allows or denies the message, and the conversation keeps it. A
-conversation says its `agent` only when it is one users may pick.
+conversation says its `agent` only when it is one users may pick. The page's picker starts on the one
+Routing chooses for the user's new chat (`ChatMe.suggestedAgent` in `GET /chat/api/me`: a dry run of the
+App's `route.resolve` over a new chat's first message, nothing dispatched or made; said only when it is
+one offered), else on the first: Routing's rules for `web` pick the assistant offered first, and a user
+may pick another. The dry run assumes `route.resolve`'s stages have no side effects (router-basic's and
+router-rules' read and decide; a project stage that counts what it routes counts it too).
 
 ## What the operator does
 
@@ -263,7 +268,9 @@ In `start`, `actor.inbox`'s `scope` says where it runs:
   the Worker): its sign-in methods, its live settings (sign-up mode, visibility, the agents users may
   pick), and whether its App sends email, so `email.send` goes in the default App only (the accounts
   actor sends), never in the Worker's. The Worker cuts the transcript and the live events the objects
-  give it by that config's `visibility`: a change shows within 10 s.
+  give it by that config's `visibility`: a change shows within 10 s. The Worker's App has no router:
+  `ChatMe.suggestedAgent` is the accounts actor's dry run of its App's `route.resolve`
+  (`channel-web.routed`, one call per `/chat/api/me` when users may pick an assistant).
 
 On Cloudflare one script holds both Apps: channel-web adds about 1.3 MiB to it (265 KiB gzip; better-auth,
 its core, zod, jose, OpenTelemetry's conventions), measured with wrangler 4.143.0 on a Worker of
@@ -303,7 +310,7 @@ under an https `PIKIT_PUBLIC_URL`).
   message answered), an operator's follow-up and its run never shown, live events in the dashboard's
   shapes with `message_end`'s entry the transcript's (same id, same messages), a message held behind a
   run, the policy as a live setting on history and live events, the agents users may pick (allowed,
-  refused, denied by routing, taken away), the search, stop, duplicates, request ids, images and body
+  refused, denied by routing, taken away; the one Routing suggests in `/me`, a dry run), the search, stop, duplicates, request ids, images and body
   limits, refusals, the operator's routes, the live `signUp` setting, what setup declares, the
   lifecycle suite.
 - `visibility.test.ts`: each policy value on messages, entries and live events (a hidden block's
@@ -321,8 +328,8 @@ under an https `PIKIT_PUBLIC_URL`).
 - `remote.test.ts`: the Worker's half over a fake platform of one App per key (`scope: "one"`), each
   conversation's object and the accounts actor: start, list, rename, the transcript, a run's messages,
   delete, isolation, live events cut in the Worker, entries told live from the object, the policy and
-  the agents from the accounts actor's config, an agent picked reaching the object, the search in the
-  index, image limits, an unreachable object, the index's versions (not busy after a run that ended
+  the agents from the accounts actor's config, an agent picked reaching the object, `/me`'s suggested
+  agent from the accounts actor's dry run, the search in the index, image limits, an unreachable object, the index's versions (not busy after a run that ended
   before its admission returned), removal.
 - `accounts-wiring.test.ts`: the real accounts (better-auth) through the routes, on a server and
   forwarded to the accounts actor on Cloudflare (the cookie cache first, its renewal sent back after a
@@ -343,7 +350,7 @@ under an https `PIKIT_PUBLIC_URL`).
   cookies (`__Secure-` and `Secure` on https only, path `/chat/`), a message and its answer (the
   transcript), the live view (`snapshot`, `message_*` whose entry ids the transcript has), another
   user's every route on a chat `404`, an operator's follow-up never in the user's transcript or live
-  view, the search, an agent picked, the accounts' tables in the accounts actor only;
+  view, the search, an agent picked (and suggested by `/me`), the accounts' tables in the accounts actor only;
   an invitation's link setting a password, a ban refused once the cookie cache expired (the actor asked
   then, its answer renewing the cache cookie; a foreign `Origin` refused through the forwarder);
   `email.send` in the default App only: the config says so, a magic link signs a new user in, a

@@ -110,9 +110,11 @@ Conversations, and the dashboard lacks the conversation header's menu the chat h
 - **Tabs** are kept in `localStorage["pikit-chat-tabs:<user id>"]`: per browser, and per user (two
   people on one browser never see each other's titles), never the dashboard's `pikit-tabs`. A deleted
   conversation's tab closes; an archived one's stays (it is still read and written).
-- **The picker** shows only with `ChatConfig.agents`; the first one is chosen at first (the conversation
-  then always records its assistant, and its composer shows it), or the one `#/?agent=` names (a
-  conversation's composer sends there when another assistant is picked: a chat keeps its assistant).
+- **The picker** shows only with `ChatConfig.agents`; it starts on the one `#/?agent=` names (a
+  conversation's composer sends there when another assistant is picked: a chat keeps its assistant),
+  else on the one Routing chooses for the user's new chat (`ChatMe.suggestedAgent`, a dry run of
+  `route.resolve`), else on the first (the conversation then always records its assistant, and its
+  composer shows it). Routing's rules for `web` pick the assistant offered first; a user may pick another.
 - **Search** in Conversations: `?q=` 250 ms after the last key, with an "Archived" switch that searches
   the archived ones alike; without either the list is the sidebar's. The sidebar's own search still
   filters the chats it has loaded (its field is the shared `SidebarNav`'s, unchanged).

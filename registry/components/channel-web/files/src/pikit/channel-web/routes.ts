@@ -23,7 +23,9 @@
  * - **What users see is the operator's policy** (`ChatConfig.visibility`, read at each request): every
  *   transcript entry and live event passes through `visibility.ts` here, the one place, on both targets.
  *   A conversation's `agent` is said only when it is one users may pick (`ChatConfig.agents`).
- * - **An agent picked** for a new conversation is one of `ChatConfig.agents`, or `400`.
+ * - **An agent picked** for a new conversation is one of `ChatConfig.agents`, or `400`. The one Routing
+ *   would choose for the user's new chat (`routed.ts`, a dry run: nothing dispatched or made) is
+ *   `ChatMe.suggestedAgent` when it is one of them: the page's picker starts on it.
  * - **A refusal is its status**: `not_found` `404`, `invalid_request` and `invalid_cursor` `400`,
  *   `too_large` `413`, `denied` `403` (the router refused it), `rejected` `422` (a stage stopped it),
  *   `no_route` `500`. Anything else (the runtime could not take the message for a while, an object
@@ -65,6 +67,7 @@ import { type Assets, BASE } from "./assets.ts";
 import type { ChatBackend, ChatRef, NewMessage } from "./backend.ts";
 import { chatIdFor, imagesProblem, isChatId, keyOf, newChatId, REQUEST_ID, requestIdOf } from "./chat.ts";
 import { type ChannelWebConfig, providerName, type SignUpSettings, type VisibilitySettings } from "./config.ts";
+import { routedAgent } from "./routed.ts";
 import { createEventProjector, projectEntry } from "./visibility.ts";
 
 export const API = "/chat/api";
@@ -320,6 +323,11 @@ export interface RouteOptions {
    * seconds until one may. On a server the App's own count; on Cloudflare the accounts actor's.
    */
   rate(userId: string, ctx: AppContext): Promise<number | undefined>;
+  /**
+   * The agent Routing would choose for a new chat of `userId` (`routed.ts`), or `undefined`. Default: this
+   * App's own `route.resolve` (a server); the Worker asks the accounts actor, whose App has the routers.
+   */
+  routed?(userId: string, ctx: AppContext): Promise<string | undefined>;
   assets: Assets;
 }
 
@@ -408,9 +416,29 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     pikit.provideKeyed("http.route", key, answering(key, (request, ctx) => options.accounts().handle(request, ctx)));
   }
 
+  /**
+   * The agent Routing would choose for `userId`'s new chat, when it is one users may pick now; else
+   * `undefined`, also when it cannot be said (logged: `/me` answers without it).
+   */
+  const suggestedAgent = async (userId: string, ctx: AppContext): Promise<string | undefined> => {
+    try {
+      const { agents } = await options.chatConfig(ctx);
+      if (agents.length === 0) return undefined;
+      const agent = await (options.routed ?? routedAgent)(userId, ctx);
+      return agent !== undefined && agents.some((each) => each.name === agent) ? agent : undefined;
+    } catch (error) {
+      ctx.logger.warn("channel-web: the agent Routing would choose for a new chat could not be read; the page picks the first offered", {
+        user: userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  };
+
   user(`GET ${API}/me`, async (_request, ctx, me) => {
     const { id, name, email, image } = me;
-    return json<ChatMe>(200, { user: { id, name, email, ...(image !== undefined && { image }) }, methods: await options.accounts().methods(id, ctx) });
+    const [methods, suggested] = await Promise.all([options.accounts().methods(id, ctx), suggestedAgent(id, ctx)]);
+    return json<ChatMe>(200, { user: { id, name, email, ...(image !== undefined && { image }) }, methods, ...(suggested !== undefined && { suggestedAgent: suggested }) });
   });
 
   user(`GET ${API}/conversations`, async (request, ctx, me) => {

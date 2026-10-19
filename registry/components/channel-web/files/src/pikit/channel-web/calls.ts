@@ -31,6 +31,7 @@
  * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations leave the index |
  * | `channel-web.config` | `{}` | `ChatConfig`: the page's config as the accounts' App makes it (its methods, its live settings: sign-up mode, visibility, the agents users may pick; whether it sends email) |
  * | `channel-web.rate` | `{ userId }` | `{ retryAfter? }`: one message of the user's counted (`messagesPerMinute`); `retryAfter` (seconds) when it is one too many |
+ * | `channel-web.routed` | `{ userId }` | `{ agent? }`: the agent this App's `route.resolve` names for a new chat of the user, a dry run (`routed.ts`); absent when it denies or halts |
  *
  * And one message (`send`, `actor.inbox.handle`), from each conversation's object to the accounts
  * actor: `channel-web.seen` `{ rows: ConversationRow[] }`, each row's newest version.
@@ -45,6 +46,7 @@ import { type ChatConfig, type ChatImage, MAX_IMAGES, SEARCH_MAX } from "./api.t
 import { type ChatBackend, type ChatRef, conversationOf, type FirstMessage, type NewMessage, refusal } from "./backend.ts";
 import { isChatId, keyOf, REQUEST_ID } from "./chat.ts";
 import type { RateLimiter } from "./rate.ts";
+import { routedAgent } from "./routed.ts";
 import type { ChatStore, ConversationRow } from "./store.ts";
 
 /** The accounts actor: an object of the conversations' class, never a conversation. Its storage holds the accounts and the users' index. */
@@ -64,6 +66,7 @@ export const CALL = {
   config: "channel-web.config",
   image: "channel-web.image",
   rate: "channel-web.rate",
+  routed: "channel-web.routed",
 } as const;
 export const LIVE = "channel-web.live";
 export const SEEN = "channel-web.seen";
@@ -200,6 +203,11 @@ export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (c
     return retryAfter === undefined ? {} : { retryAfter };
   });
   inbox.answer(CALL.config, async (_key, _message, ctx) => json(await config(ctx)));
+  // This App's routers and settings: the Worker's App has none.
+  inbox.answer(CALL.routed, async (_key, message, ctx) => {
+    const agent = await routedAgent(text(fieldsOf(message), "userId"), ctx);
+    return agent === undefined ? {} : { agent };
+  });
   inbox.handle(SEEN, async (_key, message) => store.seen(rowsOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {
     const { archived, q } = fieldsOf(message);

@@ -9,7 +9,9 @@
  * set) and `actor.mailbox` (actors-do); `admin.auth` for the operator's routes. The page's config
  * (`GET /chat/api/config`: the sign-in methods, the live sign-up mode, whether email is sent) is the
  * accounts actor's, whose App holds the accounts, their secrets and `email.send`: one call
- * (`channel-web.config`), its answer kept `CONFIG_CACHE_MS`.
+ * (`channel-web.config`), its answer kept `CONFIG_CACHE_MS`. So is the agent Routing would choose for a
+ * user's new chat (`ChatMe.suggestedAgent`): the routers are that App's (`channel-web.routed`), one call
+ * per `/chat/api/me` when users may pick an assistant.
  *
  * `component.json`'s `apps.worker` names this export (`worker`): `pikit add` puts it in
  * `export const worker` of pikit.config.ts, under its own config key, `channel-web-worker`.
@@ -65,7 +67,11 @@ export function createChannelWebWorker(wiring: AccountsWiring = BETTER_AUTH) {
       const rate = async (userId: string, ctx: AppContext): Promise<number | undefined> =>
         ((await mailbox.get().call(ACCOUNTS_KEY, CALL.rate, { userId }, ctx)) as { retryAfter?: number }).retryAfter;
 
-      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => "durable", rate, assets });
+      // The routers are the objects' App's, not this one's: the accounts actor's dry run.
+      const routed = async (userId: string, ctx: AppContext): Promise<string | undefined> =>
+        ((await mailbox.get().call(ACCOUNTS_KEY, CALL.routed, { userId }, ctx)) as { agent?: string }).agent;
+
+      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => "durable", rate, routed, assets });
       // The Worker's host is its route's: Cloudflare routes by it, so a client cannot make it another's.
       provideAdminRoutes(pikit, { auth, accounts: accountsNow, backend: () => backend, origin: (request) => linkOrigin(request.url, publicUrl, true) });
 

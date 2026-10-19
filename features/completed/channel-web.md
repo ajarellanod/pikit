@@ -228,7 +228,7 @@ cannot send it without CORS, which nothing allows).
 |---|---|
 | `GET /chat/api/config` | `ChatConfig`: the assistant's name, sign-in methods (password, magic link, providers with display names), whether one may sign up, `visibility` (`{ thinking, tools: "none" \| "names" \| "full", context }`), `agents` (`{ name, description? }[]`, the ones users may pick) (chat-parity.md) |
 | `/chat/api/auth/*` | better-auth (sign in, sign up, sign out, OAuth callbacks, verification, reset, link, account linking, sessions) |
-| `GET /chat/api/me` | `ChatMe`: the user (id, name, email, image) and their linked methods |
+| `GET /chat/api/me` | `ChatMe`: the user (id, name, email, image), their linked methods, and `suggestedAgent?`: the assistant Routing chooses for their new chat (a dry run of `route.resolve`, nothing made; on Cloudflare the accounts actor's, `channel-web.routed`), only when it is one of `ChatConfig.agents` |
 | `GET /chat/api/conversations?limit&cursor&archived&q` | `ChatPage<ChatConversation>`, newest activity first: not archived, or with `archived=1` the archived ones; with `q`, those whose title holds it (any case) |
 | `POST /chat/api/conversations` | `ChatStartRequest` (a `ChatSendRequest` and `agent?`, one of `ChatConfig.agents`, else `400`) → `201 ChatStartResponse` (`{ id, requestId, admission }`) |
 | `GET /chat/api/conversations/:id` | `ChatConversation` (`id`, `title`, `busy`, `archived`, `lastActivity`, `createdAt`, `agent?` when one users may pick) |

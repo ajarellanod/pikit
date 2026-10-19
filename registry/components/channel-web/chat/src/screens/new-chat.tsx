@@ -4,9 +4,10 @@
  * the message already in it (the shared sent messages, `useConversations`).
  *
  * When the operator lets users pick an assistant (`ChatConfig.agents`), the composer has a picker
- * (where the dashboard's has its): the first one is chosen at first, or the one `?agent=` names (a
- * conversation's composer sends here when another one is picked there), and the conversation is made
- * with it (`agent`). With none to pick, no picker: the router decides.
+ * (where the dashboard's has its): the one `?agent=` names (a conversation's composer sends here when
+ * another one is picked there), else the one Routing chooses for this user (`ChatMe.suggestedAgent`),
+ * else the first, and the conversation is made with it (`agent`). With none to pick, no picker: the
+ * router decides.
  */
 
 import { ChatBubble } from "iconoir-react";
@@ -41,7 +42,7 @@ export function NewChatScreen({ agent: asked }: { agent?: string | undefined }) 
   const { config, me } = useSession();
   const conversations = useConversations();
   const agents = config.agents.map((each) => each.name);
-  const [agent, setAgent] = useState(() => (asked !== undefined && agents.includes(asked) ? asked : agents[0]));
+  const [agent, setAgent] = useState(() => [asked, me.suggestedAgent].find((name) => name !== undefined && agents.includes(name)) ?? agents[0]);
   const [error, setError] = useState<Error>();
   const [stage, setStage] = useState(0);
   usePageTitle(config.name, "New chat");

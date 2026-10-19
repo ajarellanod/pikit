@@ -457,12 +457,14 @@ it("email.send in the objects' App only: the config says email is sent and offer
   expect(email.sent.at(-1)).toMatchObject({ to: "fay@example.com", subject: "You are invited to Ada" });
 });
 
-it("an agent picked for a new chat makes the conversation with it, another is 400; the policy is the config's", async () => {
+it("an agent picked for a new chat makes the conversation with it, another is 400; the policy is the config's; /me suggests the one the objects' router names", async () => {
   const fetch = compose({ name: "Ada", signUp: { mode: "open" }, agents: ["echo", "gone"], visibility: { tools: "none", thinking: false, context: false } });
   const config = (await (await fetch(`${HTTPS}/chat/api/config`)).json()) as ChatConfig;
   expect([config.agents, config.visibility]).toEqual([[{ name: "echo" }], { thinking: false, tools: "none", context: false }]);
   const gus = browser(fetch, HTTPS, "10.3.0.1");
   await signUp(gus, "gus@example.com", "Gus");
+  // The Worker has no router: the accounts actor's dry run of router-basic (defaultAgent echo, offered).
+  expect(((await meOf(gus)) as { suggestedAgent?: string }).suggestedAgent).toBe("echo");
   expect((await gus.send("/chat/api/conversations", { json: { text: "hi", agent: "gone" } })).status).toBe(400);
   const started = await gus.send("/chat/api/conversations", { json: { text: "hi there", agent: "echo" } });
   expect(started.status).toBe(201);

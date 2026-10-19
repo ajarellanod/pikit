@@ -20,7 +20,7 @@
  * |---|---|
  * | `GET /chat/api/config` | `ChatConfig` (no session needed) |
  * | `/chat/api/auth/*` | better-auth's own routes (sign in, sign up, OAuth callbacks, links, sessions) |
- * | `GET /chat/api/me` | `ChatMe` |
+ * | `GET /chat/api/me` | `ChatMe`: the user, their sign-in methods, and the assistant Routing picks for their new chat (`suggestedAgent`) |
  * | `GET /chat/api/conversations?limit&cursor&archived&q` | `ChatPage<ChatConversation>`, newest activity first: those not archived, or with `archived=1` the archived ones; with `q`, only those whose title holds it (any case) |
  * | `POST /chat/api/conversations` | `ChatStartRequest` → `201 ChatStartResponse` (`429` past `ChatConfig`'s rate; `400` for an `agent` not in `ChatConfig.agents`) |
  * | `GET /chat/api/conversations/:id` | `ChatConversation` |
@@ -123,6 +123,12 @@ export interface ChatMe {
   user: ChatUser;
   /** How this user can sign in: `password`, and the ids of the providers linked (`google`, an OIDC id). */
   methods: string[];
+  /**
+   * The assistant Routing's rules choose for this user's new chat (a dry run of the router: nothing is
+   * made), when it is one of `ChatConfig.agents`: the picker starts on it. Absent when there is no
+   * choice, when Routing denies the user or names an agent not offered: the picker starts on the first.
+   */
+  suggestedAgent?: string;
 }
 
 /** One page, and the cursor of the next (absent on the last page). */

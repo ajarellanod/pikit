@@ -7,7 +7,8 @@
  * - What users see (`visibility`): the model's thinking, the tools (none, their names, all of them),
  *   the Context panel. Applied to history too.
  * - Assistants users may pick (`agents`), for a new chat: the App's agents (`GET /admin/api/agents`),
- *   none by default (the router decides).
+ *   none by default (the router decides). With some, the picker starts on the one Routing chooses for
+ *   the user (`ChatMe.suggestedAgent`), else the first.
  * It stores only what differs from the config's values, so a value equal to one follows the config again.
  */
 
@@ -191,7 +192,7 @@ function WebChatSettings() {
               <Switch checked={picked.includes(agent.name)} label={assistantName(agent.name)} onChange={(on) => pick(agent.name, on)} />
             </SettingsRow>
           ))}
-          {choices.length > 0 && <p className="pt-2 text-[12.5px] text-ink-3">{picked.length === 0 ? "None picked: users get no choice, and Routing decides." : "A user's pick wins over Routing's rules."}</p>}
+          {choices.length > 0 && <p className="pt-2 text-[12.5px] text-ink-3">{picked.length === 0 ? "None picked: users get no choice, and Routing decides." : "The picker starts on the one Routing chooses (else the first); a user may pick another."}</p>}
         </>
       )}
     </div>

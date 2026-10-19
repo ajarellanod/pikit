@@ -196,8 +196,9 @@ test("on Cloudflare: auth is forwarded to the accounts actor (every set-cookie k
   calls.length = 0;
   const me = (await (await ana.send("/chat/api/me")).json()) as { user: { email: string } };
   expect(me.user.email).toBe("ana@example.com");
-  // The session from the cookie cache; only the methods are asked.
-  expect(calls).toEqual([`channel-web:accounts ${AUTH_CALL.methods}`]);
+  // The session from the cookie cache: no call for it; the methods are asked, and the page's config (whether
+  // users may pick an assistant, kept CONFIG_CACHE_MS: none offered, so no dry run of the routers).
+  expect(calls.sort()).toEqual([`channel-web:accounts ${AUTH_CALL.methods}`, "channel-web:accounts channel-web.config"]);
 
   calls.length = 0;
   ana.jar.delete("pikit_chat.session_data");
