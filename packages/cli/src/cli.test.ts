@@ -56,7 +56,7 @@ test("pikit registry capabilities prints what each capability is and who provide
   const run = await runCli(["registry", "capabilities"], temp());
   expect(run.code).toBe(0);
   expect(run.out).toContain("execution  (single, @pikit/pi-adapter, experimental)");
-  expect(run.out).toContain("provided by: execution-do, execution-local");
+  expect(run.out).toContain("provided by: execution-do, execution-gondolin, execution-local");
   expect((await runCli(["registry", "bogus"], temp())).code).toBe(2);
 });
 
