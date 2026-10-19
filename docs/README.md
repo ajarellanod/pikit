@@ -21,6 +21,8 @@ Object per conversation). These pages describe what exists at this commit, read 
 - [message-flow.md](message-flow.md): one message end to end, on a server and on Cloudflare, with the
   files that implement each step.
 - [targets.md](targets.md): `server` and `durable`, what runs where, wakeups, limits, deployment.
+- [durability.md](durability.md) (Spanish): logs and SQLite WAL from first principles, pi-durable,
+  crash recovery, Durable Objects and Rivet, with diagrams and the limits of each guarantee.
 - [cli.md](cli.md): every `pikit` command, its flags, what it changes, and what `doctor` checks.
 - [dashboard.md](dashboard.md): `admin-api`, `admin-auth-token`, the dashboard template and its views.
 
