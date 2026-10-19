@@ -34,14 +34,14 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, repo-github-app, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, credentials-do, repo-github-app, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, repo-github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | channel-telegram-webhook, credentials-do, repo-github-app, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, outbound-durable, channel-web?, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
-| `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, channel-web?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
+| `http.route` | keyed | admin-api, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-remote, execution-serve, repo-github-app, repo-github-token, tool-websearch-brave, execution-gondolin?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
@@ -50,7 +50,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `email.send` | single | email-resend, email-ses | channel-web? | `createEmailSenderConformance` |
 | `model.complete` | single | runtime-pi | admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
-| `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
+| `model.credentials` | single | credentials-do, credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `execution` | single | execution-do, execution-gondolin, execution-local, execution-remote | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-gondolin, execution-local, execution-remote | tool-bash | same |
 | `workspace` | single | execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
@@ -626,7 +626,11 @@ that producer/consumer boundary, not every event variant or browser rendering.
   `component.json` lists their keys.
 - **`model.credentials`** (`@pikit/pi-adapter`): pi-ai's `CredentialStore`, per provider id; pi-ai
   writes refreshed OAuth tokens back. Without it, providers read their environment variables (through
-  `secrets` first, if installed). Provider: credentials-file (server only).
+  `secrets` first, if installed). Providers: credentials-file (server), credentials-do (durable: one
+  object holds them; `modify` runs under its lock, so a token is refreshed once for every
+  conversation; `pikit configure --login` uploads a login to its operator route,
+  `PUT /admin/api/<store>/<provider>`, listed by `GET /admin/api/<store>`). A provider of it uses no
+  `model.provider` (provider-failover provides one and uses this: a cycle).
 - **`model.complete`** ([model.ts](../packages/contracts/src/model.ts)): `complete({ model, system?,
   prompt, maxTokens? }, ctx): Promise<string>`. One text from one of the App's models: no
   conversation, no tools, not counted in any conversation's usage. Refuses a model none of the

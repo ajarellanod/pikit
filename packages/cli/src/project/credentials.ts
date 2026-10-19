@@ -1,7 +1,8 @@
 /**
- * Run as `bun credentials.ts <project-dir> <output-file> check | login <provider> [<option>]` in the project's
- * directory: on this machine for `pikit dev`, or where the app runs for `pikit up` (the deployment's
- * `exec`). The model-credential half of `pikit configure`, as `samples/http/scripts/login.ts`:
+ * Run as `bun credentials.ts <project-dir> <output-file> check [--remote] | login <provider> [<option>]
+ * [--upload <url>]` in the project's directory: on this machine for `pikit dev`, or where the app runs
+ * for `pikit up` (the deployment's `exec`). The model-credential half of `pikit configure`, as
+ * `samples/http/scripts/login.ts`:
  *
  * - It builds a small app from the project's own components: the one that provides
  *   `model.credentials` (`credentials-file`) and those that provide `model.provider`, with the
@@ -18,6 +19,11 @@
  *   login's callback); without a terminal, a choice takes its first option, pi-ai's default. A
  *   login that names its installation (OpenAI's Sign in with ChatGPT) gets `deviceId`'s UUID, kept
  *   in `.pikit/device-id` beside the credentials, and introduces itself as `pikit`.
+ * - On `durable` (`--remote`, `--upload`), `model.credentials` runs only in the deployed App
+ *   (credentials-do, in its own Durable Object): it is not composed here. `check` reports the keys
+ *   this machine has (`.env` is the Worker's secrets); `login` keeps the new credential in memory and
+ *   uploads it to `<url>`, the store's operator route (`credentialsRoute`), with `PIKIT_ADMIN_TOKEN`
+ *   from the project's environment as the bearer token. Nothing of it is written here.
  *
  * It uses the project's `@pikit/core` and `@pikit/pi-adapter`, resolved from its `node_modules`.
  * It never prints a credential, and never reads or writes Pi's own `~/.pi/agent/auth.json`: a
@@ -109,6 +115,11 @@ export type CredentialsResult =
       owners: Record<string, string>;
       /** The providers with an OAuth login (`provider.auth.oauth`); the others take only keys. */
       oauth: string[];
+      /**
+       * `store` keeps the credentials only in the deployed App (a `durable` project): `providers` says
+       * what this machine has (keys), a login is uploaded there (`credentialsRoute`).
+       */
+      remote: boolean;
     }
   | { ok: false; error: string };
 
@@ -124,7 +135,67 @@ async function load<T>(specifier: string, projectDir: string): Promise<T> {
   return (await import(pathToFileURL(Bun.resolveSync(specifier, projectDir)).href)) as T;
 }
 
-async function openCredentials(projectDir: string): Promise<{ found: Found; stop(): Promise<void>; store: string | undefined; models: ModelsFrom }> {
+/**
+ * The operator route of a `durable` project's `model.credentials` provider, `store`, at the deployed
+ * app's `base` URL: `GET` lists what it holds (`{ credentials: [{ providerId, type }] }`), `PUT
+ * <route>/<providerId>` stores pi-ai's `Credential` (credentials-do's README).
+ */
+export function credentialsRoute(base: string, store: string, providerId?: string): string {
+  const route = `${base.replace(/\/+$/, "")}/admin/api/${store}`;
+  return providerId === undefined ? route : `${route}/${encodeURIComponent(providerId)}`;
+}
+
+/** A URL a credential and the operators' token may be sent to: https, or this machine's loopback (`wrangler dev`, tests). */
+export function safeUploadUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" || (parsed.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname));
+}
+
+/**
+ * Sends `credential` to `url` (`PUT`, the operators' bearer `token`); resolves with what went wrong,
+ * `undefined` when it was stored. What it says never holds the credential or the token: the route
+ * answers neither.
+ */
+export async function uploadCredential(url: string, token: string, credential: unknown, fetcher: typeof fetch = fetch): Promise<string | undefined> {
+  if (!safeUploadUrl(url)) return `${url} is not https: a credential is sent only over https`;
+  let response: Response;
+  try {
+    response = await fetcher(url, { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(credential) });
+  } catch (error) {
+    return `the deployed app could not be reached at ${new URL(url).origin} (${error instanceof Error ? error.message : String(error)})`;
+  }
+  if (response.ok) return undefined;
+  if (response.status === 401) return "the deployed app refused PIKIT_ADMIN_TOKEN: is the one in .env the one deployed? (`pikit up` uploads it)";
+  if (response.status === 404) return "the deployed app has no such route: deploy the store first (`pikit up`)";
+  const answer = (await response.json().catch(() => ({}))) as { error?: unknown; message?: unknown };
+  return `the deployed app answered ${response.status}${typeof answer.message === "string" ? `: ${answer.message}` : typeof answer.error === "string" ? ` (${answer.error})` : ""}`;
+}
+
+/**
+ * A store in memory for a login that goes elsewhere (`--upload`): pi-ai writes the new credential
+ * through `modify`, and it stays here only until it is uploaded.
+ */
+function memoryStore() {
+  const stored = new Map<string, unknown>();
+  return {
+    stored,
+    read: async (providerId: string) => stored.get(providerId),
+    list: async () => [...stored.keys()].map((providerId) => ({ providerId, type: (stored.get(providerId) as { type: string }).type })),
+    async modify(providerId: string, fn: (current: unknown) => Promise<unknown>) {
+      const next = await fn(stored.get(providerId));
+      if (next !== undefined) stored.set(providerId, next);
+      return next ?? stored.get(providerId);
+    },
+    delete: async (providerId: string) => void stored.delete(providerId),
+  };
+}
+
+async function openCredentials(projectDir: string, remote: boolean): Promise<{ found: Found; stop(): Promise<void>; store: string | undefined; models: ModelsFrom }> {
   const core = await load<{ defineApp: typeof defineApp; defineComponent: typeof defineComponent }>("@pikit/core", projectDir);
   const adapter = await load<{ modelsFrom: ModelsFrom }>("@pikit/pi-adapter", projectDir);
   const definition = ((await import(pathToFileURL(join(projectDir, "pikit.config.ts")).href)) as { default: AppDefinition }).default;
@@ -135,7 +206,8 @@ async function openCredentials(projectDir: string): Promise<{ found: Found; stop
   const storeName = store?.selected ?? store?.providers[0];
   const owners = described.capabilities["model.provider"]?.keys ?? {};
   const providerNames = new Set(Object.values(owners));
-  const names = new Set([...providerNames, ...(storeName === undefined ? [] : [storeName])]);
+  // On `durable` the store runs only in its object: composed here it would find no platform.
+  const names = new Set([...providerNames, ...(storeName === undefined || remote ? [] : [storeName])]);
   const components = definition.components.filter((c) => names.has(c.name));
   const config = Object.fromEntries(Object.entries(definition.config).filter(([key]) => names.has(key)));
 
@@ -161,32 +233,41 @@ async function openCredentials(projectDir: string): Promise<{ found: Found; stop
   return { found, stop: () => app.stop(), store: storeName, models: adapter.modelsFrom };
 }
 
-async function check(projectDir: string): Promise<CredentialsResult> {
-  const { found, stop, store, models } = await openCredentials(projectDir);
+async function check(projectDir: string, remote: boolean): Promise<CredentialsResult> {
+  const { found, stop, store, models } = await openCredentials(projectDir, remote);
   try {
     const all = models([...found.providers.values()], { credentials: found.credentials });
     const providers: Record<string, boolean> = {};
     for (const id of found.providers.keys()) providers[id] = (await all.checkAuth(id)) !== undefined;
-    return { ok: true, providers, store, ...offered(found) };
+    return { ok: true, providers, store, ...offered(found), remote: remote && store !== undefined };
   } finally {
     await stop();
   }
 }
 
-async function login(projectDir: string, providerId: string, preferred: string | undefined): Promise<CredentialsResult> {
-  const { found, stop, store, models } = await openCredentials(projectDir);
+async function login(projectDir: string, providerId: string, preferred: string | undefined, upload: string | undefined): Promise<CredentialsResult> {
+  const { found, stop, store, models } = await openCredentials(projectDir, upload !== undefined);
   const { loginInteraction } = await load<CredentialsModule>(CREDENTIALS_MODULE, projectDir);
   const terminal = lineTerminal(process.stdin, process.stdout);
   try {
     const provider = found.providers.get(providerId);
     if (provider === undefined) return { ok: false, error: `no installed component provides the model provider "${providerId}"` };
     if (provider.auth?.oauth === undefined) return { ok: false, error: `the model provider "${providerId}" has no login: it takes an API key` };
-    if (found.credentials === undefined) {
-      return { ok: false, error: "no installed component provides model.credentials, so a login has nowhere to be stored (install credentials-file)" };
+    if (store === undefined) {
+      return { ok: false, error: "no installed component provides model.credentials, so a login has nowhere to be stored (install credentials-file, or credentials-do on Cloudflare)" };
     }
+    const token = process.env.PIKIT_ADMIN_TOKEN;
+    if (upload !== undefined && (token === undefined || token === "")) return { ok: false, error: "PIKIT_ADMIN_TOKEN is not set (in .env): the upload to the deployed app needs the operators' token" };
+    const kept = upload === undefined ? found.credentials : memoryStore();
     const interaction = choosing(loginInteraction(terminal), terminal, { preferred, interactive: process.stdin.isTTY === true });
-    await models([provider], { credentials: found.credentials }).login(providerId, "oauth", interaction, { getDeviceId: () => deviceId(projectDir), agentName: AGENT_NAME });
-    return { ok: true, providers: { [providerId]: true }, store, ...offered(found) };
+    await models([provider], { credentials: kept }).login(providerId, "oauth", interaction, { getDeviceId: () => deviceId(projectDir), agentName: AGENT_NAME });
+    if (upload !== undefined) {
+      const credential = (kept as ReturnType<typeof memoryStore>).stored.get(providerId);
+      if (credential === undefined) return { ok: false, error: `the login to "${providerId}" gave no credential` };
+      const failed = await uploadCredential(upload, token as string, credential);
+      if (failed !== undefined) return { ok: false, error: `logged in, but the credential was not stored: ${failed}` };
+    }
+    return { ok: true, providers: { [providerId]: true }, store, ...offered(found), remote: upload !== undefined };
   } finally {
     terminal.close();
     await stop();
@@ -254,12 +335,15 @@ export function lineTerminal(input: NodeJS.ReadableStream, output: NodeJS.Writab
 }
 
 if (import.meta.main) {
-  const [dir = ".", output = "", mode, providerId = "", preferred] = process.argv.slice(2);
+  const [dir = ".", output = "", mode, ...rest] = process.argv.slice(2);
+  const at = rest.indexOf("--upload");
+  const upload = at === -1 ? undefined : rest[at + 1];
+  const [providerId = "", preferred] = rest.filter((arg, i) => arg !== "--remote" && (at === -1 || (i !== at && i !== at + 1)));
   // Where the app runs (`runScriptInApp`), the project is passed as `.`.
   const projectDir = resolve(dir);
   let result: CredentialsResult;
   try {
-    result = mode === "login" ? await login(projectDir, providerId, preferred) : await check(projectDir);
+    result = mode === "login" ? await login(projectDir, providerId, preferred === "" ? undefined : preferred, upload) : await check(projectDir, rest.includes("--remote"));
   } catch (error) {
     result = { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

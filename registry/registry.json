@@ -114,6 +114,14 @@
       ],
       "path": "components/conversations-kv"
     },
+    "credentials-do": {
+      "version": "0.0.0",
+      "description": "The model providers' credentials on Cloudflare, API keys and subscription logins (OAuth) alike, kept by one Durable Object that every conversation asks; an expiring token is refreshed once, under that object's lock. `pikit configure --login` uploads a login made on your machine.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/credentials-do"
+    },
     "credentials-file": {
       "version": "0.0.0",
       "description": "The model providers' credentials in one JSON file, readable only by its owner (mode `0600`).",

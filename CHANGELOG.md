@@ -205,6 +205,13 @@ there.
   `proposals-local` (server, nothing to set up): branches of a bare repository in the state volume,
   approvals recorded for deployment-docker's deployer. `pikit doctor` no longer calls a component
   whose only use is its routes unused on Cloudflare, where the Worker's host serves them.
+- Subscription logins on Cloudflare: `credentials-do` (durable; both Apps) provides `model.credentials`
+  from one object; pi-ai's `modify` runs under that object's per-provider lock, so an expiring OAuth
+  token is refreshed once for every conversation, and a failed refresh is not retried for a minute.
+  `pikit configure --login` logs in on the operator's machine and uploads the credential to its
+  operator route (`admin.auth`); no route answers a credential. pi-ai's OAuth flows are bundled by
+  `@pikit/pi-adapter/oauth-flows`. runtime-pi now only warns at start for a provider with no
+  credentials when `model.credentials` is installed (a login can arrive while the app runs).
 - GitHub on Cloudflare: `repo-github-app` (durable; both Apps, its connection in one object): the
   dashboard's Settings → GitHub creates a GitHub App in the operator's account from a manifest
   (private, no webhook; contents and pull requests write, checks and statuses read) and installs it on

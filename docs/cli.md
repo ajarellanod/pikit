@@ -137,15 +137,19 @@ Writes `.env` (mode 0600). In order: each component's own step (`src/pikit/<name
 checks a token, discovers an id, connects GitHub; a step may also set a key
 of its own entry in `pikit.config.ts`), then the other `environment` variables the components declare (a
 secret is asked without echo; a required `*_TOKEN` can be generated), then model credentials for each
-provider an agent names that has none: an OAuth login (stored by `credentials-file`) or the API key in
-the variable the provider's component declares first.
+provider an agent names that has none: an OAuth login (stored by `credentials-file`; on Cloudflare,
+by `credentials-do` in the deployed app) or the API key in the variable the provider's component
+declares first.
 
 - `--yes`, or no terminal: asks nothing; values come from the environment or `--generate`, and a
   missing required one fails.
 - `--generate NAME`: fill `NAME` with 32 random bytes in hex (`PIKIT_ADMIN_TOKEN`, a webhook secret).
 - `--login <provider>`: run that provider's OAuth login. It logs in where the app runs (through the
   deployment's `exec`, in Docker's volume) unless `--local` (this machine, for `pikit dev`).
-  `--login-method` picks `browser` or `code`.
+  `--login-method` picks `browser` or `code`. On Cloudflare (`durable`, with `credentials-do`) it
+  logs in on this machine (`code` unless told) and uploads the credential to the deployed app
+  (`PUT /admin/api/credentials-do/<provider>`, at the URL the last `pikit up` from here recorded,
+  with `.env`'s `PIKIT_ADMIN_TOKEN`); nothing of it stays here. Deploy first.
 
 It never prints a value, and never touches Pi's own `~/.pi/agent/auth.json`.
 
