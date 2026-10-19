@@ -16,7 +16,8 @@
  *
  * `--target`, `--preset` and `--with` answer their questions (a `--with` of a feature, or `--ui`, answers
  * "what can it do?"): the installer's `--durable` runs `pikit new --target durable --preset
- * telegram-cloudflare`, which asks only the name and what it can do.
+ * telegram-cloudflare`, which asks the name, where to talk to the agent (when several channels run
+ * there; the preset's own checked) and what it can do.
  *
  * It offers presets that make an agent you talk to, those with a channel-* component, when a target
  * has any: `cloudflare-minimal`, storage only, is for `pikit new <dir> --preset`.
