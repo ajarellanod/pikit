@@ -1,0 +1,34 @@
+#!/usr/sbin/nft -f
+# deployment-celld: a node's firewall, nftables (README, "Running a fleet"). A template: pikit never
+# runs it. Set the two definitions, then: sudo nft -f firewall.nft (and include it from
+# /etc/nftables.conf to keep it across reboots).
+#
+# It replaces only its own table, never the whole ruleset: celld's Containers keep nftables tables of
+# their own, which a `flush ruleset` would delete.
+#
+#   8081 (CELLD_INTERNAL_ADDR): peers and the operator API, which has no authentication: the private
+#        network only, never the internet.
+#   8080 (CELLD_ADDR): the Worker: only Caddy, which adds TLS and the client's address.
+#   80, 443: only on the machine that runs Caddy.
+
+define PRIVATE = 10.0.0.0/24
+define CADDY = { 10.0.0.10 }
+
+table inet pikit_celld
+delete table inet pikit_celld
+table inet pikit_celld {
+	chain input {
+		type filter hook input priority filter; policy drop;
+		ct state established,related accept
+		ct state invalid drop
+		iif "lo" accept
+		ip protocol icmp accept
+		ip6 nexthdr ipv6-icmp accept
+		# SSH (pikit logs and pikit down use it with PIKIT_CELLD_SSH): narrow it to your own addresses.
+		tcp dport 22 accept
+		ip saddr $PRIVATE tcp dport 8081 accept
+		ip saddr $CADDY tcp dport 8080 accept
+		# On the machine that runs Caddy only:
+		#tcp dport { 80, 443 } accept
+	}
+}

@@ -1,0 +1,82 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "deployment-celld",
+  "version": "0.0.0",
+  "title": "celld: your own machines, a Durable Object per chat",
+  "description": "Runs a pikit project of the durable target on your own machines with celld (self-hosted Durable Objects): the Worker and its objects, wrangler.jsonc, the commands `pikit up | down | logs | status | dev` delegate to, a CI deploy script, and the nodes' templates.",
+  "targets": [
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [],
+  "hooks": {
+    "doctor": "commands.ts"
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    },
+    {
+      "source": "files/wrangler.jsonc",
+      "target": "wrangler.jsonc"
+    }
+  ],
+  "environment": [
+    {
+      "name": "CELLD_BUCKET",
+      "secret": false,
+      "required": false,
+      "description": "The fleet's bucket, as the nodes are given it: s3://name (AWS S3, R2, Tigris), gs://name or az://container, with an optional /prefix. It needs conditional writes (not Hetzner, DigitalOcean Spaces or Backblaze B2). `pikit up` deploys to it; `pikit dev` does not need it."
+    },
+    {
+      "name": "PIKIT_CELLD_URL",
+      "secret": false,
+      "required": false,
+      "description": "The fleet's public URL (https://bot.example.com, behind Caddy or a load balancer): `pikit up` waits for /health there and gives it to the components' afterDeploy hooks (the Telegram webhook)."
+    },
+    {
+      "name": "S3_ENDPOINT",
+      "secret": false,
+      "required": false,
+      "description": "The bucket's S3-compatible endpoint, when it is not AWS S3 (R2: https://<account>.r2.cloudflarestorage.com). Stays on this machine."
+    },
+    {
+      "name": "AWS_REGION",
+      "secret": false,
+      "required": false,
+      "description": "The bucket's region (R2: auto; default us-east-1). Stays on this machine."
+    },
+    {
+      "name": "AWS_ACCESS_KEY_ID",
+      "secret": true,
+      "required": false,
+      "description": "A key of the bucket, for `celld deploy` and a rollback (R2: an S3 API token). It stays on this machine: the Worker never gets it."
+    },
+    {
+      "name": "AWS_SECRET_ACCESS_KEY",
+      "secret": true,
+      "required": false,
+      "description": "The secret of AWS_ACCESS_KEY_ID. It stays on this machine: the Worker never gets it."
+    },
+    {
+      "name": "PIKIT_CELLD_SSH",
+      "secret": false,
+      "required": false,
+      "description": "Optional: the nodes' SSH destinations, separated by commas (deploy@10.0.0.11,deploy@10.0.0.12), for `pikit logs` (journalctl) and `pikit down` (systemctl stop, one node at a time)."
+    }
+  ]
+}

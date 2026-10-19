@@ -78,7 +78,7 @@ test("new with no directory asks only on a terminal; the presets it offers have 
   expect(readdirSync(parent)).toEqual([]);
 
   const presets = openRegistry(DEFAULT_REGISTRY).presets();
-  expect(presets.map((p) => p.name)).toEqual(["cloudflare-minimal", "http", "telegram", "telegram-cloudflare"]);
+  expect(presets.map((p) => p.name)).toEqual(["cloudflare-minimal", "http", "telegram", "telegram-celld", "telegram-cloudflare"]);
   for (const preset of presets) expect(preset.title).not.toBe(preset.name);
 });
 

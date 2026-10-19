@@ -1,0 +1,61 @@
+# deployment-celld: deploy every merge to main to the celld fleet, as Workers Builds does on Cloudflare
+# (self-improvement: an approved proposal is merged, then deployed). A template (README, "Deploy from
+# CI"): copy it to .github/workflows/deploy.yml, then set in the repository's Settings → Secrets and
+# variables → Actions:
+#   variables: CELLD_BUCKET, PIKIT_CELLD_URL, AWS_REGION, and S3_ENDPOINT when the bucket is not AWS S3
+#   secrets:   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (the bucket's keys), and each of the app's
+#              secrets listed under the Deploy step's `env` (the variables of .env.example)
+# deploy.mjs gives the Worker every variable of .env.example that is set here, but the bucket's
+# settings; it waits for /health, rolls a deploy that fails back, then registers the Telegram webhook.
+
+name: Deploy (celld)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, never cancelled halfway: a later merge waits, then deploys.
+concurrency:
+  group: deploy-celld
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - name: Install celld (the fleet's version)
+        env:
+          CELLD_VERSION: v0.6.2
+        run: |
+          mkdir -p "$RUNNER_TEMP/celld"
+          curl -fsSL "https://github.com/denoland/celld/releases/download/$CELLD_VERSION/celld-x86_64-unknown-linux-gnu.gz" | gunzip > "$RUNNER_TEMP/celld/celld"
+          chmod +x "$RUNNER_TEMP/celld/celld"
+          echo "$RUNNER_TEMP/celld" >> "$GITHUB_PATH"
+      - name: Deploy, wait for /health, roll back on failure, set the webhook
+        env:
+          CELLD_BUCKET: ${{ vars.CELLD_BUCKET }}
+          PIKIT_CELLD_URL: ${{ vars.PIKIT_CELLD_URL }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # The app's secrets: one line per variable of .env.example (the telegram-celld preset's here).
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          TELEGRAM_PASSWORD: ${{ secrets.TELEGRAM_PASSWORD }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+        run: node src/pikit/deployment-celld/deploy.mjs src/pikit/channel-telegram-webhook/setup-webhook.mjs
