@@ -16,7 +16,10 @@ on the host, no network but the hosts you allow, and secrets the guest never see
   on `PATH`; on Linux, `/dev/kvm`. `pikit doctor` checks them (its `doctor` hook). The guest image
   (Alpine, about 200 MB) is downloaded on the first boot into `~/.cache/gondolin` (`$XDG_CACHE_HOME`).
 - **Instead of:** `execution-local`, and `workspace-local` (both provide what this provides: install one
-  set). `tool-read`, `tool-write`, `tool-edit` and `tool-bash` work unchanged.
+  set). `tool-read`, `tool-write`, `tool-edit` and `tool-bash` work unchanged. Two providers of
+  `execution` do not compose, so the old ones go with `--force` once this one is in:
+  `pikit add execution-gondolin --yes`, then `pikit remove execution-local --force` (and
+  `workspace-local`, if installed), then `pikit doctor`.
 
 ## Why
 

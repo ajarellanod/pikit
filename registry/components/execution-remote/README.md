@@ -30,7 +30,14 @@ pikit add execution-remote tool-bash tool-read tool-write tool-edit
 `endpoint` is `https://`, or `http://` to the machine itself (`localhost`, `127.0.0.1`, `[::1]`); the
 app does not start otherwise, nor without the token. How to run the host: execution-serve's README.
 Replace `execution-do` (Cloudflare) or `execution-local` (server) with it; with `workspace-local`
-installed too, remove that one (this component is the `workspace`).
+installed too, remove that one (this component is the `workspace`). Two providers of `execution` do
+not compose, so the old one goes with `--force` once this one is in:
+
+```sh
+pikit add execution-remote --yes      # then set "execution-remote": { endpoint } in pikit.config.ts
+pikit remove execution-do --force     # execution-local on a server; workspace-local too, if installed
+pikit doctor                          # execution, execution.shell, workspace: execution-remote
+```
 
 ## Which sandbox
 
