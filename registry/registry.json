@@ -171,6 +171,23 @@
       ],
       "path": "components/execution-local"
     },
+    "execution-remote": {
+      "version": "0.0.0",
+      "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per conversation, from a server or a Cloudflare Durable Object.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/execution-remote"
+    },
+    "execution-serve": {
+      "version": "0.0.0",
+      "description": "A sandbox host: the sandboxes of this App's workspace provider (execution-gondolin's VMs), over HTTP for execution-remote, behind a shared token.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/execution-serve"
+    },
     "expose-cloudflare-tunnel": {
       "version": "0.0.0",
       "description": "A public HTTPS URL for a server project by a Cloudflare Tunnel: `pikit expose` makes the tunnel, its routes and its DNS record on your Cloudflare domain, and `pikit up` runs cloudflared beside the app; only the paths you list are public.",
