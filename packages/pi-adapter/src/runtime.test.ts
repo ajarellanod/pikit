@@ -333,3 +333,47 @@ describe("contexts", () => {
     expect(new Set(prepared)).toEqual(new Set(["telegram"]));
   });
 });
+
+describe("conversation refs", () => {
+  test("only the refsKept most recently used refs are kept; a dropped one is read back from its document, the same, channel included", async () => {
+    // A tool that records the conversation its run sees, and holds the first run until released.
+    const seen: unknown[] = [];
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let started!: () => void;
+    const holding = new Promise<void>((resolve) => (started = resolve));
+    const probe = holdTool(async (context) => {
+      seen.push(context.value(CONVERSATION));
+      started();
+      await released;
+      return "seen";
+    });
+    const w = await worker({ agents: [scriptedAgent([probe as never])], runtime: { refsKept: 1 } });
+    const a = await w.conversation();
+    const b = await w.conversation();
+    const telegram = { ...a, channel: "telegram" };
+    await w.dispatch("r1", "hold", telegram);
+    await holding;
+
+    // b's admission and run take the one place: a's ref is dropped while a's run goes.
+    await w.dispatch("r2", "hello", b);
+    expect((await w.result("r2")).conversation).toEqual(b);
+    release();
+
+    // a's run ends, announced with a's ref read back from its document.
+    expect((await w.result("r1")).conversation).toEqual(telegram);
+    // Every reader after it: b's ref dropped in turn, and read back.
+    expect(await w.runtime.submissions.get(b, "r2", w.ctx)).toMatchObject({ kind: "settled", conversation: b });
+    expect(await w.runtime.submissions.get(a, "r1", w.ctx)).toMatchObject({ kind: "settled", conversation: telegram });
+    expect(await w.runtime.submissions.get(b, "r2", w.ctx)).toMatchObject({ kind: "settled", conversation: b });
+    // A ref without the channel, while a's is dropped: the run sees the recorded one, in its tools too.
+    await w.dispatch("r3", "hold", a);
+    expect((await w.result("r3")).conversation).toEqual(telegram);
+    expect(seen).toEqual([telegram, telegram]);
+    expect(w.results().map((result) => [result.requestId, result.conversation.conversationId])).toEqual([
+      ["r2", b.conversationId],
+      ["r1", a.conversationId],
+      ["r3", a.conversationId],
+    ]);
+  });
+});

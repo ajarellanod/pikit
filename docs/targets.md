@@ -17,13 +17,13 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-workers`: the Worker's `env` |
 | `execution` | `execution-local`: the machine's files and shell | `execution-do`: files in the object's SQL, a simulated shell |
 | Telegram | `channel-telegram` (long polling) | `channel-telegram-webhook` (two halves) |
-| HTTP API channel | `channel-http` | none yet |
+| HTTP API channel | `channel-http` | `channel-http` (two halves: routes in the Worker, the wait in the object) |
 | Model logins | `credentials-file` (OAuth or keys) | API keys only (no `model.credentials` provider) |
 
 This page does not list every component's targets: a component says them itself. Its
 `component.json`'s `targets` is where it runs (`pikit add` refuses another), and its README's
 **Targets** line why not elsewhere, and whether that is for good (channel-telegram's long polling
-needs a process) or not built yet (channel-http has no Worker half). A component on both targets
+needs a process) or not built yet. A component on both targets
 says how it differs, if it does, in its README ("On each target").
 
 `registry validate` refuses `node:*` or `bun:*` imports in the shipped files of a component that
@@ -71,8 +71,9 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
   The object is never stopped: it is evicted without warning (K6). Its RPC methods are `health()`,
   `deliver(type, key, message)`, `call(type, key, message)`, `stream(type, key, message)` and `alarm()`.
 - **Halves.** A component that must be in both Apps has a Worker half (`apps.worker` in
-  `component.json`). channel-telegram-webhook (route in the Worker, handler in the object) and admin-api
-  (routes in the Worker, answers in the objects) have two; actors-do, secrets-workers and
+  `component.json`). channel-telegram-webhook (route in the Worker, handler in the object), channel-http
+  (routes in the Worker, admission and the wait for the answer in the object, inside the call's RPC)
+  and admin-api (routes in the Worker, answers in the objects) have two; actors-do, secrets-workers and
   admin-auth-token go in both as they are. See [concepts.md](concepts.md#the-two-apps-on-cloudflare).
 - **actor.mailbox / actor.inbox.** In the Worker, `send` and `call` are RPCs to the object
   `idFromName(key)`; in an object, its own key is a local call. A handler resolves once the message is
@@ -141,8 +142,7 @@ so. deployment-cloudflare's README has the rules ("Rolling back").
   built); no connection held between events (no long polling); no `restart`
   and no `exec`, and `down` deletes data (deployment-cloudflare's README).
 
-What a component cannot do on a target is in that component's README: channel-http (no Worker half
-yet), provider-anthropic, provider-openai and credentials-file (no subscription login on Cloudflare), execution-do
+What a component cannot do on a target is in that component's README: provider-anthropic, provider-openai and credentials-file (no subscription login on Cloudflare), execution-do
 (its simulated shell), admin-api (on Cloudflare, no Delivery view).
 
 Moving a project to the other target is swapping those components, never changing an agent, a route

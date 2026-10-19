@@ -10,6 +10,7 @@
 import { expect, test } from "bun:test";
 import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withAbortSignal } from "@pikit/core";
 import {
+  ActorCallError,
   type Admission,
   type AgentRuntime,
   type AgentSubmissions,
@@ -19,7 +20,8 @@ import {
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createConversationDescribeConformance, createMemorySubmissions, type RecordingSubmissions } from "@pikit/contracts/testing";
-import channelHttp from "./index.ts";
+import { type Actors, createActors, startWorker } from "./actors.test-support.ts";
+import channelHttp, { CALL, worker } from "./index.ts";
 
 const TOKEN = "test-token-0123456789abcdef";
 const AUTH = { authorization: `Bearer ${TOKEN}` };
@@ -152,6 +154,8 @@ interface Subject {
   runtime: ReturnType<typeof scriptedRuntime>;
   /** Call a route the way a server would; `signal` plays the request's cancellation. */
   call(key: string, path: string, init?: Init): Promise<{ status: number; body: Record<string, unknown> }>;
+  /** Call a route of `app` itself: on Cloudflare, the object's own, which no server serves. */
+  own(key: string, path: string, init?: Init): Promise<{ status: number; body: Record<string, unknown> }>;
 }
 
 interface Options {
@@ -161,10 +165,13 @@ interface Options {
   extra?: ReturnType<typeof defineComponent>[];
   /** Installs `agent.submissions`, where the runtime double records. */
   submissions?: RecordingSubmissions;
+  /** On Cloudflare: this App is the conversations' objects, over `actors`, and `call` goes to the Worker's App. */
+  actors?: Actors;
 }
 
 async function started(options: Options = {}): Promise<Subject> {
   const runtime = scriptedRuntime(options.submissions);
+  const actors = options.actors;
   let routes: { get(key: string): HttpRoute | undefined } | undefined;
   const server = defineComponent({
     name: "server-test",
@@ -182,23 +189,26 @@ async function started(options: Options = {}): Promise<Subject> {
       channelHttp,
       server,
       ...(options.submissions === undefined ? [] : [defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", options.submissions as AgentSubmissions) })]),
+      ...(actors === undefined ? [] : [actors.object]),
       ...(options.extra ?? []),
     ],
     ...(options.config !== undefined && { config: options.config }),
     logger: silentLogger,
   }).create();
   await app.start();
+  const cloudflare = actors === undefined ? undefined : await startWorker(actors, { PIKIT_HTTP_TOKEN: TOKEN });
+  const through = async (caller: App, route: HttpRoute | undefined, path: string, init: Init) => {
+    if (route === undefined) throw new Error(`no route for ${path}`);
+    const ctx = caller.context(init.signal ? withAbortSignal(init.signal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT);
+    const { signal: _signal, ...rest } = init;
+    const response = await route(new Request(`http://pikit.test${path}`, rest), ctx);
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  };
   return {
     app,
     runtime,
-    async call(key, path, init = {}) {
-      const route = routes?.get(key);
-      if (route === undefined) throw new Error(`no route ${key}`);
-      const ctx = app.context(init.signal ? withAbortSignal(init.signal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT);
-      const { signal: _signal, ...rest } = init;
-      const response = await route(new Request(`http://pikit.test${path}`, rest), ctx);
-      return { status: response.status, body: (await response.json()) as Record<string, unknown> };
-    },
+    call: (key, path, init = {}) => (cloudflare === undefined ? through(app, routes?.get(key), path, init) : through(cloudflare.app, cloudflare.route(key), path, init)),
+    own: (key, path, init = {}) => through(app, routes?.get(key), path, init),
   };
 }
 
@@ -215,7 +225,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "channel-http")).toMatchObject({
     provides: ["http.route"],
     requires: ["secrets", "conversations.registry", "agent.runtime"],
-    optional: ["agent.submissions"],
+    optional: ["agent.submissions", "actor.inbox", "actor.mailbox"],
   });
   expect(app.describe().capabilities["http.route"]?.keys).toEqual({
     "POST /v1/messages": "channel-http",
@@ -502,4 +512,142 @@ test("without agent.submissions, GET is 501: nothing keeps a message's outcome o
   expect((await get(s, "c1", "m1")).status).toBe(501);
   expect((await get(s, "c1", "m1", {})).status).toBe(401);
   await s.app.stop();
+});
+
+// ---------------------------------------------------------------------------------------------
+// On Cloudflare: the Worker's half serves the routes and calls the conversation's object, whose App
+// (this export, in one key's actor) admits the message and answers (actors.test-support.ts).
+
+test("what the Worker half declares: secrets and actor.mailbox, the same routes and authentication stage", async () => {
+  const app = await defineApp({
+    components: [secretsWith({}), defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", createActors().mailbox) }), worker],
+    logger: silentLogger,
+  }).create();
+
+  expect(app.describe().components.find((component) => component.name === "channel-http-worker")).toMatchObject({
+    provides: ["http.route"],
+    requires: ["secrets", "actor.mailbox"],
+    optional: [],
+  });
+  expect(Object.keys(app.describe().capabilities["http.route"]?.keys ?? {})).toEqual(["POST /v1/messages", "GET /v1/conversations/:id/messages/:messageId", "POST /v1/conversations/:id/reset"]);
+  expect(app.describe().pipelines["http.authenticate"]).toEqual([{ id: "channel-http-bearer", priority: 100 }]);
+});
+
+test("on Cloudflare: a message is admitted in its conversation's object, and the Worker answers with the run's answer", async () => {
+  const actors = createActors();
+  const s = await started({ actors });
+
+  const answered = await send(s, { conversationId: "c1", text: "hello", messageId: "m1" });
+
+  expect(answered).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hello" } });
+  expect(actors.calls).toEqual(["channel-http.message http:c1"]);
+  expect(s.runtime.dispatched).toEqual([{ requestId: "m1", key: "http:c1", agent: "assistant", prompt: "hello" }]);
+  await s.app.stop();
+});
+
+test("on Cloudflare: a missing or wrong token is refused by the Worker, and no object is called", async () => {
+  const actors = createActors();
+  const s = await started({ actors });
+
+  const missing = await send(s, { conversationId: "c1", text: "hello" }, {});
+  const wrong = await send(s, { conversationId: "c1", text: "hello" }, { authorization: "Bearer not-the-token-at-all" });
+  const read = await get(s, "c1", "m1", {});
+  const reset = await s.call("POST /v1/conversations/:id/reset", "/v1/conversations/c1/reset", { method: "POST" });
+
+  for (const response of [missing, wrong, read, reset]) expect(response).toEqual({ status: 401, body: { error: "unauthorized" } });
+  expect(actors.calls).toEqual([]);
+  expect(s.runtime.dispatched).toEqual([]);
+  await s.app.stop();
+});
+
+test("on Cloudflare: a request that is not valid is a 400 from the Worker, before any call", async () => {
+  const actors = createActors();
+  const s = await started({ actors });
+
+  expect((await send(s, { conversationId: "c 1", text: "hello" })).status).toBe(400);
+  expect((await send(s, { conversationId: "c1", text: "hello", messageId: "dashboard:m1" })).status).toBe(400);
+  expect((await get(s, "%E0", "m1")).status).toBe(400);
+  expect(actors.calls).toEqual([]);
+  await s.app.stop();
+});
+
+test("on Cloudflare: no answer within replyTimeoutMs is a 202, the message admitted; GET finds it, and the same POST runs it once", async () => {
+  const actors = createActors();
+  const { submissions } = createMemorySubmissions();
+  const s = await started({ actors, submissions, config: { "channel-http": { replyTimeoutMs: 20 } } });
+
+  expect(await send(s, { conversationId: "c1", text: "hold", messageId: "m1" })).toEqual({ status: 202, body: { requestId: "m1" } });
+  // Admitted before the 202: the conversation holds it.
+  expect((await submissions.pending(s.app.context())).map((p) => p.requestIds)).toEqual([["m1"]]);
+  expect(await get(s, "c1", "m1")).toEqual({ status: 202, body: { requestId: "m1" } });
+  expect(await send(s, { conversationId: "c1", text: "hold", messageId: "m1" })).toEqual({ status: 202, body: { requestId: "m1" } });
+  s.runtime.hold.release();
+  while ((await get(s, "c1", "m1")).status === 202) await Bun.sleep(1);
+
+  expect(await get(s, "c1", "m1")).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hold" } });
+  expect(await send(s, { conversationId: "c1", text: "hold", messageId: "m1" })).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hold" } });
+  // Every POST reached the runtime, which took the first only: the others were duplicates.
+  expect((await submissions.answers.read(undefined, 10)).items.map((item) => item.fact.requestIds)).toEqual([["m1"]]);
+  expect(await get(s, "c1", "nothing-here")).toEqual({ status: 404, body: { requestId: "nothing-here", error: "not_found" } });
+  expect(actors.calls.filter((call) => call.startsWith(CALL.message))).toHaveLength(3);
+  await s.app.stop();
+});
+
+test("on Cloudflare: an object that cannot be reached is a 503 with the request id, to read later or send again", async () => {
+  const actors = createActors();
+  const s = await started({ actors, submissions: createMemorySubmissions().submissions });
+  actors.reachable = false;
+
+  expect(await send(s, { conversationId: "c1", text: "hello", messageId: "m1" })).toEqual({ status: 503, body: { requestId: "m1", error: "unavailable" } });
+  expect(await get(s, "c1", "m1")).toEqual({ status: 503, body: { requestId: "m1", error: "unavailable" } });
+  actors.reachable = true;
+  expect(await send(s, { conversationId: "c1", text: "hello", messageId: "m1" })).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hello" } });
+  await s.app.stop();
+});
+
+test("on Cloudflare: reset goes to the conversation's object; the object's own routes call their conversation's object too", async () => {
+  const actors = createActors();
+  const s = await started({ actors });
+  await send(s, { conversationId: "c1", text: "hello" });
+
+  const reset = await s.call("POST /v1/conversations/:id/reset", "/v1/conversations/c1/reset", { method: "POST", headers: AUTH });
+  expect(reset).toEqual({ status: 200, body: { conversationId: "c1", previousRuntimeConversationId: "s1", runtimeConversationId: "s2" } });
+  expect(actors.calls).toEqual(["channel-http.message http:c1", "channel-http.reset http:c1"]);
+
+  const own = await s.own("POST /v1/messages", "/v1/messages", message({ conversationId: "c2", text: "from the object", messageId: "m2" }));
+  expect(own).toEqual({ status: 200, body: { requestId: "m2", text: "answer: from the object" } });
+  expect(actors.calls.at(-1)).toBe("channel-http.message http:c2");
+  await s.app.stop();
+});
+
+test("on Cloudflare: the object answers only for its own conversation, and only a message of this channel", async () => {
+  const actors = createActors();
+  const s = await started({ actors });
+  const ctx = s.app.context();
+  const refused = (key: string, type: string, message: Record<string, unknown>) =>
+    actors.mailbox.call(key, type, message as never, ctx).then(
+      () => "answered",
+      (error: unknown) => (error instanceof ActorCallError ? error.code : String(error)),
+    );
+
+  expect(await refused("http:c2", CALL.message, { conversationId: "c1", text: "hello", requestId: "m1", actor: { id: "http" } })).toBe("invalid_request");
+  expect(await refused("http:c1", CALL.message, { conversationId: "c1", text: "", requestId: "m1", actor: { id: "http" } })).toBe("invalid_request");
+  expect(await refused("http:c1", CALL.message, { conversationId: "c1", text: "hello", requestId: "dashboard:m1", actor: { id: "http" } })).toBe("invalid_request");
+  expect(await refused("http:c1", CALL.message, { conversationId: "c1", text: "hello", requestId: "m1" })).toBe("invalid_request");
+  expect(await refused("telegram:c1", CALL.status, { conversationId: "c1", requestId: "m1" })).toBe("invalid_request");
+  expect(await refused("http:c1", CALL.reset, { conversationId: "c1", extra: true })).toBe("invalid_request");
+  expect(s.runtime.dispatched).toEqual([]);
+  await s.app.stop();
+});
+
+test("in one key's actor without actor.mailbox, it refuses to start", async () => {
+  const inbox = defineComponent({ name: "inbox-test", setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {}, answerStream: () => {} }) });
+  const app = await defineApp({ components: [secretsWith({ PIKIT_HTTP_TOKEN: TOKEN }), memoryRegistry(), scriptedRuntime().component, inbox, channelHttp], logger: silentLogger }).create();
+
+  const error = await app.start().then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+
+  expect(String((error as Error | undefined)?.cause)).toContain("actor.mailbox, which is not installed");
 });

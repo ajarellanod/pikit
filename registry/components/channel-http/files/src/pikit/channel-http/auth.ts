@@ -16,6 +16,18 @@ export async function digest(text: string): Promise<Digest> {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
 }
 
+/**
+ * The token's digest, read through `read` (`secrets`), or an error saying why it cannot be used: the
+ * component then refuses to start, since a channel that would refuse every request is a broken
+ * deployment. The error never quotes the value.
+ */
+export async function readToken(read: (name: string) => Promise<string | undefined>): Promise<Digest> {
+  const value = await read(TOKEN_SECRET);
+  if (value === undefined) throw new Error(`channel-http: the secret ${TOKEN_SECRET} is not set`);
+  if (value.length < MIN_TOKEN_LENGTH) throw new Error(`channel-http: the secret ${TOKEN_SECRET} is shorter than ${MIN_TOKEN_LENGTH} characters`);
+  return await digest(value);
+}
+
 /** The token of an `Authorization: Bearer <token>` header, or `undefined`. */
 export function bearerToken(header: string | null): string | undefined {
   const match = /^Bearer[ ]+(\S+)\s*$/i.exec(header ?? "");

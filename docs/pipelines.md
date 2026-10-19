@@ -76,9 +76,9 @@ the agent a conversation was created with.
 
 | | |
 |---|---|
-| Declared in | [channel-http/index.ts](../registry/components/channel-http/files/src/pikit/channel-http/index.ts) (a component may declare a pipeline) |
+| Declared in | [channel-http/routes.ts](../registry/components/channel-http/files/src/pikit/channel-http/routes.ts) (a component may declare a pipeline) |
 | Value | `{ channel; request: Request; verdict?: { kind: "authenticated"; actor } \| { kind: "rejected"; reason } }` |
-| Run by | each of channel-http's routes, before anything else |
+| Run by | each of channel-http's routes, before anything else; on Cloudflare in the Worker's App, where the request is (a project's stage goes there) |
 | Stage | `channel-http-bearer`, priority 100: compares the bearer token with `PIKIT_HTTP_TOKEN` (constant time) |
 | Rules | a stage acts only on its own `channel` and leaves a rejection alone; no verdict, a halt, or `rejected` is a `401` |
 

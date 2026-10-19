@@ -136,7 +136,9 @@ there.
   speaks OpenAI's API: `id`, `baseUrl`, the key's name, `models`), `provider-faux` (fake
   models for tests and trials: `faux/echo`, and `faux/scripted`, which calls a tool on
   `call: <tool> <json>` and shows the system prompt on `echo-system`), `credentials-file`.
-- Channels: `channel-http` (server), `channel-telegram` (long polling, server),
+- Channels: `channel-http` (both targets: on Cloudflare its Worker half calls the conversation's
+  object, which admits the message and waits for the answer inside the call), `channel-telegram`
+  (long polling, server),
   `channel-telegram-webhook` (Cloudflare: a Worker half and an object half, bot password and `/login`,
   self-registering webhook); both deliver through `startAnswerDelivery`, run a redelivered command
   once, and share their identical files (held by a test). The poller tries a failing update for 15
