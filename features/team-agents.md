@@ -36,7 +36,7 @@ a project installs, and agents that name what they may use.
 | Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate only (SPEC §6) | [approvals](approvals.md) |
 | Missions: a goal ledger with checkpoints, mirrored in a task tracker | none | no note yet |
 | Memory: summaries, search, rules, preferences | none | [memory](memory.md) |
-| Routines (cron), followups (one-shot, agent-made) | `wakeups-timers` (the runtime's own) | [scheduler](scheduler.md) |
+| Routines (cron), followups (one-shot, agent-made) | built: `scheduler-sql` (`scheduler`), `scheduler-admit`, `scheduler-routines` (config), `tool-schedule` (the agent's, its own conversation); server only | [scheduler](scheduler.md) |
 | Reply context (a terse reply to a routine's message) | none | with [scheduler](scheduler.md) |
 | A persistent JavaScript worker for the agent | none | [codemode](codemode.md) |
 | MCP servers per agent | `tool-mcp` | — |

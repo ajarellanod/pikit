@@ -175,6 +175,12 @@ there.
 - `tool-ask-user`: the `askUser` tool asks one question (confirm, select, multiselect, text, date)
   and ends the run with it as a `question` part, never waiting; a channel that draws it shows buttons
   or a form, any other its fallback text, and the answer comes back as a message.
+- Scheduled prompts (server): `scheduler-sql` declares and provides `scheduler` (jobs at a time or
+  on a 5-field cron in a zone, in `storage.sql`, woken by `wakeups`; ticks at least once with their
+  identity, a `skip` / `once` policy for missed ones; its suite in `conformance.ts`), `scheduler-admit`
+  admits each tick into its existing conversation with `admitInbound` (sender `scheduler`, message id
+  `scheduler:<job>:<tick>`), `tool-schedule` (`schedule`, `listSchedules`, `cancelSchedule`, the run's
+  own conversation only) and `scheduler-routines` (cron prompts in `pikit.config.ts`, synced at start).
 - Tools and execution: `tool-read`, `tool-write`, `tool-edit`, `tool-bash` (Pi's own), `tool-fetch`
   and `tool-websearch-brave` (their source in the component: the references for writing a tool),
   `tool-mcp` (remote MCP servers, with a deploy-time seed); each tool's `replay` is in its own source

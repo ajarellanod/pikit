@@ -1,0 +1,42 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "tool-schedule",
+  "version": "0.0.0",
+  "title": "Scheduling: your agent schedules prompts in its own conversation (schedule, listSchedules, cancelSchedule)",
+  "description": "The `schedule`, `listSchedules` and `cancelSchedule` tools, for the agents that name them: a prompt that comes back to the agent's own conversation once at a time or on a cron schedule, listed and cancelled only there.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": [
+      "scheduler"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "schedule": "safe",
+      "listSchedules": "safe",
+      "cancelSchedule": "safe"
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

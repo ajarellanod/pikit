@@ -43,7 +43,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [sandboxed-execution](sandboxed-execution.md) | ⭐ | Commands in a container, VM or remote host | Partly: SPEC §6 requires `execution-cloudflare-sandbox`, specified there |
 | [self-improvement](self-improvement.md) | ⭐ | SPEC §6 built: the `pikit-self` skill, proposals as pull requests approved in the dashboard, deploy and rollback, on both targets | Yes: SPEC §6, the launch |
 | [settings](settings.md) | ⭐ | A Settings dialog, a section per installed component, live values: the agent's prompt and model, agents and routing as data | Yes: the launch |
-| [scheduler](scheduler.md) | ⭐ | Scheduled prompts and file-defined routines, answered in the chat | No |
+| [scheduler](scheduler.md) | ⭐ | Scheduled prompts (the agent's, and routines in the config), answered in the chat; built on a server: `scheduler-sql`, `scheduler-admit`, `scheduler-routines`, `tool-schedule` | No |
 | [skills-hub](skills-hub.md) | ⭐ | Install shared skills as owned source | No |
 | [streaming-replies](streaming-replies.md) | ⭐ | A preview message edited as the answer is written | No |
 | [subagents](subagents.md) | ⭐ | Delegation to helpers (Pi's) and to other agents (pikit's) | No |
