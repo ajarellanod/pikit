@@ -24,7 +24,7 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 
 ## Before publishing `@pikit/contracts`: review its public surface
 - **Why:** until the kit is published, removing or renaming an export costs nothing (no
-  compatibility, pikit is unreleased); after, every export is a promise. Interchangeability is not at
+  compatibility: pikit 0.0.x promises none); after, every export is a promise. Interchangeability is not at
   stake: it rests on the conformance suites, `checkStability` and `checkImports`, which hold today.
 - **What to look at:**
   - Done (the contracts audit): `REDACTED`, `HTTP_ROUTE_KEY` and `commandProblem` are internal;

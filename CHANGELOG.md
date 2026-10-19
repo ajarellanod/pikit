@@ -5,8 +5,13 @@ line names its area.
 
 ## Unreleased
 
-pikit is unreleased: this is what the first release holds, by area, not the history of how it got
-there.
+Nothing yet.
+
+## 0.0.1 (2026-10-19)
+
+The first release: a git tag and a GitHub release, not npm (each project carries the kit in its
+`vendor/`). This is what it holds, by area, not the history of how it got there. No 0.0.x release
+promises compatibility with the one before: no aliases, migrations or readers of older formats.
 
 ### Kernel (`@pikit/core`)
 - `defineComponent` / `defineApp`: synchronous `setup` that only registers (`provide`,
@@ -27,6 +32,9 @@ there.
   `agent.observe` (conversations with agent, busy state and cost; a transcript; a live event stream;
   usage), `agent.tool`, `agent.skill` (the project's skills, its catalog: an agent names the ones it
   knows in `skills`, as it names tools; live agents and overrides too), `agent.definition`.
+  `ConversationRef.origin` (`originOf`): the conversation a delegated one works for, however deep,
+  written by the runtime when it creates the child; `AgentRequest.parts`: a message's parts, brought to
+  the answer of the run that takes it, once.
 - Inbound and outbound: `admitInbound` (`inbound.normalize`, `route.resolve`; it refuses a message
   whose id starts with `dashboard:`, the operator's, which channel-http answers `400`) and its outbound
   counterpart `startAnswerDelivery` (a channel's answers from the `answers` feed and its own cursor,
@@ -110,6 +118,10 @@ there.
 - A tool gives its run's answer parts with `withParts` (`@pikit/pi-adapter/tools`), collected in order
   into `AgentResult.parts`; runtime-pi re-emits pi-durable's partial answer as `agent.partial`, at most
   once per `partialEveryMs` (its config, default a second) per conversation, never after the run's end.
+- Delegation (`AGENT_DELEGATION`, on pi-durable's subagents): `start` gives the task's id (the same on
+  a rerun); `list`, `steer` and `cancel` act on a conversation's own background tasks (another's is
+  `not_found`). A completed task carries its run's parts, and a background report brings them to the
+  parent once.
 - `agent.extension` (keyed): a component adds agent behaviour as a pi-durable extension (system
   prompt sections, hooks, tool wraps, tasks), from `@pikit/pi-adapter/extensions`; agents select
   them by name.
@@ -278,6 +290,20 @@ there.
   `memory-summaries` (server): summarizes each conversation quiet for `idleMinutes` into its person's
   memory, from the answers feed with a cursor and one wakeup, once across retries and restarts,
   credentials redacted before the model and before keeping.
+- Delegation: `tool-delegate` (server and durable): `delegate` hands a task to another of the project's
+  agents in a child conversation, answered now (with its parts) or later as a message;
+  `delegate_tasks`, `delegate_steer` and `delegate_cancel` for the tasks not waited for. What a
+  delegated agent does belongs to the conversation it works for (`ConversationRef.origin`):
+  extension-approvals asks and claims there (any conversation of that tree may use the approval, none
+  of another's), memory-recall's person and tool-schedule's key are the origin's.
+- Settings and live agents: `settings-store` (the settings components declare, validated against
+  their schemas, served to the dashboard's Settings dialog; on Cloudflare one object keeps them) and
+  `agents-live` (agents as data, created and edited in Settings, as `agent.directory`; with
+  router-rules, routed to live).
+- Sandboxes: `execution-gondolin` (server): each conversation's tools in a Linux micro-VM of its own
+  (Gondolin over QEMU), no network but the hosts allowed, secrets the guest never sees.
+  `execution-remote` (server and durable): the files and a real shell in a sandbox of a host running
+  `execution-serve`, over HTTP, one per conversation.
 - Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`; git in its image; with
   `proposals-local`, self-improvement's deployer as a second compose service started by the same
   `pikit up`, the only one with the Docker socket: it merges an approved head into `main`, runs the
@@ -291,6 +317,9 @@ there.
   `wrangler dev` watches the Worker's sources and the modules those builds write, never `src/`.
   `deployment-docker` also adds the Compose file a component declares (`compose`) after its own, and
   runs `afterDeploy` hooks once the containers are healthy, with `PIKIT_PUBLIC_URL`.
+  `deployment-celld` runs the durable target on your own machines with celld (self-hosted Durable
+  Objects): the Worker and its objects, `pikit up | down | logs | status | dev`, a CI deploy script and
+  the nodes' templates.
 - Expose: `expose-cloudflare-tunnel` gives a server project a public HTTPS URL (features/completed/expose.md):
   `pikit expose` makes a remotely managed Cloudflare Tunnel, its routes (only the listed paths and
   `/health`; anything else is Cloudflare's 404) and its DNS record on your domain, and `pikit up` runs
@@ -325,7 +354,8 @@ there.
 
 ### Presets
 - `http` and `telegram` (Docker on a server; conversations on `conversations-kv` over
-  `storage-kv-sql`), `telegram-cloudflare` and `cloudflare-minimal` (`--target durable`). A preset is a
+  `storage-kv-sql`), `telegram-cloudflare`, `telegram-celld` (the same Apps on a celld fleet) and
+  `cloudflare-minimal` (`--target durable`). A preset is a
   list of `pikit add`s; its `choose` questions pick a channel (`multiple`: several at once), and its
   `features` are the components `pikit new` offers to add. The starter agent's prompt says where
   it is reached, and its model is one the preset installs; on a server it does not name `bash`,
@@ -417,7 +447,8 @@ there.
 - `bun test` (every package and component), the workerd lane (`bun run test:workerd`: the Cloudflare
   components in real Durable Objects, eviction mid-run included), and `PIKIT_E2E=1` end-to-end tests:
   a project made by `pikit new` answers a message, on a server and in workerd.
-- `tests/acceptance/team-bases.test.ts`: delegation, approvals and the scheduler composed in one App
-  that restarts mid-flow (a background delegation, a payment approved in the coordinator's own
-  conversation, paid once by a scheduled prompt), and what does not compose yet: an approval asked by
-  a delegated agent (`features/approvals.md`, open questions).
+- `tests/acceptance/team-bases.test.ts`: delegation, approvals, the scheduler and memory composed in
+  one App that restarts mid-flow (a background delegation, a payment approved in the coordinator's own
+  conversation, paid once by a scheduled prompt); and through the origin, a delegated worker's approval
+  reaches the chat, is refused to a non-approver and unusable from another chat's tree, its memory is
+  recalled from that chat only, and its scheduled prompt comes back to the chat once.

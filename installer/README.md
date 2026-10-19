@@ -19,8 +19,10 @@ before doing it. The steps and settings are at the top of the script.
   as Homebrew's, is left alone. It never runs `bun upgrade`, which would install the latest Bun.
 - pikit: `git clone` of `PIKIT_REPO` (or `PIKIT_SOURCE`, a local checkout) at `PIKIT_REF` into
   `~/.pikit/pikit`, then `bun install --frozen-lockfile --production` there. `PIKIT_REF` defaults to
-  `main` because pikit has no release tags yet; once it tags releases, the default becomes the latest
-  tag.
+  the latest release: the highest `vMAJOR.MINOR.PATCH` tag of `PIKIT_REPO` (`git ls-remote --tags`,
+  compared as numbers; pre-releases and other tags are not releases), or `main` when there is none.
+  `PIKIT_REF=main` installs the development branch; any branch, tag or commit works. With
+  `PIKIT_SOURCE` it defaults to that checkout's `HEAD`: what you are working on.
 - `~/.pikit/bin/pikit`: a two-line shim that runs the checkout's CLI with that Bun. The installer
   prints the `PATH` line to add; it edits no shell file.
 - Docker: only `pikit up` on a server needs it. On Linux the official script (`get.docker.com`) runs
@@ -66,15 +68,17 @@ storage; the Paid plan, $5 a month, raises them). What you pay for is the model'
 per message. On a machine without a browser, use an API token from the "Edit Cloudflare Workers"
 template as `CLOUDFLARE_API_TOKEN` instead of `wrangler login`; see deployment-cloudflare's README.
 
-It installs from Git because `@pikit/*` are not published yet; `pikit new` vendors them from this
-checkout into each project.
+It installs from Git because `@pikit/*` are not on npm: a release is a tag of this repository, and
+`pikit new` vendors the kit from this checkout into each project. No 0.0.x release promises
+compatibility with the one before.
 
 ## Tests
 
 - `install.test.ts`: always, `sh -n`, shellcheck (when installed), and how Bun is chosen (pin, range,
   `PIKIT_BUN_VERSION`) with stand-ins for `bun`, `curl` and `git`, without network, and the
-  Cloudflare path (`--durable`: no Docker, Node.js checked, the `pikit new` it hands over to) with
-  stand-ins for `bun`, `git` and `node`; with
+  Cloudflare path (`--durable`: no Docker, Node.js checked, the `pikit new` it hands over to) and the
+  ref it installs (the highest release tag, else `main`; `PIKIT_REF` first) with stand-ins for `bun`,
+  `git` and `node`; with
   `PIKIT_INSTALLER_TEST=1`, a real install of this repository's committed `HEAD` into a temporary
   `HOME`, twice, then `pikit --version`. CI (`.github/workflows/ci.yml`) runs the first part on every
   pull request; the nightly workflow (`.github/workflows/nightly.yml`) runs it with

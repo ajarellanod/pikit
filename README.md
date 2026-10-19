@@ -8,7 +8,8 @@ is the agent; pikit is everything Pi needs to run as a service in the cloud, and
 does. Like shadcn/ui, it is a small core plus a registry of components copied into your project as
 source you own: channels, routing, storage, delivery, deployment on a server (Docker) or on
 Cloudflare (a Durable Object per conversation). You build the assistant you need on those bases,
-with your AI, one component at a time. Unreleased: nothing is published to npm yet.
+with your AI, one component at a time. This is release 0.0.1, a git tag: the kit is not on npm (each
+project carries it in its `vendor/`), and no 0.0.x release promises compatibility with the one before.
 
 ## Five minutes
 
@@ -17,7 +18,8 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
 curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable   # a Telegram bot on Cloudflare
 ```
 
-The installer puts the CLI in `~/.pikit/bin/pikit` (a checkout in `~/.pikit/pikit`) and runs
+The installer puts the CLI in `~/.pikit/bin/pikit` (a checkout of the latest release in
+`~/.pikit/pikit`; `PIKIT_REF=main` for the development branch) and runs
 `pikit new`, which asks where the agent runs, where you talk to it (Telegram, HTTP, or both) and
 what it can do (a dashboard, routing rules, MCP tools, web search…), then configures and starts it
 ([installer/README.md](installer/README.md)). By hand, in a project:

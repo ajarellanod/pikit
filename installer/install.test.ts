@@ -1,7 +1,8 @@
 /**
  * The installer. Always: it is POSIX sh that parses, shellcheck finds nothing when it
  * is installed, and it chooses Bun by its pin and supported range (with stand-ins for `bun`, `curl`
- * and `git`: no network, and it stops before fetching pikit). With `PIKIT_INSTALLER_TEST=1`: it installs this repository's committed HEAD
+ * and `git`: no network, and it stops before fetching pikit), and which ref it installs (the latest
+ * release tag, else main; PIKIT_REF first). With `PIKIT_INSTALLER_TEST=1`: it installs this repository's committed HEAD
  * (`PIKIT_SOURCE`) into a temporary HOME, twice (it is idempotent), and `pikit --version` runs.
  * Bun is taken from the PATH, so no network is needed but for `bun install`'s cache misses.
  *
@@ -89,17 +90,31 @@ test("a Bun below the minimum or of the next major is replaced by the pinned one
 
 /**
  * Runs install.sh past pikit's install with stand-ins: a `bun` of a supported version that does
- * nothing else, a `git` that "clones" an empty directory, and a `node` of `nodeVersion`. No network,
- * no terminal (so no `pikit new`): it stops after Docker's step, or Cloudflare's.
+ * nothing else, a `git` that "clones" an empty directory, lists `tags` as the repository's (`git
+ * ls-remote --tags` output; null: listing fails) and records the ref it fetches, and a `node` of
+ * `nodeVersion`. No network, no terminal (so no `pikit new`): it stops after Docker's step, or
+ * Cloudflare's.
  */
-function install(args: string[], nodeVersion: string, env: Record<string, string> = {}) {
+function install(args: string[], nodeVersion: string, env: Record<string, string> = {}, tags: string[] | null = []) {
   const home = mkdtempSync(join(tmpdir(), "pikit-install-path-"));
   homes.push(home);
   const bin = join(home, "fake-bin");
   mkdirSync(bin);
   const script = (name: string, body: string) => writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   script("bun", 'if [ "$1" = "--version" ]; then echo 1.4.7; fi');
-  script("git", 'for a; do last="$a"; done\ncase " $* " in *" clone "*) mkdir -p "$last" ;; *" rev-parse "*) echo abc1234 ;; esac');
+  if (tags !== null) writeFileSync(join(home, "tags"), tags.map((tag) => `${"0".repeat(40)}\trefs/tags/${tag}\n`).join(""));
+  script(
+    "git",
+    [
+      'for a; do last="$a"; done',
+      'case " $* " in',
+      '  *" clone "*) mkdir -p "$last" ;;',
+      '  *" rev-parse "*) echo abc1234 ;;',
+      '  *" ls-remote "*) echo listed >> "$HOME/ls-remote"; cat "$HOME/tags" || exit 128 ;;',
+      '  *" fetch "*) echo "$last" > "$HOME/fetched" ;;',
+      "esac",
+    ].join("\n"),
+  );
   script("node", `echo ${nodeVersion}`);
   script("unzip", "exit 0");
   const run = Bun.spawnSync(["sh", SCRIPT, ...args], {
@@ -108,8 +123,48 @@ function install(args: string[], nodeVersion: string, env: Record<string, string
     stdout: "pipe",
     stderr: "pipe",
   });
-  return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString(), home };
+  const read = (file: string) => (existsSync(join(home, file)) ? readFileSync(join(home, file), "utf8").trim() : null);
+  return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString(), home, fetched: read("fetched"), listed: read("ls-remote") !== null };
 }
+
+test("by default it installs the latest release: the highest vMAJOR.MINOR.PATCH tag, compared as numbers", () => {
+  const ordered = install([], "v22.11.0", {}, ["v0.0.1", "v0.0.1^{}", "v0.1.0", "v0.0.10", "v0.0.9", "v0.0.2"]);
+  expect(ordered.code).toBe(0);
+  expect(ordered.fetched).toBe("v0.1.0");
+  expect(ordered.out).toContain("the latest release is v0.1.0 (PIKIT_REF=main for the development branch)");
+  expect(ordered.out).toContain("fetching pikit from https://github.com/ajarellanod/pikit.git (v0.1.0)");
+  expect(install([], "v22.11.0", {}, ["v0.0.9", "v0.0.10", "v0.0.1"]).fetched).toBe("v0.0.10");
+  expect(install([], "v22.11.0", {}, ["v0.9.9", "v1.0.0", "v0.10.0"]).fetched).toBe("v1.0.0");
+  // Not releases: another tag that starts with v, a pre-release, a tag that is not three numbers.
+  const others = ["v0-pre-durable", "v0.2.0-rc.1", "v0.3", "v0.4.0.1", "release-1.0.0", "0.5.0", "v0.6.x"];
+  expect(install([], "v22.11.0", {}, ["v0.0.1", ...others]).fetched).toBe("v0.0.1");
+});
+
+test("without a release tag it installs main, and saying so", () => {
+  for (const tags of [[], ["v0-pre-durable", "v0.1.0-rc.1"]]) {
+    const run = install([], "v22.11.0", {}, tags);
+    expect(run.code).toBe(0);
+    expect(run.fetched).toBe("main");
+    expect(run.out).toContain("https://github.com/ajarellanod/pikit.git has no release tags: installing main");
+  }
+});
+
+test("PIKIT_REF wins over the latest release, without listing tags; a listing that fails stops the install", () => {
+  const tags = ["v0.0.1", "v0.1.0"];
+  for (const ref of ["main", "v0.0.1", "abc1234"]) {
+    const run = install([], "v22.11.0", { PIKIT_REF: ref }, tags);
+    expect(run.code).toBe(0);
+    expect(run.fetched).toBe(ref);
+    expect(run.listed).toBe(false);
+  }
+  // A local checkout installs what is checked out there, not its latest release.
+  const source = install([], "v22.11.0", { PIKIT_SOURCE: join(tmpdir(), "a-checkout") }, tags);
+  expect([source.fetched, source.listed]).toEqual(["HEAD", false]);
+  const failed = install([], "v22.11.0", {}, null);
+  expect(failed.code).toBe(1);
+  expect(failed.err).toContain("could not list the tags of https://github.com/ajarellanod/pikit.git (PIKIT_REF=<branch, tag or commit> skips that)");
+  expect(failed.fetched).toBeNull();
+});
 
 test("--durable skips Docker, checks the Node.js wrangler runs on, and hands over to the Cloudflare bot", () => {
   const run = install(["--durable"], "v22.11.0");
@@ -166,7 +221,7 @@ test.skipIf(process.env.PIKIT_INSTALLER_TEST !== "1")(
     const pikit = join(home, ".pikit", "bin", "pikit");
     expect(existsSync(pikit)).toBe(true);
     const version = Bun.spawnSync([pikit, "--version"], { env, stdout: "pipe" });
-    expect(version.stdout.toString().trim()).toBe(`pikit 0.0.0 (${head})`);
+    expect(version.stdout.toString().trim()).toBe(`pikit 0.0.1 (${head})`);
   },
   300_000,
 );

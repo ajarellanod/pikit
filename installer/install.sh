@@ -26,10 +26,11 @@
 # Settings (environment):
 #   PIKIT_HOME            where pikit lives (default ~/.pikit)
 #   PIKIT_REPO            the Git repository (default https://github.com/ajarellanod/pikit.git)
-#   PIKIT_REF             the branch, tag or commit to install (default main; HEAD with PIKIT_SOURCE).
-#                         pikit has no release tags yet, so main is the default; once tags exist the
-#                         default becomes the latest release tag, and main is opt-in.
-#   PIKIT_SOURCE          a local checkout to install from instead of PIKIT_REPO (tests, development)
+#   PIKIT_REF             the branch, tag or commit to install (default: the latest release, the highest
+#                         vMAJOR.MINOR.PATCH tag of PIKIT_REPO, or main when it has none; HEAD with
+#                         PIKIT_SOURCE). PIKIT_REF=main installs the development branch.
+#   PIKIT_SOURCE          a local checkout to install from instead of PIKIT_REPO (tests, development):
+#                         its HEAD, what you are working on, not its latest release
 #   PIKIT_BUN_VERSION     the Bun this installs when it needs one (default 1.4.2; "1.4.2" or "bun-v1.4.2");
 #                         it must be in the supported range
 #   PIKIT_YES=1           answer yes to installing git, curl, unzip, and to replacing a Bun outside the
@@ -53,11 +54,11 @@ PIKIT_SOURCE="${PIKIT_SOURCE:-}"
 PIKIT_YES="${PIKIT_YES:-}"
 PIKIT_INSTALL_DOCKER="${PIKIT_INSTALL_DOCKER:-}"
 PIKIT_DURABLE="${PIKIT_DURABLE:-}"
+# Empty: the latest release, resolved against the repository when pikit is fetched (step 3).
 if [ -n "$PIKIT_SOURCE" ]; then
   PIKIT_REF="${PIKIT_REF:-HEAD}"
 else
-  # No release tags yet: main. Once pikit tags releases, this default becomes the latest tag.
-  PIKIT_REF="${PIKIT_REF:-main}"
+  PIKIT_REF="${PIKIT_REF:-}"
 fi
 
 for arg in "$@"; do
@@ -174,6 +175,23 @@ CHECKOUT="$PIKIT_HOME/pikit"
 mkdir -p "$PIKIT_HOME"
 # A read-only or foreign-owned local source (a mounted checkout) is still safe to read from.
 git_() { git -c safe.directory='*' -c advice.detachedHead=false "$@"; }
+# The highest release tag in `git ls-remote --tags` output on stdin: exactly vMAJOR.MINOR.PATCH (no
+# pre-release, no other tag), compared as numbers (v0.0.10 after v0.0.9); nothing when there is none.
+# `sort -k` with a start character, not `sort -V`, which POSIX does not have.
+latest_release() {
+  sed -n 's|^[0-9a-f]*[[:space:]]*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' |
+    sort -t . -k 1.2,1n -k 2,2n -k 3,3n | tail -n 1
+}
+if [ -z "$PIKIT_REF" ]; then
+  TAGS="$(git_ ls-remote --tags "$SOURCE")" || fail "could not list the tags of $SOURCE (PIKIT_REF=<branch, tag or commit> skips that)"
+  PIKIT_REF="$(printf '%s\n' "$TAGS" | latest_release)"
+  if [ -n "$PIKIT_REF" ]; then
+    say "the latest release is $PIKIT_REF (PIKIT_REF=main for the development branch)"
+  else
+    PIKIT_REF=main
+    say "$SOURCE has no release tags: installing main"
+  fi
+fi
 if [ -d "$CHECKOUT/.git" ]; then
   say "updating $CHECKOUT from $SOURCE ($PIKIT_REF)"
   git_ -C "$CHECKOUT" remote set-url origin "$SOURCE"

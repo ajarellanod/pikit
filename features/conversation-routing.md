@@ -255,7 +255,7 @@ per-request address) is to check before B is built.
 Settled by the decision above: the registry's signature, what `conversation.resolve` receives, and
 (F) or (W) on Cloudflare (nothing rewrites a key, so none arises); and how a key-rewriting component
 would require channels that read the address (there is none). If the decision is ever revisited:
-`resolve(key, { agent, address }, ctx)` rather than a trailing parameter (pikit is unreleased, and the
+`resolve(key, { agent, address }, ctx)` rather than a trailing parameter (pikit 0.0.x promises no compatibility, and the
 contracts are 0.x, K8), and `conversation.resolve` taking only the message and the key, so the
 channels' commands (`/new`, HTTP's `GET` and `reset`) resolve the same key.
 
