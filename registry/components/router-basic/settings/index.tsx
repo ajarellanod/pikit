@@ -98,12 +98,30 @@ function AgentSettings() {
           onChange={(name) => saving(router.save(storedOf({ defaultAgent: name }, routing.defaults)))}
         />
       </SettingsRow>
-      {agentNames.length > 1 && (
-        <SettingsRow label="Agent to change" description="The agent whose prompt, model, tools and skills are below." htmlFor="settings-agent">
-          <SelectControl id="settings-agent" label="Agent to change" value={agent} options={agentNames.map((name) => ({ value: name, label: assistantName(name) }))} onChange={setEditing} />
-        </SettingsRow>
-      )}
 
+      {/* the agent being edited: its own block, apart from routing, everything in it the chosen agent's */}
+      <section aria-labelledby="settings-agent-heading" className="mt-10 rounded-card border border-line p-4 sm:p-5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="min-w-0 flex-1">
+            <h3 id="settings-agent-heading" className="text-[15px] font-semibold text-ink">
+              Agent settings
+            </h3>
+            <p className="text-[12.5px] text-ink-3">The prompt, model, tools and skills of the agent chosen here.</p>
+          </div>
+          {Object.keys(override).length > 0 && (
+            <Button size="sm" variant="quiet" disabled={runtime.saving} onClick={() => saving(saveOverride({}))}>
+              Use default
+            </Button>
+          )}
+          {agentNames.length > 1 ? (
+            <SelectControl id="settings-agent" label="Agent to edit" value={agent} options={agentNames.map((name) => ({ value: name, label: assistantName(name) }))} onChange={setEditing} />
+          ) : (
+            <span className="text-[13.5px] font-medium text-ink">{assistantName(agent)}</span>
+          )}
+        </div>
+
+      {/* keyed by the agent: switching replays its entrance, so the rows read as the new agent's */}
+      <div key={agent} className="rise-in mt-2">
       {agents === undefined ? (
         runtime.error !== undefined ? (
           <div className="mt-6">
@@ -116,17 +134,6 @@ function AgentSettings() {
         <p className="mt-6 text-[13px] text-ink-3">{`The runtime does not offer ${assistantName(agent)}'s settings.`}</p>
       ) : (
         <>
-          <SettingsHeading
-            aside={
-              Object.keys(override).length > 0 && (
-                <Button size="sm" variant="quiet" disabled={runtime.saving} onClick={() => saving(saveOverride({}))}>
-                  Use default
-                </Button>
-              )
-            }
-          >
-            {assistantName(agent)}
-          </SettingsHeading>
           <SettingsRow label="System prompt" description="What the agent is told before every conversation. Applies from its next run." stacked htmlFor="settings-system-prompt">
             <PromptEditor
               id="settings-system-prompt"
@@ -181,6 +188,8 @@ function AgentSettings() {
           )}
         </>
       )}
+      </div>
+      </section>
     </div>
   );
 }

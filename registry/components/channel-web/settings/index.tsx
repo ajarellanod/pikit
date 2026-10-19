@@ -17,6 +17,7 @@ import { Button } from "@/components/bui/Button";
 import { Switch } from "@/components/bui/Switch";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Segmented, SettingsHeading, SettingsRow, storedOf } from "@/components/pikit/settings";
+import { assistantName } from "@/lib/names";
 import { defineSettings, useSettings } from "@/lib/settings";
 import { useShell } from "@/lib/shell";
 
@@ -186,8 +187,8 @@ function WebChatSettings() {
           <SettingsHeading>Assistants users may pick</SettingsHeading>
           {choices.length === 0 && <p className="py-3 text-[13px] text-ink-3">{agents === undefined ? "Loading" : "No agent."}</p>}
           {choices.map((agent) => (
-            <SettingsRow key={agent.name} label={agent.name} description={agent.description ?? (picked.includes(agent.name) ? "Offered for a new chat." : "Not offered.")}>
-              <Switch checked={picked.includes(agent.name)} label={agent.name} onChange={(on) => pick(agent.name, on)} />
+            <SettingsRow key={agent.name} label={assistantName(agent.name)} description={agent.description ?? (picked.includes(agent.name) ? "Offered for a new chat." : "Not offered.")}>
+              <Switch checked={picked.includes(agent.name)} label={assistantName(agent.name)} onChange={(on) => pick(agent.name, on)} />
             </SettingsRow>
           ))}
           {choices.length > 0 && <p className="pt-2 text-[12.5px] text-ink-3">{picked.length === 0 ? "None picked: users get no choice, and Routing decides." : "A user's pick wins over Routing's rules."}</p>}
