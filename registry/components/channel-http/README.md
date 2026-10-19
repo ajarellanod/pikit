@@ -7,13 +7,16 @@ Talk to an agent over HTTP: send a message, get the answer in the response.
   `http.authenticate`, and one to `conversation.describe`: who a conversation is with, for the
   dashboard: the client's conversation id, all the channel knows.
 - **Requires:** `secrets` (the token), `conversations.registry`, `agent.runtime`. A server (such as
-  `server-bun`) serves the routes, and a router (such as `router-basic`) picks the agent.
+  `server-bun`, or deployment-cloudflare's Worker) serves the routes, and a router (such as
+  `router-basic`) picks the agent. On Cloudflare its Worker half requires `secrets` and
+  `actor.mailbox` (actors-do).
 - **Uses, if installed:** `agent.submissions` (runtime-pi provides it): a message's outcome can be
-  read later, and sending it again returns it.
-- **Targets:** `server`. Although the handlers use Fetch and Web Crypto, the Cloudflare host serves
-  HTTP routes in the Worker's App; this channel has no Worker half yet. Do not install it on
-  Cloudflare until that request path is integrated and tested.
-- **Installs to:** `src/pikit/channel-http/`.
+  read later, and sending it again returns it. `actor.inbox` and `actor.mailbox`: where it runs
+  (below).
+- **Targets:** `server` and `durable` (Cloudflare). One code on both: in `start`, `actor.inbox`'s
+  `scope` says where it runs ("On each target").
+- **Installs to:** `src/pikit/channel-http/`; on Cloudflare, `pikit add` puts its Worker half
+  (`channel-http-worker`, the export `worker`) in the Worker's App.
 - **npm dependencies:** `typebox`.
 - **Environment:** `PIKIT_HTTP_TOKEN` (secret, required, at least 16 characters; for example
   `openssl rand -hex 32`).
@@ -50,6 +53,7 @@ The POST waits for the answer, up to `replyTimeoutMs` (120 s by default):
 | `422` | `{ requestId, error: "rejected", message }` | A stage of `inbound.normalize` refused it. |
 | `500` | `{ requestId, error: "no_route" }` | No router decided. Install one. |
 | `502` | `{ requestId, error: <code> }` | The run failed (for example, the model provider). |
+| `503` | `{ requestId, error: "unavailable" }` | On Cloudflare only: the conversation's object could not be reached (a deploy reset it mid-request). The message may have been admitted: read it with `GET`, or send it again with the same `messageId`. |
 
 **Messages sent while the agent is working are answered together by its next run.** Each waits in
 the conversation's inbox; once the run in progress ends (its own POST gets its answer), the next run
@@ -69,6 +73,7 @@ What became of a message, for a client whose POST answered `202` (the agent took
 | `502` | `{ requestId, error: "abandoned" }` | The runtime gave up on the message (its agent or conversation is gone, or it waited too long): it was never answered; send it again. |
 | `404` | `{ requestId, error: "not_found" }` | No such message in the conversation's current runtime conversation: never sent, or sent before a reset. |
 | `501` | `{ error: "not_supported", message }` | `agent.submissions` is not installed: nothing keeps a message's outcome outside the runtime. |
+| `503` | `{ requestId, error: "unavailable" }` | On Cloudflare only: the conversation's object could not be reached; ask again. |
 
 Sending the same POST again (same `conversationId` and `messageId`) answers the same way, and never
 runs it again.
@@ -105,7 +110,34 @@ is also recorded before the POST returns, the next process resumes its run at st
 died, and a client that got a `202` reads the answer with `GET`. Without it, a run a dead process
 left waits for the next message to its conversation, and the answer is only in the conversation.
 
-It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 characters.
+It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 characters (each half,
+on Cloudflare).
+
+## On each target
+
+The same routes, statuses and guarantees; only where each step runs differs.
+
+- **On a server** (`actor.inbox`'s scope `"all"`, or none installed): one App does everything. Its
+  routes authenticate, admit the message and wait for its answer in process.
+- **On Cloudflare** (scope `"one"`: each conversation is a Durable Object), two halves:
+  - **The Worker's half** (`worker.ts`) serves the routes. It runs `http.authenticate` (a project's
+    own stage of it goes in the Worker's App, where the request is), reads the request, makes the
+    request id, and calls the conversation's object: `actor.mailbox.call("http:<conversationId>",
+    "channel-http.message", { conversationId, text, requestId, actor })`, and `channel-http.status`
+    or `channel-http.reset` for the other routes. The object's answer is the response.
+  - **The object's half** (the default export) answers those calls (`actor.inbox.answer`). It checks
+    the message again (it crossed an RPC) and that it names the object's own conversation, then
+    runs the steps above: `admitInbound`, and the wait for `agent.settled` / `agent.failed` naming its
+    request id, up to `replyTimeoutMs`. The wait is inside the call's RPC event, which keeps the
+    object running while the run is driven by its alarm: an object keeps nothing alive after an
+    event (a promise left behind dies). When the wait ends without an answer the call answers
+    `202`; the message was admitted before the wait began, so it is durable in the object. Its own
+    routes, which no server serves, call their conversation's object as the Worker's do.
+  - `replyTimeoutMs` is the object's half's config; the Worker's half has none. An HTTP request to a
+    Worker has no wall-clock limit while its client waits, and the object stays in memory meanwhile
+    (billed as such): keep `replyTimeoutMs` as short as your clients allow.
+  - A client that hangs up does not cut the object's wait: it ends at `replyTimeoutMs`, and the run
+    goes on either way.
 
 ## Config
 
@@ -114,6 +146,9 @@ It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 charac
   replyTimeoutMs: 120000, // default; keep it below the server's idle timeout
 }
 ```
+
+On Cloudflare it is the object's half's (`export default` of pikit.config.ts); the Worker's half
+(`channel-http-worker`) has no config.
 
 ## Tests
 
@@ -130,6 +165,17 @@ ended while the channel was stopped, or whose event was lost, is what the same P
 after a restart. The suite's cases for a pushed answer (a platform's failures, a send cut mid-flight)
 do not apply: the client's retry is its transport.
 The `samples/http` tests run the same channel with Pi, over real HTTP.
+
+On Cloudflare's model: `conformance.test.ts` runs the same suite a second time with the Worker half's
+routes, in an App of their own, calling the objects' App (an `actor.inbox` of scope `"one"`, from
+`actors.test-support.ts`) by `actor.mailbox.call`; `channel-http.test.ts` covers the Worker's `401`
+and `400` before any call, a `202` whose message is admitted and later read by `GET` and by the same
+POST (run once), an unreachable object's `503`, reset, the object's own routes, and the object
+refusing a call for another conversation or not of this channel. In the pikit repository, the
+workerd lane (`tests/workerd/test/channel-http.workerd.ts`) runs both halves on real Durable Objects
+with runtime-pi: a message answered in the POST's response, a run longer than `replyTimeoutMs`
+(`202`, then `GET` finds it), the same `messageId` run once, and a request without the token refused
+by the Worker.
 
 The CLI generates capability declarations in `component.json` from `setup`; targets are declared
 by the component. The test "what setup declares" pins the capabilities.

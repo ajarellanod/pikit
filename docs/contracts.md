@@ -37,8 +37,8 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, repo-github-app, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, channel-google-chat, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-web?, settings-store? | `createMailboxConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, outbound-durable, channel-web?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, channel-web?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
