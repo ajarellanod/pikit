@@ -35,7 +35,7 @@ a project installs, and agents that name what they may use.
 | Questions to the user (`askUser`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) (`askUser`) |
 | Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate only (SPEC §6) | [approvals](approvals.md) |
 | Missions: a goal ledger with checkpoints, mirrored in a task tracker | none | no note yet |
-| Memory: summaries, search, rules, preferences | none | [memory](memory.md) |
+| Memory: summaries, search, rules, preferences | `memory-sql`, `memory-recall` (facts, `recall` by `LIKE`), `memory-summaries` (a summary per quiet conversation); per person (a conversation key), no spaces or shared rules | [memory](memory.md) |
 | Routines (cron), followups (one-shot, agent-made) | `wakeups-timers` (the runtime's own) | [scheduler](scheduler.md) |
 | Reply context (a terse reply to a routine's message) | none | with [scheduler](scheduler.md) |
 | A persistent JavaScript worker for the agent | none | [codemode](codemode.md) |

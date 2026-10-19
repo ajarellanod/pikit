@@ -96,8 +96,9 @@ unsafe, needs a shell, reaches the network).
   `pikit upgrade`, and the registry's copy is kept out of `tsc` (two copies of a contract file must
   be identical).
 - **A suite for every contract.** Missing today: `execution`/`ExecutionEnv` is in the adapter
-  (`@pikit/pi-adapter/execution/testing`), not in contracts; the agent tool shape has none; future
-  contracts (memory) get theirs when written.
+  (`@pikit/pi-adapter/execution/testing`), not in contracts; the agent tool shape has none. A
+  registry's own contract ships its suite with its defining component (`memory`:
+  `createMemoryConformance` in memory-sql).
 - **Design notes as build guides.** Each ⭐ note in `features/` states: the contract (and suite),
   the Pi pieces it relies on, what it must guarantee, the tests that prove it. [Memory](memory.md)
   is the first one written so.
