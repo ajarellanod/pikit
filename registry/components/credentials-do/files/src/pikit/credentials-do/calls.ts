@@ -11,7 +11,7 @@
  * | `credentials-do.read` | `{ providerId }` | `{ credential? }`: as stored, possibly expiring |
  * | `credentials-do.list` | — | `{ credentials: [{ providerId, type }] }`: no secret |
  * | `credentials-do.acquire` | `{ providerId }` | `{ lease, credential? }`: the provider's lock, once free; the credential read under it |
- * | `credentials-do.release` | `{ providerId, lease, credential?, failed? }` | `{}`: writes `credential` (or records a failed refresh), frees the lock |
+ * | `credentials-do.release` | `{ providerId, lease, credential?, failed? }` | `{}`: writes `credential` (or records a failed refresh), frees the lock; a repeat (same lease, same outcome) answers `{}` again |
  * | `credentials-do.put` | `{ providerId, credential }` | `{ providerId, type }`: an operator's upload, under the lock |
  * | `credentials-do.delete` | `{ providerId }` | `{ deleted }`, under the lock |
  *

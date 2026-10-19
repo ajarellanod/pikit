@@ -13,6 +13,11 @@
  * - **A lease expires** (`LEASE_MS`, twice pi-ai's refresh timeout), so an object that died holding
  *   one stalls the others that long at most. A release is taken while its lease is the provider's
  *   latest, expired or not; once a newer one was granted, it is refused (`lease_lost`).
+ * - **A release is idempotent.** A caller whose release's answer was lost tries it again: a repeat of
+ *   a release taken (the same lease, the same outcome) answers as the first did and changes nothing;
+ *   the same lease with another outcome is refused `lease_lost`. The last `SETTLED_KEPT` releases
+ *   are remembered. A release whose write failed keeps the lock (until the lease expires), so its
+ *   repeat can write.
  * - **A failed refresh is not retried in a loop.** A release that says its refresh failed starts a
  *   cooldown (`retryAfterMs`): until it ends, every `acquire` of that provider (the waiters behind
  *   the failure included) is refused `refresh_failed` at once, and nothing reaches the provider. An
@@ -35,6 +40,9 @@ const TABLE = "credentials_do";
 
 /** How long a lease holds the lock: twice pi-ai's refresh timeout (15 s). */
 export const LEASE_MS = 30_000;
+
+/** How many taken releases are remembered, to answer a repeat of one. */
+const SETTLED_KEPT = 64;
 
 /** What is stored for a provider, without its secret: pi-ai's `CredentialInfo`, as JSON that crosses a call. */
 export type Stored = { providerId: string; type: Credential["type"] };
@@ -70,6 +78,8 @@ export function createOwner(options: OwnerOptions): Owner {
   const locks = new Map<string, Lock>();
   /** When each provider's last refresh failed, until an upload or a refresh succeeds. */
   const failures = new Map<string, number>();
+  /** The releases taken lately: lease, and what it said (provider, credential, failed). */
+  const settled = new Map<string, string>();
 
   let ready: Promise<void> | undefined;
   const sql = async (): Promise<SqlDatabase> => {
@@ -160,21 +170,23 @@ export function createOwner(options: OwnerOptions): Owner {
       }
     },
     async release(providerId, lease, outcome, ctx) {
+      const said = JSON.stringify([providerId, outcome.credential ?? null, outcome.failed === true]);
       if (locks.get(providerId)?.lease !== lease) {
+        if (settled.get(lease) === said) return;
         throw new ActorCallError(REFUSAL.leaseLost, `credentials-do: the lock of "${providerId}" was held longer than ${LEASE_MS / 1000} s and given to another; what it wrote is dropped`);
       }
-      try {
-        if (outcome.failed === true) {
-          failures.set(providerId, clock.now());
-          ctx.logger.warn("credentials-do: an OAuth refresh failed; the provider is not asked again until the cooldown ends", { providerId, retryAfterMs: options.retryAfterMs });
-        } else if (outcome.credential !== undefined) {
-          await write(providerId, outcome.credential);
-          failures.delete(providerId);
-          ctx.logger.info("credentials-do: credential written", { providerId, type: outcome.credential.type });
-        }
-      } finally {
-        free(providerId, lease);
+      if (outcome.failed === true) {
+        failures.set(providerId, clock.now());
+        ctx.logger.warn("credentials-do: an OAuth refresh failed; the provider is not asked again until the cooldown ends", { providerId, retryAfterMs: options.retryAfterMs });
+      } else if (outcome.credential !== undefined) {
+        // A write that fails keeps the lock: the caller's repeat can write.
+        await write(providerId, outcome.credential);
+        failures.delete(providerId);
+        ctx.logger.info("credentials-do: credential written", { providerId, type: outcome.credential.type });
       }
+      settled.set(lease, said);
+      if (settled.size > SETTLED_KEPT) settled.delete(settled.keys().next().value as string);
+      free(providerId, lease);
     },
     put: (providerId, credential, ctx) =>
       locked(providerId, async () => {

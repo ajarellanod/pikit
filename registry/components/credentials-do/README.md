@@ -32,13 +32,28 @@ subscription before you log in here. An API key is the provider's way for a depl
 
 - **One copy, one object.** The credentials are one object's, `credentials-do` (of the
   conversations' class, never a conversation), in its SQLite. Each conversation's object reads them
-  with a call (`actor.mailbox`) before each model request; nothing is copied into a conversation.
+  with a call (`actor.mailbox`); nothing is stored in a conversation.
+- **Kept in memory for a minute.** Each call is a subrequest, which Cloudflare counts per
+  invocation (50 on the Free plan, shared by a whole alarm slice), and pi-ai reads the credential
+  before every model request. So a conversation's object keeps what it read (a missing credential
+  too) for `cacheTtlMs` (a minute) and asks the owner again only after it. An OAuth token is never
+  kept past its expiry minus pi-ai's refresh margin (5 minutes): pi-ai then sees it expiring and
+  refreshes it as below. **An upload or a delete made elsewhere reaches a running conversation
+  within `cacheTtlMs`**: a new login or a removed key takes up to a minute to be seen everywhere
+  (`cacheTtlMs: 0` asks every time). What a conversation refreshes or deletes itself is seen by it
+  at once.
 - **One refresh at a time, from the latest tokens.** pi-ai refreshes an OAuth token inside the
   store's `modify`, which runs under the owner object's lock for that provider: the conversation
   that finds the token expiring first takes the lock, refreshes with pi-ai's own flow and writes
   the new tokens back; the others, which found it expiring meanwhile, wait for the lock and get the
   new tokens, so nothing is refreshed twice. Refresh tokens rotate: two refreshes at once would
   leave one of them with a revoked token. A lock whose holder died is free again after 30 s.
+- **A refreshed token is not dropped when the owner does not answer.** Writing it back (the
+  release) is tried four times in about 4 s, and the owner takes a repeat of a write it already took
+  as done. If it still fails, the conversation that refreshed keeps the new tokens in memory, keeps
+  working with them, logs an error (provider id and type, never a token), and writes them back at
+  its next chance (its next refresh, or its first read after `cacheTtlMs`), as long as the owner
+  still holds the tokens they replaced.
 - **A failed refresh is reported, never looped.** The run that needed it fails with pi-ai's error;
   the conversations waiting behind it are refused at once, and for `retryAfterMs` (a minute) no
   conversation asks the provider again. Then one may try. A new login ends it at once. The stored
@@ -79,6 +94,7 @@ curl -H "Authorization: Bearer $PIKIT_ADMIN_TOKEN" https://<worker>/admin/api/cr
 ```ts
 "credentials-do": {
   retryAfterMs: 60000, // default: after a failed OAuth refresh, how long no conversation tries again
+  cacheTtlMs: 60000,   // default: how long a conversation's object keeps what it read (0: never)
 }
 ```
 
@@ -94,6 +110,14 @@ The Worker's half (`credentials-do-worker`) has no config.
   file and Pi in `auth.json`: only the Worker's code reads a Durable Object's storage.
 - **The lock is the owner's memory.** A deploy restarts every object: a refresh in flight then may
   meet another, and one of them fails (log in again if the provider revoked the token).
+- **A refreshed token the owner did not take lives in one object's memory.** Until that object
+  writes it back, the others hold the refresh token the provider just rotated away: one that needs
+  to refresh meanwhile fails (and the cooldown starts), and if that object is evicted or
+  redeployed first, the new tokens are lost: log in again. Only a release that keeps failing for
+  about 4 s (the owner unreachable, its storage failing, the invocation out of subrequests) gets
+  there, and the error log line says so.
+- **A removal takes up to `cacheTtlMs`.** A deleted credential (or a replaced one) is still served
+  by a running conversation that read it less than `cacheTtlMs` ago.
 
 ## Guarantees
 
@@ -108,6 +132,13 @@ App of its key) and pi-ai's own Anthropic flow against a local fake of the token
   none during the cooldown; one after it; a new upload ends it; the stored login unchanged;
 - a lock whose holder died: free after 30 s, its late release refused; an upload during a refresh
   waits for it and wins;
+- the cache: reads within the TTL make one call (a missing credential too), one more after it, one
+  each with `cacheTtlMs: 0`; an OAuth token kept only until pi-ai's refresh margin, and within it
+  never, so pi-ai refreshes it; `modify` replaces what is kept and `delete` drops it, another
+  object's write is seen after the TTL;
+- a lost release: retried until taken, a repeat of a taken one answered as done (and the same lease
+  with another outcome refused); one never taken leaves the refreshed tokens with the object that
+  refreshed, which keeps working without a call, logs no secret, and writes them back after the TTL;
 - the routes: upload, list, delete for an operator; `401` for anyone else (and for everyone without
   `admin.auth`) before the owner is asked; a bad body refused without echoing it; no secret in any
   answer, error or log line.
@@ -115,7 +146,7 @@ App of its key) and pi-ai's own Anthropic flow against a local fake of the token
 In the pikit repository, the workerd lane (`tests/workerd/test/credentials-do.workerd.ts`) runs a
 conversation's object and the owner object as real Durable Objects, uploads a login through
 deployment-cloudflare's server, and an agent answers after the token was refreshed against a fake
-OAuth endpoint; `packages/pi-adapter/src/oauth-flows.test.ts` bundles a Worker with wrangler and
+OAuth endpoint (and, from what its object keeps, after the operator deleted the login); `packages/pi-adapter/src/oauth-flows.test.ts` bundles a Worker with wrangler and
 refreshes a token in workerd.
 
 ## Remove it

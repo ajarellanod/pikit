@@ -18,6 +18,7 @@ import { createCredentialStoreConformance } from "@pikit/pi-adapter/testing/neut
 import { CALL, CREDENTIALS_KEY } from "./calls.ts";
 import credentialsDo, { worker } from "./index.ts";
 import { LEASE_MS } from "./owner.ts";
+import { OAUTH_REFRESH_MARGIN_MS } from "./remote.ts";
 
 const ACCESS = "sk-ant-oat-secret-access-1";
 const REFRESH = "sk-ant-ort-secret-refresh-1";
@@ -71,6 +72,8 @@ const copy = (value: JsonValue): JsonValue => JSON.parse(JSON.stringify(value)) 
 /** Cloudflare's objects, as far as credentials-do goes: a call reaches the App of its key. */
 class Objects {
   readonly calls: string[] = [];
+  /** Calls of `type` that fail like a lost subrequest: `before` the owner runs them, or `after` (the answer lost). */
+  readonly faults: { type: string; when: "before" | "after"; times: number }[] = [];
   private readonly live = new Map<string, { answers: Map<string, ActorCallHandler>; ctx: () => AppContext }>();
   readonly mailbox: ActorMailbox = {
     send: async () => {
@@ -81,7 +84,12 @@ class Objects {
       const object = this.live.get(key);
       const handler = object?.answers.get(type);
       if (object === undefined || handler === undefined) throw new ActorCallError("unreachable", `no object ${key} answers ${type}`);
-      return callResult(await answerCall(handler, key, copy(message), object.ctx()));
+      const fault = this.faults.find((each) => each.type === type && each.times > 0);
+      if (fault !== undefined) fault.times--;
+      if (fault?.when === "before") throw new Error("subrequest failed");
+      const answer = callResult(await answerCall(handler, key, copy(message), object.ctx()));
+      if (fault?.when === "after") throw new Error("subrequest failed");
+      return answer;
     },
     stream: async (_key, type) => {
       throw new ActorCallError("no_handler", `credentials-do opens no stream (${type})`);
@@ -320,6 +328,170 @@ test("an operator's upload during a refresh waits for it, then wins", async () =
   expect((await ownerCall(d, CALL.read, { providerId: "anthropic" })) as unknown).toEqual({ credential: { type: "api_key", key: "sk-ant-api-uploaded-key" } });
 });
 
+/** How many calls of `type` reached the owner. */
+const owned = (d: Deployment, type: string) => d.objects.calls.filter((each) => each === `${CREDENTIALS_KEY} ${type}`).length;
+
+/** `promise`, while the clock moves on (a release's retries wait on it). */
+async function whileAdvancing<T>(clock: ManualClock, promise: Promise<T>): Promise<T> {
+  let done = false;
+  void promise.then(
+    () => (done = true),
+    () => (done = true),
+  );
+  while (!done) await clock.advance(100);
+  return promise;
+}
+
+const authOf = async (store: CredentialStore) => (await modelsFrom([anthropicProvider()], { credentials: store }).getAuth("anthropic"))?.auth.apiKey;
+
+test("reads within the cache's TTL make one call to the owner, an absent credential included; after the TTL, one more; cacheTtlMs 0 asks every time", async () => {
+  const d = await deployment();
+  const key = { type: "api_key", key: "sk-ant-api-uploaded-key" } as const;
+  await ownerCall(d, CALL.put, { providerId: "anthropic", credential: key });
+  const store = await d.conversation();
+  d.objects.calls.length = 0;
+
+  for (let i = 0; i < 5; i++) expect(await store.read("anthropic")).toEqual(key);
+  for (let i = 0; i < 3; i++) expect(await authOf(store)).toBe("sk-ant-api-uploaded-key");
+  for (let i = 0; i < 3; i++) expect(await store.read("openai")).toBeUndefined();
+  expect(owned(d, CALL.read)).toBe(2);
+
+  await d.clock.advance(59_999);
+  await store.read("anthropic");
+  expect(owned(d, CALL.read)).toBe(2);
+  await d.clock.advance(1);
+  await store.read("anthropic");
+  await store.read("anthropic");
+  expect(owned(d, CALL.read)).toBe(3);
+
+  const uncached = await deployment({ cacheTtlMs: 0 });
+  await ownerCall(uncached, CALL.put, { providerId: "anthropic", credential: key });
+  const each = await uncached.conversation();
+  uncached.objects.calls.length = 0;
+  for (let i = 0; i < 3; i++) await each.read("anthropic");
+  expect(owned(uncached, CALL.read)).toBe(3);
+});
+
+test("an OAuth token is served from the cache only until pi-ai's refresh margin, so pi-ai sees it expiring and refreshes it through modify", async () => {
+  toFakeTokenEndpoint();
+  const d = await deployment();
+  // 20 s before pi-ai would refresh it: kept 20 s, not the TTL's 60.
+  await ownerCall(d, CALL.put, { providerId: "anthropic", credential: { ...expired, expires: d.clock.now() + OAUTH_REFRESH_MARGIN_MS + 20_000 } });
+  const store = await d.conversation();
+  d.objects.calls.length = 0;
+  await store.read("anthropic");
+  await store.read("anthropic");
+  expect(owned(d, CALL.read)).toBe(1);
+  await d.clock.advance(20_000);
+  await store.read("anthropic");
+  await store.read("anthropic");
+  expect(owned(d, CALL.read)).toBe(3);
+
+  // Within the margin: never kept; pi-ai refreshes it, and the refreshed token is kept.
+  await ownerCall(d, CALL.put, { providerId: "anthropic", credential: { ...expired, expires: Date.now() + 60_000 } });
+  const other = await d.conversation();
+  d.objects.calls.length = 0;
+  await other.read("anthropic");
+  await other.read("anthropic");
+  expect(owned(d, CALL.read)).toBe(2);
+  expect(await authOf(other)).toBe("sk-ant-oat-new-access");
+  expect(token.requests).toHaveLength(1);
+  d.objects.calls.length = 0;
+  expect(await authOf(other)).toBe("sk-ant-oat-new-access");
+  expect(d.objects.calls).toEqual([]);
+});
+
+test("modify replaces what the object keeps and delete drops it; another object's write reaches it within the TTL", async () => {
+  const d = await deployment();
+  const [a, b] = [await d.conversation(), await d.conversation()];
+  const key = (value: string): Credential => ({ type: "api_key", key: value });
+  await ownerCall(d, CALL.put, { providerId: "anthropic", credential: key("sk-ant-api-a") as unknown as JsonValue });
+  expect(await a.read("anthropic")).toEqual(key("sk-ant-api-a"));
+
+  await a.modify("anthropic", async () => key("sk-ant-api-b"));
+  d.objects.calls.length = 0;
+  expect(await a.read("anthropic")).toEqual(key("sk-ant-api-b"));
+  expect(d.objects.calls).toEqual([]);
+
+  await b.modify("anthropic", async () => key("sk-ant-api-c"));
+  expect(await a.read("anthropic")).toEqual(key("sk-ant-api-b"));
+  await d.clock.advance(60_000);
+  expect(await a.read("anthropic")).toEqual(key("sk-ant-api-c"));
+
+  await a.delete("anthropic");
+  d.objects.calls.length = 0;
+  expect(await a.read("anthropic")).toBeUndefined();
+  expect(owned(d, CALL.read)).toBe(1);
+});
+
+test("the owner takes a repeated release once: the same outcome answers as the first did, another is refused", async () => {
+  const d = await deployment();
+  await ownerCall(d, CALL.put, { providerId: "anthropic", credential: expired });
+  const { lease } = (await ownerCall(d, CALL.acquire, { providerId: "anthropic" })) as { lease: string };
+  const refreshed = { ...expired, access: "sk-ant-oat-new-access", refresh: "sk-ant-ort-new-refresh", expires: Date.now() + 3_600_000 };
+
+  expect(await ownerCall(d, CALL.release, { providerId: "anthropic", lease, credential: refreshed })).toEqual({});
+  expect(await ownerCall(d, CALL.release, { providerId: "anthropic", lease, credential: refreshed })).toEqual({});
+  for (const other of [{ credential: { ...refreshed, access: "sk-ant-oat-late" } }, { failed: true }, {}]) {
+    const refused = await ownerCall(d, CALL.release, { providerId: "anthropic", lease, ...other }).catch((error: unknown) => error);
+    expect((refused as ActorCallError).code).toBe("lease_lost");
+  }
+  expect(((await ownerCall(d, CALL.read, { providerId: "anthropic" })) as { credential: unknown }).credential).toEqual(refreshed);
+  // The lock is free.
+  expect(await ownerCall(d, CALL.acquire, { providerId: "anthropic" })).toMatchObject({ lease: expect.any(String) });
+});
+
+test("a release that fails is tried again until the owner takes it, a repeat of one it took included: the refreshed tokens are stored", async () => {
+  toFakeTokenEndpoint();
+  const d = await deployment();
+  await ownerCall(d, CALL.put, { providerId: "anthropic", credential: expired });
+  const store = await d.conversation();
+  d.objects.calls.length = 0;
+  // Two lost before the owner, then one taken whose answer is lost.
+  d.objects.faults.push({ type: CALL.release, when: "before", times: 2 }, { type: CALL.release, when: "after", times: 1 });
+
+  expect(await whileAdvancing(d.clock, authOf(store))).toBe("sk-ant-oat-new-access");
+
+  expect(owned(d, CALL.release)).toBe(4);
+  expect(token.requests).toHaveLength(1);
+  const stored = (await ownerCall(d, CALL.read, { providerId: "anthropic" })) as { credential: { refresh: string } };
+  expect(stored.credential.refresh).toBe("sk-ant-ort-new-refresh");
+  expect(d.logged.filter((line) => line.level === "error")).toEqual([]);
+  // Another conversation gets the new tokens, with no refresh.
+  expect(await authOf(await d.conversation())).toBe("sk-ant-oat-new-access");
+  expect(token.requests).toHaveLength(1);
+});
+
+test("a refreshed token the owner never takes is kept by the object that refreshed it, logged without a secret, and written back at its next chance", async () => {
+  toFakeTokenEndpoint();
+  const d = await deployment();
+  await ownerCall(d, CALL.put, { providerId: "anthropic", credential: expired });
+  const store = await d.conversation();
+  d.objects.faults.push({ type: CALL.release, when: "before", times: 4 });
+
+  expect(await whileAdvancing(d.clock, authOf(store))).toBe("sk-ant-oat-new-access");
+  expect(d.objects.faults[0]?.times).toBe(0);
+  const ownerHolds = async () => ((await ownerCall(d, CALL.read, { providerId: "anthropic" })) as { credential: { refresh: string } }).credential.refresh;
+  expect(await ownerHolds()).toBe(REFRESH);
+  const errors = d.logged.filter((line) => line.level === "error");
+  expect(errors).toHaveLength(1);
+  expect(errors[0]?.fields).toMatchObject({ providerId: "anthropic", type: "oauth" });
+  noSecretIn(JSON.stringify(d.logged));
+
+  // This object keeps working with the rotated tokens, without asking the owner or the provider.
+  d.objects.calls.length = 0;
+  expect(await authOf(store)).toBe("sk-ant-oat-new-access");
+  expect(d.objects.calls).toEqual([]);
+
+  // After the TTL, its next read writes them back; then every conversation has them, with no refresh.
+  await d.clock.advance(60_000);
+  expect(await authOf(store)).toBe("sk-ant-oat-new-access");
+  expect(await ownerHolds()).toBe("sk-ant-ort-new-refresh");
+  expect(await authOf(await d.conversation())).toBe("sk-ant-oat-new-access");
+  expect(token.requests).toHaveLength(1);
+  noSecretIn(JSON.stringify(d.logged));
+});
+
 test("a credential of no known shape is refused by the owner, without saying what it held", async () => {
   const d = await deployment();
   for (const credential of [{ type: "oauth", access: ACCESS }, { type: "bearer", token: ACCESS }, ACCESS, { type: "api_key", key: 42 }]) {
@@ -383,6 +555,9 @@ test("the operator uploads a login through the Worker; every conversation uses i
 
   const deleted = await fetchWorker("DELETE", "/admin/api/credentials-do/anthropic", { headers: OPS });
   expect(await deleted.json()).toEqual({ deleted: true });
+  // A running conversation sees the delete once what it read is older than the cache's TTL.
+  expect(await store.read("anthropic")).toEqual(login);
+  await d.clock.advance(60_000);
   expect(await store.read("anthropic")).toBeUndefined();
   noSecretIn(JSON.stringify(d.logged));
 });

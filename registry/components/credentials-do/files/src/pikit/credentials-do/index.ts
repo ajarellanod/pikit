@@ -11,6 +11,8 @@
  *   that found the token expiring meanwhile wait and get the new tokens. A failed refresh is
  *   reported to the run that needed it, and not tried again for `retryAfterMs`. Refresh tokens
  *   rotate: two refreshes at once would revoke one another's.
+ * - **Few subrequests.** Each object keeps what it read for `cacheTtlMs` (never an OAuth token past
+ *   the point pi-ai refreshes it), so a model request costs no call to the owner within it.
  * - **The OAuth flows bundled.** pi-ai loads a provider's OAuth flow with an import no bundler
  *   follows: `start` registers them statically (`bundleOAuthFlows`, `@pikit/pi-adapter/oauth-flows`),
  *   so a Worker can use and refresh a subscription's tokens.
@@ -35,6 +37,13 @@ export { ROUTE, worker, WORKER_NAME } from "./worker.ts";
 const Config = Type.Object({
   /** After a failed OAuth refresh, how long (ms) the owner refuses the next ones before it lets one try again. */
   retryAfterMs: Type.Integer({ minimum: 0, default: 60_000 }),
+  /**
+   * How long (ms) a conversation's object serves what it read from memory, instead of asking the
+   * owner (a subrequest) before every model request. An upload or a delete made elsewhere reaches a
+   * running object within it. An OAuth token is never served past its expiry minus pi-ai's refresh
+   * margin (5 min). 0 asks every time.
+   */
+  cacheTtlMs: Type.Integer({ minimum: 0, default: 60_000 }),
 });
 
 export default defineComponent({
@@ -45,7 +54,7 @@ export default defineComponent({
     const inbox = pikit.use("actor.inbox");
     const mailbox = pikit.use("actor.mailbox");
     let context: AppContext | undefined;
-    pikit.provide("model.credentials", createRemoteCredentials({ mailbox: () => mailbox.get(), context: () => context }));
+    pikit.provide("model.credentials", createRemoteCredentials({ mailbox: () => mailbox.get(), context: () => context, clock: pikit.clock, cacheTtlMs: config.cacheTtlMs }));
     const owner = createOwner({ sql: () => sql.get(), clock: pikit.clock, retryAfterMs: config.retryAfterMs });
     return {
       start(ctx) {

@@ -8,7 +8,8 @@
  * `credentials-do`, starts with nothing stored: runtime-pi only warns). Two conversations' objects then
  * ask their model at once (`model.complete`): one refreshes the token, under the owner's lock, through
  * pi-ai's own Anthropic flow against a fake of the OAuth token endpoint; both answer with the new
- * access token; the rotated tokens are in the owner object's SQLite. Anthropic is a fake behind the
+ * access token; the rotated tokens are in the owner object's SQLite. After the operator deletes the
+ * login, the first conversation still answers from what it keeps (`cacheTtlMs`). Anthropic is a fake behind the
  * isolate's `fetch`, which the test and the objects share: nothing reaches the network.
  *
  * What this lane cannot show is the bundle: its module runner resolves pi-ai's variable `import()` of
@@ -132,7 +133,8 @@ it("an uploaded subscription login whose token expired: two conversations' objec
     expect((await server.serve(new Request("https://bot.ana.workers.dev/admin/api/credentials-do"))).status).toBe(401);
 
     const ask = (key: string, prompt: string) => (mailbox as ActorMailbox).call(key, "test.complete", { prompt }, app.context());
-    const answers = await Promise.all([ask(`test:${crypto.randomUUID()}`, "hello"), ask(`test:${crypto.randomUUID()}`, "hi")]);
+    const first = `test:${crypto.randomUUID()}`;
+    const answers = await Promise.all([ask(first, "hello"), ask(`test:${crypto.randomUUID()}`, "hi")]);
 
     expect(answers).toEqual(["answer: hello", "answer: hi"]);
     expect(seen.refreshes).toEqual([expect.objectContaining({ grant_type: "refresh_token", refresh_token: REFRESH })]);
@@ -146,6 +148,12 @@ it("an uploaded subscription login whose token expired: two conversations' objec
     const listed = await (await fetchWorker("/admin/api/credentials-do")).text();
     expect(JSON.parse(listed)).toEqual({ credentials: [{ providerId: "anthropic", type: "oauth" }] });
     for (const secret of [EXPIRED_ACCESS, REFRESH, NEW_ACCESS, NEW_REFRESH]) expect(listed).not.toContain(secret);
+
+    // A running conversation keeps what it read for cacheTtlMs (no subrequest per model request): the
+    // operator's delete reaches it only after that.
+    expect(await (await fetchWorker("/admin/api/credentials-do/anthropic", { method: "DELETE" })).json()).toEqual({ deleted: true });
+    expect(await ask(first, "again")).toBe("answer: again");
+    expect(seen.messages).toEqual([NEW_ACCESS, NEW_ACCESS, NEW_ACCESS]);
   } finally {
     await app.stop();
   }
