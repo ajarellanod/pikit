@@ -4,7 +4,8 @@
 // `answerContent`, delivery's rule of what a run's answer is, for a channel to read rather than copy), how a
 // message's parts fold into its text for a transport (`foldParts`, `messagePieces`), the `question` part
 // shared by who asks and who draws it (`questionPart`, `answerText`), the check of what the contracts take as a JSON object (`isJsonObject`), the grammar of `http.route`
-// keys (`parseHttpRouteKey`, `matchesHttpRoute`) and the envelopes of an actor's call and stream
+// keys (`parseHttpRouteKey`, `matchesHttpRoute`), who a conversation is with as an operator reads it
+// (the `conversation.describe` pipeline: `describeStage`, `describeConversation`, `cleanParty`) and the envelopes of an actor's call and stream
 // (`answerCall`, `callResult`, `answerStream`, `streamResult`), so that no provider has its own. No policy: what a protocol waits, retries and says
 // is its caller's, passed in. Each contract has a stability level (SPEC K8); the capabilities'
 // levels are in the catalogue (`packages/cli/src/registry/capabilities.ts`). What only Cloudflare
@@ -38,6 +39,8 @@ export type { AgentDirectory, DirectoryAgent } from "./agent-directory.ts";
 export type { AgentCommand, CommandInfo, CommandLookup, CommandOutcome } from "./command.ts";
 export { COMMAND_NAME, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
 export type { CompletionRequest, ModelComplete } from "./model.ts";
+export type { ConversationDescriber, ConversationParty, DescribedConversation, PartyId } from "./conversation-describe.ts";
+export { channelKindOf, cleanParty, describeConversation, describeStage, PARTY_LIMITS } from "./conversation-describe.ts";
 
 export { AgentUnavailableError, admitInbound, isAgentUnavailable } from "./inbound.ts";
 export type { AdmitOptions, InboundMessage, InboundOutcome, RouteDecision } from "./inbound.ts";

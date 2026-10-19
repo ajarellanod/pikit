@@ -54,8 +54,10 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `execution.shell` | single | execution-do, execution-local | tool-bash | same |
 | `workspace` | single | workspace-local | channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 
-Two more suites check behaviour rather than one capability: `createChannelConformance` (what every
-channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web)
+Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
+channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web),
+`createConversationDescribeConformance` (a channel's stage of the `conversation.describe` pipeline,
+below: channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web)
 and `createConvergenceConformance` (kill the process after each commit, restart, check it converges:
 outbound-durable, and answer delivery over storage-kv-sql in this repository). `@pikit/core/testing`
 has `createLifecycleConformance`, which almost every component runs.
@@ -277,6 +279,44 @@ photos, 1 MB in all; channel-web's, the page's attachments) the request's `image
 them). See [pipelines.md](pipelines.md).
 
 Authentication is not here: each channel proves its senders its own way.
+
+### `conversation.describe` (a pipeline, [conversation-describe.ts](../packages/contracts/src/conversation-describe.ts))
+
+Who a conversation is with, as its channel knows it, for an operator. Not a capability: a pipeline
+whose value is `{ key, party? }`, to which each channel adds a stage, `describeStage(describer)`:
+
+```ts
+interface ConversationDescriber {
+  describe(key, ctx): Promise<ConversationParty | undefined>; // undefined: not a key this channel made
+}
+interface ConversationParty { name?; detail?; ids: { label; value }[]; link?: { label; path }; instance? }
+```
+
+- **Why a pipeline:** a keyed capability would make whoever describes (admin-api) depend on every
+  channel, and channel-web already depends on admin-api (it runs admin-api's `/name`): a start-order
+  cycle. A pipeline orders nobody and needs no provider.
+- A stage describes only the keys its channel made (parsing them itself: one component, all its
+  instances, `instance` saying which) and leaves every other value, and a `party` an earlier stage
+  set, as it is. `describeStage` enforces it, and turns a describer that throws into a value left as
+  it is (logged), so a broken channel never stops another's.
+- It runs where the conversation is (on Cloudflare the conversation's object, where the channel's
+  object half and its `storage.kv` are), and reads only what the channel has: what its platform sent
+  with a message, kept in its own storage, or its own accounts. It asks its platform nothing, and says
+  nothing secret. A key it made but knows nothing of is described by its ids, never a throw.
+- A runner reads it only through `describeConversation(ctx, key)`, which never throws and cleans what
+  it gets (`cleanParty`): control and bidirectional-override characters replaced, `name` and `detail`
+  cut to `PARTY_LIMITS` (80, 120), at most 4 ids, an id too long or empty left out, a `link` that is
+  not a dashboard path (`/...`, never `//`) left out. `channelKindOf(key)` is a key's first segment, for
+  a runner that describes a key no stage knew.
+
+Stages: channel-web (the user's name and email, from the accounts; on Cloudflare one call to the
+accounts actor; a link to the Web users page, `/channel-web?user=<id>`), channel-telegram and
+channel-telegram-webhook (a person's names or a group's title, kept in `storage.kv` from the messages
+received), channel-google-chat (a space's name, a direct message's person, kept the same way),
+channel-http (the client's conversation id). Runner: admin-api (`ApiConversation.party`, the
+dashboard's own conversations described as the operator's, a key no stage knew described by the key).
+Suite: `createConversationDescribeConformance` (with `HOSTILE_NAME`), with negative cases: another
+channel's key, a key described by an earlier stage, a hostile name.
 
 ---
 

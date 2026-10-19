@@ -31,7 +31,7 @@ if (result instanceof Halt) { /* result.reason, result.stage */ }
 
 ## The pipelines that exist
 
-Three, found by every `pikit.pipeline(` and `ctx.run(` in the kernel, contracts and registry.
+Four, found by every `pikit.pipeline(` and `ctx.run(` in the kernel, contracts and registry.
 
 ### `inbound.normalize`
 
@@ -83,6 +83,22 @@ the agent a conversation was created with.
 | Rules | a stage acts only on its own `channel` and leaves a rejection alone; no verdict, a halt, or `rejected` is a `401` |
 
 A project adds a stage to it as to any pipeline (another way to authenticate).
+
+### `conversation.describe`
+
+| | |
+|---|---|
+| Declared in | [packages/contracts/src/conversation-describe.ts](../packages/contracts/src/conversation-describe.ts) |
+| Value | `{ key; party?: ConversationParty }`, `ConversationParty` = `{ name?, detail?, ids: { label, value }[], link?: { label, path }, instance? }` |
+| Run by | `describeConversation(ctx, key)` (admin-api, for every conversation it lists or reads: `ApiConversation.party`), where the conversation is (on Cloudflare its object) |
+| Rule | a stage describes only the keys its channel made, and leaves a `party` already set; `describeStage(describer)` enforces both, and a describer that throws leaves the value (logged) |
+| Nothing set | admin-api describes the conversation by its key |
+| Cleaning | `describeConversation` cleans the `party` (`cleanParty`: one line each, `PARTY_LIMITS`, a dashboard path only) |
+
+Stages in the registry (priority 0, each on its own keys, so their order does not matter):
+`channel-web`, `channel-telegram`, `channel-telegram-webhook`, `channel-google-chat`, `channel-http`.
+It is a pipeline, not a keyed capability, so that admin-api depends on no channel (channel-web
+depends on admin-api: a keyed capability made that a cycle).
 
 ## Events
 

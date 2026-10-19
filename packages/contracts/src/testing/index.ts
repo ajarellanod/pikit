@@ -63,6 +63,9 @@ export { createHealthConformance } from "./health.ts";
 export type { AgentCommandFixture } from "./agent-command.ts";
 export { createAgentCommandConformance } from "./agent-command.ts";
 
+export type { ConversationDescribeFixture } from "./conversation-describe.ts";
+export { createConversationDescribeConformance, HOSTILE_NAME } from "./conversation-describe.ts";
+
 export type { ModelCompleteFixture } from "./model-complete.ts";
 export { createModelCompleteConformance } from "./model-complete.ts";
 
