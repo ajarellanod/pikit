@@ -8,13 +8,15 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 import { mcpOutbound } from "./test/mcp-outbound.ts";
+import { isSandboxRequest, sandboxOutbound } from "./test/sandbox-outbound.ts";
 
 export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
-      // The Worker's real `fetch` reaches only the fake MCP servers of tool-mcp.workerd.ts (test/mcp-outbound.ts).
-      miniflare: { outboundService: mcpOutbound },
+      // The Worker's real `fetch` reaches only the fake MCP servers of tool-mcp.workerd.ts (test/mcp-outbound.ts)
+      // and execution-remote's sandbox host (test/sandbox-outbound.ts).
+      miniflare: { outboundService: (request: Request) => (isSandboxRequest(request) ? sandboxOutbound(request) : mcpOutbound(request)) },
     }),
   ],
   test: {
