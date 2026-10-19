@@ -42,7 +42,7 @@ function memoryProposals() {
       calls.push(["approve", id, request]);
       fail();
       if (id !== "tools/calendar") return { ok: false, code: "not_found", message: `no proposal ${id}` };
-      if (request.head !== undefined && request.head !== HEAD) return { ok: false, code: "moved", message: "it moved" };
+      if (request.head !== HEAD) return { ok: false, code: "moved", message: "it moved" };
       return { ok: true, id, head: HEAD, merged: false, message: "Approved: the deployer merges it." };
     },
     async reject(id, request) {
@@ -147,13 +147,15 @@ test("approve passes the head the operator read and the operator, answers the ou
   const moved = await call("POST", `/${ID}/approve`, { head: "9".repeat(40), override: true });
   expect([moved.status, moved.body]).toEqual([409, { error: "moved", message: "it moved" }]);
   expect(state.calls.at(-1)).toEqual(["approve", "tools/calendar", { operator: { id: "ops" }, head: "9".repeat(40), override: true }]);
-  expect((await call("POST", "/other/approve", {})).status).toBe(404);
+  expect((await call("POST", "/other/approve", { head: HEAD })).status).toBe(404);
 
+  // The head the operator read is required, override or not: never asked of the provider without it.
   const before = state.calls.length;
-  for (const body of [{ override: "yes" }, { head: "HEAD" }, [1]]) {
+  for (const body of [undefined, {}, { override: true }, { head: "" }, { head: 42 }, { head: null }, { head: HEAD.toUpperCase() }, { head: "HEAD" }, { head: HEAD, override: "yes" }, [1]]) {
     const answer = await call("POST", `/${ID}/approve`, body);
-    expect([answer.status, (answer.body as ProposalError).error]).toEqual([400, "invalid_request"]);
+    expect([body, answer.status, (answer.body as ProposalError).error]).toEqual([body, 400, "invalid_request"]);
   }
+  expect((await call("POST", "/other/approve", {})).status).toBe(400);
   expect(state.calls.length).toBe(before);
   await app.stop();
 });
@@ -175,7 +177,7 @@ test("a provider's failure is its code, answered with the code's status, a rate 
   state.failWith = new ProposalsError("not_connected", "Self-improvement is not connected: no repository is set.");
   expect(await call("GET", "")).toMatchObject({ status: 503, body: { error: "not_connected", message: "Self-improvement is not connected: no repository is set." } });
   state.failWith = new ProposalsError("rate_limited", "try again in 30 s", 30);
-  const limited = await call("POST", `/${ID}/approve`, {});
+  const limited = await call("POST", `/${ID}/approve`, { head: HEAD });
   expect([limited.status, limited.headers.get("retry-after"), (limited.body as ProposalError).error]).toEqual([429, "30", "rate_limited"]);
   state.failWith = new ProposalsError("unavailable", "GitHub did not answer well (HTTP 503): try again");
   const down = await call("GET", `/${ID}`);

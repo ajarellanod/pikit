@@ -65,7 +65,7 @@ target (K1).
 | `requires.capabilities` | generated | its `use()` calls |
 | `optional.capabilities` | generated | its `useOptional()` and `useKeyed()` calls |
 | `provides` | generated | its `provide()` and `provideKeyed()` names (default config and every `examples` config) |
-| `declares` | hand | new kinds (`declares.kinds`) and capabilities (`declares.capabilities`: mode, stability, summary) this component defines for its registry |
+| `declares` | hand | new kinds (`declares.kinds`) and capabilities (`declares.capabilities`: mode, stability, summary, optional `offer`) this component defines for its registry |
 | `apps` | hand | `{ "worker": "<export>" }`: the export that goes in the Worker's App on Cloudflare; `"default"` puts the default export in both Apps |
 | `halves` | generated | when `apps.worker` names a half: what each App's half provides, requires and uses |
 | `hooks` | hand | `doctor`, `beforeDeploy`, `afterDeploy`: each a file of `src/pikit/<name>/` exporting a function of that name (below) |
@@ -248,8 +248,10 @@ with the project. `remove` and `upgrade` delete bases nothing names.
 
 [offers.ts](../packages/cli/src/project/offers.ts). When a component can use (`useOptional`) or
 requires (`use`) a capability the catalogue marks `offer` (`outbound.queue`, `storage.kv`) and nothing
-provides it, `add` and `new` offer its provider. A capability an offered component requires comes too
-(`outbound-durable` needs `storage.sql` and `wakeups`). Only when the registry has exactly one provider
+provides it, `add` and `new` offer its provider. The catalogue includes registry-declared capabilities;
+a declared single capability can opt in with `offer: true`, under the same target/App and ambiguity
+rules as the kit's. A capability an offered component requires comes too
+(`outbound-durable` needs `storage.sqlite` and `wakeups`). Only when the registry has exactly one provider
 that runs on every target of the project; with several, the choice is the user's and the CLI names the
 candidates. What is provided is read from what `pikit.config.ts` composes now, per App. An offered
 component is recorded `installedFor` the component that brought it, and leaves with the last of them.

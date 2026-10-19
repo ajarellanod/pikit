@@ -20,7 +20,8 @@ import type { ActorMailbox, AdminAuth } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { afterEach, expect, it, vi } from "vitest";
-import { MAX_DURABLE_IMAGE_BYTES, OPERATOR_NOTE } from "../../../registry/components/admin-api/files/src/pikit/admin-api/api.ts";
+import { MAX_DURABLE_IMAGE_BYTES, OPERATOR_NOTE, type ApiTranscriptEntry } from "../../../registry/components/admin-api/files/src/pikit/admin-api/api.ts";
+import { INITIAL, type LiveEvent, reduce } from "../../../registry/dashboard/files/src/lib/transcript.ts";
 import adminApi, { worker as adminApiWorker } from "../../../registry/components/admin-api/files/src/pikit/admin-api/index.ts";
 import { INDEX_KEY } from "../../../registry/components/admin-api/files/src/pikit/admin-api/conversation-index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
@@ -141,6 +142,8 @@ it("the Worker lists the objects' conversations from the index, reads and follow
     const decoder = new TextDecoder();
     let text = "";
     const seen: string[] = [];
+    const partials: string[] = [];
+    let liveState = INITIAL;
     const until = async (type: string) => {
       while (!seen.includes(type)) {
         const { value, done } = await reader.read();
@@ -149,20 +152,38 @@ it("the Worker lists the objects' conversations from the index, reads and follow
         for (let end = text.indexOf("\n\n"); end !== -1; end = text.indexOf("\n\n")) {
           const frame = text.slice(0, end);
           text = text.slice(end + 2);
-          for (const line of frame.split("\n")) if (line.startsWith("data: ")) seen.push((JSON.parse(line.slice(6)) as { type: string }).type);
+          for (const line of frame.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const event = JSON.parse(line.slice(6)) as LiveEvent;
+            seen.push(event.type);
+            liveState = reduce(liveState, { type: "event", event });
+            const partial = liveState.partial?.content.map((block) => block.type === "text" ? block.text : "").join("");
+            if (partial) partials.push(partial);
+          }
         }
       }
     };
-    await until("snapshot");
-    expect(seen[0]).toBe("snapshot");
-    await worker.send(a, "m-live", "followed live");
-    await until("run_end");
-    // Not polled snapshots: the run's own events, the answer's among them.
-    expect(seen).toEqual(expect.arrayContaining(["run_start", "message_start", "message_end", "run_end"]));
-    expect(seen.filter((type) => type === "snapshot")).toEqual(["snapshot"]);
-    await vi.waitFor(() => expect(answers).toContain(`${a}: answer: followed live`), { timeout: 10_000 });
-    client.abort();
-    await reader.cancel();
+    try {
+      await until("snapshot");
+      expect(seen[0]).toBe("snapshot");
+      await worker.send(a, "m-live", "followed live");
+      await until("run_end");
+      // The real UI consumer must understand Pi's JSON, not merely recognize event names.
+      expect(seen).toEqual(expect.arrayContaining(["run_start", "message_start", "message_end", "run_end"]));
+      expect(seen.filter((type) => type === "snapshot")).toEqual(["snapshot"]);
+      expect(partials.some((text) => "answer: followed live".startsWith(text))).toBe(true);
+      expect(liveState.busy).toBe(false);
+      expect(liveState.partial).toBeUndefined();
+      expect(liveState.entries.flatMap((entry) => entry.messages)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: "assistant", content: expect.arrayContaining([{ type: "text", text: "answer: followed live" }]) }),
+      ]));
+      const stored = (await (await worker.fetch(`/admin/api/conversations/${id(`${a}~1`)}/transcript`)).json()) as { items: ApiTranscriptEntry[] };
+      for (const entry of liveState.entries) expect(stored.items.find((each) => each.id === entry.id)).toEqual(entry);
+      await vi.waitFor(() => expect(answers).toContain(`${a}: answer: followed live`), { timeout: 10_000 });
+    } finally {
+      client.abort();
+      await reader.cancel();
+    }
 
     // A reset in a's object: a new conversation there (pi-durable numbers it); the old one is kept, left behind.
     const reset = (await (await worker.fetch(`/admin/api/conversations/${id(`${a}~1`)}/reset`, { method: "POST" })).json()) as { conversationId: string };

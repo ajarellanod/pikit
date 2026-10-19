@@ -183,7 +183,7 @@ test("compose.yaml: restarts, secrets from .env at run time, .pikit/ on a volume
   expect(compose.filter((line) => /(TOKEN|API_KEY|SECRET)\s*[:=]/.test(line))).toEqual([]);
 });
 
-test("compose.yaml: only the deployer has the Docker socket, behind the self-improvement profile; the app never does", () => {
+test("compose.yaml: only the deployer has the Docker socket, off behind its profile (only a Compose file added after this one turns it on); the app never does", () => {
   const compose = lines("compose.yaml");
   const deployer = compose.findIndex((line) => line === "  deployer:");
   expect(deployer).toBeGreaterThan(-1);
@@ -194,6 +194,26 @@ test("compose.yaml: only the deployer has the Docker socket, behind the self-imp
   expect(service.join("\n")).toContain('profiles: ["self-improvement"]');
   expect(service.join("\n")).toContain("target: deployer");
   for (const mount of ["- .:/project", "- pikit-state:/state", "- pikit-checks:/checks"]) expect(service.map((line) => line.trim())).toContain(mount);
+});
+
+test("the deployer's image has only this folder, no package: what deployer-main.ts loads, transitively, is this folder's files and node:*", () => {
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  const dir = join(ROOT, "src", "pikit", "deployment-docker");
+  const seen = new Set<string>();
+  const outside: string[] = [];
+  const visit = (file: string) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    // What Bun runs: type-only imports are erased.
+    for (const { path } of transpiler.scan(readFileSync(join(dir, file), "utf8")).imports) {
+      if (path.startsWith("./") && !path.slice(2).includes("/")) visit(path.slice(2));
+      else if (!path.startsWith("node:")) outside.push(`${file}: ${path}`);
+    }
+  };
+  visit("deployer-main.ts");
+  expect(outside).toEqual([]);
+  expect([...seen].sort()).toEqual(["commands.ts", "deployer-main.ts", "deployer.ts"]);
+  expect(lines("Dockerfile")).toContain("COPY src/pikit/deployment-docker/ ./src/pikit/deployment-docker/");
 });
 
 test("Dockerfile: git in the stage the app and the deployer share, the app the last stage, the deployer its own", () => {

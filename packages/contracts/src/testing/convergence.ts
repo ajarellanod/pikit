@@ -61,7 +61,9 @@ export interface ConvergenceProcess extends ProcessLife {
 export interface ConvergenceFixture {
   /** The records every process of the run shares: they outlive each crash. Fresh and empty. */
   database: SqlDatabase;
-  /** The components of one process, `storage.sql` excepted: the suite provides it over `database`. */
+  /** Also expose `storage.sqlite` when the fixture's records guarantee that dialect. */
+  sqlite?: boolean;
+  /** The components of one process, SQL storage excepted: the suite provides it over `database`. */
   components(life: ProcessLife): ComponentDefinition[];
   config?: Record<string, unknown>;
   /**
@@ -331,7 +333,10 @@ function crashingStorage(database: SqlDatabase, cut: Cut | undefined): CrashingS
 async function openProcess(fixture: ConvergenceFixture, storage: CrashingStorage, clock: ManualClock, apps: App[]): Promise<ConvergenceProcess> {
   const provider = defineComponent({
     name: "convergence-storage",
-    setup: (pikit) => pikit.provide("storage.sql", storage.database),
+    setup(pikit) {
+      pikit.provide("storage.sql", storage.database);
+      if (fixture.sqlite === true) pikit.provide("storage.sqlite", storage.database);
+    },
   });
   const life: ProcessLife = {
     get dead() {

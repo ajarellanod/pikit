@@ -92,11 +92,11 @@ them, and the tests below keep checking what matters.
 ### The commands (`commands.ts`)
 
 The CLI delegates to these functions; you can call them from a script too. Each one runs
-`docker compose …` in the project's directory (`cwd`), without a shell, with `--profile
-self-improvement` when `proposals-local` is installed (so `up` starts the deployer too), and, when
-installed components run services beside the app (`compose` in their `component.json`, recorded in
-`pikit.json`: expose-cloudflare-tunnel's `cloudflared`), with `-f compose.yaml -f <each one>`, in
-`pikit.json`'s order (`fileArgs`; every command but `exec`):
+`docker compose ...` in the project's directory (`cwd`), without a shell. When components contribute
+Compose files (`compose` in their manifest, recorded in `pikit.json`), it adds
+`-f compose.yaml -f <each one>`, in install order (`fileArgs`; every command but `exec`). This also
+activates self-improvement: proposals-local contributes an override that clears the deployer's
+profile. The commands never inspect a proposals provider's component id.
 
 | Function | Runs |
 |---|---|
@@ -137,8 +137,10 @@ Directories in `share` are mounted at the same path, read-only unless `writable`
 
 Self-improvement's last step (SPEC §6, `proposals-local`): a proposal an operator approves in the
 dashboard is deployed by a second compose service, `deployer`, next to the app. Nothing to set up and
-no extra command: `pikit up` builds and starts it when `proposals-local` is installed (every command
-then passes `--profile self-improvement`), and Docker restarts it with the app. It has the Docker
+no extra command: proposals-local's manifest contributes a Compose override that activates it, so
+`pikit up` builds and starts it and Docker restarts it with the app. Without that override the
+service stays behind its inactive `self-improvement` profile; ordinary projects get no socket
+service. It has the Docker
 socket, the project's directory at `/project`, the app's state volume at `/state`, and a volume of
 its own, `pikit-checks`, at `/checks`. The app never gets the socket.
 
@@ -148,6 +150,10 @@ proposals-local writes (`decisions.json`: all it takes from the app is "this hea
 approved"), and what it writes back (`deployer.json`: a heartbeat, each approved head's outcome with
 its checks, the last deploy, rollback and failure, which the dashboard shows).
 
+This external file protocol is typed in `@pikit/contracts/deployer`, outside the App's capability
+graph. The app imports it normally; the privileged deployer imports only its types, erased by Bun,
+and still carries no project packages or `node_modules`.
+
 Every 10 s it writes its heartbeat, keeps the proposals repository's `main` at the project's, and
 deploys the oldest approved head without an outcome:
 1. **The project** must be a git repository on `main` with nothing uncommitted (a deploy builds
@@ -155,7 +161,8 @@ deploys the oldest approved head without an outcome:
    the dashboard says why.
 2. **The merge**, in its own clone (`/checks/repo`): the branch must still be at the approved head; a
    change of the deployment's own files (`compose.yaml`, `Dockerfile`, `.dockerignore`,
-   `src/pikit/deployment-docker/`) is refused; then a fast-forward when it can, else a merge commit; a
+   `src/pikit/deployment-docker/`), any component's declared Compose file, or the set of declared
+   Compose paths is refused; then a fast-forward when it can, else a merge commit; a
    conflict fails it.
 3. **The checks**, each in a throwaway container of its image with no socket and no secret, as the
    volume's owner: `bun install --frozen-lockfile`, `bun run typecheck` when package.json has it,
@@ -177,6 +184,10 @@ is the operator's decision, not a lock. The deployer takes nothing else from the
 of the deployment, runs the agent's code only in containers without the socket, and always checks,
 waits for `/health` and rolls back. A real lock needs the agent's commands to run elsewhere
 ([features/sandboxed-execution.md](https://github.com/ajarellanod/pikit/blob/main/features/sandboxed-execution.md)).
+
+The fence covers the declared Compose files and their ordered list, not arbitrary files those
+files reference through custom `include`, `extends` or `env_file`. The shipped override only resets
+the profile. Such custom deployment dependencies need their own protection before using proposals.
 
 **Rootless Docker**, or a socket elsewhere: change the socket's path in compose.yaml's `deployer`.
 
@@ -204,12 +215,12 @@ The tests are copied with the component and run in your project:
   clone) and a fake Docker: the proposals repository made and kept at `main`; an approved branch
   merged, checked in sandboxes, built, recreated, healthy, deployed, `main` following; failing tests
   building nothing; an unhealthy one rolled back; a merge commit when `main` moved, a conflict failed;
-  a change of the deployment refused, a branch moved after its approval refused; uncommitted changes
+  deployment and contributed-Compose changes refused before building, a branch moved after approval refused; uncommitted changes
   holding the approval until committed; the loop surviving a failed pass.
 - `files.test.ts`: the root files keep their promises. Bun ≥ 1.4, a non-root user, no secret in the
   image, `.env` and `.pikit` ignored, a healthcheck on `/health`, a `stop_grace_period` longer
   than the stop deadline, git in the stage the app and the deployer share, the app the last stage, and
   the Docker socket only in the deployer, behind its profile.
 
-`component.json` is generated, not written by hand. With no `setup`, it provides and requires
-nothing. Its `files` maps `files/src` to `src` and names each root file.
+`component.json`'s capability fields are generated. With no `setup`, it provides and requires no
+runtime capabilities; its contracts dependency supplies erased protocol types. Its `files` maps `files/src` to `src` and names each root file.

@@ -21,7 +21,13 @@
  *   32-bit), `REAL`, `TEXT`, `BYTEA` for bytes (Postgres has no `BLOB`; SQLite keeps bytes as they
  *   are in any column of a table that is not `STRICT`), and no `AUTOINCREMENT`. A consumer that
  *   keeps to it runs on any provider; one that uses a dialect's own SQL (SQLite's
- *   `AUTOINCREMENT` or rowid order) says so in its header, and porting it changes that file.
+ *   `AUTOINCREMENT` or rowid order) requires `storage.sqlite`, never only `storage.sql`.
+ *
+ * `storage.sqlite`: the same `SqlDatabase` API and guarantees, with SQLite's dialect: generated
+ * `INTEGER PRIMARY KEY` rowids, `AUTOINCREMENT` that never reuses a committed id, `ON CONFLICT`
+ * upserts and `RETURNING`. The runtime and outbox require this narrower contract. A provider of
+ * portable SQL alone cannot satisfy it. `storage-sqlite` and `storage-do` provide both capabilities
+ * over the same database; neither capability is an alternative name for the other.
  */
 
 import type { JsonValue } from "./json.ts";
@@ -84,6 +90,8 @@ export interface KeyValueStorage {
 declare module "@pikit/core" {
   interface AppCapabilities {
     "storage.sql": SqlDatabase;
+    /** The SQL API with SQLite's dialect, required by consumers that use it. */
+    "storage.sqlite": SqlDatabase;
     "storage.kv": KeyValueStorage;
   }
 }

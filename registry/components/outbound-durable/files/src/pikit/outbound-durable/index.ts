@@ -1,7 +1,7 @@
 /**
  * outbound-durable: every answer is stored before it is sent, and delivered across crashes,
  * evictions and platform outages of up to 24 hours (@pikit/contracts' outbound.ts). It provides
- * `outbound.queue` on `storage.sql` and `wakeups`.
+ * `outbound.queue` on `storage.sqlite` and `wakeups`.
  *
  * - A channel attaches its transport while it runs; its answers are enqueued (stored), then sent by
  *   runs of its `wakeups` handler, each conversation's pieces in order (queue.ts).
@@ -22,7 +22,7 @@
  * conversation, progress per piece, one send path.
  *
  * Targets: `server` and `durable`: it imports nothing platform-specific; its storage is
- * `storage.sql`, its time the app's clock, and its retries are `wakeups` (`wakeups-timers` on a
+ * `storage.sqlite`, its time the app's clock, and its retries are `wakeups` (`wakeups-timers` on a
  * server, `actors-do`'s alarm in a Durable Object, where nothing runs between events).
  */
 
@@ -46,7 +46,7 @@ export default defineComponent({
   name: "outbound-durable",
   config: Config,
   setup(pikit, config) {
-    const storage = pikit.use("storage.sql");
+    const storage = pikit.use("storage.sqlite");
     const wakeups = pikit.use("wakeups");
     let queue: ReturnType<typeof createQueue> | undefined;
 

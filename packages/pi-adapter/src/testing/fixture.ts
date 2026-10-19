@@ -40,11 +40,13 @@ export function sqliteStorage(path?: string): ComponentDefinition {
         if (open === undefined) throw new Error("storage-test: storage.sql used while the app is not running");
         return open.database;
       };
-      pikit.provide("storage.sql", {
+      const database: SqlDatabase = {
         query: (sql, params) => current().query(sql, params),
         run: (sql, params) => current().run(sql, params),
         transaction: (work) => current().transaction(work),
-      });
+      };
+      pikit.provide("storage.sql", database);
+      pikit.provide("storage.sqlite", database);
       return {
         start() {
           open = path === undefined ? (memory ??= openSqliteDatabase(":memory:")) : openSqliteDatabase(path);

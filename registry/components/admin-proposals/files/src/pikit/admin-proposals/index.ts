@@ -124,8 +124,9 @@ export default defineComponent({
         const id = idOf(request);
         const body = await bodyOf(request);
         if (body.override !== undefined && typeof body.override !== "boolean") throw new Refusal(400, "invalid_request", "override is true or false");
-        if (body.head !== undefined && (typeof body.head !== "string" || !/^[0-9a-f]{40}$/.test(body.head))) throw new Refusal(400, "invalid_request", "head is a commit's 40 hexadecimal digits");
-        const outcome = await proposals.get().approve(id, { operator, ...(typeof body.head === "string" && { head: body.head }), ...(body.override === true && { override: true }) }, ctx);
+        // The head the operator read is required: an approval of whatever the branch holds now is never one.
+        if (typeof body.head !== "string" || !/^[0-9a-f]{40}$/.test(body.head)) throw new Refusal(400, "invalid_request", "head is the commit you read: its 40 hexadecimal digits");
+        const outcome = await proposals.get().approve(id, { operator, head: body.head, ...(body.override === true && { override: true }) }, ctx);
         if (!outcome.ok) return refused(outcome);
         ctx.logger.info("admin-proposals: approved", { operator: operator.id, id, head: outcome.head, merged: outcome.merged });
         const answer: ApproveResponse = { id: outcome.id, head: outcome.head, merged: outcome.merged, message: outcome.message };

@@ -52,7 +52,7 @@ the channel).
 5. **Ack.** `handleUpdate` resolves, and the poller moves its offset.
 6. **Run.** pi-durable runs the agent: the definition's `prepare(state)`, its model
    (`model.provider`), its tools (`agent.tool`) on `execution` or `workspace`, its extensions. Every
-   step is checkpointed in `storage.sql` (pi-durable's tables). With a `wakeups` provider installed,
+   step is checkpointed in `storage.sqlite` (pi-durable's tables). With a `wakeups` provider installed,
    runtime-pi drives runs inside the wakeup `runtime-pi.drive`; without, runs are promises of the
    process.
 7. **Settle.** When the run ends, the adapter appends one row to the answers log

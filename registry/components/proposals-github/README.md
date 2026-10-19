@@ -66,7 +66,7 @@ The same entry goes in `config` and in `workerConfig`.
   default branch (at most 5 per call). A rejected or merged branch the agent
   pushes again (a new head) gets a new one.
 - **Approve refuses**, before anything is written: a pull request already merged or closed
-  (`not_open`); a base other than the default branch (`wrong_base`); a head other than the one the
+  (`not_open`); a base other than the default branch (`wrong_base`); an omitted head or a head other than the one the
   operator read (`moved`); checks that fail, still run, or never ran (`checks_failing`), unless
   `override`; GitHub refusing the merge (`not_mergeable`). Each approval and rejection is logged with
   the operator.

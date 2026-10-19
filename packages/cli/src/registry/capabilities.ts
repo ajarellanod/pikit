@@ -174,6 +174,12 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "An async SQL database for records that outlive the process; each component owns its own tables.",
   },
+  "storage.sqlite": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "storage.sql's database (the same SqlDatabase API) with SQLite's dialect and guarantees, for a consumer whose SQL needs them; each component owns its own tables.",
+  },
   "storage.kv": {
     mode: "single",
     definedIn: "@pikit/contracts",
@@ -324,13 +330,19 @@ export function registryCatalogue(manifests: readonly Manifest[]): { catalogue: 
         report(`declares the capability "${name}", which the kit defines (${capabilityEntry(name)?.definedIn}): use it, or declare a capability of another name`);
         continue;
       }
-      const entry: CapabilityEntry = { mode: declared.mode as CapabilityMode, definedIn: m.name, stability: declared.stability as Stability, summary: declared.summary };
+      const entry: CapabilityEntry = {
+        mode: declared.mode as CapabilityMode,
+        definedIn: m.name,
+        stability: declared.stability as Stability,
+        summary: declared.summary,
+        ...(declared.offer === true && { offer: true }),
+      };
       const first = declaredBy.get(name);
       const existing = capabilities[name];
       if (first === undefined || existing === undefined) {
         declaredBy.set(name, m.name);
         capabilities[name] = entry;
-      } else if (existing.mode !== entry.mode || existing.stability !== entry.stability || existing.summary !== entry.summary) {
+      } else if (existing.mode !== entry.mode || existing.stability !== entry.stability || existing.summary !== entry.summary || existing.offer !== entry.offer) {
         report(`declares the capability "${name}" differently from ${first}: one contract has one declaration (copy ${first}'s)`);
       }
     }

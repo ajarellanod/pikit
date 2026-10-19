@@ -7,8 +7,9 @@
  * the preset's own, with the providers it brings (`withOffers`).
  *
  * `--ui` gives it a UI (SPEC §5, `ui.ts`): the dashboard's files in `src/dashboard/` and the components
- * it needs, installed with the preset's; its own `bun install` runs after the project's. A feature
- * reached only from the dashboard (`NEEDS_DASHBOARD`: self-improvement) brings it too.
+ * it needs, installed with the preset's: admin-api, and the defaults for `admin.auth` and `settings`
+ * unless what the project gets declares them in every App (`uiComponentsFor`); its own `bun install`
+ * runs after the project's. A feature reached only from the dashboard (`NEEDS_DASHBOARD`: self-improvement) brings it too.
  *
  * On a server the new project is a git repository on `main`, everything committed (`initRepository`):
  * self-improvement's deployer merges approved proposals there. Without git it says so and goes on.
@@ -38,7 +39,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { DEFAULT_REGISTRY, PIKIT_ROOT } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
-import { withOffers } from "../project/offers.ts";
+import { providedByManifests, withOffers } from "../project/offers.ts";
 import { starterModelProblem } from "../project/starter-model.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
@@ -52,7 +53,7 @@ import { Undo } from "../project/undo.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
 import * as starter from "./starter.ts";
-import { installDashboardPackages, UI_COMPONENTS, uiNext, writeDashboard } from "./ui.ts";
+import { installDashboardPackages, missingUiComponents, uiNext, writeDashboard } from "./ui.ts";
 
 export interface NewOptions {
   preset?: string;
@@ -115,7 +116,8 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   const ui = options.ui === true || chosen.some((component) => starter.NEEDS_DASHBOARD.includes(component));
   const dashboard = ui ? dashboardFiles(registry) : undefined;
   if (ui && dashboard === undefined) throw new CliError(`the registry ${registry.root} has no dashboard (dashboard/files/)`);
-  const asked = ui ? [...chosen, ...UI_COMPONENTS.filter((c) => !chosen.includes(c))] : chosen;
+  const forUi = ui ? uiComponentsFor(registry, chosen, targets) : [];
+  const asked = [...chosen, ...forUi];
   const { order: components, installedFor } = withOffers(registry, asked, targets);
   warnUnchosen(registry, chosen, [], targets);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
@@ -167,7 +169,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     // The dashboard before the components: those with a view install it in src/dashboard/.
     if (dashboard !== undefined) {
       const project = readProjectManifest(projectDir);
-      writeDashboard(projectDir, project, registry, "default", dashboard, UI_COMPONENTS, new Undo(projectDir));
+      writeDashboard(projectDir, project, registry, "default", dashboard, forUi, new Undo(projectDir));
       writeProjectManifest(projectDir, project);
     }
 
@@ -226,6 +228,17 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   const elsewhere = starter.upText(installed);
   log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev${elsewhere === undefined ? "         # run it here" : `         # or \`pikit up\` to ${elsewhere}`}`);
   if (dashboard !== undefined) log.info(`\n${uiNext()}`);
+}
+
+/**
+ * What the dashboard adds to a new project of `chosen` on `targets` (`missingUiComponents`): what the
+ * chosen components and the providers they bring declare, per App, in their manifests (nothing is
+ * installed yet) decides whether a default is needed. These are recorded as the dashboard's: `ui off`
+ * removes them, never one the preset chose.
+ */
+export function uiComponentsFor(registry: Registry, chosen: readonly string[], targets: readonly string[]): string[] {
+  const { order } = withOffers(registry, chosen, targets);
+  return missingUiComponents(order, targets, providedByManifests(order.map((name) => registry.manifest(name)), targets));
 }
 
 /**

@@ -10,7 +10,7 @@ it into the app.
   transcript, live events, usage; `createObserver` in the adapter's `observe.ts`). Also
   `model.complete` (a text from one of the models the agents run on, once: admin-api titles
   conversations with it) and one slash command, `agent.command` `compact` ("/compact" below).
-- **Requires:** `storage.sql`: pi-durable keeps every conversation there (its transcript, its state,
+- **Requires:** `storage.sqlite` (not just portable `storage.sql`): pi-durable keeps every conversation there (its transcript, its state,
   its runs and the messages it holds). On a server that is `storage-sqlite`, in a Cloudflare object
   `storage-do`. Its tables are pi-durable's (`conversations`, `entries`, `tasks`, `submissions`,
   `documents`…), unprefixed: one runtime per database; and the answers log, `runtime_pi_answers`.

@@ -86,6 +86,7 @@ export default defineComponent({
       transaction: (work) => serial(() => open().transaction(() => work(statements))),
     };
     pikit.provide("storage.sql", database);
+    pikit.provide("storage.sqlite", database);
 
     return {
       start(ctx) {

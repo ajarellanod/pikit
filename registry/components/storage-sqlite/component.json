@@ -2,7 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "storage-sqlite",
   "version": "0.0.0",
-  "description": "The app's SQL database (storage.sql) in one SQLite file, through node:sqlite: records components keep across restarts.",
+  "description": "The app's portable SQL (storage.sql) and SQLite (storage.sqlite) database in one file, through node:sqlite: records components keep across restarts.",
   "targets": [
     "server"
   ],
@@ -15,7 +15,8 @@
     "capabilities": []
   },
   "provides": [
-    "storage.sql"
+    "storage.sql",
+    "storage.sqlite"
   ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",

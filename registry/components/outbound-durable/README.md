@@ -2,7 +2,8 @@
 
 Every answer your agent gives is stored before it is sent, and delivered even if the process dies,
 the Durable Object is evicted, the platform is down for up to a day, or it asks you to slow down. It
-provides `outbound.queue` (@pikit/contracts' `outbound.ts`) on `storage.sql` and `wakeups`.
+provides `outbound.queue` (@pikit/contracts' `outbound.ts`) on `storage.sqlite` and `wakeups`.
+It needs SQLite's generated sequence ids; a portable-only `storage.sql` provider is not enough.
 
 ```sh
 pikit add storage-sqlite      # the database it keeps its records in

@@ -11,7 +11,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | Provider today | `deployment-docker` | `deployment-cloudflare` |
 | Apps in `pikit.config.ts` | one (default export) | two: the object's (default) and the Worker's (`worker`) |
 | Requests arrive at | `server-bun` (Hono on `Bun.serve`, port 3000) | the Worker (deployment-cloudflare's host), then RPC to an object |
-| `storage.sql` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
+| `storage.sql`, `storage.sqlite` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
 | `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `actors-do`: RPC to `idFromName(key)` (`scope` `"one"`) |
 | `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `actors-do`: rows over the object's one alarm, in slices |
 | `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-workers`: the Worker's `env` |

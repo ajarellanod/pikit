@@ -316,24 +316,25 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   never left without one. *Why:* K6 already makes a reset lose nothing; slices make a long
   conversation a sequence of short events.
 - **C5. State through neutral contracts; the platform through one context key.** The runtime's
-  state (pi-durable's storage on `storage.sql`) and conversations (`conversations-kv`, on
+  state (pi-durable's storage on `storage.sqlite`) and conversations (`conversations-kv`, on
   `storage.kv`) have neutral providers that run on both targets; the only Cloudflare-specific storage
-  is `storage-do` (`storage.sql` on the object's SQLite, whose transactions pass the `storage.sql`
-  suite unchanged). Platform objects reach components through one context key in
+  is `storage-do` (`storage.sql` and `storage.sqlite` on the object's SQLite, whose transactions
+  pass both storage conformance suites unchanged). Platform objects reach components through one context key in
   `@pikit/contracts/cloudflare`, `WORKERS_HOST`, which `deployment-cloudflare`'s entrypoints put on each App's
   start context: the Worker's `env` (and, in the Worker's App, the origin its first request reached),
   and in an object its id, its storage, and the hooks its alarm and RPC call. Its types are structural: no `cloudflare:*` import leaves the entrypoints. *Why:* the
   components that must touch the platform are few and say so by reading one key; everything else is
   the same code on both targets.
   Conversations are Pi's durable runtime's own storage (P1): there is no sessions contract.
-  pi-durable 1.0's SQLite core runs over a thin facade on `storage.sql`, proven on storage-sqlite and
+  pi-durable's SQLite core runs over a thin facade on `storage.sqlite`, proven on storage-sqlite and
   on storage-do with pi-durable's own storage conformance, so one implementation serves a server and
-  a Durable Object. That core speaks SQLite's dialect, so it needs a SQLite-backed `storage.sql`;
-  `storage.sql` stays asynchronous so that a Postgres provider fits the kit's own records, but
-  conversations in Postgres need a Postgres backend of pi-durable's `Storage`
-  (`features/storage-postgres.md`). Its tables are not
-  prefixed (an exception to `storage.sql`'s rule, proposed upstream), so one `storage.sql` holds one
-  pi-durable Session.
+  a Durable Object. That core and outbound-durable require SQLite's dialect explicitly in the
+  capability graph. `storage.sql` stays the asynchronous portable subset for the kit's other records;
+  satisfying it alone does not make a provider usable by Pi or the outbox. Both existing providers
+  expose both capabilities on the same database. Conversations in Postgres would need a Postgres
+  backend of pi-durable's `Storage` (`features/storage-postgres.md`), not another agent runtime.
+  Pi's tables are not prefixed (an exception to the storage rule, proposed upstream), so one
+  SQLite database holds one pi-durable Session.
 - **C6. Telegram by webhook is its own component.** `channel-telegram-webhook` (Worker half: the
   route, the secret Telegram echoes, the allowed users, `actor.mailbox`; object half: the inbox
   handler and delivery from `agent.submissions`' answers) reuses `channel-telegram`'s client, format
@@ -375,7 +376,7 @@ status, approval cards) may come from [Beautiful UI](https://github.com/slev1239
 conversation live (its transcript, the tools running); abort and reset; cost per conversation;
 health, once a `health` provider is installed (`features/health.md`); a Settings dialog (the
 dashboard's own preferences, kept in the browser, and a section per installed component that brings
-one, its values the `settings` contract's, which `settings-store` keeps and the UI installs:
+one, its values the `settings` contract's, which `settings-store` keeps by default:
 `features/settings.md`). The rest below comes as the components it needs are installed.
 
 **The dashboard is a channel of its own.** The operator starts conversations of the dashboard's own
@@ -385,6 +386,8 @@ other channel can continue. In another channel's conversation the operator's mes
 its answer), with a request id that starts with `dashboard:`: a run only such messages started is
 never delivered to that channel (`startAnswerDelivery`), and nothing the operator says is sent
 anywhere. A run that also answers a user's message is delivered to the user, as any run is.
+Channels cannot admit a `dashboard:` request id: `admitInbound` rejects it before any stage and
+captures identity before normalization/routing, so in-place mutation cannot turn it into one.
 
 **What it shows and does.**
 - The composition: components, capabilities and their providers, pipelines, the config without
@@ -411,7 +414,9 @@ anywhere. A run that also answers a user's message is delivered to the user, as 
   copied from pikit's registry and pinned (the pikit way: source owned, reproducible).
 - **Its data comes from a component, `admin-api`.** The admin API (`/admin/api/*`, typed and
   documented) is a pikit component that `--ui` installs and that also stands without a UI (a script
-  or an agent may read it). It registers its routes through `http.route`, asks `admin.auth` before
+  or an agent may read it). Auth and settings are chosen by capability: the CLI adds their defaults
+  only when the target's Apps lack `admin.auth` or `settings`, preserves existing providers, and
+  refuses an unknown or partially satisfied composition rather than installing a conflicting one. It registers its routes through `http.route`, asks `admin.auth` before
   every answer, and serves the dashboard's built files under `GET /admin/*` when there are some. The
   files hold no data and need no credential (a browser's navigation sends no header): the page asks
   the operator for it once, for a browser session (an HttpOnly, SameSite=Strict, expiring cookie,
@@ -431,7 +436,8 @@ anywhere. A run that also answers a user's message is delivered to the user, as 
 - **It reads contracts and feeds, never internals.** The admin API is backed by the capabilities of
   the installed components. What must not be missed comes from feeds, not from events (K3). Live views
   of conversations and tasks build on pi-durable's `watch()` and `taskGraph()`, reached through the
-  adapter, not on a copy of their state.
+  adapter, not on a copy of their state. Transcript and live-event payloads intentionally use Pi's
+  runtime JSON; integration tests run that producer's wire output through the UI consumer.
 - **It runs wherever the app runs, and closes no deployment** (§4,
   `features/deployment-targets.md`). The built UI is static files and the API is standard fetch
   handlers, so any host that serves the app serves the dashboard: `server-bun`, a Worker, and later
@@ -535,7 +541,9 @@ It changes the source of its own project, as a person would:
 2. It validates: `pikit doctor` and the project's tests.
 3. It commits to a branch of its own (`pikit/self/…`) and proposes the change with its diff and its
    test results.
-4. A human approves it, from the dashboard (a diff and an approval card) or from the chat.
+4. A human approves it, from the dashboard (a diff and an approval card) or from the chat, naming
+   the exact head commit they reviewed. No head or a changed head never approves the latest commit
+   implicitly; overriding failed checks does not bypass this requirement.
 5. The change is merged and deployed by the deployment's own pipeline, as a generation boundary:
    rebuild and restart. Conversations are actors, so the restart loses nothing (K6).
 6. Health is watched after the deploy; if it fails, the previous version comes back automatically.
@@ -565,8 +573,13 @@ its runs, its proposals and their state.
 **On the server.** The workspace is a local checkout, with the real `git`; proposals are branches of
 a repository in the app's volume (`proposals-local`); a deployer next to the app (deployment-docker's
 `deployer` service) merges what the operator approved, checks, rebuilds and restarts; a rollback
-returns to the previous image. There an approval is the operator's decision, not a lock: the agent's
-shell runs in the app's container (`features/sandboxed-execution.md` for a lock).
+returns to the previous image. The producer of approvals activates the sidecar through its manifest's
+Compose contribution, never detection of its component id. Their explicit file protocol is
+`@pikit/contracts/deployer`, not an App capability: the external process cannot query the graph.
+It imports shared types only, with no project dependency loaded in the privileged process. Changes
+to any declared Compose file or its declaration are fenced like the deployment's root files.
+There an approval is the operator's decision, not a lock: the agent's shell runs in the app's
+container (`features/sandboxed-execution.md` for a lock).
 
 **On Cloudflare** (checked against Cloudflare's documentation, August 2026):
 - **The workspace** is `execution-do`: each conversation's Durable Object, on the Free plan, with a

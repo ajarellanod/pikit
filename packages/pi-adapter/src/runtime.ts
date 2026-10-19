@@ -107,7 +107,7 @@ const WORKERS_SETTINGS: Partial<HarnessSettings> =
 
 export interface DurableRuntimeOptions {
   /**
-   * The app's `storage.sql` (SQLite: storage-sqlite, storage-do). pi-durable's storage is opened over it
+   * The app's `storage.sqlite` (storage-sqlite, storage-do; portable `storage.sql` alone is not enough). pi-durable's storage is opened over it
    * (`openDurableStorage`) at first use, and the runtime's Harness owns it from then on; the answers log
    * is kept there too (`runtime_pi_answers`), so both live and go with one database.
    */

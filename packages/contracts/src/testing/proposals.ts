@@ -15,7 +15,7 @@
 import { type AppContext, type ComponentDefinition, defineApp, defineComponent, type Handle, silentLogger, type Target } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
 import type { Operator } from "../admin.ts";
-import type { Proposals } from "../proposals.ts";
+import type { ApproveRequest, Proposals } from "../proposals.ts";
 import { checker, expecter } from "./assert.ts";
 
 export interface ProposalsFixture {
@@ -45,6 +45,8 @@ const GROUP = "proposals";
 const expect = expecter(GROUP);
 const check = checker(GROUP);
 const OPERATOR: Operator = { id: "operator-1" };
+/** A head for what is not a proposal: nothing to read, so any commit. */
+const ANY_HEAD = "0".repeat(40);
 
 interface Running {
   proposals: Proposals;
@@ -131,6 +133,25 @@ export function createProposalsConformance(factory: () => ProposalsFixture | Pro
       expect(await stateOf(running, made.id), "open", "its state after the refusal");
     }),
 
+    proposalsCase("approve without the head the operator read (none, empty, not text, or the one before a push) is moved, even with override, and changes nothing", async (running) => {
+      const { proposals, ctx, fixture } = running;
+      const made = await fixture.propose({ topic: "unread", title: "Unread", body: "", file: "unread.txt", text: "one\n" });
+      const pushed = await fixture.pushAgain(made.id);
+      // What a caller outside TypeScript may send: the contract's type requires a head.
+      const requests: [string, ApproveRequest][] = [
+        ["no head", { override: true, operator: OPERATOR } as unknown as ApproveRequest],
+        ["an empty head", { head: "", override: true, operator: OPERATOR }],
+        ["a head that is not text", { head: 42, override: true, operator: OPERATOR } as unknown as ApproveRequest],
+        ["the head before the push", { head: made.head, override: true, operator: OPERATOR }],
+      ];
+      for (const [what, request] of requests) {
+        const outcome = await proposals.approve(made.id, request, ctx);
+        expect(outcome.ok ? "approved" : outcome.code, "moved", `approving with ${what}`);
+        expect(await stateOf(running, made.id), "open", `its state after approving with ${what}`);
+      }
+      expect((await proposals.get(made.id, ctx)).head, pushed, "its head after the refusals");
+    }),
+
     proposalsCase("approve takes the head the operator read; acting on it again is not_open", async (running) => {
       const { proposals, ctx, fixture } = running;
       const made = await fixture.propose({ topic: "approved", title: "Approve me", body: "", file: "a.txt", text: "a\n" });
@@ -159,7 +180,7 @@ export function createProposalsConformance(factory: () => ProposalsFixture | Pro
       await fixture.other("feature/not-a-proposal");
       for (const id of ["feature/not-a-proposal", "../feature/not-a-proposal", "../../feature/not-a-proposal", "../../../refs/heads/feature/not-a-proposal"]) {
         expect(await codeOf(proposals.get(id, ctx)), "not_found", `get(${JSON.stringify(id)})`);
-        const approve = await proposals.approve(id, { override: true, operator: OPERATOR }, ctx);
+        const approve = await proposals.approve(id, { head: ANY_HEAD, override: true, operator: OPERATOR }, ctx);
         expect(approve.ok ? "approved" : approve.code, "not_found", `approve(${JSON.stringify(id)})`);
         const reject = await proposals.reject(id, { operator: OPERATOR }, ctx);
         expect(reject.ok ? "rejected" : reject.code, "not_found", `reject(${JSON.stringify(id)})`);
@@ -186,7 +207,7 @@ export function createProposalsConformance(factory: () => ProposalsFixture | Pro
     }),
 
     proposalsCase("approving or rejecting what is not a proposal is not_found", async ({ proposals, ctx }) => {
-      const approve = await proposals.approve("no-such-proposal", { override: true, operator: OPERATOR }, ctx);
+      const approve = await proposals.approve("no-such-proposal", { head: ANY_HEAD, override: true, operator: OPERATOR }, ctx);
       expect(approve.ok ? "approved" : approve.code, "not_found", "approve");
       const reject = await proposals.reject("no-such-proposal", { operator: OPERATOR }, ctx);
       expect(reject.ok ? "rejected" : reject.code, "not_found", "reject");

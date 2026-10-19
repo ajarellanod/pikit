@@ -153,6 +153,11 @@
                   "type": "string",
                   "pattern": "\\S",
                   "description": "One line: what a consumer gets from it."
+                },
+                "offer": {
+                  "type": "boolean",
+                  "const": true,
+                  "description": "Offered: when a component that can use it or requires it is added and nothing provides it, `pikit add` and `pikit new` offer its provider, when the registry has exactly one. For a single capability with one obvious provider, not for a choice."
                 }
               },
               "additionalProperties": false

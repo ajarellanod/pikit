@@ -45,7 +45,7 @@ asked. JSON, the contract's shapes (`api.ts`; the view keeps a copy, `view/types
 | `GET /admin/api/admin-proposals/status` | `ProposalsStatus`: whether it is ready, each part checked, the deploys |
 | `GET /admin/api/admin-proposals` | `ProposalList`: where proposals live, whether checks run before or after an approval, the open proposals, then the last closed ones |
 | `GET /admin/api/admin-proposals/:id` | `ProposalDetail`: the description (markdown), the files with their patches, the checks, the deploy |
-| `POST /admin/api/admin-proposals/:id/approve` | `{ head?, override? }` → `{ id, head, merged, message }` |
+| `POST /admin/api/admin-proposals/:id/approve` | `{ head, override? }` → `{ id, head, merged, message }` |
 | `POST /admin/api/admin-proposals/:id/reject` | `{ comment? }` → `{ id, closed: true, message }` |
 
 `:id` is the branch's topic (`pikit/self/<topic>`), its `/` encoded. A refusal is `409` (`not_open`,
@@ -79,7 +79,8 @@ could forge one; the deployer checks, waits for `/health` and rolls back whateve
 
 `admin-proposals.test.ts` runs the routes over a `proposals` in memory: `401` without an operator (and
 without `admin.auth`) and the provider never asked; status, list and a proposal passed through, a
-topic's `/` decoded; approve passing the head and the operator, its outcome as `200`, `409` or `404`,
+topic's `/` decoded; approve requires the reviewed head (40 lowercase hexadecimal digits), rejects
+missing or malformed heads as `400 invalid_request` before calling the provider, and passes the head and the operator, its outcome as `200`, `409` or `404`,
 a malformed body refused before the provider; reject's comment trimmed and bounded; a provider's
 failure as its code's status, a rate limit with `retry-after`. The providers' own tests hold what each does.
 

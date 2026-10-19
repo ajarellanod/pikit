@@ -34,7 +34,8 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, outbound-durable, repo-github-app, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, repo-github-app, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
 | `actor.mailbox` | single | actors-do, mailbox-local | admin-api, channel-google-chat, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
 | `actor.inbox` | single | actors-do, mailbox-local | channel-telegram-webhook, repo-github-app, admin-api?, channel-google-chat?, channel-web?, settings-store? | `createMailboxConformance` |
@@ -269,7 +270,9 @@ rejection dispatches nothing and is thrown, so the platform delivers the message
 does must be harmless to repeat), then `runtime.dispatch`, and returns an `InboundOutcome`:
 `admitted`, `duplicate`, `halted` (a stage halted), `denied` (the router said deny) or `no_route` (no
 stage decided). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
-when a capability fails. A dispatch rejected with `AgentUnavailableError` (the conversation's agent
+when a capability fails. Identity is captured before either pipeline runs: mutating the original
+object in place or replacing it cannot bypass the check, including the reserved `dashboard:` ids
+that channels cannot admit. A dispatch rejected with `AgentUnavailableError` (the conversation's agent
 is gone for good: removed, a live agent deleted) is not thrown: the key moves to a new conversation of
 the agent routed now and the message goes there, or, when routing names the gone agent, it is
 `denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text, images? }` (a
@@ -380,7 +383,7 @@ send throws `DeliveryError(kind)`: `transient`, `rate_limited` (with `retryAfter
 failure) or `permanent`, with `maybeSent`. `answerKey(conversation, requestId)` is
 `${conversationId}:${requestId}`, and piece keys are `${key}#${index}`.
 
-Provider: outbound-durable (on `storage.sql` and `wakeups`; gives up on `permanent` or after 24 h).
+Provider: outbound-durable (on `storage.sqlite` and `wakeups`; gives up on `permanent` or after 24 h).
 Suite: `createOutboundQueueConformance`, and the convergence suite.
 
 ### Parts ([parts.ts](../packages/contracts/src/parts.ts))
@@ -451,10 +454,23 @@ interface SqlDatabase {
 
 Async, bound `?` parameters, one database per App, each component owns tables prefixed with its name
 (`-` as `_`; `registry validate` checks the names its shipped files create) and creates them in
-`start`. The dialect is the subset SQLite and Postgres share (pi-durable's own
-tables and runtime-pi's answers log use SQLite's, and are unprefixed: one runtime per database).
+`start`. The dialect is the subset SQLite and Postgres share; no promise of SQLite's rowids or
+`AUTOINCREMENT`. A provider passing this suite alone cannot serve pi-durable or the outbox.
 Providers: storage-sqlite (a file, server), storage-do (the Durable Object's SQLite). Suite:
 `createSqlDatabaseConformance`.
+
+### `storage.sqlite` ([storage.ts](../packages/contracts/src/storage.ts))
+
+The same `SqlDatabase` API, transaction and persistence guarantees, with SQLite's dialect: generated
+`INTEGER PRIMARY KEY` rowids, `AUTOINCREMENT` that never reuses committed ids, upserts and `RETURNING`.
+`runtime-pi` and `outbound-durable` require this narrower capability, so composition rejects a
+portable-only SQL provider before either starts. pi-durable's tables are unprefixed: one runtime
+per database. Its facade remains in the Pi adapter; no runtime types enter this contract.
+
+Both storage-sqlite and storage-do provide the portable and SQLite capabilities over the same
+database. Suite: `createSqliteDatabaseConformance` (the SQL guarantees plus native-dialect cases),
+run on both providers, including real workerd for storage-do. A deliberately broken fixture that
+reuses pruned ids proves the sequence case detects the missing guarantee.
 
 ### `storage.kv`
 
@@ -592,6 +608,12 @@ feed (`outbound.queue`'s `pending` pages the same way). Provider: runtime-pi (`c
 adapter). Suite:
 `createAgentObserveConformance` (in the adapter's tests and workerd).
 
+`TranscriptEntry.messages` and live event payloads are Pi's runtime JSON, not an engine-independent
+wire format. Consumers intentionally understand it; import isolation alone does not absorb a Pi
+schema change. The workerd admin-api integration folds real Pi SSE through the dashboard reducer,
+checks partial text, and compares the announced entries with the persisted transcript. It covers
+that producer/consumer boundary, not every event variant or browser rendering.
+
 ---
 
 ## Models
@@ -714,7 +736,7 @@ interface Proposals {
   status(ctx): Promise<ProposalsStatus>;   // ready or not, part by part; the deploys when known
   list(ctx): Promise<ProposalList>;        // where they live, checks before or after approval, open then closed
   get(id, ctx): Promise<ProposalDetail>;   // description, files with patches, checks, deploy
-  approve(id, { head?, override?, operator }, ctx): Promise<ApproveOutcome>;
+  approve(id, { head, override?, operator }, ctx): Promise<ApproveOutcome>;
   reject(id, { comment?, operator }, ctx): Promise<RejectOutcome>;
   remote(ctx): Promise<ProposalsRemote | undefined>; // a path, or an https URL with authorization() for trusted code
 }
@@ -722,6 +744,9 @@ interface Proposals {
 
 - An id is the branch's topic. Only branches under the prefix of the project's own repository are
   proposals: anything else is `not_found`.
+- An approval requires the exact `ProposalDetail.head` the operator reviewed. Omitted, empty or
+  stale heads are `moved`, including with `override`; the HTTP route rejects an absent or malformed
+  head as `400 invalid_request` before invoking the provider. Override only bypasses failing checks.
 - An action is refused as an outcome, before anything is written: `not_found`, `not_open`, `moved`
   (the head is not the one the operator read), `checks_failing` (unless `override`), `wrong_base`,
   `not_mergeable`. A failure to reach where proposals live is `ProposalsError` with a code
@@ -738,6 +763,26 @@ interface Proposals {
   extension-pikit-self (`remote()`, for the steward's steps), execution-do (`remote()`: the only
   remote its `git` pushes to, under its `branchPrefix`). Suite: `createProposalsConformance`
   (both providers).
+
+### External deployer protocol ([deployer.ts](../packages/contracts/src/deployer.ts))
+
+`@pikit/contracts/deployer` is a separate subpath, not a capability: the external Docker deployer
+cannot query an App's graph. `proposals-local` writes `{ decisions: Decision[] }` to `decisions.json`;
+`deployment-docker` reads approved heads and writes `DeployerState` to `deployer.json`. Outcomes and
+checks are indexed by the approved commit, not by whatever the branch holds later. Rejections carry
+their optional comment and are never deployed. Both readers treat unreadable/unparseable files as
+empty; these types do not add runtime validation or an isolation boundary.
+
+The privileged deployer imports types only and still runs without project packages. Manifest
+`compose` contributions activate it; command code never checks the proposals provider's id. Its
+guard rejects changes to declared Compose paths or their ordered list, including the merged result,
+before checks/build/restart. It does not recursively fence files referenced by arbitrary custom
+Compose `include`, `extends` or `env_file`; shipped overrides use none of these.
+
+`createDeployerProtocolConformance` pairs the real proposal producer and deployer with real git and
+a fake Docker runner: exact decision fields, rejection comments, approved versus moved heads, and
+outcomes/checks read back by the proposal provider. Compose configuration is checked separately;
+this is not a real image-build or production rollback test.
 
 ### `health` ([health.ts](../packages/contracts/src/health.ts))
 
@@ -786,3 +831,8 @@ A registry adds a capability without changing the CLI: the defining component de
 file of its own (declaration merging on `AppCapabilities`), and ships a suite. Another component that
 uses it carries an identical copy of that file. Redeclaring a kit capability is refused. No component
 in this registry declares one today; [features/memory.md](../features/memory.md) is the worked example.
+
+The offer resolver uses this extended catalogue too. A declared single capability may set
+`offer: true`: if the target and App have exactly one eligible provider, `add` and `new` offer it
+and its required providers. Several providers remain an explicit choice; a Worker-only provider
+never satisfies a default-App requirement. Keyed or unmarked capabilities are not auto-offered.

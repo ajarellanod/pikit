@@ -9,7 +9,7 @@
  *   `docker compose …` over the project's `Dockerfile` and `compose.yaml`, and `exec`, which runs a
  *   one-off command where the app runs (`pikit configure` logs in to a model provider with it);
  * - self-improvement's deployer (`deployer.ts`), compose.yaml's `deployer` service, started by the same
- *   `pikit up` when `proposals-local` is installed: it merges, checks and deploys what an operator
+ *   `pikit up` when `proposals-local` (its Compose file) turns it on: it merges, checks and deploys what an operator
  *   approves, and rolls back to the previous image when unhealthy.
  *
  * Target: `server` (it uses `node:child_process` and the process's signals).
@@ -22,8 +22,6 @@ export {
   runBeforeDeployHooks,
   runAfterDeployHooks,
   fileArgs,
-  profileArgs,
-  SELF_IMPROVEMENT_PROFILE,
   down,
   restart,
   logs,
@@ -49,11 +47,9 @@ export {
   discover,
   ownerCommand,
   probeHealth,
+  composeFiles,
   DEFAULT_INTERVAL_MS,
   FENCED,
   type DeployerOptions,
-  type DeployerState,
-  type DeployerCheck,
   type DockerSetup,
-  type Outcome,
 } from "./deployer.ts";

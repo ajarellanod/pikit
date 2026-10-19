@@ -4,9 +4,11 @@
  * `dashboard/files/`), over the admin API of a component, `admin-api`.
  *
  * `on`:
- *   1. installs what it needs and the project lacks, `admin-auth-token` then `admin-api`, each as
- *      `pikit add` does (its own operation, its own doctor). On Cloudflare (`durable`) `add` puts each
- *      in both Apps: admin-api's Worker half serves the API and reaches the conversations' objects;
+ *   1. installs what it needs and the project lacks (`missingUiComponents`), as `pikit add` does (its
+ *      own operation, its own doctor): `admin-api`, whose API the dashboard reads, and the defaults
+ *      `admin-auth-token` and `settings-store` unless what `pikit.config.ts` composes provides
+ *      `admin.auth` and `settings` in every App already. On Cloudflare (`durable`) `add` puts each in
+ *      both Apps: admin-api's Worker half serves the API and reaches the conversations' objects;
  *   2. writes `src/dashboard/`, keeps each file's base in `pikit-bases/` and records them in
  *      `pikit.json`'s `dashboard`, with the components step 2 installed; a failure puts back what it
  *      wrote;
@@ -31,6 +33,9 @@ import { hashFile, type InstalledDashboard, modifiedFiles, PIKIT_JSON, type Proj
 import { registryPath } from "../project/registry-location.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { Undo } from "../project/undo.ts";
+import { APP_LABEL, type AppName, hasWorkerApp } from "../project/apps.ts";
+import { type ProvidedCapabilities, providedByApp } from "../project/offers.ts";
+import { probe } from "../project/run.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { add, installUiPackages } from "./add.ts";
 import { remove } from "./remove.ts";
@@ -42,6 +47,45 @@ import { type FileChanges, mergeShipped, type UpgradeOptions } from "./upgrade.t
  * (router-basic's Agent) read and write through it; it needs nothing admin-api does not.
  */
 export const UI_COMPONENTS = ["admin-auth-token", "admin-api", "settings-store"] as const;
+
+/**
+ * The capability each default of `UI_COMPONENTS` stands for: another provider of it, in every App,
+ * takes its place. admin-api stands for none: the dashboard reads its own API.
+ */
+export const UI_DEFAULT_FOR: Readonly<Partial<Record<(typeof UI_COMPONENTS)[number], string>>> = {
+  "admin-auth-token": "admin.auth",
+  "settings-store": "settings",
+};
+
+/**
+ * The `UI_COMPONENTS` a project on `targets` lacks, in order, given the names it has (`present`:
+ * installed, or chosen for a new project) and what it provides per App (`provided`). A default is
+ * not missing when it is present, or when its capability is provided in each of the project's Apps
+ * (the dashboard needs it in each: on Cloudflare admin-api's Worker half requires `admin.auth` too).
+ * Provided in some of them only, it is refused: the default goes in every App, and would be a second
+ * provider where one is, which no one chose.
+ */
+export function missingUiComponents(present: readonly string[], targets: readonly string[], provided: ProvidedCapabilities): string[] {
+  const apps: AppName[] = hasWorkerApp(targets) ? ["default", "worker"] : ["default"];
+  return UI_COMPONENTS.filter((component) => {
+    if (present.includes(component)) return false;
+    const capability = UI_DEFAULT_FOR[component];
+    if (capability === undefined) return true;
+    const lacking = apps.filter((app) => !provided[app].has(capability));
+    if (lacking.length === apps.length) return true;
+    if (lacking.length === 0) return false;
+    const label = (list: AppName[]) => list.map((app) => APP_LABEL[app]).join(" and ");
+    throw new CliError(
+      `the dashboard needs ${capability} in every App, and it is provided in ${label(apps.filter((app) => !lacking.includes(app)))} but not in ${label(lacking)}: ` +
+        `${component} would provide it in each, a second provider where one is. Provide ${capability} in ${label(lacking)} too, or use ${component} instead of yours, then run it again`,
+    );
+  });
+}
+
+/** Whether `missingUiComponents` needs to know what the project provides: a default is not present. */
+function needsComposition(present: readonly string[]): boolean {
+  return UI_COMPONENTS.some((component) => UI_DEFAULT_FOR[component] !== undefined && !present.includes(component));
+}
 
 export interface UiOptions {
   /** Skip the confirmation. */
@@ -119,7 +163,7 @@ export async function installDashboardPackages(projectDir: string, quiet = false
 export function uiNext(): string {
   return [
     "The dashboard:",
-    "  pikit configure --generate PIKIT_ADMIN_TOKEN   # the operator's token, which the dashboard asks for",
+    "  pikit configure                            # your admin.auth provider's credentials",
     `  cd ${DASHBOARD_DIR} && bun run build             # then \`pikit dev\` serves it at /admin/ (\`pikit up\` builds it on Cloudflare)`,
     `  cd ${DASHBOARD_DIR} && bun run dev               # or hot reload on :5173, against a running app`,
   ].join("\n");
@@ -131,9 +175,10 @@ export async function uiOn(projectDir: string, options: UiOptions = {}): Promise
   const { registry, name: registryName } = defaultRegistry(projectDir, project);
   const files = project.dashboard === undefined ? shippedBy(registry) : undefined;
   if (files !== undefined) checkDashboardFree(projectDir, project, options.force === true);
-  const missing = UI_COMPONENTS.filter((component) => !(component in project.components));
+  const present = Object.keys(project.components);
+  const missing = missingUiComponents(present, project.targets, needsComposition(present) ? await composedForUi(projectDir, present) : { default: new Set(), worker: new Set() });
   if (files === undefined && missing.length === 0) {
-    log.ok(`the project has a UI: ${DASHBOARD_DIR}/, with ${UI_COMPONENTS.join(", ")}`);
+    log.ok(`the project has a UI: ${DASHBOARD_DIR}/, with admin-api, ${Object.values(UI_DEFAULT_FOR).join(" and ")}`);
     return;
   }
 
@@ -172,6 +217,28 @@ export async function uiOn(projectDir: string, options: UiOptions = {}): Promise
     writeProjectManifest(projectDir, current);
   }
   log.info(`\n${uiNext()}`);
+}
+
+/**
+ * What the project's Apps provide, as `pikit.config.ts` composes them (`providedByApp`). When it does
+ * not compose, `ui on` is refused: whether a default's capability is provided is unknown, and
+ * neither its provider nor a second one is guessed.
+ */
+async function composedForUi(projectDir: string, present: readonly string[]): Promise<ProvidedCapabilities> {
+  let error: string;
+  try {
+    const result = await probe(projectDir);
+    const provided = providedByApp(result);
+    if (provided !== undefined) return provided;
+    error = result.ok ? "" : result.error;
+  } catch (thrown) {
+    error = thrown instanceof Error ? thrown.message : String(thrown);
+  }
+  const defaults = Object.entries(UI_DEFAULT_FOR).filter(([component]) => !present.includes(component));
+  throw new CliError(
+    `pikit.config.ts does not compose (${error}), so whether the project provides ${defaults.map(([, capability]) => capability).join(" and ")} is unknown: ` +
+      `fix it (\`pikit doctor\`), or add their providers yourself (\`pikit add ${defaults.map(([component]) => component).join(" ")}\`), then run \`pikit ui on\` again`,
+  );
 }
 
 export async function uiOff(projectDir: string, options: UiOptions = {}): Promise<void> {

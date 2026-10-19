@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import type { Manifest } from "../registry/manifest.ts";
 import { declaredByApp } from "./apps.ts";
-import { dependencyOrder, offeredProviders, type ProvidedCapabilities, providedByApp, providedByManifests, unchosenProviders, withOffers } from "./offers.ts";
+import { dependencyOrder, offeredProviders, type ProvidedCapabilities, providedByApp, providedByManifests, rehomedOffer, unchosenProviders, withOffers } from "./offers.ts";
 import type { ProbeResult } from "./probe.ts";
 import { openRegistry, type Registry } from "./registry-source.ts";
 
@@ -126,7 +126,7 @@ test("a provider is offered in the App that misses it: one that goes only in the
 
 test("with a second provider, nothing is offered for it (the user's choice); the presets named their storage and key-value store, and bring the rest over them", () => {
   const sqlite = registry.manifest("storage-sqlite");
-  const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
+  const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name, provides: ["storage.sql"] } : registry.manifest(name)) } as Registry;
   expect(offeredProviders(two, ["conversations-kv"]).map((o) => o.component)).toEqual(["storage-kv-sql"]);
   const telegram = registry.preset("telegram");
   expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["wakeups-timers", "outbound-durable"]);
@@ -144,12 +144,35 @@ test("an optional capability with two providers is not offered, and is named as 
 
 test("a required capability with two providers is named with its candidates too: until one is installed the project does not compose", () => {
   const sqlite = registry.manifest("storage-sqlite");
-  const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
-  // The channel's chain needs storage.sql through each provider it brings; with two providers none comes.
-  expect(offeredProviders(two, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["storage-kv-sql", "wakeups-timers", "outbound-durable"]);
-  expect(unchosenProviders(two, ["channel-telegram"], [], ["server"])).toEqual([
+  const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name, provides: ["storage.sql"] } : registry.manifest(name)) } as Registry;
+  // The key-value store needs storage.sql, which two components provide: none comes, both named.
+  expect(offeredProviders(two, ["conversations-kv"], [], ["server"]).map((o) => o.component)).toEqual(["storage-kv-sql"]);
+  expect(unchosenProviders(two, ["conversations-kv"], [], ["server"])).toEqual([
     { capability: "storage.sql", why: "required", for: "storage-kv-sql", providers: ["storage-sqlite", "storage-postgres"] },
-    { capability: "storage.sql", why: "required", for: "outbound-durable", providers: ["storage-sqlite", "storage-postgres"] },
+  ]);
+});
+
+test("a narrow capability's one provider is brought, and serves the portable one it provides too: providers first, nothing left to choose", () => {
+  // As storage.sqlite (SQLite's dialect) beside storage.sql: the outbox needs the narrow one, which only
+  // the SQLite provider has; the key-value store the portable one, which a Postgres provider has too.
+  const kv = { name: "storage-kv-x", targets: ["server"], provides: ["storage.kv"], requires: { pikit: "0.0.0", capabilities: ["storage.sql"] } };
+  const outbox = { name: "outbound-x", targets: ["server"], provides: ["outbound.queue"], requires: { pikit: "0.0.0", capabilities: ["storage.sqlite"] } };
+  const channel = { name: "channel-x", targets: ["server"], requires: { pikit: "0.0.0", capabilities: ["storage.kv"] }, optional: { capabilities: ["outbound.queue"] } };
+  const sqlite = { name: "storage-lite", targets: ["server"], provides: ["storage.sql", "storage.sqlite"] };
+  const postgres = { name: "storage-pg", targets: ["server"], provides: ["storage.sql"] };
+  const conversations = { name: "conversations-x", targets: ["server"], requires: { pikit: "0.0.0", capabilities: ["storage.kv"] } };
+  const fake = fakeRegistry([kv, outbox, channel, conversations, sqlite, postgres]);
+  expect(offeredProviders(fake, ["channel-x"], [], ["server"])).toEqual([
+    { component: "storage-lite", capability: "storage.sqlite", for: "outbound-x", why: "required" },
+    { component: "storage-kv-x", capability: "storage.kv", for: "channel-x", why: "required" },
+    { component: "outbound-x", capability: "outbound.queue", for: "channel-x", why: "recommended" },
+  ]);
+  expect(unchosenProviders(fake, ["channel-x"], [], ["server"])).toEqual([]);
+  expect(withOffers(fake, ["channel-x"], ["server"]).order).toEqual(["storage-lite", "storage-kv-x", "outbound-x", "channel-x"]);
+  // Without the outbox's need, the portable one stays the user's choice.
+  expect(offeredProviders(fake, ["conversations-x"], [], ["server"]).map((o) => o.component)).toEqual(["storage-kv-x"]);
+  expect(unchosenProviders(fake, ["conversations-x"], [], ["server"])).toEqual([
+    { capability: "storage.sql", why: "required", for: "storage-kv-x", providers: ["storage-lite", "storage-pg"] },
   ]);
 });
 
@@ -232,4 +255,92 @@ test("several names install providers first, by what each declares; otherwise in
   expect(order(["channel-telegram", "storage-kv-sql", "storage-sqlite"])).toEqual(["storage-sqlite", "storage-kv-sql", "channel-telegram"]);
   expect(order(["conversations-kv", "storage-sqlite", "storage-kv-sql"])).toEqual(["storage-sqlite", "storage-kv-sql", "conversations-kv"]);
   expect(order(["tool-read", "log-events", "tool-bash"])).toEqual(["tool-read", "log-events", "tool-bash"]);
+});
+
+/** memory.store, a contract a registry's component declares (`declares.capabilities`), not the kit's. */
+const MEMORY = { mode: "single", stability: "experimental", summary: "What the agent remembers of a person." };
+
+test("a capability a registry declares resolves as the kit's: an offered component that requires it brings its one provider, on the targets, in its App", () => {
+  const half = (provides: string[], requires: string[] = []) => ({ provides, requires, optional: [] });
+  const channel = { name: "channel-x", optional: { capabilities: ["outbound.queue"] } };
+  // The outbox requires memory.store, in its object's half only.
+  const outbox = { name: "outbound-x", provides: ["outbound.queue"], requires: { pikit: "0.0.0", capabilities: ["memory.store"] } };
+  const memory = { name: "memory-sql", provides: ["memory.store"], declares: { kinds: ["memory"], capabilities: { "memory.store": MEMORY } } };
+  const one = fakeRegistry([channel, outbox, memory]);
+  expect(offeredProviders(one, ["channel-x"], [], ["durable"])).toEqual([
+    { component: "memory-sql", capability: "memory.store", for: "outbound-x", why: "required" },
+    { component: "outbound-x", capability: "outbound.queue", for: "channel-x", why: "recommended" },
+  ]);
+  expect(withOffers(one, ["channel-x"], ["durable"]).order).toEqual(["memory-sql", "outbound-x", "channel-x"]);
+
+  // Two providers: none comes, both named.
+  const two = fakeRegistry([channel, outbox, memory, { name: "memory-kv", provides: ["memory.store"], declares: { capabilities: { "memory.store": MEMORY } } }]);
+  expect(offeredProviders(two, ["channel-x"], [], ["durable"]).map((o) => o.component)).toEqual(["outbound-x"]);
+  expect(unchosenProviders(two, ["channel-x"], [], ["durable"])).toEqual([{ capability: "memory.store", why: "required", for: "outbound-x", providers: ["memory-sql", "memory-kv"] }]);
+
+  // One that does not run on the target is no candidate: the other is the one provider.
+  const serverOnly = fakeRegistry([channel, outbox, memory, { name: "memory-file", targets: ["server"], provides: ["memory.store"] }]);
+  expect(offeredProviders(serverOnly, ["channel-x"], [], ["durable"]).map((o) => o.component)).toEqual(["memory-sql", "outbound-x"]);
+  expect(unchosenProviders(serverOnly, ["channel-x"], [], ["durable"])).toEqual([]);
+
+  // One that provides it in the Worker's App only does not serve the object's half that needs it.
+  const edge = { name: "memory-edge", provides: ["memory.store"], apps: { worker: "worker" }, halves: { default: half([]), worker: half(["memory.store"]) } };
+  const apps = fakeRegistry([channel, outbox, memory, edge]);
+  expect(offeredProviders(apps, ["channel-x"], [], ["durable"]).map((o) => o.component)).toEqual(["memory-sql", "outbound-x"]);
+  // The Worker's half that needs it gets that one, named for its App.
+  const workerOutbox = { ...outbox, apps: { worker: "worker" }, halves: { default: half(["outbound.queue"]), worker: half([], ["memory.store"]) } };
+  expect(offeredProviders(fakeRegistry([channel, workerOutbox, memory, edge]), ["channel-x"], [], ["durable"])).toEqual([
+    { component: "memory-edge", capability: "memory.store", for: "outbound-x", why: "required", app: "worker" },
+    { component: "outbound-x", capability: "outbound.queue", for: "channel-x", why: "recommended" },
+  ]);
+});
+
+test("a capability a registry declares `offer` is offered to what can use it; a keyed one, or one not marked, is not", () => {
+  const tool = { name: "tool-x", optional: { capabilities: ["memory.store"] } };
+  const provider = (offer: boolean, mode = "single") => ({
+    name: "memory-sql",
+    provides: ["memory.store"],
+    declares: { kinds: ["memory"], capabilities: { "memory.store": { ...MEMORY, mode, ...(offer && { offer: true as const }) } } },
+  });
+  expect(offeredProviders(fakeRegistry([tool, provider(true)]), ["tool-x"], [], ["durable"])).toEqual([
+    { component: "memory-sql", capability: "memory.store", for: "tool-x", why: "recommended" },
+  ]);
+  expect(offeredProviders(fakeRegistry([tool, provider(false)]), ["tool-x"], [], ["durable"])).toEqual([]);
+  expect(offeredProviders(fakeRegistry([tool, provider(true, "keyed")]), ["tool-x"], [], ["durable"])).toEqual([]);
+});
+
+test("a provider whose component was declined stays for an accepted one that still requires what it provides, never for an optional need", () => {
+  const half = (provides: string[], requires: string[] = [], optional: string[] = []) => ({ provides, requires, optional });
+  const fake = fakeRegistry([
+    { name: "channel-x", targets: ["server", "durable"], requires: { pikit: "0.0.0", capabilities: ["storage.kv"] }, optional: { capabilities: ["outbound.queue"] } },
+    { name: "storage-kv-x", targets: ["server", "durable"], provides: ["storage.kv"], requires: { pikit: "0.0.0", capabilities: ["storage.sql"] } },
+    { name: "outbound-x", targets: ["server", "durable"], provides: ["outbound.queue"], requires: { pikit: "0.0.0", capabilities: ["storage.sqlite"] } },
+    { name: "storage-lite", targets: ["server", "durable"], provides: ["storage.sql", "storage.sqlite"] },
+    { name: "storage-pg", targets: ["server", "durable"], provides: ["storage.sql"] },
+    { name: "tool-y", targets: ["server", "durable"], optional: { capabilities: ["storage.sql"] } },
+    // Requires storage.sql in its Worker half only.
+    { name: "edge-x", targets: ["durable"], apps: { worker: "worker" }, halves: { default: half([]), worker: half([], ["storage.sql"]) }, requires: { pikit: "0.0.0", capabilities: ["storage.sql"] } },
+    { name: "storage-both", targets: ["durable"], provides: ["storage.sql"], apps: { worker: "default" } },
+  ]);
+  const [sqlite, kv, outbox] = offeredProviders(fake, ["channel-x"], [], ["server"]);
+  expect([sqlite?.component, kv?.component, outbox?.component]).toEqual(["storage-lite", "storage-kv-x", "outbound-x"]);
+  const sqliteOffer = sqlite as NonNullable<typeof sqlite>;
+  const having = (names: string[], targets = ["server"]) => providedByManifests(names.map((n) => fake.manifest(n)), targets);
+
+  // The outbox declined, the key-value store accepted: SQLite stays, for the store's storage.sql.
+  expect(rehomedOffer(fake, sqliteOffer, ["channel-x", "storage-kv-x"], ["server"], having(["channel-x", "storage-kv-x"]))).toEqual({
+    component: "storage-lite", capability: "storage.sql", for: "storage-kv-x", why: "required",
+  });
+  // Both declined: nothing accepted needs it. Provided already: nothing to keep it for.
+  expect(rehomedOffer(fake, sqliteOffer, ["channel-x"], ["server"], having(["channel-x"]))).toBeUndefined();
+  expect(rehomedOffer(fake, sqliteOffer, ["channel-x", "storage-kv-x"], ["server"], having(["channel-x", "storage-kv-x", "storage-pg"]))).toBeUndefined();
+  // An optional use does not bring back what was declined.
+  expect(rehomedOffer(fake, sqliteOffer, ["tool-y"], ["server"], having(["tool-y"]))).toBeUndefined();
+
+  // Per App: one only in the default App does not serve a Worker half's need; one in both does, for the Worker's App.
+  const edgeNeeds = having(["edge-x"], ["durable"]);
+  expect(rehomedOffer(fake, { ...sqliteOffer }, ["edge-x"], ["durable"], edgeNeeds)).toBeUndefined();
+  expect(rehomedOffer(fake, { ...sqliteOffer, component: "storage-both" }, ["edge-x"], ["durable"], edgeNeeds)).toEqual({
+    component: "storage-both", capability: "storage.sql", for: "edge-x", why: "required", app: "worker",
+  });
 });

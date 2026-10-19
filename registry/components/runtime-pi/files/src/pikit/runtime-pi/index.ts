@@ -152,7 +152,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
     setup(pikit, config) {
       // The App's models, from start (a conversation's title too, through model.complete).
       let models: Models | undefined;
-      const sql = pikit.use("storage.sql");
+      const sql = pikit.use("storage.sqlite");
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
       const credentials = pikit.useOptional("model.credentials");

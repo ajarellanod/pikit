@@ -153,17 +153,23 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
   if (isDashboardRequest(message.id)) {
     throw new Error(`admitInbound: the message id "${message.id}" starts with "${DASHBOARD_REQUEST_PREFIX}", which only the dashboard's own messages may; a channel never admits one`);
   }
-  const normalized = await ctx.run("inbound.normalize", message);
-  if (normalized instanceof Halt) return halted("inbound.normalize", normalized);
-  // A stage may rewrite the text or enrich the message; which message and conversation it is stays.
-  for (const field of ["id", "channel", "conversationId"] as const) {
-    if (normalized[field] !== message[field]) {
-      throw new Error(`inbound.normalize: a stage changed the message's ${field} ("${message[field]}" → "${normalized[field]}"); stages keep id, channel and conversationId`);
+  // Compare with values captured before any stage runs, never with the object a stage may mutate.
+  const identity = { id: message.id, channel: message.channel, conversationId: message.conversationId };
+  const keepIdentity = (candidate: InboundMessage, pipeline: "inbound.normalize" | "route.resolve"): void => {
+    for (const field of ["id", "channel", "conversationId"] as const) {
+      if (candidate[field] !== identity[field]) {
+        throw new Error(`${pipeline}: a stage changed the message's ${field} ("${identity[field]}" to "${candidate[field]}"); stages keep id, channel and conversationId`);
+      }
     }
-  }
+  };
+  const normalized = await ctx.run("inbound.normalize", { ...message });
+  if (normalized instanceof Halt) return halted("inbound.normalize", normalized);
+  keepIdentity(normalized, "inbound.normalize");
 
   const routed = await ctx.run("route.resolve", { message: normalized });
   if (routed instanceof Halt) return halted("route.resolve", routed);
+  keepIdentity(normalized, "route.resolve");
+  keepIdentity(routed.message, "route.resolve");
   const decision = routed.decision;
   if (decision === undefined) {
     ctx.logger.error("no route.resolve stage decided: install a router (router-basic)", { channel: message.channel, message: message.id });

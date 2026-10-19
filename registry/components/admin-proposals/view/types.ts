@@ -102,7 +102,7 @@ export interface ProposalsStatus {
 }
 
 export interface ApproveBody {
-  head?: string;
+  head: string;
   override?: boolean;
 }
 

@@ -29,19 +29,13 @@ test("up builds, starts detached and waits for the healthcheck", async () => {
   expect(calls).toEqual([{ command: ["docker", "compose", "up", "--detach", "--build", "--wait"], cwd: "/srv/my-agent", capture: false }]);
 });
 
-test("with self-improvement on a server (proposals-local installed), every command enables the deployer's profile", async () => {
+test("no component is special: proposals-local without a Compose file adds nothing (its own Compose file turns the deployer on)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pikit-commands-"));
   dirs.push(dir);
   writeFileSync(join(dir, "pikit.json"), JSON.stringify({ components: { "proposals-local": {} } }));
   const { calls, run } = recorder();
   await up({ cwd: dir, run });
-  await down({ cwd: dir, run });
-  await logs({ cwd: dir, run });
-  expect(calls.map((call) => call.command.join(" "))).toEqual([
-    "docker compose --profile self-improvement up --detach --build --wait",
-    "docker compose --profile self-improvement down",
-    "docker compose --profile self-improvement logs --no-log-prefix",
-  ]);
+  expect(calls.map((call) => call.command.join(" "))).toEqual(["docker compose up --detach --build --wait"]);
 });
 
 /**
@@ -109,7 +103,7 @@ test("a component's Compose file goes after compose.yaml in every command but ex
   await logs({ cwd: dir, run });
   await status({ cwd: dir, run, fetch: (async () => new Response("")) as unknown as typeof fetch });
   await exec({ cwd: dir, run, command: ["true"] });
-  const files = "-f compose.yaml -f src/pikit/expose-a/compose.yaml -f src/pikit/tool-b/compose.yml --profile self-improvement";
+  const files = "-f compose.yaml -f src/pikit/expose-a/compose.yaml -f src/pikit/tool-b/compose.yml";
   expect(calls.map((call) => call.command.join(" "))).toEqual([
     `docker compose ${files} up --detach --build --wait`,
     `docker compose ${files} down`,

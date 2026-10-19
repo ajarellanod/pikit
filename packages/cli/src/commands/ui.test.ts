@@ -35,23 +35,32 @@ const NOTHING = { provides: [], requires: [], optional: [] };
 /** How each stand-in goes in a Cloudflare project's Apps, as the real ones' manifests say. */
 const APPS: Record<string, Record<string, unknown>> = {
   "admin-auth-token": { apps: { worker: "default" } },
+  "admin-auth-sso": { apps: { worker: "default" } },
+  "settings-file": { apps: { worker: "default" } },
   "admin-api": { apps: { worker: "worker" }, halves: { default: NOTHING, worker: NOTHING } },
   "settings-store": { apps: { worker: "worker" }, halves: { default: NOTHING, worker: NOTHING } },
 };
 
+/** Other providers of what admin-auth-token and settings-store stand for, in both Apps on Cloudflare: their code provides it. */
+const ALTERNATIVES: Record<string, string> = { "admin-auth-sso": "admin.auth", "settings-file": "settings" };
+const PROVIDER = (name: string, capability: string) =>
+  `import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({\n  name: "${name}",\n  setup(pikit) {\n    pikit.provide("${capability}", {});\n  },\n});\n`;
+
 /**
  * A registry with stand-ins for admin-auth-token, admin-api and settings-store (on both targets, each
- * in its Apps on Cloudflare), `log-viewer` (a component with a view and a Settings section), and a
- * dashboard of `files`.
+ * in its Apps on Cloudflare), other providers of admin.auth and settings (`ALTERNATIVES`), `log-viewer`
+ * (a component with a view and a Settings section), and a dashboard of `files`.
  */
 function registry(files: Record<string, string>): string {
   const root = temp();
   const index: { version: 1; components: Record<string, unknown> } = { version: 1, components: {} };
   const targets = ["server", "durable"];
-  for (const name of ["admin-auth-token", "admin-api", "settings-store", "log-viewer"]) {
+  for (const name of ["admin-auth-token", "admin-api", "settings-store", "log-viewer", ...Object.keys(ALTERNATIVES)]) {
     const dir = join(root, "components", name);
     mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
-    writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), `${INDEX(name)}${APPS[name]?.halves !== undefined ? `\n${WORKER_HALF(name)}` : ""}`);
+    const alternative = ALTERNATIVES[name];
+    const code = alternative === undefined ? `${INDEX(name)}${APPS[name]?.halves !== undefined ? `\n${WORKER_HALF(name)}` : ""}` : PROVIDER(name, alternative);
+    writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), code);
     const view = name === "log-viewer" ? { view: "view", settings: "settings" } : {};
     if (name === "log-viewer") {
       mkdirSync(join(dir, "view"));
@@ -63,7 +72,7 @@ function registry(files: Record<string, string>): string {
       join(dir, "component.json"),
       JSON.stringify({
         name, version: "0.1.0", description: name, targets, requires: { pikit: "0.0.0", capabilities: [] },
-        optional: { capabilities: [] }, provides: [], ...APPS[name], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...view,
+        optional: { capabilities: [] }, provides: alternative === undefined ? [] : [alternative], ...APPS[name], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...view,
       }),
     );
     index.components[name] = { version: "0.1.0", description: name, targets, path: `components/${name}` };
@@ -316,5 +325,81 @@ test("without a UI a component's view is not installed; ui on adds it, ui off ta
   expect(off.code).toBe(0);
   expect(manifest(dir).components["log-viewer"].files[view]).toBeUndefined();
   expect(manifest(dir).components["log-viewer"].files[section]).toBeUndefined();
+  expect(snapshot(dir)).toEqual(before);
+});
+
+test("ui on over another provider of admin.auth: admin-api and settings-store only, recorded as the dashboard's; ui off keeps the provider you had", async () => {
+  const dir = project(registry(DASHBOARD));
+  expect((await runCli(["add", "admin-auth-sso", "--yes"], dir)).code).toBe(0);
+
+  const on = await runCli(["ui", "on", "--yes"], dir);
+  expect(on.code).toBe(0);
+  expect(Object.keys(manifest(dir).components).sort()).toEqual(["admin-api", "admin-auth-sso", "settings-store"]);
+  expect(manifest(dir).dashboard.components).toEqual(["admin-api", "settings-store"]);
+  const again = await runCli(["ui", "on", "--yes"], dir);
+  expect(again.out).toContain("the project has a UI");
+  expect(again.code).toBe(0);
+
+  expect((await runCli(["ui", "off", "--yes"], dir)).code).toBe(0);
+  expect(Object.keys(manifest(dir).components)).toEqual(["admin-auth-sso"]);
+});
+
+test("ui on, on Cloudflare, over another provider of settings in both Apps: admin-auth-token and admin-api only; ui off keeps it", async () => {
+  const dir = project(registry(DASHBOARD), ["durable"]);
+  expect((await runCli(["add", "settings-file", "--yes"], dir)).code).toBe(0);
+
+  const on = await runCli(["ui", "on", "--yes"], dir);
+  expect(on.code).toBe(0);
+  expect(manifest(dir).dashboard.components).toEqual(["admin-auth-token", "admin-api"]);
+  expect(manifest(dir).components["settings-store"]).toBeUndefined();
+
+  expect((await runCli(["ui", "off", "--yes"], dir)).code).toBe(0);
+  expect(Object.keys(manifest(dir).components)).toEqual(["settings-file"]);
+});
+
+/** Lists a component of the project's own in `app` of its pikit.config.ts, providing `capabilities`: composed, not installed. */
+function provideOwn(dir: string, app: "default" | "worker", ...capabilities: string[]): void {
+  const head = app === "default" ? "export default defineApp({\n  components: [\n" : "export const worker = defineApp({\n  components: [\n";
+  const own = `    defineComponent({ name: "mine-${app}", setup(pikit) { ${capabilities.map((c) => `pikit.provide("${c}", {});`).join(" ")} } }),\n`;
+  const config = read(dir, "pikit.config.ts").replace('import { defineApp } from "@pikit/core";', 'import { defineApp, defineComponent } from "@pikit/core";');
+  writeFileSync(join(dir, "pikit.config.ts"), config.replace(head, `${head}${own}`));
+}
+
+test("ui on, on Cloudflare, refuses a capability provided in one App only: the default would be a second provider in the other; nothing is written", async () => {
+  for (const [app, capability] of [["worker", "admin.auth"], ["default", "settings"]] as const) {
+    const dir = project(registry(DASHBOARD), ["durable"]);
+    provideOwn(dir, app, capability);
+    const before = snapshot(dir);
+
+    const refused = await runCli(["ui", "on", "--yes"], dir);
+
+    expect(refused.err).toContain(`the dashboard needs ${capability} in every App`);
+    expect(refused.err).toContain(app === "worker" ? "but not in the default App" : "but not in the Worker's App");
+    expect(refused.code).toBe(1);
+    expect(snapshot(dir)).toEqual(before);
+  }
+});
+
+test("ui on with your own provider of both, in every App: admin-api alone", async () => {
+  const dir = project(registry(DASHBOARD), ["durable"]);
+  for (const app of ["default", "worker"] as const) provideOwn(dir, app, "admin.auth", "settings");
+
+  const on = await runCli(["ui", "on", "--yes"], dir);
+  expect(on.code).toBe(0);
+  expect(Object.keys(manifest(dir).components)).toEqual(["admin-api"]);
+  expect(manifest(dir).dashboard.components).toEqual(["admin-api"]);
+});
+
+test("ui on refuses when pikit.config.ts does not compose: whether admin.auth and settings are provided is unknown, and nothing is guessed", async () => {
+  const dir = project(registry(DASHBOARD));
+  writeFileSync(join(dir, "pikit.config.ts"), `${read(dir, "pikit.config.ts")}\nthrow new Error("broken on purpose");\n`);
+  const before = snapshot(dir);
+
+  const refused = await runCli(["ui", "on", "--yes"], dir);
+
+  expect(refused.err).toContain("pikit.config.ts does not compose");
+  expect(refused.err).toContain("broken on purpose");
+  expect(refused.err).toContain("pikit add admin-auth-token settings-store");
+  expect(refused.code).toBe(1);
   expect(snapshot(dir)).toEqual(before);
 });

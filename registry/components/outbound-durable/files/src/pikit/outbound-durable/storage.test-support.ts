@@ -49,6 +49,7 @@ export function testStorage(path: string) {
     name: "test-storage",
     setup(pikit) {
       pikit.provide("storage.sql", database);
+      pikit.provide("storage.sqlite", database);
       return {
         start() {
           db = new DatabaseSync(path);

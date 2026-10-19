@@ -390,7 +390,8 @@ export default defineComponent({
         if (pull.base.ref !== pull.base.repo.default_branch) {
           return refused("wrong_base", `#${number} would merge into ${pull.base.ref}, not ${pull.base.repo.default_branch}, the default branch`);
         }
-        if (request.head !== undefined && request.head !== pull.head.sha) return refused("moved", `${id} changed since you read it: read it again`);
+        // Only the head the operator read: none (or anything else) is not it, override or not.
+        if (request.head !== pull.head.sha) return refused("moved", `${id} changed since you read it: read it again`);
         const { checks } = await ask(() => github.checks(token, pull.head.sha, signal), TOKEN, repository);
         const override = request.override === true;
         if (checks.state !== "passing" && !override) {

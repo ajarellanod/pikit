@@ -9,8 +9,9 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DeployerState } from "@pikit/contracts/deployer";
 import { type Runner, spawnRunner } from "./commands.ts";
-import { createDeployer, type DeployerState, type DockerSetup, runDeployer } from "./deployer.ts";
+import { composeFiles, createDeployer, type DockerSetup, runDeployer } from "./deployer.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -24,9 +25,13 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return result.stdout.trim();
 }
 
-/** Writes `files` in `dir`, commits them all, and resolves with the commit. */
-async function commit(dir: string, files: Record<string, string>, message: string): Promise<string> {
+/** Writes `files` in `dir` (`null` deletes one), commits them all, and resolves with the commit. */
+async function commit(dir: string, files: Record<string, string | null>, message: string): Promise<string> {
   for (const [path, text] of Object.entries(files)) {
+    if (text === null) {
+      rmSync(join(dir, path));
+      continue;
+    }
     mkdirSync(join(dir, path, ".."), { recursive: true });
     writeFileSync(join(dir, path), text);
   }
@@ -44,7 +49,19 @@ async function server(options: { exits?: Record<string, number>; healthy?: boole
   const checks = join(root, "checks");
   for (const dir of [project, state, checks]) mkdirSync(dir, { recursive: true });
   await git(project, "init", "--quiet");
-  const first = await commit(project, { "package.json": JSON.stringify({ name: "bot", scripts: { typecheck: "tsc --noEmit" } }), "README.md": "hello\n", "src/a.ts": "export const a = 1;\n", "compose.yaml": "services: {}\n" }, "The project");
+  const first = await commit(
+    project,
+    {
+      "package.json": JSON.stringify({ name: "bot", scripts: { typecheck: "tsc --noEmit" } }),
+      "README.md": "hello\n",
+      "src/a.ts": "export const a = 1;\n",
+      "compose.yaml": "services: {}\n",
+      // A component that runs a service beside the app, as `pikit add` records it.
+      "pikit.json": PIKIT_JSON,
+      "src/pikit/expose-a/compose.yaml": "services: { side: { image: side } }\n",
+    },
+    "The project",
+  );
   const docker: string[] = [];
   const said: string[] = [];
   const run: Runner = async (command, opts) => {
@@ -61,7 +78,7 @@ async function server(options: { exits?: Record<string, number>; healthy?: boole
   const bare = join(state, "project.git");
   const stateFile = () => JSON.parse(readFileSync(join(state, "deployer.json"), "utf8")) as DeployerState;
   /** The steward: clones the proposals repository, commits `files` on `pikit/self/<topic>`, pushes it. */
-  const propose = async (topic: string, files: Record<string, string>, message = `Change ${topic}`) => {
+  const propose = async (topic: string, files: Record<string, string | null>, message = `Change ${topic}`) => {
     const work = join(root, `agent-${topic}-${Math.random().toString(36).slice(2)}`);
     await git(root, "clone", "--quiet", bare, work);
     await git(work, "checkout", "--quiet", "-b", `pikit/self/${topic}`);
@@ -78,6 +95,10 @@ async function server(options: { exits?: Record<string, number>; healthy?: boole
   };
   return { root, project, state, checks, bare, first, docker, said, deployer, stateFile, propose, approve };
 }
+
+/** The project's pikit.json, as `pikit add` writes it. */
+const pikitJson = (components: Record<string, unknown>) => `${JSON.stringify({ version: 1, targets: ["server"], registries: {}, components }, null, 2)}\n`;
+const PIKIT_JSON = pikitJson({ "expose-a": { compose: "src/pikit/expose-a/compose.yaml" }, "deployment-docker": {} });
 
 const SANDBOX = `docker run --rm --user ${process.getuid?.()}:${process.getgid?.()} --env HOME=/tmp --volume my-agent_pikit-checks:`;
 
@@ -211,6 +232,122 @@ test("refused: a change of the deployment's own files, or a branch that moved af
   await s.deployer.pass();
   expect(s.stateFile().outcomes?.[approved]).toMatchObject({ outcome: "failed", message: expect.stringContaining("moved after it was approved") });
   expect(s.docker).toEqual([]);
+});
+
+test("refused before anything runs: a change of a Compose file pikit.json lists, or of that list; the head moved, refused too", async () => {
+  const s = await server();
+  await s.deployer.pass();
+  const refused = async (topic: string, files: Record<string, string | null>, said: string) => {
+    const head = await s.propose(topic, files);
+    s.approve(topic, head);
+    await s.deployer.pass();
+    expect([topic, s.stateFile().outcomes?.[head]]).toEqual([topic, expect.objectContaining({ outcome: "failed", message: expect.stringContaining(said) })]);
+  };
+  const SIDE = "src/pikit/expose-a/compose.yaml";
+  // A listed file, changed, removed, or moved: `--no-renames` names the old path too.
+  await refused("edit-side", { [SIDE]: "services: { side: { image: side, privileged: true } }\n" }, `it changes the deployment itself (${SIDE})`);
+  await refused("remove-side", { [SIDE]: null }, `it changes the deployment itself (${SIDE})`);
+  await refused("move-side", { [SIDE]: null, "src/pikit/expose-a/side.yaml": "services: { side: { image: side } }\n" }, `it changes the deployment itself (${SIDE})`);
+  // The list: a Compose file added (proposals-local's, which turns this deployer on), one dropped, another file named one.
+  const OVERRIDE = "src/pikit/proposals-local/compose.yaml";
+  await refused(
+    "turn-on",
+    { [OVERRIDE]: "services:\n  deployer:\n    profiles: !reset []\n", "pikit.json": pikitJson({ "expose-a": { compose: SIDE }, "deployment-docker": {}, "proposals-local": { compose: OVERRIDE } }) },
+    `it changes the deployment itself (${OVERRIDE}, the Compose files pikit.json lists: [${SIDE}] on main, [${SIDE}, ${OVERRIDE}] on the branch)`,
+  );
+  await refused("drop-side", { "pikit.json": pikitJson({ "expose-a": {}, "deployment-docker": {} }) }, `the Compose files pikit.json lists: [${SIDE}] on main, [] on the branch`);
+  await refused("name-a-file", { "pikit.json": pikitJson({ "expose-a": { compose: SIDE }, "deployment-docker": { compose: "src/a.ts" } }) }, `[${SIDE}, src/a.ts] on the branch`);
+  // A list that cannot be read is never taken as empty.
+  await refused("not-json", { "pikit.json": "{" }, "its Compose files cannot be told (pikit.json is not JSON)");
+  await refused("outside", { "pikit.json": pikitJson({ "expose-a": { compose: "../compose.yaml" } }) }, 'lists a Compose file that is not a project-relative path ("../compose.yaml")');
+  await refused("absolute", { "pikit.json": pikitJson({ "expose-a": { compose: "/srv/compose.yaml" } }) }, "not a project-relative path");
+  await refused("not-text", { "pikit.json": pikitJson({ "expose-a": { compose: 5 } }) }, "not a project-relative path (5)");
+  await refused("list-of-components", { "pikit.json": `${JSON.stringify({ components: [] })}\n` }, "pikit.json's components is not an object");
+  // The approved head, never what the branch holds later.
+  const approved = await s.propose("moved", { "a.txt": "a\n" });
+  s.approve("moved", approved);
+  await s.propose("moved", { "b.txt": "b\n" });
+  await s.deployer.pass();
+  expect(s.stateFile().outcomes?.[approved]).toMatchObject({ outcome: "failed", message: expect.stringContaining("moved after it was approved") });
+  // Nothing ran: no check, no build, no restart.
+  expect(s.docker).toEqual([]);
+  expect(await git(s.project, "rev-parse", "main")).toBe(s.first);
+});
+
+test("a listed Compose file with an odd name (a leading space, a tab, non-ASCII) is matched as it is, never quoted or trimmed", async () => {
+  const s = await server();
+  const ODD = " odd ñ\t.yaml";
+  await commit(s.project, { [ODD]: "services: {}\n", "pikit.json": pikitJson({ "expose-a": { compose: "src/pikit/expose-a/compose.yaml" }, "tool-o": { compose: ODD } }) }, "An odd name");
+  await s.deployer.pass();
+  const head = await s.propose("odd", { [ODD]: "services: { side: { privileged: true } }\n" });
+  s.approve("odd", head);
+  await s.deployer.pass();
+  expect(s.stateFile().outcomes?.[head]).toMatchObject({ outcome: "failed", message: expect.stringContaining(`it changes the deployment itself (${ODD})`) });
+  expect(s.docker).toEqual([]);
+});
+
+test("a newline in a Compose path cannot disguise a different list of files", async () => {
+  const s = await server();
+  const combined = "A.yaml\nB.yaml";
+  await commit(s.project, {
+    "A.yaml": "services: {}\n",
+    "B.yaml": "services: {}\n",
+    [combined]: "services: {}\n",
+    "pikit.json": pikitJson({ a: { compose: "A.yaml" }, b: { compose: "B.yaml" } }),
+  }, "Files with ambiguous joined names");
+  await s.deployer.pass();
+  const head = await s.propose("newline", { "pikit.json": pikitJson({ a: { compose: combined } }) });
+  s.approve("newline", head);
+  await s.deployer.pass();
+  expect(s.stateFile().outcomes?.[head]).toMatchObject({ outcome: "failed", message: expect.stringContaining("it changes the deployment itself") });
+  expect(s.docker).toEqual([]);
+});
+
+test("main's list against the branch's: one an operator changed since the branch left main is refused, saying both", async () => {
+  const s = await server();
+  await s.deployer.pass();
+  const head = await s.propose("stale", { "src/b.ts": "export const b = 1;\n" });
+  await commit(s.project, { "pikit.json": pikitJson({ "expose-a": { compose: "src/pikit/expose-a/compose.yaml" }, "deployment-docker": {}, "tool-c": { compose: "src/pikit/tool-c/compose.yaml" } }), "src/pikit/tool-c/compose.yaml": "services: {}\n" }, "Add tool-c");
+  s.approve("stale", head);
+  await s.deployer.pass();
+  expect(s.stateFile().outcomes?.[head]?.message).toContain("[src/pikit/expose-a/compose.yaml, src/pikit/tool-c/compose.yaml] on main, [src/pikit/expose-a/compose.yaml] on the branch");
+  expect(s.docker).toEqual([]);
+});
+
+test("what the merge makes is checked too: two clean edits of pikit.json that change its list together are refused before the checks", async () => {
+  const s = await server();
+  // A hand-edited pikit.json with a key twice: JSON takes the last one.
+  const lines = ['{"components": {', '  "x": {"compose": "X.yaml"},', '  "p1": {},', '  "p2": {},', '  "p3": {},', '  "x": {"compose": "X.yaml"}', "}}"];
+  await commit(s.project, { "pikit.json": `${lines.join("\n")}\n`, "X.yaml": "services: {}\n" }, "By hand");
+  await s.deployer.pass();
+  // The branch drops the second x (still [X.yaml]); main changes the first (still [X.yaml]); merged, [Y.yaml].
+  const head = await s.propose("twice", { "pikit.json": `${lines.with(5, '  "q": {}').join("\n")}\n` });
+  await commit(s.project, { "pikit.json": `${lines.with(1, '  "x": {"compose": "Y.yaml"},').join("\n")}\n` }, "By hand, again");
+  s.approve("twice", head);
+  await s.deployer.pass();
+  expect(s.stateFile().outcomes?.[head]).toMatchObject({ outcome: "failed", message: expect.stringContaining("it changes the deployment itself (the merge's pikit.json lists [Y.yaml], not main's)") });
+  expect(s.docker).toEqual([]);
+});
+
+test("pikit.json's other fields are a proposal's to change: deployed", async () => {
+  const s = await server();
+  await s.deployer.pass();
+  const head = await s.propose("tool", {
+    "pikit.json": pikitJson({ "expose-a": { compose: "src/pikit/expose-a/compose.yaml", version: "0.0.1" }, "deployment-docker": {}, "tool-d": { hooks: { doctor: "src/pikit/tool-d/doctor.ts" } } }),
+    "src/pikit/tool-d/index.ts": "export default {};\n",
+  });
+  s.approve("tool", head);
+  await s.deployer.pass();
+  expect(s.stateFile().outcomes?.[head]).toMatchObject({ outcome: "deployed" });
+  expect(s.docker.some((line) => line.startsWith("docker build"))).toBe(true);
+});
+
+test("composeFiles: pikit.json's Compose files in its order; none without components; anything unreadable throws", () => {
+  expect(composeFiles(pikitJson({ a: { compose: "src/pikit/a/compose.yaml" }, b: {}, c: { compose: "src/pikit/c/c.yml" } }))).toEqual(["src/pikit/a/compose.yaml", "src/pikit/c/c.yml"]);
+  expect(composeFiles("{}")).toEqual([]);
+  for (const text of ["", "null", "[]", '{"components": null}', '{"components": {"a": null}}', '{"components": {"a": {"compose": ""}}}', '{"components": {"a": {"compose": "src/./a.yaml"}}}', '{"components": {"a": {"compose": "src\\\\a.yaml"}}}', '{"components": {"a": {"compose": "src//a.yaml"}}}']) {
+    expect(() => composeFiles(text)).toThrow();
+  }
 });
 
 test("uncommitted changes in the project: the approval waits, saying why, and deploys once they are committed", async () => {

@@ -5,10 +5,11 @@
  *   for (const c of createSqlDatabaseConformance(() => myFixture()))
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
- * The suite reaches the database through the capability, as a component would. It uses only SQL
+ * Both suites reach the database through the capability. The portable suite uses only SQL
  * that SQLite and Postgres both accept, the portable subset `storage.ts` names: `BIGINT` for an
  * integer past 32 bits (Postgres' `INTEGER` is 32-bit), `BYTEA` for bytes (Postgres has no `BLOB`;
- * SQLite keeps bytes as they are in any column of a table that is not `STRICT`).
+ * SQLite keeps bytes as they are in any column of a table that is not `STRICT`). The SQLite suite
+ * adds native-dialect cases, including generated ids that must not be reused after pruning.
  */
 
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
@@ -19,7 +20,7 @@ import type { ConformanceCase } from "@pikit/core/testing";
 /** A fresh, empty database, built for one case. */
 export interface SqlDatabaseFixture {
   /**
-   * The component providing `storage.sql`, and anything it uses. The suite may create several apps
+   * The component providing `storage.sql` (or `storage.sqlite` for its suite), and anything it uses. The suite may create several apps
    * from them over the same data, one after the other, so the data lives outside the components'
    * setup (in the fixture: a file, a schema).
    */
@@ -29,11 +30,20 @@ export interface SqlDatabaseFixture {
   dispose?(): Promise<void>;
 }
 
-const GROUP = "storage.sql";
-const expect = expecter(GROUP);
-const check = checker(GROUP);
-
+/** The portable SQL contract, without a promise of a particular engine's dialect. */
 export function createSqlDatabaseConformance(factory: () => SqlDatabaseFixture | Promise<SqlDatabaseFixture>): readonly ConformanceCase[] {
+  return databaseConformance(factory, "storage.sql");
+}
+
+/** The SQL guarantees plus the SQLite dialect the runtime and outbox depend on. */
+export function createSqliteDatabaseConformance(factory: () => SqlDatabaseFixture | Promise<SqlDatabaseFixture>): readonly ConformanceCase[] {
+  return databaseConformance(factory, "storage.sqlite");
+}
+
+function databaseConformance(factory: () => SqlDatabaseFixture | Promise<SqlDatabaseFixture>, capability: "storage.sql" | "storage.sqlite"): readonly ConformanceCase[] {
+  const GROUP = capability;
+  const expect = expecter(GROUP);
+  const check = checker(GROUP);
   const sqlCase = (name: string, run: (s: Subject) => Promise<void>): ConformanceCase => ({
     group: GROUP,
     name,
@@ -41,7 +51,7 @@ export function createSqlDatabaseConformance(factory: () => SqlDatabaseFixture |
       const fixture = await factory();
       const apps: App[] = [];
       try {
-        await run(createSubject(fixture, apps));
+        await run(createSubject(fixture, apps, capability));
       } finally {
         for (const app of apps) await app.stop().catch(() => {});
         await fixture.dispose?.();
@@ -49,7 +59,7 @@ export function createSqlDatabaseConformance(factory: () => SqlDatabaseFixture |
     },
   });
 
-  return [
+  const cases = [
     sqlCase("values read back as they were written: text, integers, reals, null and bytes", async (s) => {
       const db = await s.open();
       await db.run("CREATE TABLE conformance_values (id INTEGER PRIMARY KEY, t TEXT, i BIGINT, r REAL, n TEXT, b BYTEA)");
@@ -192,23 +202,47 @@ export function createSqlDatabaseConformance(factory: () => SqlDatabaseFixture |
       expect(await second.query("SELECT k, v FROM conformance_durable"), [{ k: "kept", v: "yes" }], "the row, after a restart");
     }),
   ];
+  if (capability === "storage.sqlite") {
+    cases.push(
+      sqlCase("SQLite generates rowids and AUTOINCREMENT never reuses a committed id", async (s) => {
+        const db = await s.open();
+        await db.run("CREATE TABLE conformance_rowids (id INTEGER PRIMARY KEY, value TEXT)");
+        const [row] = await db.query("INSERT INTO conformance_rowids (value) VALUES (?) RETURNING id", ["first"]);
+        expect(row?.id, 1, "an omitted INTEGER PRIMARY KEY to be generated");
+        await db.run("CREATE TABLE conformance_sequence (id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT)");
+        const [first] = await db.query("INSERT INTO conformance_sequence (value) VALUES (?) RETURNING id", ["first"]);
+        await db.run("DELETE FROM conformance_sequence WHERE id = ?", [first?.id ?? null]);
+        const [next] = await db.query("INSERT INTO conformance_sequence (value) VALUES (?) RETURNING id", ["next"]);
+        check(typeof first?.id === "number" && typeof next?.id === "number" && next.id > first.id, "a pruned id never to be reused");
+      }),
+      sqlCase("SQLite upserts bind parameters and RETURNING reads the resulting row", async (s) => {
+        const db = await s.open();
+        await db.run("CREATE TABLE conformance_upsert (name TEXT PRIMARY KEY, value INTEGER NOT NULL)");
+        const sql = "INSERT INTO conformance_upsert (name, value) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET value = excluded.value RETURNING name, value";
+        expect(await db.query(sql, ["same", 1]), [{ name: "same", value: 1 }], "the inserted row");
+        expect(await db.query(sql, ["same", 2]), [{ name: "same", value: 2 }], "the updated row");
+        expect(await db.query("SELECT name, value FROM conformance_upsert"), [{ name: "same", value: 2 }], "one stored row");
+      }),
+    );
+  }
+  return cases;
 }
 
 interface Subject {
-  /** Starts a new app over the fixture's storage and returns its `storage.sql`. */
+  /** Starts a new app over the fixture's storage and returns the selected SQL capability. */
   open(): Promise<SqlDatabase>;
   /** Stops every app started so far, as a process that exits. */
   stopAll(): Promise<void>;
 }
 
-function createSubject(fixture: SqlDatabaseFixture, apps: App[]): Subject {
+function createSubject(fixture: SqlDatabaseFixture, apps: App[], capability: "storage.sql" | "storage.sqlite"): Subject {
   return {
     async open() {
       let database: SqlDatabase | undefined;
       const consumer = defineComponent({
         name: "storage-sql-conformance",
         setup(pikit) {
-          const handle = pikit.use("storage.sql");
+          const handle = pikit.use(capability);
           return {
             start() {
               database = handle.get();
@@ -223,7 +257,7 @@ function createSubject(fixture: SqlDatabaseFixture, apps: App[]): Subject {
       }).create();
       apps.push(app);
       await app.start();
-      if (database === undefined) throw new Error(`${GROUP}: storage.sql was not resolved`);
+      if (database === undefined) throw new Error(`${capability} was not resolved`);
       return database;
     },
     async stopAll() {

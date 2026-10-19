@@ -1,5 +1,5 @@
 /**
- * pi-durable's portable SQLite storage over pikit's `storage.sql` (SPEC §4.1, C5). See README.md.
+ * pi-durable's portable SQLite storage over pikit's `storage.sqlite` (SPEC §4.1, C5). See README.md.
  *
  * `SqliteStorage` (`@earendil-works/pi-durable/storage/sqlite`) needs an async `SqliteDatabase` facade;
  * `storage.sql` is one on every SQLite provider pikit has (storage-sqlite's file, storage-do's Durable

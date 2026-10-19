@@ -68,6 +68,7 @@ import {
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import {
+  catalogueOf,
   dependencyOrder,
   mergeProvided,
   type Offer,
@@ -75,6 +76,7 @@ import {
   type ProvidedCapabilities,
   providedByApp,
   providedByManifests,
+  rehomedOffer,
   unchosenProviders,
 } from "../project/offers.ts";
 import { probe } from "../project/run.ts";
@@ -245,7 +247,7 @@ export async function composedProvides(projectDir: string, excluding: readonly s
 /**
  * The providers `names` bring (`offers.ts`), given what the project provides (`composedProvides`),
  * each asked about (Enter is yes), or all of them with `--yes`. A declined provider takes what only
- * it needed with it.
+ * it needed with it; what another accepted or named component still requires stays, offered for it.
  */
 export async function acceptedOffers(
   registry: Registry,
@@ -258,12 +260,20 @@ export async function acceptedOffers(
   warnUnchosen(registry, names, installed, targets, provided);
   const accepted: Offer[] = [];
   const declined = new Set<string>();
-  for (const offer of offeredProviders(registry, names, installed, targets, provided).reverse()) {
+  const catalogue = catalogueOf(registry);
+  // What the project will provide: what it does, with the named components and the accepted providers.
+  let have = mergeProvided(provided, providedByManifests(names.map((name) => registry.manifest(name)), targets));
+  for (let offer of offeredProviders(registry, names, installed, targets, provided).reverse()) {
     if (declined.has(offer.for)) {
-      declined.add(offer.component);
-      continue;
+      // Kept for another component that still requires what it provides (`rehomedOffer`).
+      const rehomed = rehomedOffer(registry, offer, [...names, ...accepted.map((a) => a.component)], targets, have);
+      if (rehomed === undefined) {
+        declined.add(offer.component);
+        continue;
+      }
+      offer = rehomed;
     }
-    const what = (capabilityEntry(offer.capability)?.summary ?? offer.capability).replace(/\.$/, "");
+    const what = (capabilityEntry(offer.capability, catalogue)?.summary ?? offer.capability).replace(/\.$/, "");
     const who = offer.app === "worker" ? `${offer.for}'s Worker half` : offer.for;
     const question =
       (offer.why === "recommended"
@@ -272,6 +282,7 @@ export async function acceptedOffers(
     if (options.yes === true || (isInteractive() && (await confirm(question, true)))) {
       log.step(`${offer.component}, for ${offer.for} (${offer.capability})`);
       accepted.push(offer);
+      have = mergeProvided(have, providedByManifests([registry.manifest(offer.component)], targets));
     } else declined.add(offer.component);
   }
   // Providers before what uses them.
@@ -289,8 +300,10 @@ export function warnUnchosen(
   targets: readonly string[],
   provided?: ProvidedCapabilities,
 ): void {
-  for (const { capability, for: name, providers, app, why } of unchosenProviders(registry, names, installed, targets, provided)) {
-    const what = (capabilityEntry(capability)?.summary ?? capability).replace(/\.$/, "");
+  const unchosen = unchosenProviders(registry, names, installed, targets, provided);
+  const catalogue = unchosen.length > 0 ? catalogueOf(registry) : undefined;
+  for (const { capability, for: name, providers, app, why } of unchosen) {
+    const what = (capabilityEntry(capability, catalogue)?.summary ?? capability).replace(/\.$/, "");
     const who = app === "worker" ? `${name}'s Worker half` : name;
     log.warn(
       why === "recommended"

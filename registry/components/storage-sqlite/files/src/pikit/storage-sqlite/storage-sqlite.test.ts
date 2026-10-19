@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type SqlDatabase } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createSqlDatabaseConformance } from "@pikit/contracts/testing";
+import { createSqlDatabaseConformance, createSqliteDatabaseConformance } from "@pikit/contracts/testing";
 import storageSqlite from "./index.ts";
 
 const directories: string[] = [];
@@ -26,9 +26,11 @@ function temporaryPath(name = "pikit.db"): string {
 
 const configFor = (path: string) => ({ "storage-sqlite": { path } });
 
-// The storage.sql contract, including data that outlives the app.
-for (const c of createSqlDatabaseConformance(() => ({ components: [storageSqlite], config: configFor(temporaryPath()) }))) {
-  test(`storage-sqlite ${c.group}: ${c.name}`, () => c.run());
+// Both SQL contracts, including data that outlives the app and the SQLite dialect.
+for (const suite of [createSqlDatabaseConformance, createSqliteDatabaseConformance]) {
+  for (const c of suite(() => ({ components: [storageSqlite], config: configFor(temporaryPath()) }))) {
+    test(`storage-sqlite ${c.group}: ${c.name}`, () => c.run());
+  }
 }
 
 // Start and stop honour their deadline, and a fresh app over the same file starts again.
@@ -69,17 +71,26 @@ test("a directory it cannot create fails the start", async () => {
 test("the database is in WAL mode, and used after stop it says so", async () => {
   const path = temporaryPath();
   let db: SqlDatabase | undefined;
+  let native: SqlDatabase | undefined;
   const user = defineComponent({
     name: "storage-user",
     setup(pikit) {
       const handle = pikit.use("storage.sql");
-      return { start: () => void (db = handle.get()) };
+      const sqlite = pikit.use("storage.sqlite");
+      return {
+        start() {
+          db = handle.get();
+          native = sqlite.get();
+        },
+      };
     },
   });
   const app = await defineApp({ components: [storageSqlite, user], config: configFor(path), logger: silentLogger }).create();
   await app.start();
   expect(await db?.query("PRAGMA journal_mode")).toEqual([{ journal_mode: "wal" }]);
   await db?.run("CREATE TABLE t (v INTEGER)");
+  await db?.run("INSERT INTO t (v) VALUES (?)", [42]);
+  expect(await native?.query("SELECT v FROM t")).toEqual([{ v: 42 }]);
   expect(existsSync(`${path}-wal`)).toBe(true);
   await app.stop();
   await expect(db?.query("SELECT 1") ?? Promise.resolve()).rejects.toThrow("storage-sqlite: storage.sql used while the app is not running");

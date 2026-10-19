@@ -12,9 +12,9 @@
  * its own: expose-cloudflare-tunnel's `cloudflared`): every command but `exec` adds each one after
  * compose.yaml (`-f compose.yaml -f <it>`), in `pikit.json`'s order.
  *
- * With self-improvement on a server (`proposals-local` installed), every command also enables
- * compose.yaml's `self-improvement` profile: the deployer next to the app (`deployer.ts`), which the
- * same `up` builds and starts.
+ * Self-improvement's deployer (`deployer.ts`), compose.yaml's `deployer` service, is off by itself (its
+ * profile); `proposals-local`'s Compose file, one of those, turns it on, so the same `up` builds and
+ * starts it when that component is installed.
  *
  * Every command goes through a `Runner`, so tests check the exact `docker` argv without Docker.
  */
@@ -347,19 +347,6 @@ export function parseContainers(output: string): ContainerState[] {
   });
 }
 
-/** The compose profile of self-improvement's deployer (compose.yaml's `deployer` service). */
-export const SELF_IMPROVEMENT_PROFILE = "self-improvement";
-/** The component whose approvals the deployer deploys: with it installed, the profile is on. */
-export const DEPLOYED_FOR = "proposals-local";
-
-/** `--profile self-improvement` when the project has self-improvement on a server (`proposals-local` in pikit.json). */
-export function profileArgs(cwd: string): string[] {
-  const path = join(cwd, "pikit.json");
-  if (!existsSync(path)) return [];
-  const { components } = JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, unknown> };
-  return components?.[DEPLOYED_FOR] === undefined ? [] : ["--profile", SELF_IMPROVEMENT_PROFILE];
-}
-
 /**
  * `-f compose.yaml -f <file>…` when installed components run services beside the app (`compose` in
  * `pikit.json`, project-relative, in its order); nothing otherwise, so Compose reads compose.yaml alone.
@@ -371,7 +358,7 @@ export function fileArgs(cwd: string): string[] {
 
 async function compose(args: string[], options: CommandOptions, capture = false): Promise<RunResult> {
   const cwd = options.cwd ?? process.cwd();
-  const command = ["docker", "compose", ...fileArgs(cwd), ...profileArgs(cwd), ...args];
+  const command = ["docker", "compose", ...fileArgs(cwd), ...args];
   const run = options.run ?? spawnRunner;
   const result = await run(command, { cwd: options.cwd ?? process.cwd(), capture });
   if (result.code !== 0) throw new Error(`\`${command.join(" ")}\` exited with code ${result.code}`);

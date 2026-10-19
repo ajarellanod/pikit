@@ -27,7 +27,7 @@ export type { ConvergenceFixture, ConvergenceProcess, ProcessLife } from "./conv
 export { createConvergenceConformance, SimulatedCrash, SimulatedStorageFailure } from "./convergence.ts";
 
 export type { SqlDatabaseFixture } from "./storage-sql.ts";
-export { createSqlDatabaseConformance } from "./storage-sql.ts";
+export { createSqlDatabaseConformance, createSqliteDatabaseConformance } from "./storage-sql.ts";
 export type { KeyValueFixture } from "./storage-kv.ts";
 export { createKeyValueConformance, createMemoryKeyValueStorage } from "./storage-kv.ts";
 
@@ -71,6 +71,9 @@ export { createModelCompleteConformance } from "./model-complete.ts";
 
 export type { ProposalsFixture } from "./proposals.ts";
 export { createProposalsConformance } from "./proposals.ts";
+
+export type { DeployerProtocolFixture } from "./deployer.ts";
+export { createDeployerProtocolConformance } from "./deployer.ts";
 
 export type { EmailApiFailure, EmailApiFake, EmailSenderFixture, SentEmail } from "./email.ts";
 export { createEmailSenderConformance } from "./email.ts";

@@ -79,8 +79,9 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      `.pikit/self/decisions.json`; Reject keeps the head under `refs/pikit/rejected/<topic>` and
      deletes the branch. Nothing to set up: no GitHub, no token, no CI, no systemd.
    - **The server's deployer** (deployment-docker's `deployer.ts`): a second compose service,
-     `deployer`, built and started by the same `pikit up` when `proposals-local` is installed (the
-     `self-improvement` profile), restarted by Docker with the app. Only it has the Docker socket; it
+     `deployer`, activated by proposals-local's manifest-contributed Compose override and built and
+     started by the same `pikit up`, restarted by Docker with the app. There is no component-id
+     check in the deployment commands. Only it has the Docker socket; it
      mounts the project's directory and the state volume. Every 10 s it keeps the proposals
      repository's `main` at the project's, and deploys the oldest approval: the project must be a
      clean git repository on `main` (else the approval waits, saying why); in its own clone, the
@@ -90,6 +91,9 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      without the socket; the running image tagged `pikit-previous`, the merge built, `app`
      recreated, `/health` awaited; on any failure the previous image back and `main` unmoved. It
      writes each outcome, with its checks, to `.pikit/self/deployer.json`, which proposals-local reads.
+     Both sides use the explicit `@pikit/contracts/deployer` file protocol; the privileged process
+     imports types only and never project packages at runtime. Contributed Compose paths and changes
+     to their declarations are part of the deployment fence too.
      After a deploy the project's `main` (as its owner) and the proposals repository's follow.
    - **On a server an approval is a decision, not a lock.** The agent's shell runs in the app's
      container: it can write the proposals repository and `decisions.json`, so it could forge an

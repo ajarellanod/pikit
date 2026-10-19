@@ -11,10 +11,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineApp, defineComponent, type Handle, silentLogger } from "@pikit/core";
-import { type Proposals, ProposalsError } from "@pikit/contracts";
+import { type ApproveRequest, type Proposals, ProposalsError } from "@pikit/contracts";
+import type { Decision, DeployerState } from "@pikit/contracts/deployer";
 import { createProposalsConformance } from "@pikit/contracts/testing";
 import git from "isomorphic-git";
-import proposalsLocal, { type Decision, type DeployerFile, HEARTBEAT_MS } from "./index.ts";
+import proposalsLocal, { HEARTBEAT_MS } from "./index.ts";
 import { commitOnto, makeRepository } from "./repository.test-support.ts";
 
 const directories: string[] = [];
@@ -149,7 +150,7 @@ test("approve records the operator's head for the deployer; its deploy, as the d
   expect(written.decisions).toEqual([{ id: "greeting", branch: "pikit/self/greeting", head, decision: "approved", operator: "ops", at: "2026-10-01T10:00:00.000Z", title: "Say hello" }]);
   expect((await proposals.list(ctx)).proposals[0]).toMatchObject({ state: "approved", deploy: { outcome: "waiting" } });
 
-  const deployer = (file: DeployerFile) => writeFileSync(join(directory, "deployer.json"), JSON.stringify(file));
+  const deployer = (file: DeployerState) => writeFileSync(join(directory, "deployer.json"), JSON.stringify(file));
   deployer({
     heartbeatAt: new Date(now - 5_000).toISOString(),
     project: { ok: true, message: "main at 1234567, clean." },
@@ -183,6 +184,22 @@ test("approve records the operator's head for the deployer; its deploy, as the d
   expect((await proposals.list(ctx)).proposals[0]?.state).toBe("merged");
   const stale = await proposals.status(ctx);
   expect([stale.connected, stale.checks.find((check) => check.id === "deployer")?.state]).toEqual([false, "failing"]);
+  await app.stop();
+});
+
+test("approve without the head the operator read is moved and writes no decision for the deployer", async () => {
+  const directory = temporary();
+  const gitdir = join(directory, "project.git");
+  const main = await makeRepository(gitdir);
+  const head = await commitOnto(gitdir, "refs/heads/pikit/self/greeting", main, { "hello.txt": "hi\n" }, "Say hello");
+  const { app, proposals, ctx } = await started(directory);
+
+  for (const request of [{}, { head: "" }, { head: 42 }, { head: head.toUpperCase() }, { head: main }]) {
+    const outcome = await proposals.approve("greeting", { ...request, override: true, operator: OPERATOR } as ApproveRequest, ctx);
+    expect([request, outcome.ok ? "approved" : outcome.code]).toEqual([request, "moved"]);
+  }
+  expect(fs.existsSync(join(directory, "decisions.json"))).toBe(false);
+  expect((await proposals.list(ctx)).proposals[0]?.state).toBe("open");
   await app.stop();
 });
 

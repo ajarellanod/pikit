@@ -10,10 +10,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
-import { openRegistry } from "../project/registry-source.ts";
+import { openRegistry, type Registry } from "../project/registry-source.ts";
+import type { Manifest } from "../registry/manifest.ts";
 import { runCli } from "../testing/cli.ts";
-import { checkStarterModel } from "./new.ts";
+import { checkStarterModel, uiComponentsFor } from "./new.ts";
 import { starterModel } from "./starter.ts";
+import { UI_COMPONENTS } from "./ui.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -114,3 +116,37 @@ test("new refuses a preset whose starter model's provider it does not install, b
   expect((await run("own")).err).toContain("`bun install` failed");
   expect(readFileSync(join(parent, "own", "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "alpha/model-1",');
 }, 60_000);
+
+test("--ui brings admin-api, and the defaults for admin.auth and settings that the chosen components do not provide; a default the preset chose is the preset's", () => {
+  const builtin = openRegistry(DEFAULT_REGISTRY);
+  expect(uiComponentsFor(builtin, builtin.preset("http"), ["server"])).toEqual([...UI_COMPONENTS]);
+  expect(uiComponentsFor(builtin, builtin.preset("telegram-cloudflare"), ["durable"])).toEqual([...UI_COMPONENTS]);
+  // agents-live's group installs settings-store: the preset's, never recorded as the dashboard's.
+  const live = builtin.preset("http", ["agents-live"]);
+  expect(live).toContain("settings-store");
+  expect(uiComponentsFor(builtin, live, ["server"])).toEqual(["admin-auth-token", "admin-api"]);
+});
+
+test("--ui with other providers of admin.auth and settings: decided by what their manifests declare in each App of the target", () => {
+  const nothing = { provides: [], requires: [], optional: [] };
+  const fake = (manifests: Partial<Manifest>[]): Registry => {
+    const full = manifests.map((m) => ({ version: "0.0.0", description: m.name, targets: ["server", "durable"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {}, files: [], ...m }) as Manifest);
+    return { names: () => full.map((m) => m.name), manifest: (name: string) => full.find((m) => m.name === name) as Manifest } as unknown as Registry;
+  };
+  const registry = fake([
+    { name: "admin-auth-sso", provides: ["admin.auth"], apps: { worker: "default" } },
+    { name: "settings-file", provides: ["settings"] },
+    { name: "admin-auth-edge", provides: ["admin.auth"], apps: { worker: "worker" }, halves: { default: nothing, worker: { ...nothing, provides: ["admin.auth"] } } },
+    { name: "settings-both", provides: ["settings"], apps: { worker: "default" } },
+  ]);
+  expect(uiComponentsFor(registry, ["admin-auth-sso", "settings-file"], ["server"])).toEqual(["admin-api"]);
+  expect(uiComponentsFor(registry, ["admin-auth-sso"], ["server"])).toEqual(["admin-api", "settings-store"]);
+  expect(uiComponentsFor(registry, ["settings-file"], ["server"])).toEqual(["admin-auth-token", "admin-api"]);
+  // On Cloudflare, each in both Apps: nothing of theirs comes.
+  expect(uiComponentsFor(registry, ["admin-auth-sso", "settings-both"], ["durable"])).toEqual(["admin-api"]);
+  // In one App only: refused before anything is written; the default would be a second provider in the other.
+  expect(() => uiComponentsFor(registry, ["admin-auth-edge"], ["durable"])).toThrow("the dashboard needs admin.auth in every App, and it is provided in the Worker's App (export const worker) but not in the default App");
+  expect(() => uiComponentsFor(registry, ["settings-file"], ["durable"])).toThrow("the dashboard needs settings in every App, and it is provided in the default App but not in the Worker's App (export const worker)");
+  // On a server only the default App counts: the Worker's half alone does not provide it there.
+  expect(uiComponentsFor(registry, ["admin-auth-edge"], ["server"])).toEqual([...UI_COMPONENTS]);
+});

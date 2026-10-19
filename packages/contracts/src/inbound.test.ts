@@ -163,6 +163,44 @@ test("admitInbound: a stage that changes which message or conversation this is b
   expect(e.steps).toEqual([]);
 });
 
+test("admitInbound: in-place normalization cannot change identity, including to a dashboard request", async () => {
+  for (const change of [{ id: "other" }, { id: "dashboard:changed" }, { channel: "other" }, { conversationId: "c2" }]) {
+    const e = ends();
+    const input = { ...message };
+    const ctx = await appWith((pikit) => pikit.pipeline("inbound.normalize", (m) => Object.assign(m, change)));
+    await expect(admitInbound(ctx, input, { ...e, key: "test:c1" })).rejects.toThrow("stages keep id, channel and conversationId");
+    expect(e.steps).toEqual([]);
+    expect(input).toEqual(message);
+  }
+});
+
+test("admitInbound: routing cannot mutate or replace the message's identity", async () => {
+  for (const change of [{ id: "dashboard:changed" }, { channel: "other" }, { conversationId: "c2" }]) {
+    for (const inPlace of [false, true]) {
+      const e = ends();
+      const ctx = await appWith((pikit) => pikit.pipeline("route.resolve", (value) => ({
+        ...value,
+        message: inPlace ? Object.assign(value.message, change) : { ...value.message, ...change },
+        decision: { agent: "support", access: "allow" },
+      })));
+      await expect(admitInbound(ctx, { ...message }, { ...e, key: "test:c1" })).rejects.toThrow("route.resolve: a stage changed the message's");
+      expect(e.steps).toEqual([]);
+    }
+  }
+});
+
+test("admitInbound: in-place text normalization still works without changing the caller's message", async () => {
+  const e = ends();
+  const input = { ...message };
+  const ctx = await appWith((pikit) => pikit.pipeline("inbound.normalize", (m) => {
+    m.text = m.text.toUpperCase();
+    return m;
+  }));
+  await admitInbound(ctx, input, { ...e, key: "test:c1" });
+  expect(e.dispatched[0]?.prompt).toBe("HELLO");
+  expect(input.text).toBe("hello");
+});
+
 test("admitInbound: a message whose id is the dashboard's is refused before anything runs", async () => {
   const e = ends();
   const ctx = await appWith(() => {});

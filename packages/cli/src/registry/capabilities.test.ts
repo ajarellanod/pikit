@@ -81,6 +81,21 @@ test("a declaration may not redeclare the kit's vocabulary, and one capability h
   ]);
 });
 
+test("a declared capability keeps `offer`, and two declarations of it must agree on it", () => {
+  const offered = { ...memory, offer: true as const };
+  const { catalogue, problems } = registryCatalogue([
+    manifest("memory-sql", { declares: { kinds: ["memory"], capabilities: { memory: offered } } }),
+    manifest("memory-kv", { declares: { capabilities: { memory: offered } } }),
+  ]);
+  expect(problems).toEqual([]);
+  expect(capabilityEntry("memory", catalogue)?.offer).toBe(true);
+  expect(registryCatalogue([manifest("memory-sql", { declares: { capabilities: { memory } } })]).catalogue.capabilities.memory?.offer).toBeUndefined();
+  expect(registryCatalogue([
+    manifest("memory-sql", { declares: { kinds: ["memory"], capabilities: { memory: offered } } }),
+    manifest("memory-kv", { declares: { capabilities: { memory } } }),
+  ]).problems).toEqual(['memory-sql: declares the capability "memory" differently from memory-kv: one contract has one declaration (copy memory-kv\'s)']);
+});
+
 test("usage lists every catalogued capability, its providers and its consumers, optional ones marked", () => {
   const usage = capabilityUsage([
     manifest("runtime-x", { provides: ["agent.runtime"], requires: ["execution"], optional: ["agent.tool"] }),

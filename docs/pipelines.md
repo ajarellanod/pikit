@@ -41,7 +41,7 @@ Four, found by every `pikit.pipeline(` and `ctx.run(` in the kernel, contracts a
 | Value | `InboundMessage` (`{ id, channel, conversationId, actor, text, images? }`; a field is added, optional, with the component that reads it) |
 | Run by | `admitInbound`, first, for every message of every channel |
 | Stages in the registry | none |
-| Rules | a stage may rewrite the text, keep or drop the images, or enrich the message, never `id`, `channel` or `conversationId` (`admitInbound` throws) |
+| Rules | a stage may rewrite the text, keep or drop the images, or enrich the message, never `id`, `channel` or `conversationId` (`admitInbound` compares a pre-pipeline snapshot and throws, including for in-place mutation) |
 | Halt | `admitInbound` returns `{ kind: "halted", pipeline: "inbound.normalize" }`: channel-http answers `422`, the Telegram channels "I can't take that message." |
 
 It is the place for a project's policy stage (a filter, a rewrite).
@@ -53,7 +53,7 @@ It is the place for a project's policy stage (a filter, a rewrite).
 | Declared in | [packages/contracts/src/inbound.ts](../packages/contracts/src/inbound.ts) |
 | Value | `{ message: InboundMessage; decision?: RouteDecision }`, `RouteDecision` = `{ agent, access: "allow" \| "deny", reason? }` |
 | Run by | `admitInbound`, after `inbound.normalize` |
-| Rule | a stage that finds a `decision` leaves it; the first stage to set one decides |
+| Rule | a stage that finds a `decision` leaves it; the first stage to set one decides. The message's identity stays unchanged, whether a stage mutates or replaces it (`admitInbound` checks before resolving or dispatching). |
 | No decision at the end | `no_route`, logged as an error ("install a router"); channel-http answers `500 no_route` |
 | `deny` | `denied`: channel-http `403`, the Telegram channels "Sorry, I can't answer that here." |
 | Halt | `halted`: channel-http `403` |

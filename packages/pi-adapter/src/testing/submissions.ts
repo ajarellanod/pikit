@@ -129,7 +129,7 @@ export function createPiSubmissionsFixture(records: SubmissionsFixtureRecords): 
   const underTest = defineComponent({
     name: "runtime-under-test",
     setup(pikit) {
-      const sql = pikit.use("storage.sql");
+      const sql = pikit.use("storage.sqlite");
       let mine: DurableRuntime | undefined;
       return {
         start(ctx) {

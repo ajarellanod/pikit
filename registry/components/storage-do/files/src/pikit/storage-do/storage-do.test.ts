@@ -10,14 +10,16 @@ import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withConte
 import type { SqlDatabase } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createSqlDatabaseConformance } from "@pikit/contracts/testing";
+import { createSqlDatabaseConformance, createSqliteDatabaseConformance } from "@pikit/contracts/testing";
 import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import storageDo from "./index.ts";
 import { fakeDurableObjectStorage, fakeObjectHost } from "./durable-object.test-support.ts";
 
-// The storage.sql contract; one object per case, shared by the apps the case starts.
-for (const c of createSqlDatabaseConformance(() => ({ components: withWorkersHost(fakeObjectHost(), [storageDo]) }))) {
-  test(`storage-do ${c.group}: ${c.name}`, () => c.run());
+// Both SQL contracts; one object per case, shared by the apps the case starts.
+for (const suite of [createSqlDatabaseConformance, createSqliteDatabaseConformance]) {
+  for (const c of suite(() => ({ components: withWorkersHost(fakeObjectHost(), [storageDo]) }))) {
+    test(`storage-do ${c.group}: ${c.name}`, () => c.run());
+  }
 }
 
 // Start and stop honour their deadline, and a fresh app over the same object starts again.
@@ -28,7 +30,7 @@ for (const c of createLifecycleConformance(() => ({ component: hostedStorageDo }
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [storageDo], logger: silentLogger }).create();
-  expect(app.describe().components).toEqual([{ name: "storage-do", provides: ["storage.sql"], requires: [], optional: [] }]);
+  expect(app.describe().components).toEqual([{ name: "storage-do", provides: ["storage.sql", "storage.sqlite"], requires: [], optional: [] }]);
 });
 
 /** The reason `app.start` fails with, when the host in its context is `host`. */
@@ -62,16 +64,25 @@ test("it uses the object in app.start's context, as deployment-cloudflare passes
   storage.sql.exec("CREATE TABLE seen (v TEXT)");
   storage.sql.exec("INSERT INTO seen VALUES ('in the object')");
   let db: SqlDatabase | undefined;
+  let native: SqlDatabase | undefined;
   const user = defineComponent({
     name: "storage-user",
     setup(pikit) {
       const handle = pikit.use("storage.sql");
-      return { start: () => void (db = handle.get()) };
+      const sqlite = pikit.use("storage.sqlite");
+      return {
+        start() {
+          db = handle.get();
+          native = sqlite.get();
+        },
+      };
     },
   });
   const app = await defineApp({ components: [storageDo, user], logger: silentLogger }).create();
   await app.start(withContextValue(WORKERS_HOST, fakeObjectHost(storage), BACKGROUND_CONTEXT));
   expect(await db?.query("SELECT v FROM seen")).toEqual([{ v: "in the object" }]);
+  await db?.run("INSERT INTO seen VALUES (?)", ["shared"]);
+  expect(await native?.query("SELECT v FROM seen ORDER BY v")).toEqual([{ v: "in the object" }, { v: "shared" }]);
   await app.stop();
   await expect(db?.query("SELECT 1") ?? Promise.resolve()).rejects.toThrow("storage-do: storage.sql used while the app is not running");
 });

@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./cloudflare": "./src/cloudflare.ts",
     "./cloudflare/testing": "./src/testing/workers-host.ts",
+    "./deployer": "./src/deployer.ts",
     "./testing": "./src/testing/index.ts"
   },
   "files": ["src"],

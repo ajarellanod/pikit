@@ -12,25 +12,27 @@ Cloudflare provider (`storage-do`) may give as well. (Conversations are pi-durab
 there is no sessions contract, [pi-durable migration](completed/pi-durable-migration.md).)
 
 ## What it gives
-Conversations, sessions and every component's tables in Postgres, for a managed database or
-[several replicas](replicas.md).
+A future Postgres provider for portable records, and (with an upstream Pi storage backend) for
+conversations. This is not implemented: satisfying `storage.sql` alone does not replace SQLite for
+the runtime or outbox, nor make conversations multi-writer.
 
 ## How it fits pikit
 - `storage-postgres` provides `storage.sql` (`SqlDatabase`, async so that Postgres fits, C5)
   and passes its suite; every component's tables keep their prefixes. The suite uses only SQL both
   engines accept (`BIGINT`, `BYTEA`, `storage.ts`); the provider rewrites `?` to `$n` and returns
   `int8` values (`COUNT(*)` too) as numbers. Each SQLite-dialect consumer (`outbound-durable`)
-  ports its own store file, as its header says; runtime-pi's answers log stays with pi-durable's
+  ports its own store file and changes its `storage.sqlite` requirement; runtime-pi's answers log stays with pi-durable's
   storage, which is SQLite's.
-- The runtime's state is pi-durable's storage, which pikit runs over `storage.sql` through its SQLite
+- The runtime's state is pi-durable's storage, which pikit runs over `storage.sqlite` through its SQLite
   core. A Postgres `storage.sql` cannot host that core as it is: conversations in Postgres need a
   Postgres backend of pi-durable's `Storage`, passing pi-durable's storage conformance (below).
-- The swap is selection or removal (`capabilities: { storage.sql: storage-postgres }`), with the
-  router, channels and agents untouched (P3).
+- The portable-record swap is selection or removal (`capabilities: { "storage.sql": "storage-postgres" }`),
+  with the router, channels and agents untouched (P3). Components that require `storage.sqlite`
+  still need a SQLite provider; composition refuses an incompatible substitution.
 - When a second conversation backend is wanted (Postgres, JSONL, libSQL/Turso), the runtime's
   storage becomes a capability of its own (say `agent.storage`, a pi-durable `Storage`), whose
-  default provider runs pi-durable's SQLite core over `storage.sql`. Until then it is not added
-  (YAGNI): runtime-pi opens the storage over `storage.sql` itself.
+  default provider runs pi-durable's SQLite core over `storage.sqlite`. Until then it is not added
+  (YAGNI): runtime-pi opens the storage over `storage.sqlite` itself.
 - One writer: pi-durable assumes one process owns a storage (its SQLite backend keeps the next id
   and sequence in memory; there is no cross-process locking). Postgres alone therefore gives a
   managed database and backups, not [several replicas](replicas.md) sharing conversations: those

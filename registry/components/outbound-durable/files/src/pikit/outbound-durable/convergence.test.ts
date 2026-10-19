@@ -35,6 +35,7 @@ function fixture(): ConvergenceFixture {
 
   return {
     database: records.database,
+    sqlite: true,
     // After a storage failure, the world waits out the queue's first backoff before it looks again.
     retryAfterMs: BACKOFF_MS[0],
     components: (life) => [

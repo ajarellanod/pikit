@@ -93,10 +93,17 @@ accepts a downgrade or a kit range it would refuse, and overwrites new files tha
 pikit ui on | off [--force] [--yes]
 ```
 
-`on` installs `admin-auth-token` and `admin-api` if missing, writes `src/dashboard/` from
-`registry/dashboard/files` (recorded in `pikit.json`'s `dashboard`, with bases), and runs `bun install`
-there. `off` deletes `src/dashboard/` and removes what `on` installed; it refuses without `--force`
-when you modified or added a file there.
+`on` installs `admin-api` if missing and the defaults `admin-auth-token` / `settings-store` only
+when the project's composition does not already provide `admin.auth` / `settings`. On Cloudflare
+each capability must be present in both Apps; a partial provider is refused rather than duplicated.
+A composition it cannot probe is not guessed: fix it with `pikit doctor` first. `new --ui` makes the
+same decision from the chosen manifests, target and Apps. An alternative settings provider still
+owns its operator surface: `settings` alone does not promise the dashboard's settings HTTP API.
+
+It writes `src/dashboard/` from `registry/dashboard/files` (recorded in `pikit.json`'s `dashboard`,
+with bases), and runs `bun install` there. `off` removes only the components the dashboard added,
+never providers chosen by the preset or installed before it, and refuses without `--force` when
+you modified or added a dashboard file.
 
 ## pikit doctor
 
@@ -164,10 +171,10 @@ Delegated to the installed `deployment-*` component's exported functions
 `up` first runs `doctor` (skipping the `doctor` hook of a component that has a `beforeDeploy`, which
 `up` runs right before the build) and checks model credentials where the app runs. `restart` exists
 only where the deployment exports it (Docker). With self-improvement on a server (`proposals-local`),
-deployment-docker's commands enable compose's `self-improvement` profile: `up` also builds and starts
-the deployer next to the app, which deploys what an operator approves (no other command, no host
-service). deployment-docker's commands also add the Compose file of every component that declares
-one (`compose`: expose-cloudflare-tunnel's `cloudflared`), and its `up` runs the components'
+proposals-local contributes a Compose override that activates the deployer next to the app, so `up`
+builds and starts it too (no separate command or host service). The commands do not inspect provider
+names: they add the Compose file of every component that declares one (`compose`, also used for
+expose-cloudflare-tunnel's `cloudflared`), and its `up` runs the components'
 `afterDeploy` hooks once the containers are healthy, with the project's public URL
 (`PIKIT_PUBLIC_URL`), or says it ran none without one.
 

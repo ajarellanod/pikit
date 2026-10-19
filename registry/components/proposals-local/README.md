@@ -11,7 +11,7 @@ rolls back when the new version is unhealthy.
   Self-improvement), `deployment-docker` (the deployer: `pikit up` starts it when this component is
   installed), `extension-pikit-self` (it tells the steward how to propose, from `remote()`).
 - **Target:** `server`.
-- **Installs to:** `src/pikit/proposals-local/`.
+- **Installs to:** `src/pikit/proposals-local/`, including its Compose override and doctor hook.
 - **npm dependencies:** `isomorphic-git` 1.42.3, `diff` 8.0.4, `typebox`.
 
 ```sh
@@ -24,7 +24,10 @@ pikit add admin-proposals proposals-local    # or: pikit new --preset http --wit
    committed). Commit what you change by hand: the deployer deploys `main` plus the proposal, so it
    waits while the project has uncommitted changes, and says so.
 2. **The proposals repository** is a bare repository in the app's state volume,
-   `.pikit/self/project.git`. The deployer makes it from the project's `main` when it starts, and keeps
+   `.pikit/self/project.git`. This component's manifest contributes a Compose override that activates
+   deployment-docker's `deployer` service without detection by component name; `doctor` checks that
+   the combined Compose configuration actually supplies it. The deployer makes the repository from
+   the project's `main` when it starts, and keeps
    its `main` there. `remote()` answers its path.
 3. **The steward proposes** with plain git in its shell (the image has git), as on every target:
    `git clone <remote> project`, `git checkout -b pikit/self/<topic>`, the change, `bun install` and
@@ -42,11 +45,13 @@ pikit add admin-proposals proposals-local    # or: pikit new --preset http --wit
    restarts the app and waits for `/health`; on any failure it keeps or restores the previous image and
    `main` does not move. It writes what happened to `.pikit/self/deployer.json`, which this component
    reads: the proposal's state (`approved`, `merged`, `failed`), its deploy and checks, and the
-   status's last deploy, rollback and failure.
+   status's last deploy, rollback and failure. Both sides use the file protocol's types in
+   `@pikit/contracts/deployer`, not private copies or a capability an external process cannot read.
 6. **Reject** records the rejection and its comment, keeps the head under `refs/pikit/rejected/<topic>`
    and deletes the branch. A new push on the same topic is a new proposal.
 
-A proposal's id is its topic. Approving a head that moved since the operator read it is `moved`;
+A proposal's id is its topic. Approval requires the exact head the operator read; an omitted, empty
+or changed head is `moved`, including with `override`, and writes no decision;
 acting on one decided already is `not_open`.
 
 ## Security: an approval is a decision, not a lock
@@ -56,7 +61,8 @@ the proposals repository and `decisions.json` directly, so it could push any bra
 approval; there is no fence in git and no token to keep. What holds:
 - the deployer trusts nothing of the app's but "this head of this branch was approved": it fetches the
   head itself, refuses a change of the deployment's own files (compose.yaml, the Dockerfile,
-  `.dockerignore`, `src/pikit/deployment-docker/`), runs the agent's code only in containers without
+  `.dockerignore`, `src/pikit/deployment-docker/`, any declared component Compose file or the set
+  of those paths), runs the agent's code only in containers without
   the socket or secrets, and always checks, waits for `/health` and rolls back;
 - give `bash` only to the steward, and ask it for changes only through doors only you reach.
 
@@ -87,10 +93,14 @@ isomorphic-git (`repository.test-support.ts`, no git binary needed), then: the t
 from the head commit, the files against `main` (added, modified, removed, binary) with their patches;
 an approval written for the deployer, and the deployer's outcome read back as the state, the deploy and
 the checks; the deployer's heartbeat in the status; a rejection kept under `refs/pikit/rejected/` and a
-new push on the topic open again.
+new push on the topic open again. `doctor.test.ts` checks Compose's argv and failures with a fake
+runner. The repository also runs `createDeployerProtocolConformance` against this real provider and
+the real deployer with git and a fake Docker runner: exact decisions, rejection comments, moved
+heads, and outcomes/checks read back. No real image is built by these tests.
 
 ## Remove it
 
-`pikit remove proposals-local` (with `admin-proposals`): the next `pikit up` no longer enables the
-deployer's profile; stop a running one with `docker compose --profile self-improvement down`. The
-state volume keeps `.pikit/self/`.
+`pikit remove proposals-local` (with `admin-proposals`) removes its Compose registration and override;
+the next `pikit up` no longer activates the deployer. Removal does not stop an already running
+container: stop it with `docker compose --profile self-improvement stop deployer`. The state volume
+keeps `.pikit/self/`.

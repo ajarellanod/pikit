@@ -44,8 +44,9 @@ services:
 
 
   # Self-improvement's deployer (src/pikit/deployment-docker/deployer.ts): it deploys what an operator
-  # approves in the dashboard (proposals-local), and rolls back when unhealthy. On only with the
-  # profile, which `pikit up` enables when proposals-local is installed. The only service with the
+  # approves in the dashboard (proposals-local), and rolls back when unhealthy. Off by itself (its
+  # profile): proposals-local's own Compose file, which `pikit up` adds after this one, turns it on
+  # (`profiles: !reset []`). A proposal never changes either file (the deployer refuses it). The only service with the
   # Docker socket: the app never gets it. It reads the project's directory (it merges into its main
   # branch, as the directory's owner) and the app's state (the proposals repository, the approvals).
   deployer:

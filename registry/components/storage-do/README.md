@@ -1,10 +1,11 @@
 # storage-do
 
 The app's SQL database on Cloudflare: each conversation's Durable Object keeps its records in its own
-SQLite. It provides `storage.sql` (SPEC §4.1, C5), so what uses `storage.sql` on a server
-(`storage-kv-sql`, runtime-pi's pi-durable tables and answers log) runs unchanged in the object.
+SQLite. It provides portable `storage.sql` and SQLite-specific `storage.sqlite` over the same
+database (SPEC C5), so both ordinary records and runtime-pi's Pi tables and answers log run unchanged
+in the object. A portable-only SQL provider cannot replace the latter.
 
-- **Provides:** `storage.sql`.
+- **Provides:** `storage.sql`, `storage.sqlite`.
 - **Requires:** nothing; it reads the object from `WORKERS_HOST`, which `deployment-cloudflare`'s
   entrypoint puts in the start context.
 - **Target:** `durable`. On a server, use `storage-sqlite`.
@@ -48,13 +49,13 @@ Cloudflare must fit them:
 
 ## Removing it
 
-`pikit remove storage-do` refuses while a component requires `storage.sql`. The data stays in each
+`pikit remove storage-do` refuses while a component requires `storage.sql` or `storage.sqlite`. The data stays in each
 object until the object is deleted: it is your data.
 
 ## Tests
 
 Copied with the component, they run in your project under `bun test`, over a double of a Durable
-Object's storage (`node:sqlite` in memory): the `storage.sql` conformance suite (values, bound
-parameters, transactions, isolation, data that survives a restart), the lifecycle suite, and what it
-refuses at start. pikit also runs the `storage.sql` suite, `storage-kv-sql`, and runtime-pi's answers feed and reconciliation
+Object's storage (`node:sqlite` in memory): both SQL conformance suites (values, bound parameters,
+transactions, isolation, persistence, generated ids, non-reused sequence ids, upserts and `RETURNING`),
+the lifecycle suite, and what it refuses at start. pikit also runs both SQL suites, `storage-kv-sql`, and runtime-pi's answers feed and reconciliation
 over this component, in workerd on a real SQLite-backed Durable Object (`tests/workerd`).

@@ -1,0 +1,12 @@
+# Self-improvement's deployer turned on (proposals-local). deployment-docker adds this file after
+# compose.yaml (`compose` in the component's component.json) for `pikit up`, `down`, `restart`, `logs`
+# and `status`: compose.yaml's `deployer` service, off by itself behind its profile, then runs as it
+# is defined there (its image, the Docker socket, its volumes). Nothing else changes.
+#
+# `!reset` needs a Compose that applies it (checked with Docker Compose 5.5.1). One that does not, or a compose.yaml
+# without the `deployer` service, leaves no deployer: this component's doctor check (`doctor.ts`, run by
+# `pikit doctor` and before `pikit up`) says so. A proposal never changes this file (the deployer refuses it).
+
+services:
+  deployer:
+    profiles: !reset []

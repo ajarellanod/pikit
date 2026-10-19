@@ -1,5 +1,9 @@
 # Maintenance lessons
 
+- Locate guessed documentation/source filenames before reading them: `packages/contracts` and `packages/pi-adapter` have no package-local README; the dashboard's HTTP client is `registry/dashboard/files/src/lib/api.ts`, not `lib/admin.ts`. Generated projects use `src/dashboard/src/lib/api.ts`; list their views instead of assuming `conversations/home.tsx` exists.
+- A listener on TCP 9222 does not prove a CDP endpoint is available: check `/json/version` before attaching agent-browser. Chrome's remote-debugging mode may need browser-use's connection flow instead.
+- `wrangler deployments list --json` lists deployments oldest first in the current CLI: select the greatest `created_on`, not element zero, to record the active or rollback version; verify the active version against `/health`.
+
 - The boundary import scanner treats strings and regexes in tests that contain `import ... from` as actual imports, even inside fixture readers. Avoid putting that phrase in test helper source; use file/path fragments instead.
 
 - External-registry fixtures must satisfy the complete `ManifestSchema`, including the required `optional.capabilities` and adapter range when depended on, before exercising another validation failure.

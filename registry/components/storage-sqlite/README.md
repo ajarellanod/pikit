@@ -1,9 +1,9 @@
 # storage-sqlite
 
-The app's SQL database in one SQLite file. It provides `storage.sql`: components that
-keep records across restarts (the outbox's deliveries, a scheduler's jobs) use it, and each creates
-its own tables, prefixed with its name (`outbound_durable_pieces`), which `pikit registry validate`
-checks.
+The app's SQL database in one SQLite file. It provides portable `storage.sql` and SQLite-specific
+`storage.sqlite` over the same database. Components create their own tables, prefixed with their
+name (`outbound_durable_pieces`), which `pikit registry validate` checks. The runtime and outbox need
+`storage.sqlite`; other record stores only need `storage.sql`.
 
 ```sh
 pikit add storage-sqlite
@@ -34,11 +34,11 @@ It uses `node:sqlite`, which Bun and Node >= 22 both ship: no native module to i
 
 ## Removing it
 
-`pikit remove storage-sqlite` refuses while a component requires `storage.sql`. The file stays: it is
+`pikit remove storage-sqlite` refuses while a component requires `storage.sql` or `storage.sqlite`. The file stays: it is
 your data, and deleting it is yours to do.
 
 ## Tests
 
-Copied with the component, they run in your project: the `storage.sql` conformance suite (values,
-bound parameters, transactions, isolation, data that survives a restart), the lifecycle suite, and
-the start failures.
+Copied with the component, they run in your project: both SQL conformance suites (values, bound
+parameters, transactions, isolation, persistence, generated ids, non-reused sequence ids, upserts
+and `RETURNING`), the lifecycle suite, and the start failures.

@@ -128,6 +128,12 @@ const DeclaredCapabilitySchema = Type.Object(
     mode: Type.String({ enum: ["single", "keyed"], description: "`single`: one provider (`provide`); `keyed`: one per key (`provideKeyed`)." }),
     stability: Type.String({ enum: ["experimental", "stable"], description: "How settled the contract is (SPEC K8): `experimental` until two providers pass its suite." }),
     summary: Type.String({ pattern: TEXT, description: "One line: what a consumer gets from it." }),
+    offer: Type.Optional(
+      Type.Literal(true, {
+        description:
+          "Offered: when a component that can use it or requires it is added and nothing provides it, `pikit add` and `pikit new` offer its provider, when the registry has exactly one. For a single capability with one obvious provider, not for a choice.",
+      }),
+    ),
   },
   { additionalProperties: false },
 );

@@ -18,6 +18,10 @@
   "provides": [
     "proposals"
   ],
+  "hooks": {
+    "doctor": "doctor.ts"
+  },
+  "compose": "compose.yaml",
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "diff": "8.0.4",

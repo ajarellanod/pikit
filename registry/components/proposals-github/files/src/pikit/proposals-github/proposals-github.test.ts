@@ -6,7 +6,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { defineApp, defineComponent, type Handle, type Logger, silentLogger } from "@pikit/core";
-import { GitHubNotConnectedError, type Proposals, ProposalsError } from "@pikit/contracts";
+import { type ApproveRequest, GitHubNotConnectedError, type Proposals, ProposalsError } from "@pikit/contracts";
 import { createProposalsConformance } from "@pikit/contracts/testing";
 import { type FakeGitHub, startFakeGitHub } from "./fake-github.test-support.ts";
 import proposalsGithub, { MAX_PATCH } from "./index.ts";
@@ -119,7 +119,7 @@ test("what setup declares: component.json's provides / requires / optional come 
 
 test("dormant until GitHub is connected: every call but status is not_connected, pointing to Settings → GitHub; no remote", async () => {
   const { github, proposals, ctx, app, access } = await started({ repository: null });
-  for (const work of [proposals.list(ctx), proposals.get("a", ctx), proposals.approve("a", { operator: OPERATOR }, ctx), proposals.reject("a", { operator: OPERATOR }, ctx)]) {
+  for (const work of [proposals.list(ctx), proposals.get("a", ctx), proposals.approve("a", { head: SHA, operator: OPERATOR }, ctx), proposals.reject("a", { operator: OPERATOR }, ctx)]) {
     const error = (await work.then(
       () => undefined,
       (thrown: unknown) => thrown,
@@ -340,12 +340,18 @@ test("approve refuses failing, pending or missing checks unless overridden", asy
   github.setChecks(failing, [{ name: "checks", status: "completed", conclusion: "failure" }]);
   github.setChecks(pending, [], [{ context: "ci", state: "pending" }]);
 
-  for (const id of ["a", "b", "c"]) {
-    expect([id, await proposals.approve(id, { operator: OPERATOR }, ctx)]).toEqual([id, expect.objectContaining({ ok: false, code: "checks_failing" })]);
+  for (const [id, head] of [
+    ["a", failing],
+    ["b", pending],
+    ["c", none],
+  ] as const) {
+    expect([id, await proposals.approve(id, { head, operator: OPERATOR }, ctx)]).toEqual([id, expect.objectContaining({ ok: false, code: "checks_failing" })]);
   }
+  // Override passes the checks, never the head.
+  expect(await proposals.approve("a", { head: pending, override: true, operator: OPERATOR }, ctx)).toMatchObject({ ok: false, code: "moved" });
   expect(github.requests.some((request) => request.method === "PUT")).toBe(false);
 
-  expect((await proposals.approve("a", { override: true, operator: OPERATOR }, ctx)).ok).toBe(true);
+  expect((await proposals.approve("a", { head: failing, override: true, operator: OPERATOR }, ctx)).ok).toBe(true);
   expect(github.pull(1)?.merged).toBe(true);
   expect(logged.at(-1)?.fields).toMatchObject({ number: 1, checks: "failing", override: true });
   await app.stop();
@@ -360,8 +366,8 @@ test("approve refuses what is not an open proposal into the default branch, or a
   github.addPull({ number: 5, branch: "pikit/self/moved", sha: SHA });
   github.setChecks(SHA, [{ name: "checks", status: "completed", conclusion: "success" }]);
 
-  const refusal = async (id: string, head?: string) => {
-    const outcome = await proposals.approve(id, { override: true, operator: OPERATOR, ...(head !== undefined && { head }) }, ctx);
+  const refusal = async (id: string, head = SHA) => {
+    const outcome = await proposals.approve(id, { head, override: true, operator: OPERATOR }, ctx);
     return outcome.ok ? "approved" : outcome.code;
   };
   expect(await refusal("x")).toBe("not_found");
@@ -369,6 +375,11 @@ test("approve refuses what is not an open proposal into the default branch, or a
   expect(await refusal("elsewhere")).toBe("wrong_base");
   expect(await refusal("done")).toBe("not_open");
   expect(await refusal("moved", "9".repeat(40))).toBe("moved");
+  // Without the head read (a caller outside TypeScript), override or not: moved, never merged.
+  for (const request of [{}, { head: "" }, { head: 42 }, { head: SHA.toUpperCase() }]) {
+    const outcome = await proposals.approve("moved", { ...request, override: true, operator: OPERATOR } as ApproveRequest, ctx);
+    expect([request, outcome.ok ? "approved" : outcome.code]).toEqual([request, "moved"]);
+  }
   expect(await refusal("nothing")).toBe("not_found");
   expect(github.requests.some((request) => request.method !== "GET")).toBe(false);
 
@@ -431,7 +442,7 @@ test("a token GitHub lets read but not merge: its 403 is forbidden, and nothing 
   const { proposals, ctx, app } = await started({ github, token: github.readToken });
   github.addPull({ number: 2, branch: "pikit/self/b", sha: SHA });
   github.setChecks(SHA, [{ name: "checks", status: "completed", conclusion: "success" }]);
-  const error = await proposals.approve("b", { operator: OPERATOR }, ctx).catch((thrown: unknown) => thrown as ProposalsError);
+  const error = await proposals.approve("b", { head: SHA, operator: OPERATOR }, ctx).catch((thrown: unknown) => thrown as ProposalsError);
   expect((error as ProposalsError).code).toBe("forbidden");
   expect((error as ProposalsError).message).toContain("GitHub's token");
   expect(github.pull(2)?.state).toBe("open");

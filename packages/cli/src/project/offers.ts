@@ -4,9 +4,10 @@
  *
  * - A capability a component can use (`useOptional`) or requires (`use`) and the catalogue marks
  *   `offer` (durable delivery, `outbound.queue`; a place for small values, `storage.kv`), which
- *   nothing installed provides: its provider is offered.
+ *   nothing installed provides: its provider is offered. The catalogue is the registry's
+ *   (`catalogueOf`): the kit's, with the capabilities its components declare, `offer` included.
  * - A capability an offered component requires (`use`), which nothing provides: its provider comes
- *   too (`outbound-durable` needs `storage.sql`: `storage-sqlite`).
+ *   too (`outbound-durable` needs `storage.sqlite`: `storage-sqlite`).
  *
  * Only when the registry has exactly one provider that runs on every one of the project's targets
  * (`storage-sqlite` on a server, `storage-do` on Cloudflare): with several, choosing is the user's.
@@ -27,7 +28,7 @@
  * alone (`withOffers`). A project whose composition is unknown gets no offer.
  */
 
-import { capabilityEntry } from "../registry/capabilities.ts";
+import { capabilityEntry, type RegistryCatalogue, registryCatalogue } from "../registry/capabilities.ts";
 import type { Manifest } from "../registry/manifest.ts";
 import { type AppName, declaredByApp, workerHalfName } from "./apps.ts";
 import { NEW_PROJECT_TARGETS } from "./pikit-json.ts";
@@ -36,6 +37,22 @@ import type { Registry } from "./registry-source.ts";
 
 /** The capabilities each App provides. */
 export type ProvidedCapabilities = Record<AppName, ReadonlySet<string>>;
+
+/**
+ * `registry`'s catalogue: the kit's, extended with what its components declare (`registryCatalogue`).
+ * A manifest that does not read is left out, and so are conflicting declarations but the first:
+ * `registry validate` reports both.
+ */
+export function catalogueOf(registry: Registry): RegistryCatalogue {
+  const manifests = registry.names().flatMap((name) => {
+    try {
+      return [registry.manifest(name)];
+    } catch {
+      return [];
+    }
+  });
+  return registryCatalogue(manifests).catalogue;
+}
 
 /**
  * What each App of a composed project provides (`probe`), but for `excluding` (components about to
@@ -127,6 +144,8 @@ function resolveOffers(
 ): { offers: Offer[]; unchosen: UnchosenOffer[] } {
   // Installed components whose composition is unknown: nothing is offered rather than guessed.
   if (composed === undefined && installed.length > 0) return { offers: [], unchosen: [] };
+  const catalogue = catalogueOf(registry);
+  const entry = (capability: string) => capabilityEntry(capability, catalogue);
   const provided: Record<AppName, Set<string>> = { default: new Set(composed?.default), worker: new Set(composed?.worker) };
   const known = (name: string) => {
     try {
@@ -165,11 +184,11 @@ function resolveOffers(
         // What an offered component requires comes with it. What a component the user chose requires
         // is theirs to provide (`pikit add` warns, `pikit doctor` fails), unless the catalogue marks
         // it `offer`: `conversations-kv` brings `storage-kv-sql` as `channel-telegram` does.
-        ...half.requires.filter((c) => depth > 0 || capabilityEntry(c)?.offer === true).map((c): [string, Offer["why"]] => [c, "required"]),
-        ...half.optional.filter((c) => capabilityEntry(c)?.offer === true).map((c): [string, Offer["why"]] => [c, "recommended"]),
+        ...half.requires.filter((c) => depth > 0 || entry(c)?.offer === true).map((c): [string, Offer["why"]] => [c, "required"]),
+        ...half.optional.filter((c) => entry(c)?.offer === true).map((c): [string, Offer["why"]] => [c, "recommended"]),
       ];
       for (const [capability, why] of wanted) {
-        if (provided[app].has(capability) || capabilityEntry(capability)?.mode !== "single") continue;
+        if (provided[app].has(capability) || entry(capability)?.mode !== "single") continue;
         const providers = providersOf(capability, app);
         // Several providers, none installed: choosing is the user's. Named either way: an optional
         // one may be left out silently, a required one leaves the project not composing until one is.
@@ -184,7 +203,29 @@ function resolveOffers(
     }
   };
   for (const name of names) visit(name, 0);
-  return { offers, unchosen };
+  // An offer made later may provide what an earlier one requires (storage-sqlite, brought for the
+  // outbox's storage.sqlite, serves the key-value store's storage.sql too): providers still come
+  // first, and what it provides is not left to choose.
+  const order = dependencyOrder(offers.map((offer) => known(offer.component) as Manifest), targets);
+  offers.sort((a, b) => order.indexOf(a.component) - order.indexOf(b.component));
+  return { offers, unchosen: unchosen.filter((u) => !provided[u.app ?? "default"].has(u.capability)) };
+}
+
+/**
+ * `offer` again, when the component it came for was declined: for one of `consumers` (the named
+ * components, and the providers accepted so far) that still requires what it provides, in an App
+ * where `provided` (the project's, with what the consumers declare) lacks it. Undefined when none
+ * does: it leaves with what it came for. An optional need never keeps it.
+ */
+export function rehomedOffer(registry: Registry, offer: Offer, consumers: readonly string[], targets: readonly string[], provided: ProvidedCapabilities): Offer | undefined {
+  for (const [app, half] of declaredByApp(registry.manifest(offer.component), targets)) {
+    for (const consumer of consumers) {
+      const needs = declaredByApp(registry.manifest(consumer), targets).find(([where]) => where === app)?.[1].requires ?? [];
+      const capability = needs.find((c) => half.provides.includes(c) && !provided[app].has(c));
+      if (capability !== undefined) return { component: offer.component, capability, for: consumer, why: "required", ...(app === "worker" && { app }) };
+    }
+  }
+  return undefined;
 }
 
 /**

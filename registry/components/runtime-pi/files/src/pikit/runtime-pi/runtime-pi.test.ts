@@ -159,7 +159,7 @@ test("what setup declares: component.json's provides / requires / optional come 
 
   expect(described).toMatchObject({
     provides: ["agent.runtime", "agent.conversations", "agent.submissions", "agent.observe", "model.complete", "agent.command"],
-    requires: ["storage.sql"],
+    requires: ["storage.sqlite"],
     optional: ["agent.definition", "model.provider", "model.credentials", "secrets", "agent.tool", "agent.extension", "agent.skill", "execution", "workspace", "wakeups", "settings", "agent.directory"],
   });
 });
@@ -353,7 +353,7 @@ function flakyStorage() {
         if (open === undefined) throw new Error("storage-flaky: not running");
         return open.database;
       };
-      pikit.provide("storage.sql", {
+      pikit.provide("storage.sqlite", {
         query: (sql, params) => (isDown ? unreachable() : db().query(sql, params)),
         run: (sql, params) => (isDown ? unreachable() : db().run(sql, params)),
         transaction: (work) =>

@@ -151,9 +151,9 @@ export interface ProposalDetail extends ProposalSummary {
 }
 
 export interface ApproveRequest {
-  /** The head commit the operator read: `moved` when the branch moved since. */
-  head?: string;
-  /** Approve although the checks that run before an approval do not pass. */
+  /** The head commit the operator read (`ProposalDetail.head`): `moved` when the branch's head is not it (moved since, or no head sent). */
+  head: string;
+  /** Approve although the checks that run before an approval do not pass; never without `head`. */
   override?: boolean;
   operator: Operator;
 }

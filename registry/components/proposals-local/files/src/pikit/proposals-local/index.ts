@@ -7,7 +7,8 @@
  *
  * - **Read** with isomorphic-git: each branch's head commit (its subject the title, its body the
  *   description), the files changed since it left `main` (their merge base), with bounded patches.
- * - **Approve** records the head the operator read, with the operator, in `.pikit/self/decisions.json`;
+ * - **Approve** records the head the operator read, with the operator, in `.pikit/self/decisions.json`
+ *   (the shapes of the files shared with the deployer are `@pikit/contracts/deployer`'s);
  *   the deployer, next to the app (deployment-docker), picks it up: it merges it into the project's
  *   main branch, runs the checks (install, typecheck, tests), rebuilds and restarts the app, waits for
  *   `/health`, and rolls back when any step fails. It writes what happened to
@@ -21,6 +22,10 @@
  * not a wall; the deployer trusts nothing else of the app's, and always runs the checks, waits for
  * `/health` and rolls back. A wall needs the agent's commands elsewhere
  * (features/sandboxed-execution.md).
+ *
+ * **The deployer runs because of this component**: its Compose file (`compose.yaml` here, which
+ * `pikit add` records and deployment-docker adds after the project's) turns on compose.yaml's
+ * `deployer` service, and its doctor check (`doctor.ts`) says when Compose does not list it.
  *
  * Target: `server`.
  */
@@ -43,6 +48,7 @@ import {
   type ProposalSummary,
   type RejectOutcome,
 } from "@pikit/contracts";
+import { DECISIONS_FILE, type Decision, type DeployerCheck, DEPLOYER_STATE_FILE, type DeployerState } from "@pikit/contracts/deployer";
 import { structuredPatch } from "diff";
 import git, { TREE } from "isomorphic-git";
 import Type from "typebox";
@@ -74,39 +80,6 @@ const Config = Type.Object({
   mainBranch: Type.String({ minLength: 1, default: "main" }),
 });
 
-/** An operator's decision on a proposal's head, as `decisions.json` keeps it (the deployer's input). */
-export interface Decision {
-  id: string;
-  branch: string;
-  head: string;
-  decision: "approved" | "rejected";
-  operator: string;
-  /** ISO 8601. */
-  at: string;
-  title: string;
-  comment?: string;
-}
-
-/** A step the deployer ran on an approved head. */
-interface DeployerCheck {
-  name: string;
-  state: "passing" | "failing" | "pending" | "skipped";
-  detail: string;
-}
-
-/** What the deployer writes (`deployer.json`): deployment-docker's `DeployerState`. */
-export interface DeployerFile {
-  startedAt?: string;
-  heartbeatAt?: string;
-  /** Whether the project's checkout can be deployed from, and why not. */
-  project?: { ok: boolean; message: string };
-  deploying?: string;
-  outcomes?: Record<string, ProposalDeploy & { id?: string; checks?: DeployerCheck[] }>;
-  lastDeploy?: { head: string; id?: string; message: string; at: string };
-  lastRollback?: { head: string; id?: string; message: string; at: string };
-  lastFailure?: { head: string; id?: string; message: string; at: string };
-}
-
 const NO_CHECKS: ProposalChecks = { state: "none", passed: 0, failed: 0, pending: 0, items: [] };
 
 /** The steps the deployer ran, summed up as the contract's checks. */
@@ -128,8 +101,8 @@ export default defineComponent({
   setup(pikit, config) {
     const directory = resolve(config.directory);
     const gitdir = join(directory, "project.git");
-    const decisionsPath = join(directory, "decisions.json");
-    const deployerPath = join(directory, "deployer.json");
+    const decisionsPath = join(directory, DECISIONS_FILE);
+    const deployerPath = join(directory, DEPLOYER_STATE_FILE);
     const prefix = config.branchPrefix;
     const main = config.mainBranch;
     const now = () => new Date(pikit.clock.now()).toISOString();
@@ -144,7 +117,7 @@ export default defineComponent({
       }
     };
     const decisions = async () => (await readJson<{ decisions?: Decision[] }>(decisionsPath, {})).decisions ?? [];
-    const deployer = () => readJson<DeployerFile>(deployerPath, {});
+    const deployer = () => readJson<DeployerState>(deployerPath, {});
     const record = (decision: Decision) => {
       const done = writing.then(async () => {
         const kept = [decision, ...(await decisions())].slice(0, KEPT);
@@ -184,7 +157,7 @@ export default defineComponent({
     const baseOf = async (head: string, mainOid: string) => ((await git.findMergeBase({ fs, gitdir, oids: [mainOid, head] })) as string[])[0];
 
     /** A decision's state, and its deploy as the deployer wrote it. */
-    const decided = (decision: Decision | undefined, file: DeployerFile): { state: ProposalSummary["state"]; deploy?: ProposalDeploy; checks?: ProposalChecks } => {
+    const decided = (decision: Decision | undefined, file: DeployerState): { state: ProposalSummary["state"]; deploy?: ProposalDeploy; checks?: ProposalChecks } => {
       if (decision === undefined) return { state: "open" };
       if (decision.decision === "rejected") return { state: "closed" };
       const outcome = file.outcomes?.[decision.head];
@@ -194,7 +167,7 @@ export default defineComponent({
     };
     const decisionOf = (all: readonly Decision[], id: string, head: string) => all.find((decision) => decision.id === id && decision.head === head);
 
-    const summaryOf = async (id: string, head: string, mainOid: string, all: readonly Decision[], file: DeployerFile): Promise<ProposalSummary> => {
+    const summaryOf = async (id: string, head: string, mainOid: string, all: readonly Decision[], file: DeployerState): Promise<ProposalSummary> => {
       const base = await baseOf(head, mainOid).catch(() => undefined);
       const commits = await commitsSince(head, base);
       const top = commits[0] ?? (await git.log({ fs, gitdir, ref: head, depth: 1 }))[0];
@@ -374,7 +347,8 @@ export default defineComponent({
           return all.some((decision) => decision.id === id) ? { ok: false, code: "not_open", message: `${id} was decided already` } : { ok: false, code: "not_found", message: `no proposal ${id}` };
         }
         if (decisionOf(all, id, head) !== undefined) return { ok: false, code: "not_open", message: `${id} at ${head.slice(0, 7)} was decided already` };
-        if (request.head !== undefined && request.head !== head) return { ok: false, code: "moved", message: `${id} changed since you read it: read it again` };
+        // Only the head the operator read: none (or anything else) is not it.
+        if (request.head !== head) return { ok: false, code: "moved", message: `${id} changed since you read it: read it again` };
         const title = (await git.log({ fs, gitdir, ref: head, depth: 1 }))[0]?.commit.message.split("\n")[0]?.trim() ?? branchOf(id);
         await record({ id, branch: branchOf(id), head, decision: "approved", operator: request.operator.id, at: now(), title });
         return { ok: true, id, head, merged: false, message: "Approved: the deployer merges it into main, runs the checks, rebuilds and restarts the app, and rolls back if it is unhealthy." };

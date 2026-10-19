@@ -21,8 +21,8 @@ export type {
 
 /** `POST /admin/api/admin-proposals/:id/approve`'s body. */
 export interface ApproveBody {
-  /** The head commit the operator read: refused (`409 moved`) when the branch moved since. */
-  head?: string;
+  /** The head commit the operator read (40 hexadecimal digits; without it `400 invalid_request`): refused (`409 moved`) when the branch moved since. */
+  head: string;
   /** Approve although the checks that run before an approval do not pass. */
   override?: boolean;
 }

@@ -72,6 +72,7 @@ export default defineComponent({
         }),
     };
     pikit.provide("storage.sql", database);
+    pikit.provide("storage.sqlite", database);
 
     return {
       async start() {

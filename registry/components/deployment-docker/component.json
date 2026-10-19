@@ -8,13 +8,16 @@
   ],
   "requires": {
     "pikit": "0.0.0",
+    "contracts": "0.0.0",
     "capabilities": []
   },
   "optional": {
     "capabilities": []
   },
   "provides": [],
-  "dependencies": {},
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
   "files": [
     {
       "source": "files/src",

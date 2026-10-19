@@ -12,7 +12,7 @@
     "contracts": "0.0.0",
     "adapter": "0.0.0",
     "capabilities": [
-      "storage.sql"
+      "storage.sqlite"
     ]
   },
   "optional": {

@@ -1,12 +1,14 @@
 /**
  * Self-improvement's deployer on a server (SPEC §6): it deploys the proposals an operator approves
  * in the dashboard, next to the app, with nothing to set up. compose.yaml's `deployer` service runs it
- * (profile `self-improvement`, on when `proposals-local` is installed), started by the same `pikit up`:
+ * (profile `self-improvement`, off by itself; proposals-local's own Compose file turns it on, so it
+ * runs when that component is installed), started by the same `pikit up`:
  * its own image (git, Bun, Docker's CLI), the Docker socket, the project's directory at `/project`,
  * the app's state volume at `/state` and a volume of its own at `/checks`. The app never gets the
  * socket.
  *
- * What it shares with the app is `/state/self` (the app's `.pikit/self`, proposals-local's):
+ * What it shares with the app is `/state/self` (the app's `.pikit/self`, proposals-local's), in the
+ * shapes of `@pikit/contracts/deployer` (types only: this image has none of the project's packages):
  * - `project.git`, the proposals repository: it makes it from the project's main branch, and keeps its
  *   `main` there; the steward clones it and pushes branches `pikit/self/<topic>`;
  * - `decisions.json`, the operator's approvals (proposals-local writes them): all it takes from the
@@ -20,7 +22,8 @@
  *    main plus the proposal: an edit not committed would be lost): else the approval waits, and says why.
  * 2. In `/checks/repo` (its own clone), the project's main and the proposal's branch are fetched; the
  *    branch must still be at the approved head; a change of the deployment's own files (compose.yaml,
- *    the Dockerfile, `.dockerignore`, `src/pikit/deployment-docker/`) is refused; then it merges:
+ *    the Dockerfile, `.dockerignore`, `src/pikit/deployment-docker/`, every Compose file pikit.json
+ *    lists, on main or on the branch, and that list itself) is refused; then it merges:
  *    fast-forward when it can, else a merge commit; a conflict fails it.
  * 3. The checks, each in a container of the deployer's image with no socket and no secret:
  *    `bun install --frozen-lockfile`, `bun run typecheck` when package.json has it, `bun test`; then
@@ -42,6 +45,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+// Types only: erased when Bun runs this file, so the deployer's image needs no package.
+import type { Decision, DeployerCheck, DeployerState, DeployRecord, Outcome } from "@pikit/contracts/deployer";
 import { beforeDeployHooks, type Runner, spawnRunner } from "./commands.ts";
 
 export const DEFAULT_INTERVAL_MS = 10_000;
@@ -49,49 +54,31 @@ export const DEFAULT_INTERVAL_MS = 10_000;
 /** The deployment's own files: a proposal never changes them (the deployer and the app's container are the deployment). */
 export const FENCED = [/^compose\.ya?ml$/, /^Dockerfile$/, /^\.dockerignore$/, /^src\/pikit\/deployment-docker\//];
 
-/** A step the deployer ran on an approved head (proposals-local reads them as the proposal's checks). */
-export interface DeployerCheck {
-  name: string;
-  state: "passing" | "failing" | "pending" | "skipped";
-  detail: string;
-}
+/** A project-relative path, as `pikit add` records one: no absolute path, no `.` or `..` segment, no backslash. */
+const relativePath = (path: string) => path !== "" && !path.includes("\\") && !path.includes("\0") && path.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 
-export interface DeployRecord {
-  head: string;
-  id?: string;
-  message: string;
-  at: string;
-}
-
-export interface Outcome {
-  id?: string;
-  outcome: "waiting" | "deploying" | "deployed" | "rolled back" | "failed";
-  message: string;
-  at: string;
-  checks?: DeployerCheck[];
-}
-
-/** `deployer.json`: what the deployer writes for the app (proposals-local reads it). */
-export interface DeployerState {
-  startedAt?: string;
-  heartbeatAt?: string;
-  project?: { ok: boolean; message: string };
-  deploying?: string;
-  outcomes?: Record<string, Outcome>;
-  lastDeploy?: DeployRecord;
-  lastRollback?: DeployRecord;
-  lastFailure?: DeployRecord;
-}
-
-/** An approval, as proposals-local writes it in `decisions.json`. */
-export interface Decision {
-  id: string;
-  branch: string;
-  head: string;
-  decision: "approved" | "rejected";
-  operator: string;
-  at: string;
-  title: string;
+/**
+ * The Compose files `pikit.json` lists (`components.<name>.compose`), in its order, as `deployment-docker`
+ * adds them after compose.yaml; none without `pikit.json` or without `components`. Throws on anything
+ * else: a list it cannot read is never taken as empty.
+ */
+export function composeFiles(text: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("pikit.json is not JSON");
+  }
+  const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+  if (!isObject(parsed)) throw new Error("pikit.json is not an object");
+  if (parsed.components === undefined) return [];
+  if (!isObject(parsed.components)) throw new Error("pikit.json's components is not an object");
+  return Object.entries(parsed.components).flatMap(([name, installed]) => {
+    if (!isObject(installed)) throw new Error(`pikit.json's ${JSON.stringify(name)} is not an object`);
+    if (installed.compose === undefined) return [];
+    if (typeof installed.compose !== "string" || !relativePath(installed.compose)) throw new Error(`pikit.json's ${JSON.stringify(name)} lists a Compose file that is not a project-relative path (${JSON.stringify(installed.compose)})`);
+    return [installed.compose];
+  });
 }
 
 /** Where the deployer is in Docker: found by inspecting its own container (`discover`). */
@@ -214,6 +201,7 @@ export function createDeployer(options: DeployerOptions) {
     await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`);
     await rename(temporary, statePath);
   };
+  // The file names are @pikit/contracts/deployer's (DECISIONS_FILE, DEPLOYER_STATE_FILE), copied: this image imports no package.
   const decisions = async (): Promise<Decision[]> => {
     try {
       return ((JSON.parse(await readFile(join(stateDir, "decisions.json"), "utf8")) as { decisions?: Decision[] }).decisions ?? []).filter((each) => each.decision === "approved");
@@ -247,6 +235,15 @@ export function createDeployer(options: DeployerOptions) {
     await must(exec(asOwner(bare, [...GIT, "--git-dir", bare, "fetch", "--quiet", "--no-tags", projectDir, `+refs/heads/${main}:refs/heads/${main}`])), "git fetch into the proposals repository");
   };
 
+  /** The Compose files `commit`'s pikit.json lists (`composeFiles`); none without pikit.json. Throws when they cannot be told. */
+  const composeFilesAt = async (commit: string): Promise<string[]> => {
+    const entry = await must(git(repo, "ls-tree", "--name-only", commit, "--", "pikit.json"), "git ls-tree");
+    if (entry === "") return [];
+    const shown = await run(asOwner(repo, [...GIT, "-C", repo, "show", `${commit}:pikit.json`]), { cwd: repo, capture: true });
+    if (shown.code !== 0) throw new Error(`git show of ${short(commit)}'s pikit.json exited with code ${shown.code}`);
+    return composeFiles(shown.stdout);
+  };
+
   /** Runs `command` in a container of the deployer's image, on `/checks/repo`, without the socket. */
   const sandbox = async (setup: DockerSetup, command: readonly string[], env?: string) => {
     const { uid, gid } = existsSync(checksDir) ? statSync(checksDir) : { uid: 0, gid: 0 };
@@ -269,7 +266,20 @@ export function createDeployer(options: DeployerOptions) {
     if (head !== decision.head) return failed(head === "" ? `${decision.branch} is gone: nothing to deploy` : `${decision.branch} moved after it was approved (now ${short(head)}): approve its new head to deploy it`);
     const base = await must(git(repo, "rev-parse", `refs/remotes/project/${main}`), "git rev-parse");
     const fork = (await git(repo, "merge-base", base, head)).out;
-    const touched = (await git(repo, "diff", "--name-only", fork || base, head)).out.split("\n").filter((path) => FENCED.some((fence) => fence.test(path)));
+    // The Compose files pikit.json lists are the deployment too (proposals-local's turns this deployer on).
+    let composed: { base: string[]; head: string[] };
+    try {
+      composed = { base: await composeFilesAt(base), head: await composeFilesAt(head) };
+    } catch (error) {
+      return failed(`its Compose files cannot be told (${error instanceof Error ? error.message : String(error)}): not deployed`);
+    }
+    const listed = new Set([...composed.base, ...composed.head]);
+    // Every path, a rename's both sides included (`--no-renames`), as it is: not quoted (`-z`), not trimmed.
+    const diff = await run(asOwner(repo, [...GIT, "-C", repo, "diff", "--name-only", "--no-renames", "-z", fork || base, head]), { cwd: repo, capture: true });
+    if (diff.code !== 0) throw new Error(`git diff exited with code ${diff.code}`);
+    const changed = diff.stdout.split("\0").filter((path) => path !== "");
+    const touched = changed.filter((path) => listed.has(path) || FENCED.some((fence) => fence.test(path)));
+    if (JSON.stringify(composed.base) !== JSON.stringify(composed.head)) touched.push(`the Compose files pikit.json lists: [${composed.base.join(", ")}] on ${main}, [${composed.head.join(", ")}] on the branch`);
     if (touched.length > 0) return failed(`it changes the deployment itself (${touched.join(", ")}): such a change is yours to make by hand, never a proposal's`);
     await must(git(repo, "checkout", "--quiet", "--force", "--detach", base), "git checkout");
     await must(git(repo, "clean", "-fdq"), "git clean");
@@ -282,6 +292,11 @@ export function createDeployer(options: DeployerOptions) {
       }
     }
     const candidate = await must(git(repo, "rev-parse", "HEAD"), "git rev-parse");
+    // What the merge made lists main's Compose files, whatever the two sides' edits of pikit.json combined into.
+    const merged = await composeFilesAt(candidate).catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+    if (typeof merged === "string" || JSON.stringify(merged) !== JSON.stringify(composed.base)) {
+      return failed(`it changes the deployment itself (the merge's pikit.json lists ${typeof merged === "string" ? `no readable Compose files: ${merged}` : `[${merged.join(", ")}]`}, not main's): such a change is yours to make by hand, never a proposal's`);
+    }
     checks.push({ name: "merge", state: "passing", detail: candidate === head ? "fast-forward" : `merge commit ${short(candidate)}` });
 
     // 3. The checks: the agent's code runs only in these containers.

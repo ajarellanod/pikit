@@ -1,5 +1,5 @@
 /**
- * The outbox's records in `storage.sql`: one row per piece of an answer, from stored to delivered or
+ * The outbox's records in `storage.sqlite`: one row per piece of an answer, from stored to delivered or
  * abandoned, and one receipt per piece that settled. All SQL of the component is here; the rest reads
  * and writes `Piece`s.
  *
