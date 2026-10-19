@@ -44,9 +44,20 @@ What pi-durable does not know is pikit's agents. The runtime adds that layer
   answer to the person. Request id `delegate-result:<reporter task id>`: a rerun admits it once.
 - **The tasks are installed by the runtime** (`pikit.delegation`, `pikit.delegation-anchor`,
   `pikit.delegation-reporter`) before pi-durable opens, so a restart finds their definitions.
+- **A background task can be listed, steered and cancelled** by the conversation that started it, and
+  only by it: `start` returns its id (the call's task id), and the parent's `pikit.delegations`
+  document records its agent, child, steers, a cancel and its bounded result (fixed in the reporter's
+  commit), so `list` survives restarts and another conversation's id is `not_found`. A steer goes to
+  the child with `whenBusy: "steer"` and the task's sender; it is recorded before it is sent and
+  refused once the result is fixed, and the reporter waits for every recorded steer before fixing it,
+  so one that came after the child's last tool round (and ran on its own) is what the report answers,
+  never lost. A cancel marks the task and aborts the child; the report says stopped, once; each submit
+  to the child checks the mark after it, so none escapes a cancel.
 
 `tool-delegate` is the tool: which agents (each with what it is for, which the model reads), how deep
-(`maxDepth`), `wait` (`run`) or not (`start`), a delegated task always waiting for its own. It owns the
+(`maxDepth`), `wait` (`run`) or not (`start`), a delegated task always waiting for its own; and
+`delegate_tasks`, `delegate_steer`, `delegate_cancel` for the tasks not waited for, separate so an
+agent names only those it needs (and `extension-house-rules` can allow them per sender). It owns the
 children's keys (`delegate:<depth>:<task id>`). A tool cannot use `agent.runtime` (the runtime uses
 every tool: a dependency cycle), which is why the delegation comes in the tool's context.
 

@@ -17,6 +17,12 @@
  *   (`{ channel: "delegate", id }`), which its tools and hooks read (`RUN_REQUESTS`).
  * - **Replay is `safe`**: a call made again after a crash finds the child it created and the input it
  *   submitted (pi-durable's ownership and request ids), and only waits again.
+ * - **The tasks it did not wait for** have an id (`wait: false` returns it), and three tools of their
+ *   own, which an agent names apart (and `extension-house-rules` can allow per sender): `delegate_tasks`
+ *   lists them or reads one, `delegate_steer` sends one a message while it runs, `delegate_cancel` stops
+ *   one. Each sees only the tasks of its own conversation (`list`, `steer`, `cancel` of
+ *   `AGENT_DELEGATION`). All `safe`: listing reads, a steer's request id is its call's (a rerun sends
+ *   nothing twice), and a cancel done again changes nothing.
  *
  * Targets: `server` and `durable`: it imports nothing platform-specific, and the child is the parent's
  * own storage's.
@@ -24,11 +30,15 @@
 
 import { defineComponent } from "@pikit/core";
 import { CONVERSATION } from "@pikit/contracts";
-import { AGENT_DELEGATION, defineTool, type ToolRegistration } from "@pikit/pi-adapter/tools";
+import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, defineTool, type ToolRegistration } from "@pikit/pi-adapter/tools";
 import Type, { type Static } from "typebox";
 
 /** The name agents give it, and its key under `agent.tool`. */
 export const DELEGATE_TOOL = "delegate";
+/** The tools of the tasks it did not wait for: list or read one, steer one, stop one. */
+export const TASKS_TOOL = "delegate_tasks";
+export const STEER_TOOL = "delegate_steer";
+export const CANCEL_TOOL = "delegate_cancel";
 /** The prefix of a delegated task's conversation key, which this tool makes and reads. */
 export const DELEGATE_KEY_PREFIX = "delegate:";
 /** The channel of a delegated task's message, as its sender says it. */
@@ -60,7 +70,7 @@ export function depthOf(key: string): number {
 export function delegateDescription(config: DelegateConfig): string {
   return [
     "Hands a task to another agent of this project and gets its answer. Each call is a new conversation of that agent, which starts with nothing but the task: write everything it needs in it.",
-    "By default the call waits for the agent's answer. With wait: false it returns at once and the answer arrives later in this conversation, as a message: use it for long tasks, and carry on meanwhile.",
+    "By default the call waits for the agent's answer. With wait: false it returns at once, with the task's id, and the answer arrives later in this conversation, as a message: use it for long tasks, and carry on meanwhile.",
     "The agents:",
     ...config.agents.map((agent) => `- ${agent.name}: ${agent.description}`),
   ].join("\n");
@@ -100,13 +110,76 @@ export function createDelegateTool(config: DelegateConfig): ToolRegistration {
       };
       // Only a conversation a person started gets answers later: a delegated task waits for its own.
       if (args.wait === false && depth === 1) {
-        await delegation.start(api, task, context);
-        return { output: [{ type: "text", text: `The task is with the agent "${args.agent}" now. Its answer will arrive in this conversation as a message when it ends; carry on meanwhile.` }] };
+        const id = await delegation.start(api, task, context);
+        return { output: [{ type: "text", text: `The task "${id}" is with the agent "${args.agent}" now. Its answer will arrive in this conversation as a message when it ends; carry on meanwhile.` }] };
       }
       const outcome = await delegation.run(api, task, context);
       if (outcome.kind === "completed") return { output: [{ type: "text", text: `The agent "${args.agent}" answered:\n\n${outcome.text === "" ? "(nothing)" : outcome.text}` }] };
       if (outcome.kind === "failed") throw new Error(`the agent "${args.agent}" could not do the task: ${outcome.message}`);
       throw new Error(`the agent "${args.agent}" was stopped before it answered`);
+    },
+  }) as unknown as ToolRegistration;
+}
+
+/** The runtime's delegation, in a conversation's run. */
+function delegationIn(context: { value: (key: typeof AGENT_DELEGATION) => AgentDelegation | undefined }): AgentDelegation {
+  const delegation = context.value(AGENT_DELEGATION);
+  if (delegation === undefined) throw new Error("this tool runs only in a conversation's run");
+  return delegation;
+}
+
+const notFound = (id: string) => new Error(`there is no task "${id}" started from this conversation`);
+
+const TaskId = Type.String({ minLength: 1, description: "The task's id, as delegate returned it." });
+
+const line = (task: BackgroundDelegation) => `- ${task.id}: the agent "${task.agent}", ${task.status}${task.result === undefined ? "" : `:\n${task.result}`}`;
+
+/** `delegate_tasks`: this conversation's tasks, or one. */
+export function createTasksTool(): ToolRegistration {
+  return defineTool({
+    name: TASKS_TOOL,
+    description:
+      "Lists the tasks this conversation handed to other agents without waiting (delegate with wait: false): each one's id, agent and status (running, completed, failed or aborted), and how it ended. With an id, only that task.",
+    parameters: Type.Object({ id: Type.Optional(TaskId) }),
+    replay: "safe",
+    async execute(args, api, context) {
+      const tasks = await delegationIn(context).list(api, context);
+      const shown = args.id === undefined ? tasks : tasks.filter((task) => task.id === args.id);
+      if (args.id !== undefined && shown.length === 0) throw notFound(args.id);
+      return { output: [{ type: "text", text: shown.length === 0 ? "No task was handed over from this conversation without waiting." : shown.map(line).join("\n") }] };
+    },
+  }) as unknown as ToolRegistration;
+}
+
+/** `delegate_steer`: a message to a running task. */
+export function createSteerTool(): ToolRegistration {
+  return defineTool({
+    name: STEER_TOOL,
+    description:
+      "Sends a message to a task this conversation handed to another agent without waiting, while it runs: to correct or add to it. The agent reads it as soon as it can; the task's answer arrives in this conversation as before.",
+    parameters: Type.Object({ id: TaskId, message: Type.String({ minLength: 1, description: "What to tell the agent." }) }),
+    replay: "safe",
+    async execute(args, api, context) {
+      const status = await delegationIn(context).steer(api, args.id, args.message, context);
+      if (status === "not_found") throw notFound(args.id);
+      if (status !== "running") throw new Error(`the task "${args.id}" has already ended (${status}): nothing was sent`);
+      return { output: [{ type: "text", text: `The message is with the task "${args.id}". Its answer will arrive in this conversation when it ends.` }] };
+    },
+  }) as unknown as ToolRegistration;
+}
+
+/** `delegate_cancel`: stops a running task. */
+export function createCancelTool(): ToolRegistration {
+  return defineTool({
+    name: CANCEL_TOOL,
+    description: "Stops a task this conversation handed to another agent without waiting. This conversation then gets one message saying it was stopped.",
+    parameters: Type.Object({ id: TaskId }),
+    replay: "safe",
+    async execute(args, api, context) {
+      const status = await delegationIn(context).cancel(api, args.id, context);
+      if (status === "not_found") throw notFound(args.id);
+      const text = status === "aborted" ? `The task "${args.id}" is stopped.` : `The task "${args.id}" had already ended (${status}): nothing to stop.`;
+      return { output: [{ type: "text", text }] };
     },
   }) as unknown as ToolRegistration;
 }
@@ -119,6 +192,9 @@ export default defineComponent({
     // Under the name the model calls it by: agents name it, and runtime-pi checks the two match. Its
     // `summary` is what an operator reads next to it in the dashboard (the model reads its description).
     pikit.provideKeyed("agent.tool", DELEGATE_TOOL, { ...createDelegateTool(config), summary: "Hands a task to another agent of the project, and gets its answer" });
+    pikit.provideKeyed("agent.tool", TASKS_TOOL, { ...createTasksTool(), summary: "Lists the tasks handed to other agents without waiting, and how they ended" });
+    pikit.provideKeyed("agent.tool", STEER_TOOL, { ...createSteerTool(), summary: "Sends a message to a task another agent is doing" });
+    pikit.provideKeyed("agent.tool", CANCEL_TOOL, { ...createCancelTool(), summary: "Stops a task another agent is doing" });
     return {
       start() {
         const missing = config.agents.map((agent) => agent.name).filter((name) => agents.get(name) === undefined);

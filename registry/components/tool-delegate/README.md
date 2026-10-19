@@ -2,9 +2,11 @@
 
 The `delegate` tool, for the agents that name it: an agent hands a task to another agent of the
 project and gets its answer, now or later. Each task is a child conversation of the agent the call
-names, which starts with nothing but the task, on pi-durable's subagents.
+names, which starts with nothing but the task, on pi-durable's subagents. Three more tools list,
+steer and stop the tasks it did not wait for.
 
-- **Provides:** `agent.tool`, under the key `delegate` (replay `safe`).
+- **Provides:** `agent.tool`, under the keys `delegate`, `delegate_tasks`, `delegate_steer` and
+  `delegate_cancel` (replay `safe`, all four).
 - **Uses, optionally:** `agent.definition`, to check at start that the agents its config lists exist.
 - **Targets:** `server` and `durable` (Cloudflare, celld): the child lives in the parent's storage.
 - **Installs to:** `src/pikit/tool-delegate/` (`index.ts`, `tool-delegate.test.ts`).
@@ -41,13 +43,26 @@ The model calls `delegate({ agent, task, wait? })`:
 - **`wait` (the default) waits** for the agent's answer and returns it: `The agent "researcher"
   answered: …`. A task that failed or was stopped is an error result the model reads. Stopping the
   assistant's run stops the task it waits for.
-- **`wait: false` returns at once**: the task goes on beyond the run, and when it ends its answer
+- **`wait: false` returns at once**, with the task's id: the task goes on beyond the run, and when it ends its answer
   arrives in the conversation as a message of its own (`[The agent "researcher" finished the task you
   delegated to it. …]`), so the agent runs again with it and its answer reaches the person on their
   channel. A restart in between loses nothing.
 - **A delegated task can delegate too**, if its agent names `delegate`, one level deeper, at most
   `maxDepth` (default 2) levels. A delegated task always waits for its own delegations: only a
   conversation a person started gets answers later.
+
+For the tasks not waited for, name the tools the agent needs (`tools: ["delegate", "delegate_tasks",
+"delegate_steer", "delegate_cancel"]`); `extension-house-rules` can allow them per sender:
+
+- **`delegate_tasks({ id? })`** lists the conversation's tasks (id, agent, `running`, `completed`,
+  `failed` or `aborted`, and the answer or why it failed, at most 2000 characters), or one.
+- **`delegate_steer({ id, message })`** sends a running task a message from the delegating agent: it
+  joins the task's run (or runs right after it), and the task's one answer covers it. A task that
+  ended takes none (an error the model reads).
+- **`delegate_cancel({ id })`** stops it: the conversation gets one message saying it was stopped.
+  Again, or once ended, it changes nothing and says so.
+
+Each sees only the tasks its own conversation started: another's id is an unknown task.
 
 ## How it is built
 
@@ -63,6 +78,10 @@ The model calls `delegate({ agent, task, wait? })`:
   reads a conversation's depth from it. The child conversation's channel (`ConversationRef.channel`)
   is `delegate`. A call made again after a crash (replay `safe`) finds the
   child it created and the input it submitted, and only waits again.
+- **The tasks not waited for** are the runtime's `list`, `steer` and `cancel` (`AGENT_DELEGATION`),
+  which read the calling conversation's own record of them (so another's are not found, and a restart
+  loses nothing). Replay `safe`: listing only reads, a steer's request id is its call's (a rerun sends
+  nothing twice), and a cancel done again changes nothing.
 - **Which agents, and how deep, is this tool's config**, checked when the App is defined; an agent it
   lists that the App does not define stops the App at start. Routing (`route.resolve`) is not asked:
   delegation is between the project's agents, by name.
@@ -71,14 +90,18 @@ The model calls `delegate({ agent, task, wait? })`:
 
 - `tool-delegate.test.ts` (copied into your project): what `setup` declares, a start refused for an
   unknown agent, the description, the task each call asks for (agent, key, channel, task, sender) and how
-  (`run` or `start`), the outcomes as the model reads them, depth and waiting rules, and config that is
-  refused. It calls the tool with a stand-in for the runtime's delegation.
+  (`run` or `start`), the outcomes as the model reads them, depth and waiting rules, config that is
+  refused, and what `delegate_tasks`, `delegate_steer` and `delegate_cancel` answer for each status. It
+  calls the tools with a stand-in for the runtime's delegation.
 - `app.test.ts` (beside `files/`, in the registry only): with runtime-pi in a real App, on a SQLite
   file and the scripted faux model: a task waited for, a task answered later, one that reports after a
-  restart, and the depth limit.
+  restart, the depth limit, and a task listed, steered and cancelled (reported once) by its own
+  conversation, while another conversation neither sees nor stops it.
 - `tests/workerd/test/tool-delegate.workerd.ts`: in a real Durable Object, driven by its alarm, both
-  ways.
+  ways, and a task listed and cancelled.
 - The runtime's side (`packages/pi-adapter/src/delegation.test.ts`): the child as the other agent, a
-  rerun after a crash, a stop that reaches the child, background tasks across a restart.
+  rerun after a crash, a stop that reaches the child, background tasks across a restart, a stable id,
+  the list after a restart, a steer that joins the run and one that comes after its last tool round,
+  a cancel reported once, and another conversation's id `not_found`.
 
 Design note: [features/subagents.md](https://github.com/ajarellanod/pikit/blob/main/features/subagents.md).

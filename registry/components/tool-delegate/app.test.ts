@@ -47,7 +47,7 @@ function hold() {
 }
 
 const agents = (helperTools: AgentDefinition["tools"] = []) => [
-  defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate"] }),
+  defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate", "delegate_tasks", "delegate_steer", "delegate_cancel"] }),
   defineAgent({ name: "helper", model: "faux/scripted", tools: helperTools }),
 ];
 
@@ -101,6 +101,12 @@ async function start(dir: string, list: AgentDefinition[], delegateConfig: Recor
       await live().runtime.dispatch({ requestId, conversation, prompt, sender: { channel: "test", id: "alice" } }, app.context());
       return conversation;
     },
+    /** Sends `prompt` to `conversation` again, and resolves with its run's result. */
+    async say(conversation: ConversationRef, prompt: string, requestId: string): Promise<Result> {
+      await live().runtime.dispatch({ requestId, conversation, prompt, sender: { channel: "test", id: "alice" } }, app.context());
+      return until((r) => r.requestId === requestId, `the result of ${requestId}`);
+    },
+    results: () => results,
     result: (requestId: string) => until((r) => r.requestId === requestId, `the result of ${requestId}`),
     resultWhere: (match: (result: Result) => boolean) => until(match, "a matching result"),
   };
@@ -137,7 +143,7 @@ test("delegate with wait: false returns at once; the helper's answer arrives lat
 
   const conversation = await s.ask("test:2", 'call: delegate {"agent":"helper","task":"hold","wait":false}');
   const first = await s.result("test:2:1");
-  expect(toolResults(first)[0]).toStartWith('The task is with the agent "helper" now.');
+  expect(toolResults(first)[0]).toMatch(/^The task "\d+" is with the agent "helper" now\./);
   await held.started;
   held.release();
 
@@ -145,6 +151,29 @@ test("delegate with wait: false returns at once; the helper's answer arrives lat
   expect(reported.conversation.conversationId).toBe(conversation.conversationId);
   expect(reported.text).toContain('[The agent "helper" finished the task you delegated to it.');
   expect(reported.text).toContain("answer: hold");
+});
+
+test("the tasks not waited for: listed, steered and cancelled by their own conversation only, and a cancel is reported once", async () => {
+  const held = hold();
+  const s = await start(directory(), agents([held.tool as AgentTool]));
+  const conversation = await s.ask("test:5", 'call: delegate {"agent":"helper","task":"hold","wait":false}');
+  const id = /^The task "(\d+)"/.exec(toolResults(await s.result("test:5:1"))[0] ?? "")?.[1] ?? "";
+  await held.started;
+
+  expect(toolResults(await s.say(conversation, "call: delegate_tasks {}", "test:5:2"))).toEqual([`- ${id}: the agent "helper", running`]);
+  expect(toolResults(await s.say(conversation, `call: delegate_steer ${JSON.stringify({ id, message: "also this" })}`, "test:5:3"))[0]).toStartWith(`The message is with the task "${id}".`);
+  // Another conversation does not see it, and cannot stop it.
+  const other = await s.ask("test:6", "call: delegate_tasks {}");
+  expect(toolResults(await s.result("test:6:1"))).toEqual(["No task was handed over from this conversation without waiting."]);
+  expect(toolResults(await s.say(other, `call: delegate_cancel ${JSON.stringify({ id })}`, "test:6:2"))[0]).toContain(`there is no task "${id}" started from this conversation`);
+
+  expect(toolResults(await s.say(conversation, `call: delegate_cancel ${JSON.stringify({ id })}`, "test:5:4"))).toEqual([`The task "${id}" is stopped.`]);
+  const reported = await s.resultWhere((r) => r.requestId.startsWith("delegate-result:"));
+  expect(reported.conversation.conversationId).toBe(conversation.conversationId);
+  expect(reported.text).toContain('[The task you delegated to the agent "helper" was stopped before it answered.]');
+  expect(toolResults(await s.say(conversation, `call: delegate_cancel ${JSON.stringify({ id })}`, "test:5:5"))).toEqual([`The task "${id}" is stopped.`]);
+  expect(toolResults(await s.say(conversation, `call: delegate_tasks ${JSON.stringify({ id })}`, "test:5:6"))).toEqual([`- ${id}: the agent "helper", aborted`]);
+  expect(s.results().filter((r) => r.requestId.startsWith("delegate-result:"))).toHaveLength(1);
 });
 
 test("a task nobody waits for still reports after a restart", async () => {

@@ -200,8 +200,8 @@ carry a `summary` (`InstalledTool`): one short plain line for an operator, which
 next to the tool (admin-api's `GET /admin/api/agents`; absent, the description's first sentence); the
 model never reads it. The kit's tools each write one where they are provided. A tool
 that works on `api.env` must use `execution` or `execution.shell`. Registry tools: `read` (safe),
-`write`, `edit`, `bash`, `fetch` (unsafe), `websearch` (safe), `delegate` (safe), and tool-mcp's
-`<server>_<tool>`.
+`write`, `edit`, `bash`, `fetch` (unsafe), `websearch` (safe), `delegate`, `delegate_tasks`,
+`delegate_steer`, `delegate_cancel` (safe), and tool-mcp's `<server>_<tool>`.
 
 A tool cannot use `agent.runtime` or `conversations.registry` (the runtime uses every tool: a cycle).
 What a tool may need of the runtime is in its context, from the runtime's `scope`: besides the keys
@@ -209,8 +209,15 @@ above, `AGENT_DELEGATION` (`@pikit/pi-adapter/tools`, Pi-shaped: it takes the ca
 runtime's delegation on pi-durable's subagents: `run(api, { agent, key, channel, task, sender })`, a child
 conversation of another agent owned by the call (stopping the run stops it; a rerun finds it), or
 `start(…)`, one that outlives the run, whose answer is admitted to the parent through `dispatch`
-(request id `delegate-result:<task id>`). Used by tool-delegate. Tested by the adapter's
-`delegation.test.ts` and the workerd lane.
+(request id `delegate-result:<task id>`); `start` returns the task's id, the call's task id (a rerun
+gets the same). The background tasks of the calling conversation, and only its own (another's id is
+`not_found`), survive restarts and are controlled with `list(api)` (id, agent, status `running |
+completed | failed | aborted`, the answer or failure, at most `RESULT_LIMIT` characters), `steer(api, id,
+message)` (only while running, from the sender the task started with: it joins the child's run, and
+a steer that comes after its last tool round runs next and is what the one report answers; never
+lost) and `cancel(api, id)` (aborts the child; reported to the parent as stopped once; again, or once
+ended, it changes nothing and returns the status). Foreground delegations are the call's, not
+listed. Used by tool-delegate. Tested by the adapter's `delegation.test.ts` and the workerd lane.
 
 No suite (see [building-components.md](../features/building-components.md), "Contracts without a
 suite").

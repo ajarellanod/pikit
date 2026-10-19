@@ -3,7 +3,7 @@
   "name": "tool-delegate",
   "version": "0.0.0",
   "title": "Delegation: your agent hands a task to another agent (the delegate tool)",
-  "description": "The `delegate` tool, for the agents that name it: a task handed to another agent of the project, in a child conversation on pi-durable's subagents, answered now or later as a message.",
+  "description": "The `delegate` tool, for the agents that name it: a task handed to another agent of the project, in a child conversation on pi-durable's subagents, answered now or later as a message; and `delegate_tasks`, `delegate_steer`, `delegate_cancel` for the tasks not waited for.",
   "targets": [
     "server",
     "durable"
@@ -24,7 +24,10 @@
   ],
   "replay": {
     "tools": {
-      "delegate": "safe"
+      "delegate": "safe",
+      "delegate_tasks": "safe",
+      "delegate_steer": "safe",
+      "delegate_cancel": "safe"
     }
   },
   "dependencies": {

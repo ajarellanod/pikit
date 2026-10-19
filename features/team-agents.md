@@ -30,7 +30,7 @@ a project installs, and agents that name what they may use.
 | Rate limits, admission control | none | no note yet |
 | Slash commands, prompt templates | `/new` in the channels; `agent.command` exists, but only admin-api runs it; Pi extensions' commands not | [slash-commands](slash-commands.md) |
 | Delegation, background tasks | `tool-delegate`: run or start, depth limit, answers to the parent | [subagents](subagents.md) |
-| An orchestrator: assign, list, follow, steer and cancel other agents' tasks, read their transcripts | none: `AgentDelegation` has `run` and `start` only | no note yet (below) |
+| An orchestrator: assign, list, follow, steer and cancel other agents' tasks, read their transcripts | `tool-delegate`: `delegate` (`wait: false` returns an id), `delegate_tasks`, `delegate_steer`, `delegate_cancel`, on `AgentDelegation`'s `list`, `steer`, `cancel`, each conversation its own tasks; reading a child's transcript is open | [subagents](subagents.md) |
 | An agent writes to another chat | none; `outbound.queue.enqueue` reached through the mailbox | no note yet |
 | Questions to the user (`askUser`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) (`askUser`) |
 | Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate only (SPEC §6) | [approvals](approvals.md) |
@@ -79,9 +79,9 @@ contracts:
   asks, who draws it and who waits for the answer, three components that must not know each other.
   Questions (`askUser`, the `question` part) come with channel-google-chat; decisions
   that wait days stay approvals'.
-- **`AgentDelegation`** (`@pikit/pi-adapter`): status, steer, cancel and the list of started tasks,
-  for an orchestrator. Stitching `agent.runtime`, `agent.observe` and the mailbox together could do
-  it, but `agent.observe` sees only its own Durable Object on Cloudflare.
+- **`AgentDelegation`** (`@pikit/pi-adapter`, built): `list`, `steer` and `cancel` of a
+  conversation's background tasks, for an orchestrator, on pi-durable's own records, in the parent's
+  storage (so in its Durable Object on Cloudflare too).
 - **Not threads**: a thread is the channel's, in its key ([threads](threads.md)).
 
 Changes to components, not contracts: channels running `agent.command` (`runAgentCommand`) for a

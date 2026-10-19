@@ -9,23 +9,46 @@
 import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import { CONVERSATION, type ConversationRef } from "@pikit/contracts";
-import { AGENT_DELEGATION, type AgentDelegation, type DelegatedOutcome, type DelegatedTask } from "@pikit/pi-adapter/tools";
-import toolDelegate, { createDelegateTool, DELEGATE_TOOL, type DelegateConfig, delegateDescription, depthOf } from "./index.ts";
+import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, type DelegatedOutcome, type DelegatedTask } from "@pikit/pi-adapter/tools";
+import toolDelegate, {
+  CANCEL_TOOL,
+  createCancelTool,
+  createDelegateTool,
+  createSteerTool,
+  createTasksTool,
+  DELEGATE_TOOL,
+  type DelegateConfig,
+  delegateDescription,
+  depthOf,
+  STEER_TOOL,
+  TASKS_TOOL,
+} from "./index.ts";
 
 const config: DelegateConfig = { agents: [{ name: "researcher", description: "Reads sources." }, { name: "coder", description: "Writes code." }], maxDepth: 2 };
 const parent: ConversationRef = { key: "telegram:1", agent: "assistant", conversationId: "7" };
 
-/** A stand-in delegation that answers `outcome` and records each task, by how it was asked. */
-function delegation(outcome: DelegatedOutcome = { kind: "completed", text: "done" }) {
+/** A stand-in delegation that answers `outcome`, records each task by how it was asked, and has `tasks` started in the background. */
+function delegation(outcome: DelegatedOutcome = { kind: "completed", text: "done" }, tasks: BackgroundDelegation[] = []) {
   const asked: { how: "run" | "start"; task: DelegatedTask }[] = [];
+  const steered: { id: string; message: string }[] = [];
+  const statusOf = (id: string) => tasks.find((task) => task.id === id)?.status ?? "not_found";
   const stand: AgentDelegation = {
     run: async (_api, task) => {
       asked.push({ how: "run", task });
       return outcome;
     },
-    start: async (_api, task) => void asked.push({ how: "start", task }),
+    start: async (_api, task) => {
+      asked.push({ how: "start", task });
+      return "t9";
+    },
+    list: async () => tasks,
+    steer: async (_api, id, message) => {
+      if (statusOf(id) === "running") steered.push({ id, message });
+      return statusOf(id);
+    },
+    cancel: async (_api, id) => (statusOf(id) === "running" ? "aborted" : statusOf(id)),
   };
-  return { stand, asked };
+  return { stand, asked, steered };
 }
 
 /** Calls the tool as the runtime does, in `conversation`'s run (`null`: outside any run). */
@@ -50,7 +73,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     // Keyed: it checks at start that the agents its config lists are defined.
     optional: ["agent.definition"],
   });
-  expect(app.describe().capabilities["agent.tool"]?.keys).toEqual({ [DELEGATE_TOOL]: "tool-delegate" });
+  expect(app.describe().capabilities["agent.tool"]?.keys).toEqual({ [DELEGATE_TOOL]: "tool-delegate", [TASKS_TOOL]: "tool-delegate", [STEER_TOOL]: "tool-delegate", [CANCEL_TOOL]: "tool-delegate" });
 });
 
 test("it refuses to start when its config names an agent the App does not define", async () => {
@@ -77,9 +100,9 @@ test("a call runs the task in a child of the agent it names, one level deeper, i
   expect(d.asked).toEqual([{ how: "run", task: { agent: "researcher", key: "delegate:1:t9", channel: "delegate", task: "find X", sender: { channel: "delegate", id: "assistant" } } }]);
 });
 
-test("wait: false starts it, and says the answer comes later", async () => {
+test("wait: false starts it, and says its id and that the answer comes later", async () => {
   const d = delegation();
-  expect(textOf(await call({ agent: "coder", task: "write Y", wait: false }, d))).toStartWith('The task is with the agent "coder" now.');
+  expect(textOf(await call({ agent: "coder", task: "write Y", wait: false }, d))).toStartWith('The task "t9" is with the agent "coder" now.');
   expect(d.asked.map((each) => each.how)).toEqual(["start"]);
 });
 
@@ -106,6 +129,38 @@ test("outside a conversation's run, or to an agent it does not list, nothing is 
   await expect(call({ agent: "researcher", task: "x" }, d, null)).rejects.toThrow("only in a conversation's run");
   await expect(call({ agent: "stranger", task: "x" }, d)).rejects.toThrow('there is no agent "stranger"');
   expect(d.asked).toEqual([]);
+});
+
+/** Calls one of the tools of the tasks not waited for, as the runtime does. */
+const control = (tool: ReturnType<typeof createTasksTool>, args: Record<string, unknown>, d: ReturnType<typeof delegation>) =>
+  tool.execute(args as never, { taskId: "t10" } as never, withContextValue(AGENT_DELEGATION, d.stand, BACKGROUND_CONTEXT) as never);
+
+test("delegate_tasks lists this conversation's tasks, or one by id; an id it does not have is an error", async () => {
+  const tasks: BackgroundDelegation[] = [
+    { id: "t1", agent: "researcher", status: "running" },
+    { id: "t2", agent: "coder", status: "completed", result: "wrote it" },
+  ];
+  const d = delegation(undefined, tasks);
+  expect(textOf(await control(createTasksTool(), {}, d))).toBe('- t1: the agent "researcher", running\n- t2: the agent "coder", completed:\nwrote it');
+  expect(textOf(await control(createTasksTool(), { id: "t2" }, d))).toBe('- t2: the agent "coder", completed:\nwrote it');
+  await expect(control(createTasksTool(), { id: "t3" }, d)).rejects.toThrow('there is no task "t3" started from this conversation');
+  expect(textOf(await control(createTasksTool(), {}, delegation()))).toBe("No task was handed over from this conversation without waiting.");
+});
+
+test("delegate_steer sends only to a running task; delegate_cancel stops one, and says when it had ended", async () => {
+  const d = delegation(undefined, [
+    { id: "t1", agent: "researcher", status: "running" },
+    { id: "t2", agent: "coder", status: "completed", result: "x" },
+  ]);
+  expect(textOf(await control(createSteerTool(), { id: "t1", message: "also Z" }, d))).toBe('The message is with the task "t1". Its answer will arrive in this conversation when it ends.');
+  await expect(control(createSteerTool(), { id: "t2", message: "also Z" }, d)).rejects.toThrow('the task "t2" has already ended (completed): nothing was sent');
+  await expect(control(createSteerTool(), { id: "t3", message: "also Z" }, d)).rejects.toThrow('there is no task "t3"');
+  expect(d.steered).toEqual([{ id: "t1", message: "also Z" }]);
+
+  expect(textOf(await control(createCancelTool(), { id: "t1" }, d))).toBe('The task "t1" is stopped.');
+  expect(textOf(await control(createCancelTool(), { id: "t2" }, d))).toBe('The task "t2" had already ended (completed): nothing to stop.');
+  await expect(control(createCancelTool(), { id: "t3" }, d)).rejects.toThrow('there is no task "t3"');
+  for (const tool of [createTasksTool(), createSteerTool(), createCancelTool()]) expect(tool.replay).toBe("safe");
 });
 
 test("config is checked when the App is defined: at least one agent, each named and described, a depth from 1 to 5", () => {

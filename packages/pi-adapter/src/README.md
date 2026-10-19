@@ -155,7 +155,10 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   definition to it (`AgentConfigs.apply`), submits the task with its sender and waits; `start` gives
   the child to a background anchor task and a background reporter task (example 23), which admits the
   answer to the parent through `dispatch` (logged and announced). The tasks are installed in the
-  registry (`pikit.delegation`) before pi-durable opens.
+  registry (`pikit.delegation`) before pi-durable opens. `start` returns the task's id (the call's
+  task id); `list`, `steer` and `cancel` read the parent's own `pikit.delegations`, so a conversation
+  controls only its tasks; the reporter fixes the (bounded) result there only after every recorded
+  steer is answered, and reports a cancelled task as stopped.
 
 ## Submissions (`submissions.ts`, `answers.ts`)
 

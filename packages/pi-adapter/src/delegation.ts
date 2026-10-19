@@ -20,7 +20,17 @@
  *   which outlives the parent's turns, and a reporter task (background too) submits the task, waits for
  *   its answer and admits a message to the parent (`delegate-result:<reporter id>`). Both are durable:
  *   a restart resumes them. What one call started is recorded in the parent's `pikit.delegations`
- *   document in the same commit, so a rerun of the call starts nothing twice.
+ *   document in the same commit, under the call's task id, which is the task's id (`start` returns it):
+ *   a rerun of the call starts nothing twice and returns the same id.
+ * - **`list`, `steer`, `cancel`** control the background tasks of the calling conversation, and only
+ *   those: they read its own `pikit.delegations`, so another conversation's id is `not_found`. A task's
+ *   result is recorded there (bounded) in the commit that fixes what the reporter reports, so `list`
+ *   survives restarts. A steer is recorded before it is sent, and refused once the result is fixed; the
+ *   reporter waits for every recorded steer before it fixes it, so a steer that could not join the
+ *   child's run (it came after its last tool round, and started a run of its own) is reported, never
+ *   lost: the report is the last run's answer. A cancel marks the task and aborts the child; a marked
+ *   task is reported stopped whatever the child answered, once; each submit to the child checks the
+ *   mark after it, so no run started by a submit escapes a cancel.
  *
  * Everything happens in the parent's storage: on a server as in a Durable Object (Cloudflare, celld),
  * with no call between actors.
@@ -33,6 +43,8 @@ import {
   defineExtension,
   defineTask,
   type EntryId,
+  type ConversationHandle,
+  type InputSubmissionDraft,
   type SettledSubmissionRecord,
   type ToolExecutionApi,
   type Tx,
@@ -62,14 +74,44 @@ export interface DelegatedTask {
 /** How a task ended. */
 export type DelegatedOutcome = { kind: "completed"; text: string } | { kind: "failed"; message: string } | { kind: "aborted" };
 
+/** Where a background task is. */
+export type DelegationStatus = "running" | "completed" | "failed" | "aborted";
+
+/** A task this conversation started in the background (`start`). */
+export interface BackgroundDelegation {
+  /** What `start` returned. */
+  id: string;
+  /** The agent doing it. */
+  agent: string;
+  status: DelegationStatus;
+  /** Once it ended: its answer (`completed`) or why it failed (`failed`), at most `RESULT_LIMIT` characters. */
+  result?: string;
+}
+
 export interface AgentDelegation {
   /** Runs `task` in a child conversation this tool call owns, and resolves with how it ended. */
   run(api: ToolExecutionApi, task: DelegatedTask, context: ChordContext): Promise<DelegatedOutcome>;
   /**
-   * Starts `task` in a child conversation that outlives this run, and resolves once it is recorded; when
-   * it ends, its answer is admitted to this conversation as a message of its own.
+   * Starts `task` in a child conversation that outlives this run, and resolves with its id once it is
+   * recorded (the call's task id: a rerun of the call gets the same); when it ends, its answer is
+   * admitted to this conversation as a message of its own.
    */
-  start(api: ToolExecutionApi, task: DelegatedTask, context: ChordContext): Promise<void>;
+  start(api: ToolExecutionApi, task: DelegatedTask, context: ChordContext): Promise<string>;
+  /** The tasks this conversation started, oldest first; never another conversation's. Foreground (`run`) ones are the call's, not listed. */
+  list(api: ToolExecutionApi, context: ChordContext): Promise<BackgroundDelegation[]>;
+  /**
+   * Sends `message` to this conversation's task `id` while it runs, from the sender it started with: it
+   * joins the child's run, or runs right after it, and the task's one report is the answer to it.
+   * `running`: sent (a rerun of the call sends nothing twice). Another status: it had ended, nothing is
+   * sent. `not_found`: this conversation started no task `id`.
+   */
+  steer(api: ToolExecutionApi, id: string, message: string, context: ChordContext): Promise<DelegationStatus | "not_found">;
+  /**
+   * Stops this conversation's task `id`: it is reported to this conversation as stopped, once.
+   * `aborted`: stopped (again: nothing more happens). Another status: it had ended, nothing is done.
+   * `not_found`: this conversation started no task `id`.
+   */
+  cancel(api: ToolExecutionApi, id: string, context: ChordContext): Promise<DelegationStatus | "not_found">;
 }
 
 /** Where a tool's context carries the runtime's delegation. */
@@ -81,8 +123,26 @@ export const RESULT_REQUEST_PREFIX = "delegate-result:";
 /** The extension the runtime installs with the delegation tasks, so a restart finds their definitions. */
 export const DELEGATION_EXTENSION = "pikit.delegation";
 
+/** How many characters of a task's answer (or failure) the parent's record keeps, for `list`. */
+export const RESULT_LIMIT = 2000;
+
+type JsonSender = { channel: string; id: string };
+/** A steer, recorded before it is sent: the reporter sends it too if a crash came between. */
+type Steer = { requestId: string; message: string };
+/** What a background start created, and what became of it. */
+type Delegation = {
+  child: number;
+  agent: string;
+  sender?: JsonSender;
+  steers?: Steer[];
+  /** A cancel was asked: it is reported stopped. */
+  cancelled?: true;
+  /** How it ended, bounded, fixed in the reporter's commit. */
+  result?: DelegatedOutcome;
+};
+
 /** Per tool task of the parent, what its background start created: a rerun finds it. */
-const DelegationsDoc = defineDoc<{ [toolTaskId: string]: { child: number } }>({
+const DelegationsDoc = defineDoc<{ [toolTaskId: string]: Delegation }>({
   kind: "pikit.delegations",
   version: 1,
   scope: "conversation",
@@ -91,13 +151,13 @@ const DelegationsDoc = defineDoc<{ [toolTaskId: string]: { child: number } }>({
   initial: () => ({}),
 });
 
-type JsonSender = { channel: string; id: string };
 type ReporterInput = {
+  /** The task's id: its key in `pikit.delegations`; its input's request id is `delegate:<id>`. */
+  id: string;
   child: number;
   parent: { key: string; agent: string; conversationId: string };
   agent: string;
   task: string;
-  requestId: string;
   sender?: JsonSender;
 };
 type ReporterState = { phase: "deliver" } | { phase: "report"; outcome: DelegatedOutcome };
@@ -139,8 +199,27 @@ export function resultPrompt(agent: string, outcome: DelegatedOutcome): string {
   return `[The task you delegated to the agent "${agent}" was stopped before it answered.]`;
 }
 
-const inputOf = (task: string, requestId: string, sender: JsonSender | undefined) =>
+const inputOf = (task: string, requestId: string, sender: JsonSender | undefined): InputSubmissionDraft =>
   ({ type: "input", content: task, requestId, ...(sender !== undefined && { entry: { kind: INPUT_KIND, data: { sender } } }) }) as const;
+
+const steerOf = (steer: Steer, sender: JsonSender | undefined): InputSubmissionDraft => ({ ...inputOf(steer.message, steer.requestId, sender), whenBusy: "steer" });
+
+const clip = (text: string) => (text.length > RESULT_LIMIT ? `${text.slice(0, RESULT_LIMIT)} [...]` : text);
+
+const boundedOutcome = (outcome: DelegatedOutcome): DelegatedOutcome =>
+  outcome.kind === "completed" ? { kind: "completed", text: clip(outcome.text) } : outcome.kind === "failed" ? { kind: "failed", message: clip(outcome.message) } : outcome;
+
+const statusOf = (record: Delegation): DelegationStatus => record.result?.kind ?? (record.cancelled === true ? "aborted" : "running");
+
+/**
+ * Submits `draft` to a background task's child, then aborts the child if the task was cancelled: a
+ * cancel either aborted the run this submit started, or committed before this read.
+ */
+async function submitTo(reader: Pick<ToolExecutionApi, "snapshot">, parent: ConversationId, id: string, child: ConversationHandle, draft: InputSubmissionDraft, context: ChordContext) {
+  const submission = await child.submit(draft, context);
+  if ((await reader.snapshot(DelegationsDoc, parent, context))?.[id]?.cancelled === true) await child.abort(context);
+  return submission;
+}
 
 const plainSender = (sender: Sender | undefined): JsonSender | undefined => (sender === undefined ? undefined : { channel: sender.channel, id: sender.id });
 
@@ -165,15 +244,38 @@ export function createDelegation(options: DelegationOptions) {
     initial: () => ({ phase: "deliver" }),
     phases: {
       deliver: async (reporter, runtime, context) => {
-        const { child, task, requestId, sender } = reporter.input;
-        const handle = await runtime.conversation(child as ConversationId, context);
-        if (handle === undefined) {
-          await runtime.commit(() => ({ status: "running", checkpoint: { phase: "report", outcome: { kind: "failed", message: "its conversation is gone" } } }), context);
-          return;
+        const { id, task, sender } = reporter.input;
+        const child = reporter.input.child as ConversationId;
+        const parent = runtime.conversationId;
+        const handle = await runtime.conversation(child, context);
+        // `start` submitted it; its request id makes this find the same submission.
+        if (handle !== undefined) await (await submitTo(runtime, parent, id, handle, inputOf(task, `delegate:${id}`, sender), context)).wait(context);
+        for (;;) {
+          // The outcome is fixed only once every steer recorded is answered: the last one's run is the report.
+          let pending = undefined as Steer | undefined;
+          await runtime.commit(async (tx) => {
+            const record = (await tx.doc(DelegationsDoc, parent))[id];
+            let outcome: DelegatedOutcome;
+            if (record?.cancelled === true) outcome = { kind: "aborted" };
+            else if (handle === undefined) outcome = { kind: "failed", message: "its conversation is gone" };
+            else {
+              let last = `delegate:${id}`;
+              for (const steer of record?.steers ?? []) {
+                const submitted = await tx.submissionByRequest(child, steer.requestId);
+                if (submitted?.status !== "done" && submitted?.status !== "unanswered") {
+                  pending = { requestId: steer.requestId, message: steer.message };
+                  return undefined;
+                }
+                last = steer.requestId;
+              }
+              outcome = await outcomeOf(tx, (await tx.submissionByRequest(child, last)) as SettledSubmissionRecord);
+            }
+            if (record !== undefined) record.result = boundedOutcome(outcome);
+            return { status: "running", checkpoint: { phase: "report", outcome } };
+          }, context);
+          if (pending === undefined || handle === undefined) return;
+          await (await submitTo(runtime, parent, id, handle, steerOf(pending, sender), context)).wait(context);
         }
-        // Its request id makes a rerun after a crash find the same submission.
-        const settled = await (await handle.submit(inputOf(task, requestId, sender), context)).wait(context);
-        await runtime.commit(async (tx) => ({ status: "running", checkpoint: { phase: "report", outcome: await outcomeOf(tx, settled) } }), context);
       },
       report: async (reporter, runtime, context) => {
         if (reporter.state.checkpoint.phase !== "report") return;
@@ -192,7 +294,13 @@ export function createDelegation(options: DelegationOptions) {
         await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
       },
     },
-    abort: (_reporter, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+    // Stopped with its parent's background work: it reports nothing, and `list` says so.
+    abort: (reporter, runtime, context) =>
+      runtime.commit(async (tx) => {
+        const record = (await tx.doc(DelegationsDoc, runtime.conversationId))[reporter.input.id];
+        if (record !== undefined && record.result === undefined) record.result = { kind: "aborted" };
+        return { status: "terminal", outcome: { status: "aborted" } };
+      }, context),
   });
 
   /** The definition of `name`, or a refusal the tool reports. */
@@ -223,9 +331,12 @@ export function createDelegation(options: DelegationOptions) {
 
     async start(api, task, context) {
       const agent = definitionOf(task.agent);
-      const parent = await api.commit(async (tx) => {
+      const id = String(api.taskId);
+      const sender = plainSender(task.sender);
+      const child = await api.commit(async (tx) => {
         const started = await tx.doc(DelegationsDoc, api.conversationId);
-        if (Object.hasOwn(started, String(api.taskId))) return undefined;
+        const existing = started[id];
+        if (existing !== undefined) return existing.child as ConversationId;
         // The parent's key and agent, as the runtime recorded them.
         const recorded = await tx.doc(ConversationDoc, api.conversationId);
         // Both tasks belong to the parent conversation and are background: its stops and idle waits pass them by.
@@ -233,20 +344,64 @@ export function createDelegation(options: DelegationOptions) {
         const anchor = await tx.createTask(Anchor, null, background);
         const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
         await options.apply(tx, child.id, { key: task.key, agent: task.agent, conversationId: String(child.id), channel: task.channel }, agent);
-        const sender = plainSender(task.sender);
         const input: ReporterInput = {
+          id,
           child: child.id as number,
           parent: { key: recorded.key, agent: recorded.agent, conversationId: String(api.conversationId) },
           agent: task.agent,
           task: task.task,
-          requestId: `delegate:${api.taskId}`,
           ...(sender !== undefined && { sender }),
         };
         await tx.createTask(Reporter, input, background);
-        started[String(api.taskId)] = { child: child.id as number };
+        started[id] = { child: child.id as number, agent: task.agent, ...(sender !== undefined && { sender }) };
         return child.id;
       }, context);
-      if (parent !== undefined) await api.details({ conversationId: parent } as JsonValue, context);
+      await api.details({ conversationId: child } as JsonValue, context);
+      // Submitted before the id is returned, so no steer reaches the child before its task.
+      const handle = await api.conversation(child, context);
+      if (handle !== undefined) await submitTo(api, api.conversationId, id, handle, inputOf(task.task, `delegate:${id}`, sender), context);
+      return id;
+    },
+
+    async list(api, context) {
+      const started = (await api.snapshot(DelegationsDoc, api.conversationId, context)) ?? {};
+      return Object.entries(started).map(([id, record]) => {
+        const result = record.result?.kind === "completed" ? record.result.text : record.result?.kind === "failed" ? record.result.message : undefined;
+        return { id, agent: record.agent, status: statusOf(record), ...(result !== undefined && { result }) };
+      });
+    },
+
+    async steer(api, id, message, context) {
+      const requestId = `delegate-steer:${String(api.taskId)}`;
+      const found = await api.commit(async (tx) => {
+        const record = (await tx.doc(DelegationsDoc, api.conversationId))[id];
+        if (record === undefined) return "not_found" as const;
+        const sent = record.steers?.some((steer) => steer.requestId === requestId) === true;
+        // Once its outcome is fixed nothing joins it: the reporter fixes it only after every steer recorded.
+        if (!sent && statusOf(record) !== "running") return statusOf(record);
+        // A new array: a draft copies what is assigned to it, so a push after `??=` would be lost.
+        if (!sent) record.steers = [...(record.steers ?? []), { requestId, message }];
+        return { child: record.child as ConversationId, sender: plainSender(record.sender) };
+      }, context);
+      if (typeof found === "string") return found;
+      const handle = await api.conversation(found.child, context);
+      if (handle === undefined) return "failed";
+      await submitTo(api, api.conversationId, id, handle, steerOf({ requestId, message }, found.sender), context);
+      return "running";
+    },
+
+    async cancel(api, id, context) {
+      const found = await api.commit(async (tx) => {
+        const record = (await tx.doc(DelegationsDoc, api.conversationId))[id];
+        if (record === undefined) return "not_found" as const;
+        if (record.result !== undefined) return record.result.kind;
+        record.cancelled = true;
+        return record.child as ConversationId;
+      }, context);
+      if (typeof found === "string") return found;
+      // Aborted again by a second cancel (an idle child: nothing happens), so a rerun after a crash still stops it.
+      await (await api.conversation(found, context))?.abort(context);
+      return "aborted";
     },
   };
 

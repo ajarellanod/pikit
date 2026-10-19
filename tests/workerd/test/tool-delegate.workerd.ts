@@ -3,7 +3,8 @@
  * `actor.inbox` and `wakeups`), runtime-pi driving its runs in wakeups, and the scripted model. The
  * assistant delegates to the helper: the task is a child conversation in the same object's storage
  * (pi-durable's subagents), driven by the same alarm. Waited for, its answer is the call's; not waited
- * for, a background task reports it to the assistant, whose answer is announced like any other.
+ * for, a background task reports it to the assistant, whose answer is announced like any other; the
+ * assistant lists it and cancels it, and hears once that it stopped.
  */
 
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
@@ -23,10 +24,25 @@ afterEach(async () => {
   await resetObjects();
 });
 
-/** The assistant (it delegates) and the helper (`hold` returns once released), on the scripted model. */
+type Result = { requestId: string; text: string | undefined; tools: string[] };
+
+/** The text of the tool results a run added. */
+const toolResults = (messages: readonly unknown[]): string[] =>
+  (messages as { role: string; content?: { type: string; text?: string }[] }[]).flatMap((message) =>
+    message.role === "toolResult" ? (message.content ?? []).flatMap((part) => (part.type === "text" && part.text !== undefined ? [part.text] : [])) : [],
+  );
+
+/** The assistant (it delegates) and the helper (`hold` returns once released, or fails when its run stops), on the scripted model. */
 function agents(held: { released: Promise<void> }) {
-  const assistant = defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate"] });
-  const helper = defineAgent({ name: "helper", model: "faux/scripted", tools: [holdTool(() => held.released.then(() => "released"))] });
+  const assistant = defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate", "delegate_tasks", "delegate_cancel"] });
+  const hold = holdTool(
+    (context) =>
+      new Promise<string>((resolve, reject) => {
+        context.abortSignal?.addEventListener("abort", () => reject(context.abortSignal?.reason), { once: true });
+        void held.released.then(() => resolve("released"));
+      }),
+  );
+  const helper = defineAgent({ name: "helper", model: "faux/scripted", tools: [hold] });
   const provider = scriptedProvider();
   return [
     defineComponent({ name: "agents-fixture", setup: (pikit) => [assistant, helper].forEach((agent) => pikit.provideKeyed("agent.definition", agent.name, agent)) }),
@@ -34,20 +50,23 @@ function agents(held: { released: Promise<void> }) {
   ];
 }
 
-/** A channel's object half: admits each message to the assistant, and records every announced result. */
-function channelActor(results: { requestId: string; text: string | undefined }[]) {
+/** A channel's object half: admits each message to the assistant (one conversation per key), and records every announced result. */
+function channelActor(results: Result[]) {
   return defineComponent({
     name: "test-channel-actor",
     setup(pikit) {
       const inbox = pikit.use("actor.inbox");
       const runtime = pikit.use("agent.runtime");
       const conversations = pikit.use("agent.conversations");
-      pikit.on("agent.settled", (result) => void results.push({ requestId: result.requestId, text: result.text }));
+      const known = new Map<string, string>();
+      pikit.on("agent.settled", (result) => void results.push({ requestId: result.requestId, text: result.text, tools: toolResults(result.messages) }));
       return {
         start() {
           inbox.get().handle("test.message", async (key, message, ctx) => {
             const { id, text } = message as { id: string; text: string };
-            const conversation: ConversationRef = { key, agent: "assistant", conversationId: await conversations.get().create(ctx) };
+            const conversationId = known.get(key) ?? (await conversations.get().create(ctx));
+            known.set(key, conversationId);
+            const conversation: ConversationRef = { key, agent: "assistant", conversationId };
             await runtime.get().dispatch({ requestId: id, conversation, prompt: text, sender: { channel: "test", id: "alice" } }, ctx);
           });
         },
@@ -73,14 +92,14 @@ async function workerApp() {
   };
 }
 
-function compose(results: { requestId: string; text: string | undefined }[], held: { released: Promise<void> }) {
+function compose(results: Result[], held: { released: Promise<void> }) {
   composeObjects([storageDo, actorsDo, ...agents(held), toolDelegate, runtimePi, channelActor(results)], {
     "tool-delegate": { agents: [{ name: "helper", description: "Helps." }] },
   });
 }
 
 it("delegate waits for the helper, a child conversation in the same object, driven by its alarm", async () => {
-  const results: { requestId: string; text: string | undefined }[] = [];
+  const results: Result[] = [];
   compose(results, { released: Promise.resolve() });
   const worker = await workerApp();
   try {
@@ -93,7 +112,7 @@ it("delegate waits for the helper, a child conversation in the same object, driv
 });
 
 it("delegate with wait: false: the assistant answers at once, and the helper's answer comes back as a message of its own", async () => {
-  const results: { requestId: string; text: string | undefined }[] = [];
+  const results: Result[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
   compose(results, { released });
@@ -104,6 +123,34 @@ it("delegate with wait: false: the assistant answers at once, and the helper's a
     release();
     await vi.waitFor(() => expect(results.map((each) => each.requestId.split(":")[0])).toEqual(["m1", "delegate-result"]), { timeout: 10_000 });
     expect(results[1]?.text).toContain('[The agent "helper" finished the task you delegated to it.');
+  } finally {
+    await worker.stop();
+  }
+});
+
+it("the assistant lists the task it did not wait for and cancels it; it hears once that it stopped", async () => {
+  const results: Result[] = [];
+  compose(results, { released: new Promise<void>(() => {}) });
+  const worker = await workerApp();
+  const key = `test:${crypto.randomUUID()}`;
+  const of = (requestId: string) => results.find((each) => each.requestId === requestId);
+  try {
+    await worker.send(key, { id: "m1", text: 'call: delegate {"agent":"helper","task":"hold","wait":false}' });
+    await vi.waitFor(() => expect(of("m1")).toBeDefined(), { timeout: 10_000 });
+    const id = /^The task "(\d+)"/.exec(of("m1")?.tools[0] ?? "")?.[1];
+    expect(id).toBeDefined();
+
+    await worker.send(key, { id: "m2", text: "call: delegate_tasks {}" });
+    await vi.waitFor(() => expect(of("m2")?.tools).toEqual([`- ${id}: the agent "helper", running`]), { timeout: 10_000 });
+
+    await worker.send(key, { id: "m3", text: `call: delegate_cancel ${JSON.stringify({ id })}` });
+    await vi.waitFor(() => expect(results.some((each) => each.requestId.startsWith("delegate-result:"))).toBe(true), { timeout: 10_000 });
+    await vi.waitFor(() => expect(of("m3")?.tools).toEqual([`The task "${id}" is stopped.`]), { timeout: 10_000 });
+    expect(results.find((each) => each.requestId.startsWith("delegate-result:"))?.text).toContain('[The task you delegated to the agent "helper" was stopped before it answered.]');
+
+    await worker.send(key, { id: "m4", text: `call: delegate_tasks ${JSON.stringify({ id })}` });
+    await vi.waitFor(() => expect(of("m4")?.tools).toEqual([`- ${id}: the agent "helper", aborted`]), { timeout: 10_000 });
+    expect(results.filter((each) => each.requestId.startsWith("delegate-result:"))).toHaveLength(1);
   } finally {
     await worker.stop();
   }
