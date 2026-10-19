@@ -9,23 +9,26 @@
 import { afterEach, expect, test } from "bun:test";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineTool } from "@earendil-works/pi-durable";
-import { CONVERSATION, defineAgent, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
+import { CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
 import type { DurableTool } from "./agent.ts";
 import { ConversationDoc } from "./agent.ts";
 import { toChord } from "./context.ts";
-import { AGENT_DELEGATION, RESULT_REQUEST_PREFIX } from "./delegation.ts";
-import { databaseFile, holdTool, openWorker, type WorkerOptions } from "./test-support.ts";
+import { AGENT_DELEGATION, type BackgroundDelegation, RESULT_LIMIT, RESULT_REQUEST_PREFIX } from "./delegation.ts";
+import { databaseFile, holdTool, openWorker, type Worker, type WorkerOptions } from "./test-support.ts";
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
-/** The test's delegate tool: `run` or `start` on the runtime's delegation, as a tool component would. */
+/**
+ * The test's delegate tool: `run` or `start` on the runtime's delegation, as a tool component would;
+ * `start` answers `started <id>` (`twice`: started again in the same call, as a rerun would, and both ids).
+ */
 const delegate = defineTool({
   name: "delegate",
   description: "Delegates",
-  parameters: Type.Object({ agent: Type.String(), task: Type.String(), wait: Type.Optional(Type.Boolean()) }),
+  parameters: Type.Object({ agent: Type.String(), task: Type.String(), wait: Type.Optional(Type.Boolean()), twice: Type.Optional(Type.Boolean()) }),
   replay: "safe",
   async execute(args, api, context) {
     const delegation = context.value(AGENT_DELEGATION);
@@ -33,11 +36,31 @@ const delegate = defineTool({
     if (delegation === undefined || parent === undefined) throw new Error("no delegation in the context");
     const task = { agent: args.agent, key: `delegate:1:${String(api.taskId)}`, channel: "delegate", task: args.task, sender: { channel: "delegate", id: parent.agent } };
     if (args.wait === false) {
-      await delegation.start(api, task, context);
-      return { output: [{ type: "text", text: "started" }] };
+      const ids = [await delegation.start(api, task, context)];
+      if (args.twice === true) ids.push(await delegation.start(api, task, context));
+      return { output: [{ type: "text", text: `started ${ids.join(" ")}` }] };
     }
     const outcome = await delegation.run(api, task, context);
     return { output: [{ type: "text", text: JSON.stringify(outcome) }] };
+  },
+}) as unknown as DurableTool;
+
+/** The test's control tool: `list`, `steer` or `cancel` on the runtime's delegation; answers with the result as JSON. */
+const control = defineTool({
+  name: "control",
+  description: "Controls background tasks",
+  parameters: Type.Object({ op: Type.String(), id: Type.Optional(Type.String()), message: Type.Optional(Type.String()) }),
+  replay: "safe",
+  async execute(args, api, context) {
+    const delegation = context.value(AGENT_DELEGATION);
+    if (delegation === undefined) throw new Error("no delegation in the context");
+    const result =
+      args.op === "list"
+        ? await delegation.list(api, context)
+        : args.op === "steer"
+          ? await delegation.steer(api, args.id ?? "", args.message ?? "", context)
+          : await delegation.cancel(api, args.id ?? "", context);
+    return { output: [{ type: "text", text: JSON.stringify(result) }] };
   },
 }) as unknown as DurableTool;
 
@@ -70,7 +93,7 @@ function hold() {
 }
 
 const agents = [
-  defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate"] }),
+  defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate", "control"] }),
   defineAgent({ name: "helper", model: "faux/scripted", systemPrompt: "You help.", tools: ["hold"] }),
 ];
 
@@ -79,7 +102,7 @@ function records() {
   cleanup.push(file.dispose);
   return {
     async worker(options: WorkerOptions) {
-      const w = await openWorker(file.path, { agents, ...options });
+      const w = await openWorker(file.path, { agents, ...options, tools: { control, ...options.tools } });
       cleanup.push(w.close);
       return w;
     },
@@ -162,7 +185,7 @@ test("start: the call returns at once; the task's answer reaches the parent late
   const conversation = await w.conversation("assistant");
 
   await w.dispatch("r1", 'call: delegate {"agent":"helper","task":"hold","wait":false}', conversation);
-  expect(toolResults((await w.result("r1")).messages)).toEqual(["started"]);
+  expect(toolResults((await w.result("r1")).messages)).toEqual([expect.stringMatching(/^started \d+$/) as never]);
   await held.started;
   held.release();
 
@@ -206,4 +229,161 @@ test("the child records its key and agent, so a reopened runtime builds it as th
   const all = (await storage.scanConversations({}, 100, undefined, toChord(w.ctx))).items;
   const docs = await Promise.all(all.map((each) => harness.snapshot(ConversationDoc, each.id as ConversationId, toChord(w.ctx))));
   expect(docs.map((doc) => doc?.agent).sort()).toEqual(["assistant", "helper"]);
+});
+
+/** Starts `task` for the helper in the background from `conversation` (run `requestId`), and returns its id. */
+async function startTask(w: Worker, conversation: ConversationRef, requestId: string, task = "hold", twice = false): Promise<string> {
+  await w.dispatch(requestId, `call: delegate ${JSON.stringify({ agent: "helper", task, wait: false, ...(twice && { twice }) })}`, conversation);
+  const [text] = toolResults((await w.result(requestId)).messages);
+  return text?.replace(/^started /, "") ?? "";
+}
+
+/** Calls `control` from `conversation` (run `requestId`), and returns what it answered. */
+async function controlCall(w: Worker, conversation: ConversationRef, requestId: string, args: { op: string; id?: string; message?: string }): Promise<unknown> {
+  await w.dispatch(requestId, `call: control ${JSON.stringify(args)}`, conversation);
+  return JSON.parse(toolResults((await w.result(requestId)).messages)[0] ?? "null");
+}
+
+/** The background results reported so far. */
+const reports = (w: Worker) => w.results().filter((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+
+/** A `hold` that ends its run (`terminate`), so a steer queued meanwhile is placed after the run's answer, in a run of its own. */
+function terminatingHold() {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let started!: () => void;
+  const holding = new Promise<void>((resolve) => (started = resolve));
+  const tool = defineTool({
+    name: "hold",
+    description: "Blocks until the test releases it, then ends the run.",
+    parameters: Type.Object({}),
+    async execute() {
+      started();
+      await released;
+      return { output: [{ type: "text", text: "released" }], control: { terminate: true } };
+    },
+  }) as unknown as DurableTool;
+  return { tool, started: holding, release: () => release() };
+}
+
+test("start: its id is the call's task id, the same when the call starts it again; one child, one report", async () => {
+  const held = hold();
+  const w = await (await records()).worker({ tools: { delegate, control, hold: held.tool } });
+  const conversation = await w.conversation("assistant");
+
+  const ids = (await startTask(w, conversation, "r1", "hold", true)).split(" ");
+  expect(ids).toHaveLength(2);
+  expect(ids[1]).toBe(ids[0] as string);
+  const { storage } = await w.runtime.opened(w.ctx);
+  expect((await storage.scanConversations({}, 100, undefined, toChord(w.ctx))).items.length).toBe(2);
+
+  held.release();
+  await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  await w.dispatch("r2", "after", conversation);
+  await w.result("r2");
+  expect(reports(w)).toHaveLength(1);
+});
+
+test("list: this conversation's background tasks, running and then how they ended (bounded), after a restart; foreground ones are not listed", async () => {
+  const db = await records();
+  const first = hold();
+  const w1 = await db.worker({ tools: { delegate, control, hold: first.tool } });
+  const conversation = await w1.conversation("assistant");
+  const id = await startTask(w1, conversation, "r1");
+  await first.started;
+  expect(await controlCall(w1, conversation, "r2", { op: "list" })).toEqual([{ id, agent: "helper", status: "running" }]);
+  await w1.close();
+
+  const next = hold();
+  next.release();
+  const w2 = await db.worker({ tools: { delegate, control, hold: next.tool } });
+  await w2.runtime.inspect(w2.ctx);
+  await w2.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  // A foreground delegation is the call's: not listed.
+  await w2.dispatch("r3", 'call: delegate {"agent":"helper","task":"x"}', conversation);
+  await w2.result("r3");
+  const long = await startTask(w2, conversation, "r4", "y".repeat(RESULT_LIMIT + 100));
+  await w2.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX) && each.text?.includes("yyy") === true);
+
+  const listed = (await controlCall(w2, conversation, "r5", { op: "list" })) as BackgroundDelegation[];
+  expect(listed[0]).toEqual({ id, agent: "helper", status: "completed", result: "answer: hold" });
+  expect(listed.map((each) => each.id)).toEqual([id, long]);
+  expect(listed[1]?.result).toBe(`${`answer: ${"y".repeat(RESULT_LIMIT + 100)}`.slice(0, RESULT_LIMIT)} [...]`);
+});
+
+test("steer: reaches the child's run in progress, from the delegating agent; the one report answers it; a task that ended takes none", async () => {
+  const held = hold();
+  const w = await (await records()).worker({ tools: { delegate, control, hold: held.tool } });
+  const conversation = await w.conversation("assistant");
+  const id = await startTask(w, conversation, "r1");
+  await held.started;
+
+  expect(await controlCall(w, conversation, "r2", { op: "steer", id, message: "hold" })).toBe("running");
+  held.release();
+  const reported = await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+
+  // The steer joined the run: its second hold saw both requests, each from the delegating agent.
+  const sender = { channel: "delegate", id: "assistant" };
+  expect(held.seen.requests).toEqual([
+    { requestId: `delegate:${id}`, sender },
+    { requestId: expect.stringMatching(/^delegate-steer:/) as never, sender },
+  ]);
+  expect(reported.text).toContain("answer: hold");
+  expect(await controlCall(w, conversation, "r3", { op: "steer", id, message: "more" })).toBe("completed");
+  expect(await controlCall(w, conversation, "r4", { op: "cancel", id })).toBe("completed");
+  expect(await controlCall(w, conversation, "r5", { op: "steer", id: "999", message: "more" })).toBe("not_found");
+  expect(reports(w)).toHaveLength(1);
+});
+
+test("steer: one that comes after the child's last tool round runs after it, and the report is its answer, not the run before", async () => {
+  const held = terminatingHold();
+  const w = await (await records()).worker({ tools: { delegate, control, hold: held.tool } });
+  const conversation = await w.conversation("assistant");
+  const id = await startTask(w, conversation, "r1");
+  await held.started;
+
+  expect(await controlCall(w, conversation, "r2", { op: "steer", id, message: "and then this" })).toBe("running");
+  // The hold ends the run: the steer cannot join it, and starts a run of its own.
+  held.release();
+  const reported = await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+
+  expect(reported.text).toContain("answer: and then this");
+  expect(await controlCall(w, conversation, "r3", { op: "list" })).toEqual([{ id, agent: "helper", status: "completed", result: "answer: and then this" }]);
+});
+
+test("cancel: stops the child, and the parent hears it was stopped once; cancelling again does nothing more", async () => {
+  const held = hold();
+  const w = await (await records()).worker({ tools: { delegate, control, hold: held.tool } });
+  const conversation = await w.conversation("assistant");
+  const id = await startTask(w, conversation, "r1");
+  await held.started;
+
+  expect(await controlCall(w, conversation, "r2", { op: "cancel", id })).toBe("aborted");
+  expect(held.seen.aborted).toBe(true);
+  const reported = await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  expect(reported.text).toContain('[The task you delegated to the agent "helper" was stopped before it answered.]');
+
+  expect(await controlCall(w, conversation, "r3", { op: "cancel", id })).toBe("aborted");
+  expect(await controlCall(w, conversation, "r4", { op: "steer", id, message: "hold" })).toBe("aborted");
+  expect(await controlCall(w, conversation, "r5", { op: "list" })).toEqual([{ id, agent: "helper", status: "aborted" }]);
+  expect(reports(w)).toHaveLength(1);
+});
+
+test("another conversation's task is not_found: it lists none, and can neither steer nor cancel it", async () => {
+  const held = hold();
+  const w = await (await records()).worker({ tools: { delegate, control, hold: held.tool } });
+  const mine = await w.conversation("assistant");
+  const other = await w.conversation("assistant");
+  const id = await startTask(w, mine, "r1");
+  await held.started;
+
+  expect(await controlCall(w, other, "o1", { op: "list" })).toEqual([]);
+  expect(await controlCall(w, other, "o2", { op: "steer", id, message: "hold" })).toBe("not_found");
+  expect(await controlCall(w, other, "o3", { op: "cancel", id })).toBe("not_found");
+
+  expect(held.seen.aborted).toBe(false);
+  expect(await controlCall(w, mine, "r2", { op: "list" })).toEqual([{ id, agent: "helper", status: "running" }]);
+  held.release();
+  const reported = await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  expect(reported.text).toContain("answer: hold");
 });

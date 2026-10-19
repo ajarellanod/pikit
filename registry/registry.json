@@ -424,7 +424,7 @@
     },
     "tool-delegate": {
       "version": "0.0.0",
-      "description": "The `delegate` tool, for the agents that name it: a task handed to another agent of the project, in a child conversation on pi-durable's subagents, answered now or later as a message.",
+      "description": "The `delegate` tool, for the agents that name it: a task handed to another agent of the project, in a child conversation on pi-durable's subagents, answered now or later as a message; and `delegate_tasks`, `delegate_steer`, `delegate_cancel` for the tasks not waited for.",
       "targets": [
         "server",
         "durable"
