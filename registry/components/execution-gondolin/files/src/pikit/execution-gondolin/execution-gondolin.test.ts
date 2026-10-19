@@ -19,7 +19,8 @@ import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/t
 import { createWorkspaceConformance } from "@pikit/pi-adapter/testing";
 import { doctor } from "./doctor.ts";
 import { FakeLauncher } from "./fake-guest.test-support.ts";
-import { createExecutionGondolin } from "./index.ts";
+import { SandboxCache } from "./cache.ts";
+import { createExecutionGondolin, holdsWorkingDirectory, KEEP_SANDBOXES, TMP_DIR } from "./index.ts";
 import { qemuBinary, qemuProblem } from "./qemu.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -229,7 +230,7 @@ test("paths never leave the sandbox: absolute, .., and links the guest made, whe
   await s.app.stop();
 });
 
-test("temporary files and spilled output are under /tmp/pikit, on the host, emptied at the next start", async () => {
+test("temporary files and spilled output are under /tmp/pikit, on the host, in the component's own directory, emptied at the next start; nothing else is", async () => {
   const launcher = new FakeLauncher();
   launcher.respond = () => ({ chunks: Array.from({ length: 6 }, (_, i) => ["stdout", `line-${i}\n`] as ["stdout", string]) });
   const s = await started({}, { launcher });
@@ -243,16 +244,20 @@ test("temporary files and spilled output are under /tmp/pikit, on the host, empt
   const spillPath = spilled.result.ok ? (spilled.result.value.spillPath as string) : "";
   expect(await env.readTextFile(spillPath, ctx)).toEqual({ ok: true, value: spilled.stdout });
   expect(spilled.stdout).toBe("line-0\nline-1\nline-2\nline-3\nline-4\nline-5\n");
-  expect(existsSync(join(s.root, "tmp", "conversations", "1", spillPath.slice("/tmp/pikit/".length)))).toBe(true);
+  expect(existsSync(join(s.root, TMP_DIR, "conversations", "1", spillPath.slice("/tmp/pikit/".length)))).toBe(true);
   expect((await env.createTempDir("../escape-", ctx)).ok).toBe(false);
   await s.app.stop();
 
-  // A new process: what an earlier one left in tmp is gone, the workspace stays.
+  // A new process: what an earlier one left in its temporary area is gone; the workspace, and a `tmp`
+  // that is not the component's, stay.
   writeFileSync(join(s.root, "conversations", "1", "kept.txt"), "kept");
+  mkdirSync(join(s.root, "tmp"));
+  writeFileSync(join(s.root, "tmp", "theirs.txt"), "not the component's");
   const again = await defineApp({ components: [createExecutionGondolin(new FakeLauncher())], config: { "execution-gondolin": { root: s.root } }, logger: silentLogger }).create();
   await again.start();
-  expect(existsSync(join(s.root, "tmp", "conversations", "1"))).toBe(false);
+  expect(existsSync(join(s.root, TMP_DIR, "conversations", "1"))).toBe(false);
   expect(existsSync(join(s.root, "conversations", "1", "kept.txt"))).toBe(true);
+  expect(readFileSync(join(s.root, "tmp", "theirs.txt"), "utf8")).toBe("not the component's");
   await again.stop();
 });
 
@@ -271,7 +276,7 @@ test("the VM boots at the first command, once, with the conversation's directori
   const [guest] = launcher.guests;
   expect(guest?.spec).toEqual({
     label: "pikit support 7",
-    mounts: { "/workspace": join(s.root, "conversations", "7"), "/tmp/pikit": join(s.root, "tmp", "conversations", "7") },
+    mounts: { "/workspace": join(s.root, "conversations", "7"), "/tmp/pikit": join(s.root, TMP_DIR, "conversations", "7") },
     allowedHosts: [],
     secrets: [],
     memory: "512M",
@@ -528,4 +533,61 @@ test("doctor: a problem when QEMU or qemu-img is not on PATH, and nothing to say
   expect(qemuProblem(() => "/usr/bin/qemu")).toBeUndefined();
   const result = await doctor({ config: {}, get: () => undefined });
   expect(result.problems).toEqual(qemuProblem() === undefined ? [] : [qemuProblem() as string]);
+});
+
+test("the sandbox cache keeps at most `keep` idle entries, dropping the least recently used, and never one that is not idle", () => {
+  const busy = new Set(["b0", "b1"]);
+  const cache = new SandboxCache<string>(3, (id) => !busy.has(id));
+  const made: string[] = [];
+  const get = (id: string) => cache.get(id, () => (made.push(id), id));
+
+  for (const id of ["b0", "b1", "a", "b", "c", "d", "e"]) get(id);
+  // a to d were dropped, oldest first; b0 and b1, though oldest, are not idle and stay.
+  expect(cache.size).toBe(3);
+  for (const id of ["b0", "b1", "e", "d"]) get(id);
+  expect(made).toEqual(["b0", "b1", "a", "b", "c", "d", "e", "d"]);
+  // When more than `keep` are not idle, all of them stay: the cache never drops one in use.
+  for (const id of ["b2", "b3", "b4"]) busy.add(id);
+  for (const id of ["b2", "b3", "b4"]) get(id);
+  expect(cache.size).toBe(5);
+});
+
+test("conversations' sandboxes are bounded: idle ones are dropped and rebuilt with their files; one with a VM is kept", async () => {
+  const launcher = new FakeLauncher();
+  launcher.respond = (command) => (command.command === "hang" ? { hang: true } : { exitCode: 0 });
+  const s = await started({}, { launcher });
+  const busy = await s.env("busy");
+  const running = busy.exec("hang", undefined, ctx);
+  await until(() => launcher.guests[0]?.running === 1);
+  const first = await s.env("first");
+  expect((await first.writeFile("kept.txt", "first's", ctx)).ok).toBe(true);
+  // A VM that idles out (no command running) leaves its entry droppable too.
+  await (await s.env("ran")).exec("quick", undefined, ctx);
+
+  for (let i = 0; i < KEEP_SANDBOXES * 3; i++) await s.env(`c${i}`);
+
+  const again = await s.env("first");
+  expect(again).not.toBe(first);
+  expect(await again.readTextFile("kept.txt", ctx)).toEqual({ ok: true, value: "first's" });
+  // The conversation running a command keeps its sandbox (and so its one VM).
+  expect(await s.env("busy")).toBe(busy);
+  await busy.cleanup(ctx);
+  await running;
+  expect(launcher.guests.filter((guest) => guest.spec.label === "pikit support busy")).toHaveLength(1);
+  await s.app.stop();
+});
+
+test("start refuses a root that is the working directory, holds it, or is /", async () => {
+  const cwd = process.cwd();
+  for (const root of [".", cwd, join(cwd, ".."), "/"]) {
+    const app = await defineApp({ components: [createExecutionGondolin(new FakeLauncher())], config: { "execution-gondolin": { root } }, logger: silentLogger }).create();
+    const error = await app.start().then(
+      () => undefined,
+      (thrown: unknown) => String(((thrown as Error).cause as Error | undefined)?.message),
+    );
+    expect({ root, error }).toEqual({ root, error: expect.stringContaining("is the working directory, holds it, or is /") });
+  }
+  expect(holdsWorkingDirectory("/srv", "/srv/app")).toBe(true);
+  expect(holdsWorkingDirectory("/srv/app/.pikit/gondolin", "/srv/app")).toBe(false);
+  expect(holdsWorkingDirectory("/srv/ap", "/srv/app")).toBe(false);
 });

@@ -7,8 +7,9 @@
  * alone (the README says why), and `execution` and `execution.shell`, one more sandbox (`default`)
  * for a tool called outside a conversation. Each sandbox:
  * - has its files in `<root>/conversations/<conversationId>/` on the host, `/workspace` in the guest
- *   (a Gondolin VFS mount), and its temporary files in `<root>/tmp/...`, `/tmp/pikit` in the guest
- *   (emptied at start). The file tools work on the host directories (`env.ts`, `paths.ts`): a
+ *   (a Gondolin VFS mount), and its temporary files in `<root>/.execution-gondolin-tmp/...`,
+ *   `/tmp/pikit` in the guest (emptied at start: the one directory this component deletes).
+ *   Start refuses a `root` that is the working directory, holds it, or is `/`. The file tools work on the host directories (`env.ts`, `paths.ts`): a
  *   conversation that only reads and writes files never boots a VM. No path, and no link the guest
  *   made, leads them outside these two directories.
  * - boots its VM at its first command, closes it after `idleSeconds` without one (`pool.ts`); at most
@@ -19,18 +20,23 @@
  *   holds a placeholder in `$NAME`, which the host replaces in requests to that secret's hosts only
  *   (SPEC C7). No value is logged.
  *
+ * The sandboxes of conversations are held in a bounded cache (`cache.ts`): an idle one is dropped and
+ * rebuilt at its next `resolve`, its files untouched.
+ *
  * Start refuses when QEMU is missing, or when secrets are configured without a `secrets` provider; it
  * warns when Linux has no KVM (QEMU then emulates, slowly). Stop closes every VM.
  *
  * Target: `server` (QEMU processes beside the app).
  */
 
+import { realpathSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { ConversationRef } from "@pikit/contracts";
 import { defineComponent } from "@pikit/core";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import Type from "typebox";
+import { SandboxCache } from "./cache.ts";
 import { createSandboxEnv, type Sandbox, TMP, WORKSPACE } from "./env.ts";
 import { gondolinLauncher } from "./gondolin.ts";
 import type { GuestLauncher, GuestSpec } from "./guest.ts";
@@ -74,6 +80,28 @@ const Config = Type.Object({
  */
 const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+/** The one directory under `root` this component deletes (at start): its temporary area, named so nothing else is. */
+export const TMP_DIR = ".execution-gondolin-tmp";
+
+/** Idle conversation sandboxes kept built; more are dropped, least recently resolved first (`cache.ts`). */
+export const KEEP_SANDBOXES = 64;
+
+/** `path` with its links resolved when it exists, else as given. */
+function real(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Whether `root` is `/`, the working directory, or one of its ancestors: never a place to keep sandboxes in. */
+export function holdsWorkingDirectory(root: string, cwd = process.cwd()): boolean {
+  return [root, real(root)].some((dir) =>
+    [cwd, real(cwd)].some((here) => dir === sep || here === dir || here.startsWith(dir.endsWith(sep) ? dir : dir + sep)),
+  );
+}
+
 /** The component over `launcher`: `gondolinLauncher` (QEMU) for real, a fake in the tests. */
 export function createExecutionGondolin(launcher: GuestLauncher) {
   return defineComponent({
@@ -99,10 +127,10 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
         },
       });
 
-      /** A sandbox over `<root>/<path>` and `<root>/tmp/<path>`, its VM labelled `label`. Builds nothing on disk. */
+      /** A sandbox over `<root>/<path>` and `<root>/<TMP_DIR>/<path>`, its VM labelled `label`. Builds nothing on disk. */
       function sandbox(name: string, path: string, label: string): Sandbox {
         const workspace = join(root, path);
-        const tmp = join(root, "tmp", path);
+        const tmp = join(root, TMP_DIR, path);
         const spec = (values: Record<string, string | undefined>): GuestSpec => {
           const unset = config.secrets.filter((secret) => !values[secret.name]).map((secret) => secret.name);
           if (unset.length > 0) log.warn("execution-gondolin: secrets not set, left out of this VM until its next boot", { sandbox: name, secrets: unset });
@@ -134,7 +162,6 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
 
       /** Makes a sandbox's directories (again, if someone removed them). */
       const made = async (box: Sandbox) => {
-        await mkdir(join(root, "tmp"), { recursive: true });
         await mkdir(box.tmp, { recursive: true });
         await mkdir(box.workspace, { recursive: true });
       };
@@ -144,19 +171,21 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
       pikit.provide("execution", defaultEnv);
       pikit.provide("execution.shell", defaultEnv);
 
-      const conversations = new Map<string, { box: Sandbox; env: ExecutionEnv }>();
+      // Bounded: an entry with a VM or a running command is never dropped, so a conversation never has two.
+      const conversations = new SandboxCache<{ box: Sandbox; env: ExecutionEnv }>(
+        KEEP_SANDBOXES,
+        ({ box }) => box.slot.guest === undefined && box.slot.busy === 0 && box.running.size === 0,
+      );
       const provider: WorkspaceProvider = {
         async resolve(conversation: ConversationRef) {
           const id = conversation.conversationId;
           if (!CONVERSATION_ID.test(id)) {
             throw new Error(`execution-gondolin: conversation id ${JSON.stringify(id)} is not a safe directory name (letters, digits, _ and -, at most 128)`);
           }
-          let found = conversations.get(id);
-          if (found === undefined) {
+          const found = conversations.get(id, () => {
             const box = sandbox(`conversation-${id}`, join("conversations", id), `pikit ${conversation.agent} ${id}`);
-            found = { box, env: createSandboxEnv(box) };
-            conversations.set(id, found);
-          }
+            return { box, env: createSandboxEnv(box) };
+          });
           // Every call: a directory removed meanwhile is made again, and one made already costs nothing.
           await made(found.box);
           return { env: found.env };
@@ -167,6 +196,9 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
       return {
         async start(ctx) {
           log = ctx.logger;
+          if (holdsWorkingDirectory(root)) {
+            throw new Error(`execution-gondolin: root ${JSON.stringify(config.root)} is the working directory, holds it, or is /: give the sandboxes a directory of their own (the default is .pikit/gondolin)`);
+          }
           const problem = launcher.check();
           if (problem !== undefined) throw new Error(`execution-gondolin: ${problem}`);
           const names = config.secrets.map((secret) => secret.name);
@@ -176,7 +208,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           const warning = launcher.warning();
           if (warning !== undefined) ctx.logger.warn(`execution-gondolin: ${warning}`);
           // Temporary files and spilled output of an earlier process: no VM and no tool refers to them now.
-          await rm(join(root, "tmp"), { recursive: true, force: true });
+          await rm(join(root, TMP_DIR), { recursive: true, force: true });
           await made(fallback);
         },
         async stop() {

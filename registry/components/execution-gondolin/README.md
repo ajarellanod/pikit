@@ -44,17 +44,23 @@ starts with a new transcript. The previous conversation's files stay on the host
 ## What a sandbox is
 
 ```
-<root>/conversations/<conversationId>/       /workspace in the guest: the conversation's files
-<root>/tmp/conversations/<conversationId>/   /tmp/pikit in the guest: temporary files, spilled output
-<root>/default/                              /workspace of `execution`'s sandbox
-<root>/tmp/default/                          its /tmp/pikit
+<root>/conversations/<conversationId>/                           /workspace in the guest: the conversation's files
+<root>/.execution-gondolin-tmp/conversations/<conversationId>/   /tmp/pikit in the guest: temporary files, spilled output
+<root>/default/                                                  /workspace of `execution`'s sandbox
+<root>/.execution-gondolin-tmp/default/                          its /tmp/pikit
 ```
 
 `root` is `.pikit/gondolin` by default (in `pikit-state` on Docker). `/workspace` is a Gondolin VFS
 mount (`RealFSProvider`) over the host directory, so the files outlive the VM, and a snapshot of a
 conversation is the host's alone
 ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)).
-`<root>/tmp` is emptied at start: no VM and no tool refers to an earlier process's.
+`<root>/.execution-gondolin-tmp` is emptied at start (no VM and no tool refers to an earlier
+process's): the only directory this component deletes. Start refuses a `root` that is the working
+directory, one of its ancestors, or `/`.
+
+The process keeps the sandboxes of at most 64 idle conversations built (and every one with a VM or a
+command running); an idle one past that is dropped, least recently resolved first, and rebuilt at its
+next `resolve`, its files untouched.
 
 - **Files without a VM.** `read`, `write`, `edit` and every `FileSystem` method work on the host
   directories directly, with Pi's own `NodeExecutionEnv` underneath: a conversation that never runs a
@@ -180,10 +186,12 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 - the `execution` conformance suite on a conversation's environment, files only (`exec` answering
   `shell_unavailable` when no VM boots), the `workspace` suite, and the lifecycle suite;
 - files on the host, in the conversation's directory, at `/workspace`; no VM for file tools; keyed by
-  `conversationId` alone; unsafe ids refused;
+  `conversationId` alone; unsafe ids refused; the sandbox cache bounded (idle ones dropped and rebuilt
+  with their files, one with a VM kept);
 - confinement: absolute paths, `..`, links to host paths, to `/etc`, up and out, loops; writes and
   renames through them refused; a link removed, not its target; no host path in errors;
-- `/tmp/pikit` and spill on the host, emptied at the next start;
+- `/tmp/pikit` and spill on the host, in `.execution-gondolin-tmp`, emptied at the next start while a
+  `tmp` beside it stays; a `root` that is the working directory, holds it, or is `/` refused at start;
 - boot at the first command with the right mounts and spec; output per stream across chunk
   boundaries; spawn errors; timeout, cancellation and a throwing `onOutput` kill the command;
   `cleanup`; stop closes every VM; idle close and reboot; eviction at `maxVms`, the bounded queue and
