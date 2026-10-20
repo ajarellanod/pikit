@@ -1,0 +1,50 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "tool-websearch-gemini",
+  "version": "0.0.1",
+  "title": "Web search: your agent searches the web with Gemini and Google Search (needs an API key)",
+  "description": "The `websearch` tool, for the agents that name it: Gemini answers grounded in Google Search, with its sources; the key the model never sees. An alternative to tool-websearch-brave.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "adapter": "0.0.1",
+    "capabilities": [
+      "secrets"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "websearch": "safe"
+    }
+  },
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@pikit/contracts": "0.0.1"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "GEMINI_API_KEY",
+      "secret": true,
+      "required": false,
+      "description": "A Gemini API key, from aistudio.google.com/apikey (the free tier works). Optional: without it the app starts and each search fails saying so. Read through secrets; the model never sees it."
+    }
+  ]
+}
