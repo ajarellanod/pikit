@@ -44,7 +44,7 @@ again. A bundle that names the admin API (`/admin/api`) is refused.
 | `src/lib/conversations.tsx` | the user's latest conversations (the sidebar's 20), the messages sent and not shown yet (the shared `useSentMessages`), and the tabs, kept in this browser per user |
 | `src/lib/location.ts`, `routes.ts` | the hash routes (`#/c/<id>`, `#/set-password?token=…&email=…`); each signed-out screen keyed by its route, so another route starts it anew |
 | `src/lib/visible.ts` | signed out, the config read again when the tab comes back (a sign-up mode changed meanwhile) |
-| `src/components/bui/` (`ActionsMenu` too), `src/components/pikit/` (`conversation`, `context-panel`, `tab-bar`, `message`; `settings-shell`, `settings-rows`: the dashboard's settings dialog's frame and rows), `src/lib/{activity,format,messages,names,sounds,sources,theme,transcript,utils}.ts`, `src/index.css`, `public/` | the dashboard's shared pieces and look, copied |
+| `src/components/bui/` (`ActionsMenu` too), `src/components/pikit/` (`conversation`, `context-panel`, `tab-bar`, `message`, `image-viewer`; `settings-shell`, `settings-rows`: the dashboard's settings dialog's frame and rows), `src/lib/{activity,format,messages,names,sounds,sources,theme,transcript,utils}.ts`, `src/index.css`, `public/` | the dashboard's shared pieces and look, copied |
 
 The copies are the dashboard's own files: in the kit, `bun scripts/chat-shared.ts generate` makes them
 and `scripts/chat.test.ts` checks them; in your project `pikit upgrade` merges them as any other file.

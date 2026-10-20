@@ -8,7 +8,7 @@
  *   dashboard's shell. Every file of `src/lib/` is in exactly one of the two.
  * - `SHARED_UI_FILES`: the lib-ui files, Beautiful UI's primitives (`src/components/bui/`, its
  *   `ActionsMenu` and `Combobox` too: every file of the folder) and the pieces that take everything by props and never fetch (`message`,
- *   `error-note`, `markdown`, `markdown-engine`, a settings dialog's frame and rows: `settings-shell`,
+ *   `error-note`, `image-viewer`, `markdown`, `markdown-engine`, a settings dialog's frame and rows: `settings-shell`,
  *   `settings-rows`; and a conversation's view over a source each app implements, features/completed/chat-parity.md:
  *   `conversation`, `context-panel`, `tab-bar`), as paths from the dashboard's root.
  *
@@ -34,6 +34,7 @@ const SHARED_PIECES = [
   "context-panel.tsx",
   "conversation.tsx",
   "error-note.tsx",
+  "image-viewer.tsx",
   "markdown-engine.tsx",
   "markdown.tsx",
   "message.tsx",
