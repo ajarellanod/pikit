@@ -7,7 +7,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHttpHooks, type SecretManager } from "@earendil-works/gondolin";
@@ -23,7 +23,7 @@ import { FakeLauncher } from "./fake-guest.test-support.ts";
 import { SandboxCache } from "./cache.ts";
 import { GondolinGuest, gitConfig, imageFile, proposalsHook, staleImages } from "./gondolin.ts";
 import { type GuestSpec, PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
-import { createExecutionGondolin, holdsWorkingDirectory, IMAGE_DIR, KEEP_SANDBOXES, TMP_DIR } from "./index.ts";
+import { createExecutionGondolin, holdsWorkingDirectory, IMAGE_DIR, KEEP_SANDBOXES, PROFILE_WARNING, TMP_DIR } from "./index.ts";
 import { qemuBinary, qemuProblem } from "./qemu.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -195,12 +195,45 @@ test("a conversation id that is not a safe directory name is refused, and nothin
     expect(s.workspace.resolve(ref(id), s.app.context())).rejects.toThrow("not a safe directory name");
   }
   expect(existsSync(join(s.root, "escape"))).toBe(false);
-  // The agent names a directory too: anything that is not one name is refused, before anything is made.
-  for (const agent of ["", "..", "a/b", "../escape", "a.b", "x".repeat(129)]) {
+  // The agent names a directory too: anything that is not one lowercase name is refused, before anything
+  // is made (`Developer` and `developer` would share one on a case-insensitive filesystem).
+  for (const agent of ["", "..", "a/b", "../escape", "a.b", "x".repeat(129), "Developer", "_Sandbox"]) {
     await expect(s.workspace.resolve(ref("ok", agent), s.app.context())).rejects.toThrow("is not a safe directory name");
   }
   expect(existsSync(join(s.root, "conversations", "ok"))).toBe(false);
   expect(existsSync(join(s.root, TMP_DIR, "conversations", "ok"))).toBe(false);
+  await s.app.stop();
+});
+
+test("a sandbox with a link (or a file) on the way from root is refused, naming it: nothing is mounted or made through it", async () => {
+  const outside = temporaryDir();
+  writeFileSync(join(outside, "keep.txt"), "the host's");
+  const s = await started();
+  // A guest whose /workspace was conversations/1/ (before sandboxes were per agent) left `developer -> outside`.
+  mkdirSync(join(s.root, "conversations", "1"), { recursive: true });
+  symlinkSync(outside, join(s.root, "conversations", "1", "developer"));
+  // A conversation's directory itself a link, a link in the temporary area, a file.
+  symlinkSync(outside, join(s.root, "conversations", "2"));
+  mkdirSync(join(s.root, TMP_DIR, "conversations", "3"), { recursive: true });
+  symlinkSync(outside, join(s.root, TMP_DIR, "conversations", "3", "support"));
+  writeFileSync(join(s.root, "conversations", "4"), "");
+  const refusal = (id: string, agent: string, path: string) =>
+    `execution-gondolin: the sandbox of conversation "${id}" and agent "${agent}" is refused: ${path} (under root) is a symbolic link or a file`;
+
+  await expect(s.workspace.resolve(ref("1", "developer"), s.app.context())).rejects.toThrow(refusal("1", "developer", "conversations/1/developer"));
+  await expect(s.workspace.resolve(ref("2", "support"), s.app.context())).rejects.toThrow(refusal("2", "support", "conversations/2"));
+  await expect(s.workspace.resolve(ref("3", "support"), s.app.context())).rejects.toThrow(refusal("3", "support", `${TMP_DIR}/conversations/3/support`));
+  await expect(s.workspace.resolve(ref("4", "support"), s.app.context())).rejects.toThrow(refusal("4", "support", "conversations/4"));
+  // Refused at every resolve, not only the first (the sandbox is cached).
+  await expect(s.workspace.resolve(ref("1", "developer"), s.app.context())).rejects.toThrow(refusal("1", "developer", "conversations/1/developer"));
+  expect(readdirSync(outside)).toEqual(["keep.txt"]);
+  expect(s.launcher.guests).toHaveLength(0);
+
+  // Another agent of the same conversation is a real directory: it works.
+  const { env } = await s.workspace.resolve(ref("1", "support"), s.app.context());
+  expect((await env.writeFile("a.txt", "support's", ctx)).ok).toBe(true);
+  expect(readFileSync(join(s.root, "conversations", "1", "support", "a.txt"), "utf8")).toBe("support's");
+  expect(readdirSync(outside)).toEqual(["keep.txt"]);
   await s.app.stop();
 });
 
@@ -438,6 +471,37 @@ test("at maxVms, a new VM closes the one idle the longest; when all run commands
   await s.app.stop();
 });
 
+test("maxVms counts every profile's VMs together: another agent's command closes the idle VM, or waits for it, as with one machine", async () => {
+  const launcher = new FakeLauncher();
+  launcher.respond = (command) => (command.command === "hang" ? { hang: true } : { exitCode: 0 });
+  const s = await started({ maxVms: 1, queueSeconds: 0.1, agents: { developer: { cpus: 1 }, analyst: { memory: "2G" } } }, { launcher });
+  const envOf = async (agent: string) => (await s.workspace.resolve(ref("1", agent), s.app.context())).env;
+  const [developer, analyst] = [await envOf("developer"), await envOf("analyst")];
+
+  await developer.exec("quick", undefined, ctx);
+  await analyst.exec("quick", undefined, ctx);
+  // The developer's VM, idle, was closed for the analyst's: one VM for both machines.
+  expect(launcher.guests.map((g) => [g.spec.label, g.spec.cpus, g.spec.memory, g.closed])).toEqual([
+    ["pikit developer 1", 1, "1G", true],
+    ["pikit analyst 1", 2, "2G", false],
+  ]);
+
+  const hanging = analyst.exec("hang", undefined, ctx);
+  await until(() => launcher.live.length === 1 && launcher.live[0]?.running === 1);
+  const refused = await developer.exec("quick", undefined, ctx);
+  expect(refused).toMatchObject({ ok: false, error: { code: "spawn_error" } });
+  expect(!refused.ok && refused.error.message).toContain("all 1 VMs (maxVms) are running commands");
+
+  // Waiting, the developer gets a VM once the analyst's command ends.
+  const waiting = developer.exec("quick", undefined, withAbortSignal(new AbortController().signal, ctx));
+  await analyst.cleanup(ctx);
+  expect((await waiting).ok).toBe(true);
+  await hanging;
+  expect(launcher.live.map((g) => g.spec.label)).toEqual(["pikit developer 1"]);
+  expect(launcher.guests).toHaveLength(3);
+  await s.app.stop();
+});
+
 test("a VM that fails to boot is not kept: exec answers shell_unavailable, and the next command tries again", async () => {
   const launcher = new FakeLauncher();
   launcher.bootError = new Error("qemu-system-aarch64: failed to start");
@@ -553,7 +617,7 @@ test("profiles: an agent's machine replaces the base field by field; an agent wi
   expect(await specOf("developer")).toEqual({ allowedHosts: ["objects.githubusercontent.com", "api.github.com", "github.com"], secrets: ["GH_TOKEN"], memory: "1G", cpus: 2, packages: ["github-cli"] });
   // What it leaves out is the base's.
   expect(await specOf("analyst")).toEqual({ ...base, memory: "2G", cpus: 1 });
-  for (const agent of ["support", "developerr", "Developer", "constructor", "_shared"]) expect({ agent, machine: await specOf(agent) }).toEqual({ agent, machine: base });
+  for (const agent of ["support", "developerr", "constructor", "_shared"]) expect({ agent, machine: await specOf(agent) }).toEqual({ agent, machine: base });
   await run(s.execution, "true");
   expect(s.launcher.guests.at(-1)?.spec.label).toBe("pikit default");
   expect(machine(s.launcher.guests.at(-1)?.spec as GuestSpec)).toEqual(base);
@@ -620,6 +684,17 @@ test("agents' keys are agent names: anything else, or a field that is global onl
   await s.app.stop();
 });
 
+test("a secret is never named like Object.prototype's special keys (__proto__, constructor, prototype): refused at start, the base's or a profile's", async () => {
+  const values: Record<string, string | undefined> = {};
+  for (const name of ["__proto__", "constructor", "prototype"]) {
+    const secrets = [{ name, hosts: ["api.example"] }];
+    await expect(started({ secrets }, { providers: [secretsOf(values)] })).rejects.toThrow();
+    await expect(started({ agents: { developer: { secrets } } }, { providers: [secretsOf(values)] })).rejects.toThrow();
+  }
+  const s = await started({ secrets: [{ name: "__proto__x", hosts: ["api.example"] }, { name: "CONSTRUCTOR", hosts: ["api.example"] }] }, { providers: [secretsOf(values)] });
+  await s.app.stop();
+});
+
 test("a profile no agent.definition has is warned of at start where agents are defined; a sandbox host (no agents) cannot tell", async () => {
   const agents = defineComponent({
     name: "agents-test",
@@ -627,7 +702,7 @@ test("a profile no agent.definition has is warned of at start where agents are d
       for (const name of ["developer", "analyst"]) pikit.provideKeyed("agent.definition", name, { name, model: "faux/model" } as never);
     },
   });
-  const warning = "execution-gondolin: `agents` names a profile no agent here has (misspelled?): no agent gets it";
+  const warning = PROFILE_WARNING;
   const s = await started({ agents: { developer: {}, developr: { cpus: 4 } } }, { providers: [agents] });
   expect(s.logs).toContainEqual({ level: "warn", message: warning, fields: { profiles: ["developr"], agents: ["developer", "analyst"] } });
   await s.app.stop();
@@ -638,6 +713,34 @@ test("a profile no agent.definition has is warned of at start where agents are d
   const right = await started({ agents: { developer: {} } }, { providers: [agents] });
   expect(right.logs.some((log) => log.message === warning)).toBe(false);
   await right.app.stop();
+});
+
+test("live agents (agent.directory) are not used: agents-live uses agent.tools, which use execution.shell, so the App keeps no cycle; the warning allows for them", async () => {
+  const agents = defineComponent({
+    name: "agents-test",
+    setup(pikit) {
+      pikit.provideKeyed("agent.definition", "developer", { name: "developer", model: "faux/model" } as never);
+    },
+  });
+  // agents-live's shape: it reads the tools; tool-bash's: it runs on execution.shell.
+  const live = defineComponent({
+    name: "agents-live-test",
+    setup(pikit) {
+      pikit.useKeyed("agent.tool");
+      pikit.provide("agent.directory", { list: async () => [], get: async () => undefined } as never);
+    },
+  });
+  const tool = defineComponent({
+    name: "tool-test",
+    setup(pikit) {
+      pikit.use("execution.shell");
+      pikit.provideKeyed("agent.tool", "bash", {} as never);
+    },
+  });
+  const s = await started({ agents: { developer: {}, support: {} } }, { providers: [agents, live, tool] });
+  expect(s.logs).toContainEqual({ level: "warn", message: PROFILE_WARNING, fields: { profiles: ["support"], agents: ["developer"] } });
+  expect(PROFILE_WARNING).toContain("unless it is a live agent's (agents-live), which is not checked");
+  await s.app.stop();
 });
 
 test("images: one checkpoint per build id and packages; making one removes only another build's files and other processes' partial ones", () => {

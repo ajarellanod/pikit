@@ -4,16 +4,21 @@
  * (every conversation, the credentials), not another conversation's workspace, not `.env`.
  *
  * It provides `workspace`, one sandbox per conversation and agent, keyed by the `ConversationRef`'s
- * `conversationId` and `agent` (the README says why), and `execution` and `execution.shell`, one more
- * sandbox (`default`) for a tool called outside a conversation. Each sandbox:
+ * `conversationId` and `agent` (the README says why): two agents of one conversation get two
+ * sandboxes, and a delegated child, a conversation of its own, gets its own whatever its agent. And
+ * `execution` and `execution.shell`, one more sandbox (`default`) for a tool called outside a
+ * conversation. Each sandbox:
  * - has its files in `<root>/conversations/<conversationId>/<agent>/` on the host, `/workspace` in the guest
  *   (a Gondolin VFS mount), and its temporary files in `<root>/.execution-gondolin-tmp/...`,
  *   `/tmp/pikit` in the guest (emptied at start: the one directory this component deletes).
  *   Start refuses a `root` that is the working directory, holds it, or is `/`. The file tools work on the host directories (`env.ts`, `paths.ts`): a
  *   conversation that only reads and writes files never boots a VM. No path, and no link the guest
- *   made, leads them outside these two directories.
+ *   made, leads them outside these two directories. Each directory from `root` down to them must be
+ *   a real one (`made`): a symbolic link there (a guest of the layout before agents could leave
+ *   `conversations/<id>/<agent>` as one) refuses the sandbox, nothing mounted or made through it.
  * - boots its VM at its first command, closes it after `idleSeconds` without one (`pool.ts`); at most
  *   `maxVms` run at once: a new one closes the VM idle the longest, or waits `queueSeconds` for one.
+ *   An image build's VM (below) is not one of them.
  *   What the VM wrote outside `/workspace` and `/tmp/pikit` goes with it.
  * - runs on its agent's machine: the profile in `agents` whose key is `ConversationRef.agent`, each
  *   field it sets replacing the base's (`packages`, `allowedHosts`, `secrets`, `memory`, `cpus`), else
@@ -36,14 +41,15 @@
  *
  * Start refuses when QEMU is missing, or when secrets (the base's or a profile's) are configured
  * without a `secrets` provider; it warns when Linux has no KVM (QEMU then emulates, slowly), and, where
- * `agent.definition`s are provided, of a profile no agent has. Stop closes every VM.
+ * `agent.definition`s are provided, of a profile none has (a live agent's, `agent.directory`, is not
+ * checked: using it would make a cycle, the README says why). Stop closes every VM.
  *
  * Target: `server` (QEMU processes beside the app).
  */
 
 import { realpathSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { lstat, mkdir, rm } from "node:fs/promises";
+import { join, relative, resolve, sep } from "node:path";
 import type { ConversationRef } from "@pikit/contracts";
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
@@ -55,8 +61,11 @@ import type { GuestLauncher, GuestProposals, GuestSpec } from "./guest.ts";
 import { Mounts } from "./paths.ts";
 import { Pool, type PoolLog, Slot } from "./pool.ts";
 
-/** A variable name: a secret's name is the guest's `$NAME` and the name in `secrets`. */
-const VARIABLE = "^[A-Za-z_][A-Za-z0-9_]*$";
+/**
+ * A variable name: a secret's name is the guest's `$NAME` and the name in `secrets`. Never one of
+ * `Object.prototype`'s special keys, so no record of secrets, here or in Gondolin, reads one.
+ */
+const VARIABLE = "^(?!(?:__proto__|constructor|prototype)$)[A-Za-z_][A-Za-z0-9_]*$";
 
 /** An agent's name, as `@pikit/contracts` checks it (`defineAgent`): the keys of `agents`. */
 const AGENT_NAME = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
@@ -134,8 +143,12 @@ type Secret = Static<ReturnType<typeof secretList>>[number];
  */
 const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-/** A `ConversationRef.agent` that is safe as one directory name, as `conversationId` is. */
-const AGENT_DIR = /^[A-Za-z0-9_-]{1,128}$/;
+/**
+ * A `ConversationRef.agent` that is safe as one directory name, as `conversationId` is, and lowercase:
+ * two agents never share a directory on a case-insensitive filesystem (agent names and execution-serve's
+ * `_<sandbox>` are lowercase).
+ */
+const AGENT_DIR = /^[a-z0-9_-]{1,128}$/;
 
 /** The directory under `root` this component empties at start: its temporary area, named so nothing else is. */
 export const TMP_DIR = ".execution-gondolin-tmp";
@@ -143,8 +156,30 @@ export const TMP_DIR = ".execution-gondolin-tmp";
 /** Where the image with `packages` is kept, under `root`: made when needed, its stale checkpoints removed then. */
 export const IMAGE_DIR = ".execution-gondolin-image";
 
+/** The warning for a profile no `agent.definition` has. */
+export const PROFILE_WARNING =
+  "execution-gondolin: `agents` names a profile no agent.definition has (misspelled?): no agent gets it, unless it is a live agent's (agents-live), which is not checked";
+
 /** Idle conversation sandboxes kept built; more are dropped, least recently resolved first (`cache.ts`). */
 export const KEEP_SANDBOXES = 64;
+
+/**
+ * Makes `<root>/<parts...>` (`root` exists) one directory at a time, each a real directory: nothing is
+ * made through a symbolic link found on the way. The first path that is not a directory of its own (a
+ * link, a file), or `undefined` when none.
+ */
+async function realDirectories(root: string, parts: readonly string[]): Promise<string | undefined> {
+  let path = root;
+  for (const part of parts) {
+    path = join(path, part);
+    // Not recursive: its parent was checked; on a link (even a dangling one) it is EEXIST.
+    await mkdir(path).catch((error: { code?: string }) => {
+      if (error.code !== "EEXIST") throw error;
+    });
+    if (!(await lstat(path)).isDirectory()) return path;
+  }
+  return undefined;
+}
 
 /** `path` with its links resolved when it exists, else as given. */
 function real(path: string): string {
@@ -195,7 +230,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
         log: { info: (message, fields) => log.info(message, fields), warn: (message, fields) => log.warn(message, fields) },
         async secrets() {
           const store = secrets.get();
-          const values: Record<string, string | undefined> = {};
+          const values: Record<string, string | undefined> = Object.create(null);
           for (const name of secretNames) values[name] = store === undefined ? undefined : await store.get(name);
           return values;
         },
@@ -245,10 +280,22 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
         };
       }
 
-      /** Makes a sandbox's directories (again, if someone removed them). */
-      const made = async (box: Sandbox) => {
-        await mkdir(box.tmp, { recursive: true });
-        await mkdir(box.workspace, { recursive: true });
+      /**
+       * Makes a sandbox's directories (again, if someone removed them), refusing it (`whose` names it)
+       * when one on the way from `root` is not a real directory: a guest of the layout before agents
+       * (its `/workspace` was `conversations/<id>/`) may have left `<agent>` as a link to anywhere,
+       * which the VM's mount and the file tools would otherwise follow.
+       */
+      const made = async (box: Sandbox, whose: string) => {
+        await mkdir(root, { recursive: true });
+        for (const dir of [box.tmp, box.workspace]) {
+          const wrong = await realDirectories(root, relative(root, dir).split(sep));
+          if (wrong !== undefined) {
+            throw new Error(
+              `execution-gondolin: the sandbox of ${whose} is refused: ${relative(root, wrong)} (under root) is a symbolic link or a file, not a directory of its own (a guest's, before sandboxes were per agent?); nothing was mounted or made through it: move it away`,
+            );
+          }
+        }
       };
 
       // No conversation, no agent: always the base machine.
@@ -271,7 +318,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           }
           const agent = conversation.agent;
           if (!AGENT_DIR.test(agent)) {
-            throw new Error(`execution-gondolin: agent ${JSON.stringify(agent)} is not a safe directory name (letters, digits, _ and -, at most 128)`);
+            throw new Error(`execution-gondolin: agent ${JSON.stringify(agent)} is not a safe directory name (lowercase letters, digits, _ and -, at most 128)`);
           }
           const found = conversations.get(`${id}/${agent}`, () => {
             // The agent's own profile, by exact key (an own property: `constructor` is no profile), else the base.
@@ -280,7 +327,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
             return { box, env: createSandboxEnv(box) };
           });
           // Every call: a directory removed meanwhile is made again, and one made already costs nothing.
-          await made(found.box);
+          await made(found.box, `conversation ${JSON.stringify(id)} and agent ${JSON.stringify(agent)}`);
           return { env: found.env };
         },
       };
@@ -299,16 +346,18 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
             throw new Error(`execution-gondolin: secrets are configured (${secretNames.join(", ")}) but no \`secrets\` provider is installed: add one (secrets-env)`);
           }
           // A misspelled profile gives its agent the base (fails closed); say so where agents are known.
+          // Only the code's: a live agent (`agent.directory`) cannot be read here without a cycle
+          // (agents-live uses `agent.tool`s, which use `execution.shell`), so the message allows for one.
           const known = definitions.keys();
           const unknown = Object.keys(config.agents).filter((name) => !known.includes(name));
           if (known.length > 0 && unknown.length > 0) {
-            ctx.logger.warn("execution-gondolin: `agents` names a profile no agent here has (misspelled?): no agent gets it", { profiles: unknown, agents: known });
+            ctx.logger.warn(PROFILE_WARNING, { profiles: unknown, agents: known });
           }
           const warning = launcher.warning();
           if (warning !== undefined) ctx.logger.warn(`execution-gondolin: ${warning}`);
           // Temporary files and spilled output of an earlier process: no VM and no tool refers to them now.
           await rm(join(root, TMP_DIR), { recursive: true, force: true });
-          await made(fallback);
+          await made(fallback, '"default" (execution)');
         },
         async stop() {
           await pool.stop();

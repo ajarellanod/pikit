@@ -138,9 +138,10 @@ export function imageFile(buildId: string, packages: readonly string[]): string 
 
 /**
  * The files of an image directory (`names`) to remove once a checkpoint of `buildId` is made: those of
- * another build id (its checkpoints and partial ones), and partial ones another process left. The
- * checkpoints of this build, whatever their packages (another agent's machine), stay, and so do this
- * process's partial ones (another agent's image being made now).
+ * another build id (its checkpoints and partial ones), and every partial one of another process, even
+ * one a live process is still writing (two servers sharing a `root`: that build then fails and is made
+ * again at its next boot). The checkpoints of this build, whatever their packages (another agent's
+ * machine), stay, and so do this process's partial ones (another agent's image being made now).
  */
 export function staleImages(names: readonly string[], buildId: string, pid = process.pid): string[] {
   const build = `${digest(buildId)}-`;
@@ -151,6 +152,7 @@ export function staleImages(names: readonly string[], buildId: string, pid = pro
  * Gondolin's image with `spec.packages` added, as a checkpoint in `spec.imageDir` named by the image's
  * build id and the packages (`imageFile`): loaded when it is there, else made once (a VM that reaches
  * only `ALPINE_MIRROR` runs `apk add`), then the files of another build are removed (`staleImages`).
+ * That VM is made here, outside the pool: it does not count against `maxVms`.
  */
 async function imageWith(spec: GuestSpec): Promise<VmCheckpoint> {
   const assets = await ensureGuestAssets();
