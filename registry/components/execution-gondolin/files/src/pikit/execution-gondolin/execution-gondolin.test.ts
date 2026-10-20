@@ -10,6 +10,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHttpHooks, type SecretManager } from "@earendil-works/gondolin";
 import type { ConversationRef } from "@pikit/contracts";
 import { type App, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
@@ -20,8 +21,8 @@ import { createWorkspaceConformance } from "@pikit/pi-adapter/testing";
 import { doctor } from "./doctor.ts";
 import { FakeLauncher } from "./fake-guest.test-support.ts";
 import { SandboxCache } from "./cache.ts";
-import { gitConfig, proposalsHook } from "./gondolin.ts";
-import { PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
+import { GondolinGuest, gitConfig, imageFile, proposalsHook, staleImages } from "./gondolin.ts";
+import { type GuestSpec, PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
 import { createExecutionGondolin, holdsWorkingDirectory, IMAGE_DIR, KEEP_SANDBOXES, TMP_DIR } from "./index.ts";
 import { qemuBinary, qemuProblem } from "./qemu.ts";
 
@@ -140,7 +141,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   const app = await defineApp({ components: [createExecutionGondolin(new FakeLauncher())], logger: silentLogger }).create();
 
   expect(app.describe().components).toEqual([
-    { name: "execution-gondolin", provides: ["execution", "execution.shell", "workspace"], requires: [], optional: ["secrets", "proposals"] },
+    { name: "execution-gondolin", provides: ["execution", "execution.shell", "workspace"], requires: [], optional: ["secrets", "proposals", "agent.definition"] },
   ]);
 });
 
@@ -150,10 +151,10 @@ test("a conversation's files are on the host, in its own directory, at /workspac
   const two = await s.env("2");
 
   expect(one.cwd).toBe("/workspace");
-  expect(one.id).toBe("execution-gondolin:conversation-1");
+  expect(one.id).toBe("execution-gondolin:conversation-1/support");
   expect(two.id).not.toBe(one.id);
   expect((await one.writeFile("notes/a.txt", "one's", ctx)).ok).toBe(true);
-  expect(readFileSync(join(s.root, "conversations", "1", "notes", "a.txt"), "utf8")).toBe("one's");
+  expect(readFileSync(join(s.root, "conversations", "1", "support", "notes", "a.txt"), "utf8")).toBe("one's");
   expect(await two.exists("notes/a.txt", ctx)).toEqual({ ok: true, value: false });
   expect(await one.canonicalPath("notes/a.txt", ctx)).toEqual({ ok: true, value: "/workspace/notes/a.txt" });
   expect((await one.fileInfo("notes/a.txt", ctx)).ok && (await one.fileInfo("notes/a.txt", ctx))).toMatchObject({ value: { path: "/workspace/notes/a.txt", name: "a.txt" } });
@@ -166,12 +167,25 @@ test("a conversation's files are on the host, in its own directory, at /workspac
   await s.app.stop();
 });
 
-test("a sandbox is keyed by conversationId alone: the same id under another key or agent is the same sandbox", async () => {
+test("a sandbox is keyed by conversation and agent: the same pair under another key is the same; another agent of the conversation gets its own directory and VM", async () => {
   const s = await started();
   const first = await s.workspace.resolve({ key: "telegram:1", agent: "support", conversationId: "abc" }, s.app.context());
-  const again = await s.workspace.resolve({ key: "remote:sandbox", agent: "ops", conversationId: "abc", channel: "http" }, s.app.context());
+  const again = await s.workspace.resolve({ key: "remote:sandbox", agent: "support", conversationId: "abc", channel: "http" }, s.app.context());
+  const child = await s.workspace.resolve({ key: "telegram:1", agent: "developer", conversationId: "abc" }, s.app.context());
 
   expect(again.env).toBe(first.env);
+  expect(child.env).not.toBe(first.env);
+  expect(child.env.id).toBe("execution-gondolin:conversation-abc/developer");
+  expect((await child.env.writeFile("mine.txt", "developer's", ctx)).ok).toBe(true);
+  expect(readFileSync(join(s.root, "conversations", "abc", "developer", "mine.txt"), "utf8")).toBe("developer's");
+  expect(await first.env.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
+  await run(first.env, "true");
+  await run(child.env, "true");
+  expect(s.launcher.guests.map((guest) => [guest.spec.label, guest.spec.mounts["/workspace"], guest.spec.mounts["/tmp/pikit"]])).toEqual([
+    ["pikit support abc", join(s.root, "conversations", "abc", "support"), join(s.root, TMP_DIR, "conversations", "abc", "support")],
+    ["pikit developer abc", join(s.root, "conversations", "abc", "developer"), join(s.root, TMP_DIR, "conversations", "abc", "developer")],
+  ]);
+  expect(s.launcher.live).toHaveLength(2);
   await s.app.stop();
 });
 
@@ -181,24 +195,31 @@ test("a conversation id that is not a safe directory name is refused, and nothin
     expect(s.workspace.resolve(ref(id), s.app.context())).rejects.toThrow("not a safe directory name");
   }
   expect(existsSync(join(s.root, "escape"))).toBe(false);
+  // The agent names a directory too: anything that is not one name is refused, before anything is made.
+  for (const agent of ["", "..", "a/b", "../escape", "a.b", "x".repeat(129)]) {
+    await expect(s.workspace.resolve(ref("ok", agent), s.app.context())).rejects.toThrow("is not a safe directory name");
+  }
+  expect(existsSync(join(s.root, "conversations", "ok"))).toBe(false);
+  expect(existsSync(join(s.root, TMP_DIR, "conversations", "ok"))).toBe(false);
   await s.app.stop();
 });
 
 test("paths never leave the sandbox: absolute, .., and links the guest made, wherever they point", async () => {
   const s = await started();
   const env = await s.env("1");
-  const host = join(s.root, "conversations", "1");
+  const host = join(s.root, "conversations", "1", "support");
+  const other = join(s.root, "conversations", "2", "support");
   // The server's own state and another conversation's files, next to this one on the host.
   writeFileSync(join(s.root, "state.db"), "every conversation");
-  mkdirSync(join(s.root, "conversations", "2"), { recursive: true });
-  writeFileSync(join(s.root, "conversations", "2", "theirs.txt"), "conversation 2's");
+  mkdirSync(other, { recursive: true });
+  writeFileSync(join(other, "theirs.txt"), "conversation 2's");
   writeFileSync(join(host, "real.txt"), "mine");
   mkdirSync(join(host, "dir"));
   // Links as the guest makes them: targets in the guest's namespace, or host paths it guessed.
   symlinkSync("/etc", join(host, "etc"));
-  symlinkSync(join(s.root, "conversations", "2"), join(host, "host-path"));
-  symlinkSync("../../2", join(host, "dir", "up"));
-  symlinkSync("../..", join(host, "parent"));
+  symlinkSync(other, join(host, "host-path"));
+  symlinkSync("../../../2/support", join(host, "dir", "up"));
+  symlinkSync("../../..", join(host, "parent"));
   symlinkSync("/workspace/real.txt", join(host, "absolute.txt"));
   symlinkSync("loop-b", join(host, "loop-a"));
   symlinkSync("loop-a", join(host, "loop-b"));
@@ -217,13 +238,13 @@ test("paths never leave the sandbox: absolute, .., and links the guest made, whe
   expect(await code(env.writeFile("host-path/planted.txt", "x", ctx))).toBe("permission_denied");
   expect(await code(env.createDir("parent/planted", undefined, ctx))).toBe("permission_denied");
   expect(await code(env.renameFile("real.txt", "../2/stolen.txt", ctx))).toBe("permission_denied");
-  expect(existsSync(join(s.root, "conversations", "2", "planted.txt"))).toBe(false);
+  expect(existsSync(join(other, "planted.txt"))).toBe(false);
   expect(existsSync(join(s.root, "planted"))).toBe(false);
-  expect(existsSync(join(s.root, "conversations", "2", "stolen.txt"))).toBe(false);
+  expect(existsSync(join(other, "stolen.txt"))).toBe(false);
   // The link itself can be seen and removed: what it points to stays.
   expect(await env.fileInfo("host-path", ctx)).toMatchObject({ ok: true, value: { kind: "symlink", path: "/workspace/host-path" } });
   expect(await code(env.remove("host-path", undefined, ctx))).toBe("ok");
-  expect(readFileSync(join(s.root, "conversations", "2", "theirs.txt"), "utf8")).toBe("conversation 2's");
+  expect(readFileSync(join(other, "theirs.txt"), "utf8")).toBe("conversation 2's");
   // Errors speak of guest paths, never of the host's layout.
   const missing = await env.readTextFile("missing.txt", ctx);
   expect(!missing.ok && missing.error.code).toBe("not_found");
@@ -246,19 +267,19 @@ test("temporary files and spilled output are under /tmp/pikit, on the host, in t
   const spillPath = spilled.result.ok ? (spilled.result.value.spillPath as string) : "";
   expect(await env.readTextFile(spillPath, ctx)).toEqual({ ok: true, value: spilled.stdout });
   expect(spilled.stdout).toBe("line-0\nline-1\nline-2\nline-3\nline-4\nline-5\n");
-  expect(existsSync(join(s.root, TMP_DIR, "conversations", "1", spillPath.slice("/tmp/pikit/".length)))).toBe(true);
+  expect(existsSync(join(s.root, TMP_DIR, "conversations", "1", "support", spillPath.slice("/tmp/pikit/".length)))).toBe(true);
   expect((await env.createTempDir("../escape-", ctx)).ok).toBe(false);
   await s.app.stop();
 
   // A new process: what an earlier one left in its temporary area is gone; the workspace, and a `tmp`
   // that is not the component's, stay.
-  writeFileSync(join(s.root, "conversations", "1", "kept.txt"), "kept");
+  writeFileSync(join(s.root, "conversations", "1", "support", "kept.txt"), "kept");
   mkdirSync(join(s.root, "tmp"));
   writeFileSync(join(s.root, "tmp", "theirs.txt"), "not the component's");
   const again = await defineApp({ components: [createExecutionGondolin(new FakeLauncher())], config: { "execution-gondolin": { root: s.root } }, logger: silentLogger }).create();
   await again.start();
   expect(existsSync(join(s.root, TMP_DIR, "conversations", "1"))).toBe(false);
-  expect(existsSync(join(s.root, "conversations", "1", "kept.txt"))).toBe(true);
+  expect(existsSync(join(s.root, "conversations", "1", "support", "kept.txt"))).toBe(true);
   expect(readFileSync(join(s.root, "tmp", "theirs.txt"), "utf8")).toBe("not the component's");
   await again.stop();
 });
@@ -278,7 +299,7 @@ test("the VM boots at the first command, once, with the conversation's directori
   const [guest] = launcher.guests;
   expect(guest?.spec).toEqual({
     label: "pikit support 7",
-    mounts: { "/workspace": join(s.root, "conversations", "7"), "/tmp/pikit": join(s.root, TMP_DIR, "conversations", "7") },
+    mounts: { "/workspace": join(s.root, "conversations", "7", "support"), "/tmp/pikit": join(s.root, TMP_DIR, "conversations", "7", "support") },
     allowedHosts: [],
     secrets: [],
     memory: "512M",
@@ -292,7 +313,7 @@ test("the VM boots at the first command, once, with the conversation's directori
   ]);
   // Another conversation gets a VM of its own.
   await run(await s.env("8"), "echo");
-  expect(launcher.guests.map((g) => g.spec.mounts["/workspace"])).toEqual([join(s.root, "conversations", "7"), join(s.root, "conversations", "8")]);
+  expect(launcher.guests.map((g) => g.spec.mounts["/workspace"])).toEqual([join(s.root, "conversations", "7", "support"), join(s.root, "conversations", "8", "support")]);
   await s.app.stop();
   expect(launcher.live).toHaveLength(0);
 });
@@ -499,11 +520,139 @@ test("secrets: read through `secrets` at boot and at each command, given to the 
     { GITHUB_TOKEN: "ghp_real-value-1", NPM_TOKEN: undefined },
     { GITHUB_TOKEN: "ghp_rotated-value-2", NPM_TOKEN: undefined },
   ]);
-  expect(s.logs).toContainEqual({ level: "warn", message: "execution-gondolin: secrets not set, left out of this VM until its next boot", fields: { sandbox: "conversation-1", secrets: ["NPM_TOKEN"] } });
+  expect(s.logs).toContainEqual({ level: "warn", message: "execution-gondolin: secrets not set, left out of this VM until its next boot", fields: { sandbox: "conversation-1/support", secrets: ["NPM_TOKEN"] } });
   // Commands get no secret through their variables: only the VM's placeholders carry them.
   expect(guest?.commands.map((c) => c.env)).toEqual([{}, {}]);
   expect(JSON.stringify(s.logs)).not.toContain("value-");
   await s.app.stop();
+});
+
+/** The machine fields of the spec a VM booted with. */
+const machine = ({ allowedHosts, secrets, memory, cpus, packages }: GuestSpec) => ({ allowedHosts, secrets: secrets.map((secret) => secret.name), memory, cpus, packages });
+
+test("profiles: an agent's machine replaces the base field by field; an agent with none, a misspelled one and `default` get the base", async () => {
+  const s = await started(
+    {
+      allowedHosts: ["base.example"],
+      packages: ["make"],
+      agents: {
+        developer: { packages: ["github-cli"], secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }], allowedHosts: ["objects.githubusercontent.com"] },
+        analyst: { memory: "2G", cpus: 1 },
+      },
+    },
+    { providers: [secretsOf({ GH_TOKEN: "ghp_value" })] },
+  );
+  const base = { allowedHosts: ["base.example"], secrets: [], memory: "1G", cpus: 2, packages: ["make"] };
+  const specOf = async (agent: string) => {
+    const { env } = await s.workspace.resolve(ref("1", agent), s.app.context());
+    await run(env, "true");
+    return machine(s.launcher.guests.at(-1)?.spec as GuestSpec);
+  };
+
+  // Its allowedHosts replace the base's (base.example is not added), plus its own secrets' hosts; its packages replace the base's.
+  expect(await specOf("developer")).toEqual({ allowedHosts: ["objects.githubusercontent.com", "api.github.com", "github.com"], secrets: ["GH_TOKEN"], memory: "1G", cpus: 2, packages: ["github-cli"] });
+  // What it leaves out is the base's.
+  expect(await specOf("analyst")).toEqual({ ...base, memory: "2G", cpus: 1 });
+  for (const agent of ["support", "developerr", "Developer", "constructor", "_shared"]) expect({ agent, machine: await specOf(agent) }).toEqual({ agent, machine: base });
+  await run(s.execution, "true");
+  expect(s.launcher.guests.at(-1)?.spec.label).toBe("pikit default");
+  expect(machine(s.launcher.guests.at(-1)?.spec as GuestSpec)).toEqual(base);
+  await s.app.stop();
+});
+
+test("a profile's secret reaches only that agent's VMs, also after a rotation; the unset warning names only a VM's own secrets", async () => {
+  const values: Record<string, string | undefined> = { GH_TOKEN: "ghp_value-1" };
+  const s = await started(
+    { agents: { developer: { secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com"] }] }, analyst: { secrets: [{ name: "NPM_TOKEN", hosts: ["registry.npmjs.org"] }] } } },
+    { providers: [secretsOf(values)] },
+  );
+  const envOf = async (agent: string) => (await s.workspace.resolve(ref("1", agent), s.app.context())).env;
+  const [support, developer] = [await envOf("support"), await envOf("developer")];
+
+  await run(support, "first");
+  await run(developer, "first");
+  values.GH_TOKEN = "ghp_value-2";
+  await run(support, "second");
+  await run(developer, "second");
+
+  const [base, dev] = s.launcher.guests;
+  expect(base?.spec.secrets).toEqual([]);
+  expect(base?.spec.allowedHosts).toEqual([]);
+  expect(dev?.spec.secrets).toEqual([{ name: "GH_TOKEN", hosts: ["api.github.com"], value: "ghp_value-1" }]);
+  // The pool reads every agent's secrets; each VM keeps only those it booted with (GondolinGuest.refreshSecrets, below).
+  expect(dev?.refreshes.at(-1)).toEqual({ GH_TOKEN: "ghp_value-2", NPM_TOKEN: undefined });
+  // NPM_TOKEN is unset, but neither VM has it: no warning yet. The analyst's VM names it.
+  expect(s.logs.filter((log) => log.message.startsWith("execution-gondolin: secrets not set"))).toEqual([]);
+  await run(await envOf("analyst"), "first");
+  expect(s.logs.filter((log) => log.message.startsWith("execution-gondolin: secrets not set"))).toEqual([
+    { level: "warn", message: "execution-gondolin: secrets not set, left out of this VM until its next boot", fields: { sandbox: "conversation-1/analyst", secrets: ["NPM_TOKEN"] } },
+  ]);
+  expect(JSON.stringify(s.logs)).not.toContain("value-");
+  await s.app.stop();
+});
+
+test("GondolinGuest.refreshSecrets updates and removes only the secrets the VM booted with: it never gains another agent's", () => {
+  const { secretManager } = createHttpHooks({ allowedHosts: [], secrets: { GH_TOKEN: { hosts: ["api.github.com"], value: "ghp_value-1" } } });
+  const calls: string[] = [];
+  const recording: SecretManager = {
+    listSecrets: () => secretManager.listSecrets(),
+    updateSecret: (name, options) => void (calls.push(`update ${name}`), secretManager.updateSecret(name, options)),
+    deleteSecret: (name) => void (calls.push(`delete ${name}`), secretManager.deleteSecret(name)),
+  };
+  const guest = new GondolinGuest({} as never, "/bin/sh", recording, new Map([["GH_TOKEN", "ghp_value-1"]]));
+
+  guest.refreshSecrets({ GH_TOKEN: "ghp_value-1", NPM_TOKEN: "npm_value", OTHER: "other_value" });
+  guest.refreshSecrets({ GH_TOKEN: "ghp_value-2", NPM_TOKEN: "npm_value" });
+  guest.refreshSecrets({ NPM_TOKEN: "npm_value" });
+
+  expect(calls).toEqual(["update GH_TOKEN", "delete GH_TOKEN"]);
+  expect(secretManager.listSecrets().map((secret) => [secret.name, secret.deleted])).toEqual([["GH_TOKEN", true]]);
+});
+
+test("agents' keys are agent names: anything else, or a field that is global only, is refused at start", async () => {
+  for (const key of ["Developer", "dev_ops", "-dev", "dev-", "dev--ops", "1dev", "a".repeat(101)]) {
+    expect({ key, refused: await started({ agents: { [key]: {} } }).then((s) => (s.app.stop(), false), () => true) }).toEqual({ key, refused: true });
+  }
+  for (const profile of [{ root: "/elsewhere" }, { maxVms: 9 }, { memory: "lots" }, { packages: ["--allow-untrusted"] }]) {
+    await expect(started({ agents: { developer: profile } })).rejects.toThrow();
+  }
+  const s = await started({ agents: { ["a".repeat(100)]: {}, "dev-ops2": { cpus: 4 } } });
+  await s.app.stop();
+});
+
+test("a profile no agent.definition has is warned of at start where agents are defined; a sandbox host (no agents) cannot tell", async () => {
+  const agents = defineComponent({
+    name: "agents-test",
+    setup(pikit) {
+      for (const name of ["developer", "analyst"]) pikit.provideKeyed("agent.definition", name, { name, model: "faux/model" } as never);
+    },
+  });
+  const warning = "execution-gondolin: `agents` names a profile no agent here has (misspelled?): no agent gets it";
+  const s = await started({ agents: { developer: {}, developr: { cpus: 4 } } }, { providers: [agents] });
+  expect(s.logs).toContainEqual({ level: "warn", message: warning, fields: { profiles: ["developr"], agents: ["developer", "analyst"] } });
+  await s.app.stop();
+
+  const host = await started({ agents: { developr: { cpus: 4 } } });
+  expect(host.logs.some((log) => log.message === warning)).toBe(false);
+  await host.app.stop();
+  const right = await started({ agents: { developer: {} } }, { providers: [agents] });
+  expect(right.logs.some((log) => log.message === warning)).toBe(false);
+  await right.app.stop();
+});
+
+test("images: one checkpoint per build id and packages; making one removes only another build's files and other processes' partial ones", () => {
+  const dev = imageFile("build-1", ["github-cli", "git"]);
+  const analyst = imageFile("build-1", ["py3-pandas"]);
+  // The packages in any order, each once, name the same file; the build id is its own part of the name.
+  expect(imageFile("build-1", ["git", "github-cli", "git"])).toBe(dev);
+  expect(analyst).not.toBe(dev);
+  expect(dev.split("-")[0]).toBe(analyst.split("-")[0]);
+  const old = imageFile("build-0", ["github-cli", "git"]);
+  expect(old.split("-")[0]).not.toBe(dev.split("-")[0]);
+  const partial = (file: string, pid: number) => file.replace(/\.qcow2$/, `.${pid}.partial`);
+
+  const names = [dev, analyst, old, partial(analyst, 42), partial(dev, 7), partial(old, 42), "stray.qcow2"];
+  expect(staleImages(names, "build-1", 42).sort()).toEqual([old, partial(dev, 7), partial(old, 42), "stray.qcow2"].sort());
 });
 
 test("start refuses when secrets are configured without a secrets provider, or when no VM can boot here; it warns when VMs are slow", async () => {
@@ -522,6 +671,8 @@ test("start refuses when secrets are configured without a secrets provider, or w
   noQemu.problem = "qemu-system-aarch64 is not on PATH";
 
   expect(await failure({ secrets: [{ name: "GITHUB_TOKEN", hosts: ["api.github.com"] }] })).toContain("no `secrets` provider is installed");
+  // A profile's secret too.
+  expect(await failure({ agents: { developer: { secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com"] }] } } })).toContain("secrets are configured (GH_TOKEN) but no `secrets` provider is installed");
   expect(await failure({}, noQemu)).toContain("qemu-system-aarch64 is not on PATH");
 
   const slow = new FakeLauncher();

@@ -4,11 +4,13 @@ Each conversation's tools work in a Linux micro-VM of its own ([Gondolin](https:
 over QEMU): a real shell that cannot read the server's files or another conversation's, with its files
 on the host, no network but the hosts you allow, and secrets the guest never sees.
 
-- **Provides:** `workspace` (a sandbox per conversation), and `execution` and `execution.shell` (one
-  more sandbox, `default`, for a tool called outside a conversation). All are pi-durable's `ExecutionEnv`.
+- **Provides:** `workspace` (a sandbox per conversation and agent, each on its agent's machine), and
+  `execution` and `execution.shell` (one more sandbox, `default`, for a tool called outside a
+  conversation). All are pi-durable's `ExecutionEnv`.
 - **Uses if present:** `secrets` (required once `secrets` is configured: start refuses without it),
   `proposals` (self-improvement on a server, proposals-local: the steward's `git` reaches the
-  proposals repository, and nothing else of it; "Proposals" below).
+  proposals repository, and nothing else of it; "Proposals" below), `agent.definition` (only to warn
+  at start of a profile in `agents` that no agent has).
 - **Target:** `server`: QEMU processes beside the app.
 - **Installs to:** `src/pikit/execution-gondolin/`.
 - **npm dependencies:** `@earendil-works/gondolin` (0.13.0, Apache-2.0; Earendil Works' sandbox, not
@@ -32,15 +34,22 @@ network reaches only what you allow.
 
 ## How a sandbox is keyed
 
-**By `ConversationRef.conversationId` alone.** `key`, `agent` and `channel` do not choose the sandbox:
-the same `conversationId` resolved under another key or agent is the same sandbox (`agent` only names
-the VM in `gondolin list`). For a component that builds a `ConversationRef` itself (`execution-serve`,
-from a remote sandbox id), `conversationId` must be:
+**By `ConversationRef.conversationId` and `ConversationRef.agent`.** `key` and `channel` do not choose
+the sandbox: the same conversation and agent resolved under another key is the same sandbox. Two agents
+of one conversation (a delegated child of another agent) get two sandboxes: two directories, two VMs,
+each on its own agent's machine ("Machines per agent" below). A child of the same agent shares its
+parent's. For a component that builds a `ConversationRef` itself (`execution-serve`, from a remote
+sandbox id), `conversationId` must be:
 
 - **unique** among everything that resolves a workspace through this App, including pikit's own
-  conversations, whose ids the runtime numbers (`"1"`, `"2"`…): prefix a remote id (`remote-<id>`);
+  conversations, whose ids the runtime numbers (`"1"`, `"2"`...): prefix a remote id (`remote-<id>`);
 - **a safe directory name**: `^[A-Za-z0-9_-]{1,128}$`. Anything else is refused: `resolve` throws, so
   the tool call fails, and nothing is made on disk.
+
+`agent` must be a safe directory name too (the same pattern; refused the same way). It also chooses the
+machine: the profile in `agents` whose key is exactly `agent`, else the base. An agent name outside the
+agent grammar (execution-serve's `_<sandbox>` for a request that names no agent) never matches a
+profile, so it gets the base.
 
 Why `conversationId` and not `key`: pikit's runtime gives a reset conversation (`/new`) a new
 `conversationId` under the same key, so a new conversation starts with a new, empty workspace, as it
@@ -49,10 +58,10 @@ starts with a new transcript. The previous conversation's files stay on the host
 ## What a sandbox is
 
 ```
-<root>/conversations/<conversationId>/                           /workspace in the guest: the conversation's files
-<root>/.execution-gondolin-tmp/conversations/<conversationId>/   /tmp/pikit in the guest: temporary files, spilled output
-<root>/default/                                                  /workspace of `execution`'s sandbox
-<root>/.execution-gondolin-tmp/default/                          its /tmp/pikit
+<root>/conversations/<conversationId>/<agent>/                           /workspace in the guest: that agent's files
+<root>/.execution-gondolin-tmp/conversations/<conversationId>/<agent>/   /tmp/pikit in the guest: temporary files, spilled output
+<root>/default/                                                          /workspace of `execution`'s sandbox
+<root>/.execution-gondolin-tmp/default/                                  its /tmp/pikit
 ```
 
 `root` is `.pikit/gondolin` by default (in `pikit-state` on Docker). `/workspace` is a Gondolin VFS
@@ -60,13 +69,13 @@ mount (`RealFSProvider`) over the host directory, so the files outlive the VM, a
 conversation is the host's alone
 ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)).
 `<root>/.execution-gondolin-tmp` is emptied at start (no VM and no tool refers to an earlier
-process's), and `<root>/.execution-gondolin-image/` holds the image with `packages` (below), whose
-stale checkpoints are removed when a new one is made: the only things this component deletes. Start
-refuses a `root` that is the working directory, one of its ancestors, or `/`.
+process's), and `<root>/.execution-gondolin-image/` holds the images with `packages` (below), whose
+checkpoints of an older Gondolin image are removed when a new one is made: the only things this
+component deletes. Start refuses a `root` that is the working directory, one of its ancestors, or `/`.
 
-The process keeps the sandboxes of at most 64 idle conversations built (and every one with a VM or a
-command running); an idle one past that is dropped, least recently resolved first, and rebuilt at its
-next `resolve`, its files untouched.
+The process keeps at most 64 idle sandboxes (one conversation's agent each) built (and every one with
+a VM or a command running); an idle one past that is dropped, least recently resolved first, and
+rebuilt at its next `resolve`, its files untouched.
 
 - **Files without a VM.** `read`, `write`, `edit` and every `FileSystem` method work on the host
   directories directly, with Pi's own `NodeExecutionEnv` underneath: a conversation that never runs a
@@ -91,12 +100,15 @@ next `resolve`, its files untouched.
   checkpoint of it with those Alpine packages added: made at the first boot that needs it (a VM whose
   only reachable host is `dl-cdn.alpinelinux.org` runs `apk add`, a few seconds), kept in
   `<root>/.execution-gondolin-image/` by the image's build id and the packages, and every VM starts
-  from it (copy-on-write: nothing a VM writes reaches it). `git` is added whenever `proposals` is
-  installed. If `apk add` fails (no route to the mirror), the command answers `shell_unavailable`
-  saying why, and the next one tries again; the image's root disk has about 80 MB free once git is in.
-- **Bounded.** At most `maxVms` VMs run at once. A new one closes the VM idle the longest; when all
-  are running commands, the command waits up to `queueSeconds`, then fails with `spawn_error`, saying
-  all `maxVms` were busy. A VM that fails to boot is not kept (the command answers
+  from it (copy-on-write: nothing a VM writes reaches it). Each machine (the base, an agent's profile)
+  with its own packages has its own checkpoint; making one removes only those of another Gondolin
+  build (and partial ones a crashed process left), never another machine's. `git` is added whenever
+  `proposals` is installed. If `apk add` fails (no route to the mirror), the command answers
+  `shell_unavailable` saying why, and the next one tries again; the image's root disk has about 80 MB
+  free once git is in.
+- **Bounded.** At most `maxVms` VMs run at once, every agent's together. A new one closes the VM idle
+  the longest; when all are running commands, the command waits up to `queueSeconds`, then fails with
+  `spawn_error`, saying all `maxVms` were busy. A VM that fails to boot is not kept (the command answers
   `shell_unavailable`, with the reason); the next command tries again.
 - **Commands.** A string runs in the guest's `bash` (sh if the image had none), an argv as its program
   with its arguments unparsed. The output streams to `onOutput` as it comes, per stream, all of it
@@ -112,21 +124,44 @@ next `resolve`, its files untouched.
   files, and pikit reloads nothing from them.
 - `stop()` closes every VM; a command still running then fails.
 
+## Machines per agent
+
+Each agent may get its own machine: `agents` maps an agent's name (`ConversationRef.agent`, in the
+agent grammar `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 100 characters; any other key is refused at
+start) to a profile of `packages`, `allowedHosts`, `secrets`, `memory` and `cpus`.
+
+- **Field by field.** A field the profile sets replaces the base's (its `allowedHosts` are not added to
+  the base's); a field it leaves out is the base's. What the configuration shows is what the agent gets.
+  Its reachable hosts are its `allowedHosts` plus its own secrets' hosts; its packages, its `packages`
+  plus `git` with `proposals`. `root`, `idleSeconds`, `maxVms` and `queueSeconds` are global only (a
+  profile with one is refused).
+- **The base for anyone else.** An agent `agents` does not name (a misspelled key too) gets the base:
+  with the default base, no secret and no network. It fails closed. `execution`'s own sandbox
+  (`default`) always gets the base.
+- **A misspelled key** is warned of at start in an App that provides `agent.definition`s (a profile no
+  agent has). A sandbox host (`execution-serve`'s App) knows no agents, so it cannot warn.
+
 ## Network and secrets (SPEC C7)
 
-- **Denied by default.** The guest reaches, over HTTP and HTTPS only, the hosts in `allowedHosts`
-  (Gondolin's patterns: `api.github.com`, `*.npmjs.org`) and those of its secrets. Gondolin is the
-  guest's whole network: no raw TCP, no UDP but DNS (answered by the host, synthetic), no SSH, private
-  ranges blocked; a host not allowed is answered `403` by the host itself. TLS is intercepted by the
+- **Denied by default.** The guest reaches, over HTTP and HTTPS only, the hosts in its machine's
+  `allowedHosts` (Gondolin's patterns: `api.github.com`, `*.npmjs.org`) and those of its machine's
+  secrets. Gondolin is the guest's whole network: no raw TCP, no UDP but DNS (answered by the host,
+  synthetic), no SSH, private ranges blocked; a host not allowed is answered `403` by the host itself. TLS is intercepted by the
   host (its CA is trusted in the guest) so it can apply the policy.
-- **Secrets the guest never holds.** For each `{ name, hosts }` in `secrets`, the guest's `$NAME` is a
-  placeholder. The host replaces it with the real value in the headers (also `Authorization: Basic`) of
-  requests to `hosts`, and refuses a request that sends it elsewhere. Request bodies, URLs and
+- **Secrets the guest never holds.** For each `{ name, hosts }` in its machine's `secrets`, the
+  guest's `$NAME` is a placeholder. The host replaces it with the real value in the headers (also
+  `Authorization: Basic`) of requests to `hosts`, and refuses a request that sends it elsewhere. Request bodies, URLs and
   responses are not rewritten. The value is read through the `secrets` capability when a VM boots and
   again at each command: a rotated value is used from the next command on, and requests that still
   carry the old one are refused. A secret not set when the VM boots is left out of that VM until its
   next boot (a warning names it); one unset later is removed from the running VM. No value is logged:
   messages name secrets, never their values.
+- **Only its machine's secrets.** The values of every configured secret (the base's and every
+  profile's) are read through `secrets`, but a VM boots with its machine's alone, and a rotation only
+  updates or removes the ones it booted with: a VM never gains a secret, so an agent never holds
+  another agent's, not even through a delegation (the child works in a VM of its own). The warning for
+  an unset secret names only the VM's own. Start refuses when any secret, the base's or a profile's,
+  is configured without a `secrets` provider.
 
 ## Proposals (self-improvement on a server)
 
@@ -156,6 +191,23 @@ the rewrite at its next boot.
   memory: "1G",              // default: each VM's memory (QEMU syntax: "512M", "2G")
   cpus: 2,                   // default: each VM's CPUs
   packages: [],              // Alpine packages added to the image, once (git comes with `proposals`)
+  agents: {},                // default: a machine per agent, each field replacing the base's
+}
+```
+
+`allowedHosts`, `secrets`, `memory`, `cpus` and `packages` are the base machine. A team where the
+developer has `gh` and a GitHub token, the analyst Python and Google's APIs, and no other agent either:
+
+```ts
+"execution-gondolin": {
+  agents: {
+    developer: {
+      packages: ["github-cli"],
+      secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }],
+      allowedHosts: ["objects.githubusercontent.com"],
+    },
+    analyst: { packages: ["py3-pandas"], allowedHosts: ["*.googleapis.com"], memory: "2G" },
+  },
 }
 ```
 
@@ -181,8 +233,12 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 
 ## Decisions
 
-- **Per conversation, not per agent**: isolation between conversations is what closes the hole
-  (another conversation's files); the VM is cheap and only up while commands run.
+- **Per conversation and agent**: isolation between conversations is what closes the hole (another
+  conversation's files), and a VM boots with its agent's machine, its secrets included, so two agents
+  never share one: a delegated child of another agent gets a VM and a workspace of its own, and results
+  pass through the delegation's answer or through git. The VM is cheap and only up while commands run.
+- **A profile replaces the base field by field**, and an agent with none gets the base: what the
+  configuration shows is what the agent gets, and a misspelled name fails closed.
 - **`execution` is a sandbox too** (`default`): a tool called outside a conversation (a test, a
   command of the operator) gets a VM of its own, never the host's shell.
 - **Files from the host, guest paths everywhere**: no VM for a file tool, and one namespace for the
@@ -192,6 +248,8 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   none is, the wait is bounded and the error says what to change.
 - **Secret hosts are reachable** without repeating them in `allowedHosts`: a secret whose host is
   blocked would be useless.
+- **One image per build and packages**: two machines with different packages each keep their own
+  checkpoint; only a newer Gondolin image makes the older ones stale.
 - **Gondolin's import.** `registry validate` refuses `@earendil-works/*` outside the adapter, since
   only the adapter imports Pi. Gondolin is Earendil Works' but not Pi (no Pi inside), so the CLI's
   `isPiImport` (`packages/cli/src/registry/imports.ts`) names it as not Pi; the component declares it
@@ -225,7 +283,8 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 - the `execution` conformance suite on a conversation's environment, files only (`exec` answering
   `shell_unavailable` when no VM boots), the `workspace` suite, and the lifecycle suite;
 - files on the host, in the conversation's directory, at `/workspace`; no VM for file tools; keyed by
-  `conversationId` alone; unsafe ids refused; the sandbox cache bounded (idle ones dropped and rebuilt
+  conversation and agent (two agents of one conversation: two directories, two VMs); unsafe ids and
+  agent names refused, nothing made; the sandbox cache bounded (idle ones dropped and rebuilt
   with their files, one with a VM kept);
 - confinement: absolute paths, `..`, links to host paths, to `/etc`, up and out, loops; writes and
   renames through them refused; a link removed, not its target; no host path in errors;
@@ -237,10 +296,17 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   its message; a failed boot not kept; a cancelled boot;
 - network and secrets wiring: none by default, `allowedHosts` plus the secrets' hosts, values read at
   boot and at each command, an unset secret left out with a warning, no value in any log;
+- machines per agent: the profile chosen by agent, field by field (its `allowedHosts` replacing the
+  base's); an agent with none, a misspelled one, `constructor` and `default` on the base (no secret, no
+  host); a profile's secret only in its agent's VMs, also after a rotation, and the unset warning only
+  for a VM's own; `GondolinGuest.refreshSecrets` (over Gondolin's real secret manager) never adding a
+  secret; bad profile keys and global-only fields refused; the warning for a profile no agent has, only
+  where agents are defined; images of two machines kept side by side (`imageFile`, `staleImages`);
 - packages (none by default, `git` first with `proposals`, names refused when not Alpine's), the
   proposals wiring (a `path` remote read at each use), the guest's gitconfig, and the proposals host
   answered by `serve` alone; the sync of what the file tools changed, before the next command, once;
-- start refuses without QEMU or without `secrets`, warns without KVM; doctor's check.
+- start refuses without QEMU or without `secrets` (a profile's secret too), warns without KVM;
+  doctor's check.
 
 `gondolin.test.ts` runs over real VMs where QEMU is installed (skipped, saying so, elsewhere): the
 whole `execution` conformance suite with a real shell (pi-durable's cases too: argv, streams,

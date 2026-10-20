@@ -104,7 +104,7 @@ if (problem !== undefined) {
     writeFileSync(sentinel, "every conversation");
 
     const own = await sh(one, "cat /workspace/mine.txt");
-    const other = await sh(two, `ls -A /workspace; test -e '${sentinel}' && echo host-visible; test -e '${join(running.root, "conversations", "1")}' && echo sibling-visible; echo done`);
+    const other = await sh(two, `ls -A /workspace; test -e '${sentinel}' && echo host-visible; test -e '${join(running.root, "conversations", "1", "it")}' && echo sibling-visible; echo done`);
 
     expect(own.output).toBe("one's");
     expect(other.output).toBe("done\n");
@@ -150,7 +150,7 @@ if (problem !== undefined) {
 
     const wrote = await sh(env, "echo kept > made.txt; echo gone > /root/scratch.txt");
     expect(wrote.result).toMatchObject({ ok: true, value: { exitCode: 0 } });
-    expect(readFileSync(join(running.root, "conversations", "idle", "made.txt"), "utf8")).toBe("kept\n");
+    expect(readFileSync(join(running.root, "conversations", "idle", "it", "made.txt"), "utf8")).toBe("kept\n");
 
     const deadline = Date.now() + 30_000;
     while (!running.logs.includes("execution-gondolin: closing an idle VM")) {
@@ -160,6 +160,6 @@ if (problem !== undefined) {
     const again = await sh(env, "cat made.txt; test -e /root/scratch.txt && echo scratch-survived; true");
 
     expect(again.output).toBe("kept\n");
-    expect(existsSync(join(running.root, "conversations", "idle", "made.txt"))).toBe(true);
+    expect(existsSync(join(running.root, "conversations", "idle", "it", "made.txt"))).toBe(true);
   }, BOOT_MS);
 }
