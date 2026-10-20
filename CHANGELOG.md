@@ -49,6 +49,20 @@ line names its area.
   mount caches are synced first: before, `git add -A` right after `write` could miss a new file or
   commit an edited one's old size).
 - extension-pikit-self: a server's proposals are cloned as `file://<path>`.
+- execution-gondolin: a machine per agent. `agents` maps an agent's name to a profile (`packages`,
+  `allowedHosts`, `secrets`, `memory`, `cpus`), each field it sets replacing the base's; an agent it
+  does not name, a misspelled one and `execution`'s own sandbox get the base. A sandbox is a
+  conversation's and an agent's: its files are `<root>/conversations/<conversationId>/<agent>/`, and a
+  delegated child of another agent works in a VM of its own. A VM gets only its machine's secrets;
+  images of different packages coexist; `maxVms` counts every profile's VMs.
+- execution-remote, execution-serve: every request of a conversation's sandbox carries
+  `Pikit-Agent: <agent>` (a malformed one is `400 invalid_request`), so the host's profiles apply.
+  Sandbox ids hash the agent in: `o-<SHA-256 of object id and agent>` in a Durable Object,
+  `k-<SHA-256 of conversation key and agent>` on a server. Without the header, execution-serve gives
+  each sandbox an agent of its own (`_<sandbox>`, never a profile's): workspace-local behind it is a
+  directory per agent, or per sandbox without the header. Breaking: existing sandboxes (`o-<object
+  id>`, `k-<hash>`, execution-gondolin's `conversations/<conversationId>/`) are orphaned, with no
+  migration.
 
 ### Contracts
 

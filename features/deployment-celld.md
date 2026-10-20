@@ -95,6 +95,11 @@ order.
   `telegram:<chat>:<message id>`) got no second answer.
 
 ### Sandbox (celld's Containers)
+A real shell on celld today needs no Containers: `execution-remote` sends each command to a host
+running `execution-serve` over `execution-gondolin`, a sandbox per conversation and agent, with a
+machine profile per agent ([agent sandboxes](agent-sandboxes.md)). The spike below tried celld's
+Containers instead.
+
 A spike tool `sandbox` ran commands in a container per conversation through `@cloudflare/sandbox`
 0.12.9 (`getSandbox(env.Sandbox, <object id>)`), beside `execution-do`.
 
@@ -166,7 +171,8 @@ kept across a graceful stop of the node that held it.
 - What an operator does when a node's disk is lost for good: blocked conversations and no documented
   way to accept the loss.
 - ECS credentials through the task role (the standard AWS chain; untested; `denoland/celld#225`).
-- A sandbox `execution` component on celld's Containers: pi-durable's `ExecutionEnv` over the
+- A sandbox `execution` component on celld's Containers, beside `execution-remote` (today's real
+  shell, on a host of its own): pi-durable's `ExecutionEnv` over the
   sandbox, its workspace backed up to the bucket when it sleeps and restored when it wakes
   ([sandboxed execution](sandboxed-execution.md)).
 - celld is beta, and nodes that come and go (autoscaling) exercise takeover and balancing, its least
