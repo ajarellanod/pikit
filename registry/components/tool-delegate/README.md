@@ -84,7 +84,23 @@ For the tasks not waited for, name the tools the agent needs (`tools: ["delegate
 "delegate_steer", "delegate_cancel"]`); `extension-house-rules` can allow them per sender:
 
 - **`delegate_tasks({ id? })`** lists the conversation's tasks (id, agent, `running`, `completed`,
-  `failed` or `aborted`, and the answer or why it failed, at most 2000 characters), or one.
+  `failed` or `aborted`, and the answer or why it failed, at most 2000 characters), a running one
+  with its latest step on its line. With an id, it shows how that task is going, running or ended:
+  its agent's last 5 steps, oldest first, and how long ago the last one was. A step is what the
+  agent wrote (at most 300 characters) or a tool it called, with its arguments (at most 120
+  characters) and `running`, `ok` or `error`:
+
+  ```
+  - 17: the agent "developer", running
+  Its last steps, oldest first (the last one 40 seconds ago):
+    - wrote: The failing test is in src/app.test.ts; fixing the parser.
+    - called read {"path":"src/parse.ts"}: ok
+    - called bash {"command":"bun test"}: running
+  ```
+
+  So the agent can tell the person how it is going, and decide whether to steer or stop it. It shows
+  only what the task's own conversation holds (the arguments its tools were called with, a secret
+  typed there included), which this conversation's storage already holds.
 - **`delegate_steer({ id, message })`** sends a running task a message from the delegating agent: it
   joins the task's run (or runs right after it), and the task's one answer covers it. A task that
   ended takes none (an error the model reads).
@@ -130,9 +146,10 @@ Each sees only the tasks its own conversation started: another's id is an unknow
   way they go with the answer of this conversation's run, which its channel delivers, and the model
   reads them as shown to the person (`partsNote`), so it does not ask again. The answer comes back
   to this conversation as a message: the agent hands it on with a new delegation.
-- **The tasks not waited for** are the runtime's `list`, `steer` and `cancel` (`AGENT_DELEGATION`),
-  which read the calling conversation's own record of them (so another's are not found, and a restart
-  loses nothing). Replay `safe`: listing only reads, a steer's request id is its call's (a rerun sends
+- **The tasks not waited for** are the runtime's `list`, `progress`, `steer` and `cancel`
+  (`AGENT_DELEGATION`), which read the calling conversation's own record of them (so another's are
+  not found, and a restart loses nothing); `progress` reads the child's last steps from its entries,
+  in the same storage (no call between actors). Replay `safe`: listing only reads, a steer's request id is its call's (a rerun sends
   nothing twice), and a cancel done again changes nothing.
 - **Which agents, who may delegate to each, and how deep, is this tool's config**, checked when the
   App is defined; an agent it lists (or names in a `from`) that the App does not define stops the App
@@ -147,20 +164,24 @@ Each sees only the tasks its own conversation started: another's id is an unknow
   them, depth and waiting rules, `from` (an allowed caller, a refused one with nothing started both
   ways, laundering through an allowed agent refused, a chain wholly in it allowed, untrusted chains
   refused for a restricted agent and not for another, the order of the checks), config that is
-  refused, and what `delegate_tasks`, `delegate_steer` and `delegate_cancel` answer for each status. It
+  refused, and what `delegate_tasks` (a task's steps with its id, a running one's latest in the
+  list), `delegate_steer` and `delegate_cancel` answer for each status. It
   calls the tools with a stand-in for the runtime's delegation.
 - `app.test.ts` (beside `files/`, in the registry only): with runtime-pi in a real App, on a SQLite
   file and the scripted faux model: a task waited for, a task answered later, one that reports after a
   restart, the depth limit, a task listed, steered and cancelled (reported once) by its own
-  conversation, while another conversation neither sees nor stops it, and `from`: allowed directly and
+  conversation, while another conversation neither sees nor stops it, a task's tool calls read with
+  `delegate_tasks({ id })` while it runs and after (another conversation reads none), and `from`: allowed directly and
   two levels deep (the keys carry the chain), refused directly and through an allowed agent (the
   restricted agent never runs).
 - `tests/workerd/test/tool-delegate.workerd.ts`: in a real Durable Object, driven by its alarm, both
-  ways, a task listed and cancelled, the child's key with its chain, and a `from` refusal.
+  ways, a task listed and cancelled, its steps read while it runs and after, the child's key with its chain, and a `from` refusal.
 - The runtime's side (`packages/pi-adapter/src/delegation.test.ts`): the child as the other agent, a
   rerun after a crash, a stop that reaches the child, background tasks across a restart, a stable id,
   the list after a restart, a steer that joins the run and one that comes after its last tool round,
-  a cancel reported once, another conversation's id `not_found`, the origin two delegations deep and
+  a cancel reported once, another conversation's id `not_found`, `progress` (none before the child's
+  first answer, the last steps bounded and oldest first, how each call went, the ended task's, another
+  conversation's id and an unknown one `not_found`, after a restart), the origin two delegations deep and
   after a restart, and the child's parts in `run`'s outcome and in the report, once.
 - `tests/acceptance/team-bases.test.ts`: a delegated worker's approval asked, decided in the chat and
   used by the chat's tree once (never by another's), its memory and its scheduled prompt.

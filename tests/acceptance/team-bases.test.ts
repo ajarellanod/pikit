@@ -246,12 +246,12 @@ test("a coordinator delegates in the background, gets a payment approved in its 
   const w = world();
   await w.boot();
 
-  // 1. The coordinator hands work to the worker without waiting; the task is listed running.
+  // 1. The coordinator hands work to the worker without waiting; the task is listed running, at its hold.
   const delegated = await w.say("alice", "m1", call("delegate", { agent: "worker", task: "hold", wait: false }));
   const task = /^The task "(\d+)" is with the agent "worker" now\./.exec(toolResults(delegated)[0] ?? "")?.[1];
   expect(task).toBeDefined();
   await w.held.started;
-  expect(toolResults(await w.say("alice", "m2", call("delegate_tasks", {})))).toEqual([`- ${task}: the agent "worker", running`]);
+  expect(toolResults(await w.say("alice", "m2", call("delegate_tasks", {})))).toEqual([`- ${task}: the agent "worker", running; its latest step: called hold {}: running`]);
   // Once its hold ends, the worker wraps up.
   expect(toolResults(await w.say("alice", "m3", call("delegate_steer", { id: task, message: "wrap up" })))[0]).toStartWith(`The message is with the task "${task}".`);
 

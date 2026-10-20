@@ -31,6 +31,12 @@
  *   lost: the report is the last run's answer. A cancel marks the task and aborts the child; a marked
  *   task is reported stopped whatever the child answered, once; each submit to the child checks the
  *   mark after it, so no run started by a submit escapes a cancel.
+ * - **`progress`** reads where one of those tasks is: its status and the child's last steps (assistant
+ *   text, tool calls and how they ended), bounded, from the child's entries (`tx.scanEntries` in a
+ *   commit that writes nothing), read in the parent's storage. Scoped as `list` (its `pikit.delegations`
+ *   first), so another conversation's id is `not_found`. It shows the parent only what the child's own
+ *   transcript holds, which the parent's storage already holds: a tool call's arguments as the child
+ *   wrote them (a secret the child typed there too), clipped.
  *
  * - **The child's origin** (`ConversationRef.origin`) is written in its record when it is created, from
  *   the parent's: the parent's own origin when the parent is delegated too, else the parent. Its tools,
@@ -50,6 +56,7 @@
 import type { Context as ChordContext, JsonValue } from "@earendil-works/chord";
 import {
   type ConversationId,
+  type Cursor,
   defineDoc,
   defineExtension,
   defineTask,
@@ -104,6 +111,21 @@ export interface BackgroundDelegation {
   result?: string;
 }
 
+/**
+ * One step of a task's child conversation, as `progress` reads it: what its model wrote (`text`, at most
+ * `STEP_TEXT_LIMIT` characters), or a tool it called, with its arguments as JSON (at most
+ * `STEP_ARGUMENTS_LIMIT` characters) and how the call is: `running` (no result written yet), `ok` or `error`.
+ */
+export type DelegationStep = { kind: "text"; text: string } | { kind: "tool"; name: string; arguments: string; status: "running" | "ok" | "error" };
+
+/** Where a background task is (`progress`): as `list` has it, and the child's last steps. */
+export interface DelegationProgress extends BackgroundDelegation {
+  /** The child's last steps, at most `PROGRESS_STEPS`, oldest first; none before its model first answered. */
+  steps: DelegationStep[];
+  /** When the child last wrote to its conversation (its newest message's time, ms since the epoch); absent before it did. */
+  updatedAt?: number;
+}
+
 export interface AgentDelegation {
   /** Runs `task` in a child conversation this tool call owns, and resolves with how it ended. */
   run(api: ToolExecutionApi, task: DelegatedTask, context: ChordContext): Promise<DelegatedOutcome>;
@@ -115,6 +137,11 @@ export interface AgentDelegation {
   start(api: ToolExecutionApi, task: DelegatedTask, context: ChordContext): Promise<string>;
   /** The tasks this conversation started, oldest first; never another conversation's. Foreground (`run`) ones are the call's, not listed. */
   list(api: ToolExecutionApi, context: ChordContext): Promise<BackgroundDelegation[]>;
+  /**
+   * Where this conversation's task `id` is: its status (as `list`) and its child's last steps, running or
+   * ended. Only reads. `not_found`: this conversation started no task `id`.
+   */
+  progress(api: ToolExecutionApi, id: string, context: ChordContext): Promise<DelegationProgress | "not_found">;
   /**
    * Sends `message` to this conversation's task `id` while it runs, from the sender it started with: it
    * joins the child's run, or runs right after it, and the task's one report is the answer to it.
@@ -141,6 +168,15 @@ export const DELEGATION_EXTENSION = "pikit.delegation";
 
 /** How many characters of a task's answer (or failure) the parent's record keeps, for `list`. */
 export const RESULT_LIMIT = 2000;
+
+/** How many of the child's last steps `progress` gives. */
+export const PROGRESS_STEPS = 5;
+/** How many characters of a text step `progress` keeps. */
+export const STEP_TEXT_LIMIT = 300;
+/** How many characters of a tool call's arguments (as JSON) `progress` keeps. */
+export const STEP_ARGUMENTS_LIMIT = 120;
+/** How many of the child's newest entries `progress` reads at most, looking for its steps. */
+const PROGRESS_SCAN = 200;
 
 type JsonSender = { channel: string; id: string };
 /** A steer, recorded before it is sent: the reporter sends it too if a crash came between. */
@@ -240,11 +276,46 @@ const inputOf = (task: string, requestId: string, sender: JsonSender | undefined
 
 const steerOf = (steer: Steer, sender: JsonSender | undefined): InputSubmissionDraft => ({ ...inputOf(steer.message, steer.requestId, sender), whenBusy: "steer" });
 
-const clip = (text: string) => (text.length > RESULT_LIMIT ? `${text.slice(0, RESULT_LIMIT)} [...]` : text);
+const clipTo = (text: string, limit: number) => (text.length > limit ? `${text.slice(0, limit)} [...]` : text);
+const clip = (text: string) => clipTo(text, RESULT_LIMIT);
 
 /** What `list` keeps of an outcome: its text or failure, bounded; never its parts (the report carries them). */
 const boundedOutcome = (outcome: DelegatedOutcome): RecordedOutcome =>
   outcome.kind === "completed" ? { kind: "completed", text: clip(outcome.text) } : outcome.kind === "failed" ? { kind: "failed", message: clip(outcome.message) } : outcome;
+
+/**
+ * In `tx`: the last `PROGRESS_STEPS` steps of `child`, oldest first, and when it last wrote. Reads its
+ * newest entries back (at most `PROGRESS_SCAN`): a tool call's result comes after it, so it is read first.
+ */
+async function stepsOf(tx: Tx, child: ConversationId): Promise<{ steps: DelegationStep[]; updatedAt?: number }> {
+  const newestFirst: DelegationStep[] = [];
+  const results = new Map<string, boolean>();
+  let updatedAt: number | undefined;
+  let read = 0;
+  let cursor: Cursor | undefined;
+  do {
+    const page = await tx.scanEntries({ conversationId: child, order: "descending" }, Math.min(50, PROGRESS_SCAN - read), cursor);
+    for (const entry of page.items) {
+      for (const message of [...(entry.model ?? [])].reverse()) {
+        if (message.role === "system") continue;
+        updatedAt ??= message.role === "assistant" ? message.timestamp + (message.durationMs ?? 0) : message.timestamp;
+        if (message.role === "toolResult") results.set(message.toolCallId, message.isError);
+        if (message.role !== "assistant") continue;
+        const text = message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("").trim();
+        const calls = message.content.flatMap((part): DelegationStep[] => {
+          if (part.type !== "toolCall") return [];
+          const ended = results.get(part.id);
+          return [{ kind: "tool", name: part.name, arguments: clipTo(JSON.stringify(part.arguments), STEP_ARGUMENTS_LIMIT), status: ended === undefined ? "running" : ended ? "error" : "ok" }];
+        });
+        newestFirst.push(...calls.reverse(), ...(text === "" ? [] : [{ kind: "text" as const, text: clipTo(text, STEP_TEXT_LIMIT) }]));
+      }
+      if (newestFirst.length >= PROGRESS_STEPS) break;
+    }
+    read += page.items.length;
+    cursor = page.next;
+  } while (cursor !== undefined && newestFirst.length < PROGRESS_STEPS && read < PROGRESS_SCAN);
+  return { steps: newestFirst.slice(0, PROGRESS_STEPS).reverse(), ...(updatedAt !== undefined && { updatedAt }) };
+}
 
 /**
  * In `tx`: the origin of a conversation `parent` delegates from, as its record has it: its own origin
@@ -283,6 +354,13 @@ async function submitTo(reader: Pick<ToolExecutionApi, "snapshot">, parent: Conv
   if ((await reader.snapshot(DelegationsDoc, parent, context))?.[id]?.cancelled === true) await child.abort(context);
   return submission;
 }
+
+/** The background tasks of `records` (`pikit.delegations`' entries), as `list` gives them. */
+const backgroundOf = (records: [string, Readonly<Delegation>][]): BackgroundDelegation[] =>
+  records.map(([id, record]) => {
+    const result = record.result?.kind === "completed" ? record.result.text : record.result?.kind === "failed" ? record.result.message : undefined;
+    return { id, agent: record.agent, status: statusOf(record), ...(result !== undefined && { result }) };
+  });
 
 const plainSender = (sender: Sender | undefined): JsonSender | undefined => (sender === undefined ? undefined : { channel: sender.channel, id: sender.id });
 
@@ -439,11 +517,17 @@ export function createDelegation(options: DelegationOptions) {
     },
 
     async list(api, context) {
-      const started = (await api.snapshot(DelegationsDoc, api.conversationId, context)) ?? {};
-      return Object.entries(started).map(([id, record]) => {
-        const result = record.result?.kind === "completed" ? record.result.text : record.result?.kind === "failed" ? record.result.message : undefined;
-        return { id, agent: record.agent, status: statusOf(record), ...(result !== undefined && { result }) };
-      });
+      return backgroundOf(Object.entries((await api.snapshot(DelegationsDoc, api.conversationId, context)) ?? {}));
+    },
+
+    async progress(api, id, context) {
+      // As `list`: this conversation's own record, so another's task is not found.
+      const record = (await api.snapshot(DelegationsDoc, api.conversationId, context))?.[id];
+      if (record === undefined) return "not_found";
+      const [listed] = backgroundOf([[id, record]]);
+      // A commit that only reads: it writes nothing.
+      const read = await api.commit((tx) => stepsOf(tx, record.child as ConversationId), context);
+      return { ...(listed as BackgroundDelegation), ...read };
     },
 
     async steer(api, id, message, context) {

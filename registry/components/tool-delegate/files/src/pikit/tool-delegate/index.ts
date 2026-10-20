@@ -33,8 +33,9 @@
  *   submitted (pi-durable's ownership and request ids), and only waits again.
  * - **The tasks it did not wait for** have an id (`wait: false` returns it), and three tools of their
  *   own, which an agent names apart (and `extension-house-rules` can allow per sender): `delegate_tasks`
- *   lists them or reads one, `delegate_steer` sends one a message while it runs, `delegate_cancel` stops
- *   one. Each sees only the tasks of its own conversation (`list`, `steer`, `cancel` of
+ *   lists them (a running one with its latest step) or reads one with its agent's last steps (how it is
+ *   going), `delegate_steer` sends one a message while it runs, `delegate_cancel` stops one. Each sees
+ *   only the tasks of its own conversation (`list`, `progress`, `steer`, `cancel` of
  *   `AGENT_DELEGATION`). All `safe`: listing reads, a steer's request id is its call's (a rerun sends
  *   nothing twice), and a cancel done again changes nothing.
  *
@@ -44,7 +45,7 @@
 
 import { defineComponent } from "@pikit/core";
 import { CONVERSATION, type ConversationRef, originOf } from "@pikit/contracts";
-import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, defineTool, partsNote, type ToolRegistration, withParts } from "@pikit/pi-adapter/tools";
+import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, type DelegationProgress, type DelegationStep, defineTool, partsNote, type ToolRegistration, withParts } from "@pikit/pi-adapter/tools";
 import Type, { type Static } from "typebox";
 
 /** The name agents give it, and its key under `agent.tool`. */
@@ -214,19 +215,50 @@ const TaskId = Type.String({ minLength: 1, description: "The task's id, as deleg
 
 const line = (task: BackgroundDelegation) => `- ${task.id}: the agent "${task.agent}", ${task.status}${task.result === undefined ? "" : `:\n${task.result}`}`;
 
+/** A step of a task's child on one line: what it wrote, or a tool it called and how that call is. */
+const stepLine = (step: DelegationStep) =>
+  step.kind === "text" ? `wrote: ${step.text.replace(/\s+/g, " ")}` : `called ${step.name} ${step.arguments.replace(/\s+/g, " ")}: ${step.status}`;
+
+/** How long ago `at` was (ms since the epoch), in words. */
+function ago(at: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  const [amount, unit] = seconds < 120 ? [seconds, "second"] : seconds < 7200 ? [Math.round(seconds / 60), "minute"] : [Math.round(seconds / 3600), "hour"];
+  return `${amount} ${unit}${amount === 1 ? "" : "s"} ago`;
+}
+
+/** One task with its child's last steps (`AgentDelegation.progress`). */
+const detailed = (task: DelegationProgress) =>
+  `${line(task)}\n${
+    task.steps.length === 0
+      ? `Its agent ${task.status === "running" ? "has taken no step yet" : "took no step"}.`
+      : `Its last steps, oldest first${task.updatedAt === undefined ? "" : ` (the last one ${ago(task.updatedAt)})`}:\n${task.steps.map((step) => `  - ${stepLine(step)}`).join("\n")}`
+  }`;
+
 /** `delegate_tasks`: this conversation's tasks, or one. */
 export function createTasksTool(): ToolRegistration {
   return defineTool({
     name: TASKS_TOOL,
     description:
-      "Lists the tasks this conversation handed to other agents without waiting (delegate with wait: false): each one's id, agent and status (running, completed, failed or aborted), and how it ended. With an id, only that task.",
+      "Lists the tasks this conversation handed to other agents without waiting (delegate with wait: false): each one's id, agent and status (running, completed, failed or aborted), how it ended, and a running one's latest step. With an id, only that task, with its agent's last steps (what it wrote, the tools it called and how they went): to see how it is going, and whether to steer it.",
     parameters: Type.Object({ id: Type.Optional(TaskId) }),
     replay: "safe",
     async execute(args, api, context) {
-      const tasks = await delegationIn(context).list(api, context);
-      const shown = args.id === undefined ? tasks : tasks.filter((task) => task.id === args.id);
-      if (args.id !== undefined && shown.length === 0) throw notFound(args.id);
-      return { output: [{ type: "text", text: shown.length === 0 ? "No task was handed over from this conversation without waiting." : shown.map(line).join("\n") }] };
+      const delegation = delegationIn(context);
+      if (args.id !== undefined) {
+        const task = await delegation.progress(api, args.id, context);
+        if (task === "not_found") throw notFound(args.id);
+        return { output: [{ type: "text", text: detailed(task) }] };
+      }
+      const tasks = await delegation.list(api, context);
+      const lines = await Promise.all(
+        tasks.map(async (task) => {
+          if (task.status !== "running") return line(task);
+          const progress = await delegation.progress(api, task.id, context);
+          const latest = progress === "not_found" ? undefined : progress.steps.at(-1);
+          return latest === undefined ? line(task) : `${line(task)}; its latest step: ${stepLine(latest)}`;
+        }),
+      );
+      return { output: [{ type: "text", text: tasks.length === 0 ? "No task was handed over from this conversation without waiting." : lines.join("\n") }] };
     },
   }) as unknown as ToolRegistration;
 }

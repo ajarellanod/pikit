@@ -240,7 +240,12 @@ conversation of another agent owned by the call (stopping the run stops it; a re
 (request id `delegate-result:<task id>`); `start` returns the task's id, the call's task id (a rerun
 gets the same). The background tasks of the calling conversation, and only its own (another's id is
 `not_found`), survive restarts and are controlled with `list(api)` (id, agent, status `running |
-completed | failed | aborted`, the answer or failure, at most `RESULT_LIMIT` characters), `steer(api, id,
+completed | failed | aborted`, the answer or failure, at most `RESULT_LIMIT` characters), `progress(api,
+id)` (the same, and the child's last `PROGRESS_STEPS` steps, oldest first: its model's text, at most
+`STEP_TEXT_LIMIT` characters, or a tool call with its arguments as JSON, at most `STEP_ARGUMENTS_LIMIT`
+characters, `running`, `ok` or `error`; and `updatedAt`, when the child last wrote; only reads, from the
+child's entries in the parent's storage: what its transcript holds, a secret it typed in a call's
+arguments included), `steer(api, id,
 message)` (only while running, from the sender the task started with: it joins the child's run, and
 a steer that comes after its last tool round runs next and is what the one report answers; never
 lost) and `cancel(api, id)` (aborts the child; reported to the parent as stopped once; again, or once

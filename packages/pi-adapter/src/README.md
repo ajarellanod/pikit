@@ -163,8 +163,10 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   the child to a background anchor task and a background reporter task (example 23), which admits the
   answer to the parent through `dispatch` (logged and announced). The tasks are installed in the
   registry (`pikit.delegation`) before pi-durable opens. `start` returns the task's id (the call's
-  task id); `list`, `steer` and `cancel` read the parent's own `pikit.delegations`, so a conversation
-  controls only its tasks; the reporter fixes the (bounded) result there only after every recorded
+  task id); `list`, `progress`, `steer` and `cancel` read the parent's own `pikit.delegations`, so a
+  conversation controls only its tasks; `progress` adds the child's last steps (its text and tool
+  calls with how they ended, bounded: `PROGRESS_STEPS`, `STEP_TEXT_LIMIT`, `STEP_ARGUMENTS_LIMIT`),
+  read newest first from its entries (`tx.scanEntries`, at most 200, in a commit that writes nothing); the reporter fixes the (bounded) result there only after every recorded
   steer is answered, and reports a cancelled task as stopped. A child's `pikit.conversation` gets its
   `origin` (the parent's, or the parent) in the commit that creates it, before `apply`; every ref the
   runtime builds takes the origin from that record (`asRecorded`), never from a given ref. A completed
