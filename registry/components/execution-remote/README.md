@@ -7,7 +7,7 @@ a real Linux, as a server's does. pi-durable's own `read`, `write`, `edit` and `
 `tool-*` components) work on it unchanged.
 
 - **Provides:** `execution` and `execution.shell` (pi-durable's `ExecutionEnv`, `env.ts`) and
-  `workspace` (a sandbox per conversation).
+  `workspace` (a sandbox per conversation and agent).
 - **Requires:** `secrets` (the token).
 - **Targets:** `server` and `durable` (only `fetch` and Web Crypto). On Cloudflare it belongs in the
   conversation object's App (the default export of `pikit.config.ts`), not the Worker's.
@@ -41,28 +41,41 @@ pikit doctor                          # execution, execution.shell, workspace: e
 
 ## Which sandbox
 
-A sandbox id has an agent name's grammar (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 100 characters);
+A conversation's sandbox is its agent's (`ConversationRef.agent`, which the runtime gives
+`workspace.resolve`): two agents never share one, so **a delegated child of another agent works in a
+sandbox of its own**, not its parent's (results pass through the delegation's answer, or git). A
+child of the same agent shares its parent's. Every request to a conversation's sandbox carries the
+header `Pikit-Agent: <agent>`, and the host resolves the sandbox for that agent: execution-gondolin
+there gives it the agent's machine (its packages, hosts, secrets; its README). `execution`'s own
+sandbox has no conversation and names no agent: the host gives it the base machine.
+
+A sandbox id is kebab-case, lowercase (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 100 characters);
 the host makes the sandbox on its first request and keeps it. On the host, execution-serve resolves
-it as the conversation `remote-<id>` (its `conversationId`, which execution-gondolin keys its VMs by
-alone), so a remote sandbox never shares one with the host App's own conversations (execution-serve's
-README).
+it as the conversation `remote-<id>`, so a remote sandbox never shares one with the host App's own
+conversations (execution-serve's README).
 
 - **In a Durable Object** (`WORKERS_HOST`, which deployment-cloudflare puts in the start context, has
-  an object): `o-<object id>`, for `execution` and every conversation `workspace` is asked for. The
-  object is `idFromName(key)` of the conversation: one sandbox for its whole life, through
-  evictions, deploys and resets, as execution-do's files are the object's. A delegated child
-  conversation, which lives in the parent's object, works in the parent's sandbox.
-- **On a server:** `workspace` gives each conversation key its own sandbox, `k-<SHA-256 of the key, in
-  hex>` (one key, one sandbox, through resets, as an object on Cloudflare; whatever the agent).
-  `execution` alone, which a conversation's tools never use while `workspace` is installed, is the
-  sandbox `sandbox` (`shared`).
+  an object): each agent of the object works in `o-<hex SHA-256 of "<object id>\n<agent>">`, with an
+  environment of its own kept for the App's life. The object is `idFromName(key)` of the
+  conversation (its delegated children live in it too): one sandbox per agent for its whole life,
+  through evictions, deploys and resets, as execution-do's files are the object's. `execution` alone
+  works in `o-<object id>`.
+- **On a server:** `workspace` gives each conversation key and agent its own sandbox,
+  `k-<hex SHA-256 of "<key>\n<agent>">` (through resets, as an object on Cloudflare). `execution`
+  alone, which a conversation's tools never use while `workspace` is installed, is the sandbox
+  `sandbox` (`shared`).
+
+The ids are hashes of the conversation and the agent: sandboxes made before that (`o-<object id>` of a
+conversation, `k-<hash of the key>`) are orphaned on the host, never migrated.
 
 ## The protocol
 
 `protocol.ts`, an identical copy in execution-serve (change both together; the registry's test fails
 while they differ): `POST <endpoint>/execution/v1/sandboxes/<sandbox>/<operation>`, a JSON body,
-`Authorization: Bearer <token>`. Every `ExecutionEnv` operation is one request; the environment's
-failures come back as its own `FileError` / `ExecutionError` codes, and nothing throws:
+`Authorization: Bearer <token>`, and `Pikit-Agent: <agent>` for a conversation's sandbox (an agent's
+name, at most 100 characters; a malformed one is `400`; a header because every body is strict).
+Every `ExecutionEnv` operation is one request; the environment's failures come back as its own
+`FileError` / `ExecutionError` codes, and nothing throws:
 
 | What fails | The result |
 |---|---|
@@ -132,15 +145,20 @@ Copied with the component (`execution-remote.test.ts`), against a fake host spea
 on a local `Bun.serve`: what setup declares; the start refused without the token, with a short one,
 over http to another machine, or in the Worker's App; the sandbox of a conversation on a server
 (`k-<hash>`) and in a Durable Object (`o-<id>`); paths sent absolute; the token only in the
-`Authorization` header and a command's variables the caller's (C7); the protocol's failures as
-results; output chunk by chunk from the cursor, with `skipped`; a read retried, a command lost;
+`Authorization` header and a command's variables the caller's (C7); `Pikit-Agent` on every request of
+a conversation's sandbox and never on `execution`'s, two agents of one key or object in two sandboxes
+(a delegated child of another agent), the same agent always in the same, an agent that is not an
+agent's name refused before any request; the protocol's failures as results; output chunk by chunk from the cursor, with `skipped`; a read retried, a command lost;
 cancellation stopping the command by its id, during its start too, and a throwing `onOutput`; a
 small file whole, a large one in pieces; stop.
 
-In the registry (`app.test.ts`, beside `files/`): against a real execution-serve (server-bun,
-workspace-local over execution-local) on `Bun.serve`, pi-durable's `ExecutionEnv` suite and the
-`workspace` suite pass end to end; pi-durable's own tools in a Harness turn (a long `bash` output
-through the window, its spill file read back); a sandbox per key, per object; a quick command and a
-small read cost one request each; a cancelled command's process does not run on; a wrong token.
-pikit also runs the suite in workerd, in a real Durable Object reaching a real host
-(`tests/workerd/test/execution-remote.workerd.ts`).
+In the registry (`app.test.ts`, beside `files/`): against a real execution-serve (server-bun, a
+provider keyed by conversation and agent as execution-gondolin's is, over execution-local) on
+`Bun.serve`, pi-durable's `ExecutionEnv` suite and the `workspace` suite pass end to end; pi-durable's
+own tools in a Harness turn (a long `bash` output through the window, its spill file read back); a
+sandbox per key and agent, per object and agent, each resolved on the host for its agent and
+`execution`'s for none; behind workspace-local, a directory per agent; a quick command and a small
+read cost one request each; a cancelled command's process does not run on; a wrong token.
+`gondolin.test.ts` runs remote, serve and execution-gondolin together on real micro-VMs (skipped
+without QEMU). pikit also runs the suite in workerd, in a real Durable Object reaching a real host,
+with two agents of one object in two sandboxes (`tests/workerd/test/execution-remote.workerd.ts`).

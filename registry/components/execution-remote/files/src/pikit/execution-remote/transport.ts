@@ -3,7 +3,7 @@
  * nothing else): what it answered, or why it did not. It never throws.
  */
 
-import { isProtocolErrorCode, type Operation, type Outcome, PROTOCOL_PATH, type ProtocolErrorCode, type RequestOf } from "./protocol.ts";
+import { AGENT_HEADER, isProtocolErrorCode, type Operation, type Outcome, PROTOCOL_PATH, type ProtocolErrorCode, type RequestOf } from "./protocol.ts";
 
 export type CallFailure =
   /** The caller's context was cancelled. */
@@ -20,6 +20,8 @@ export interface CallOptions {
   signal?: AbortSignal | undefined;
   /** The request's own time limit. */
   timeoutMs: number;
+  /** The agent the sandbox is for, sent as `Pikit-Agent`; none for `execution`'s own sandbox. */
+  agent?: string | undefined;
 }
 
 export interface Transport {
@@ -40,7 +42,7 @@ export function createTransport(options: TransportOptions): Transport {
   const endpoint = options.endpoint.replace(/\/+$/, "");
   return {
     endpoint,
-    async call(sandbox, operation, request, { signal, timeoutMs }) {
+    async call(sandbox, operation, request, { signal, timeoutMs, agent }) {
       const token = options.token();
       if (token === undefined) return { ok: false, failure: { kind: "protocol", status: 503, code: "unavailable", message: "execution-remote is not running" } };
       if (signal?.aborted === true) return { ok: false, failure: { kind: "aborted" } };
@@ -48,7 +50,7 @@ export function createTransport(options: TransportOptions): Transport {
       try {
         const response = await (options.fetch ?? fetch)(`${endpoint}${PROTOCOL_PATH}/${sandbox}/${operation}`, {
           method: "POST",
-          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(agent !== undefined && { [AGENT_HEADER]: agent }) },
           body: JSON.stringify(request),
           signal: signal === undefined ? limit : AbortSignal.any([signal, limit]),
         });

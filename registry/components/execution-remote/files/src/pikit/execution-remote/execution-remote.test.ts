@@ -3,7 +3,7 @@
  *
  * The sandbox host is a fake speaking the protocol (`protocol.ts`) on a local `Bun.serve`, so each
  * test decides what the host answers and sees every request: which sandbox, which operation, what
- * body, which token. The registry's own test (`app.test.ts`, beside `files/`) runs the component
+ * body, which token, which agent (`Pikit-Agent`). The registry's own test (`app.test.ts`, beside `files/`) runs the component
  * against a real execution-serve, under pi-durable's `ExecutionEnv` suite; the workerd lane runs it in
  * a Durable Object.
  */
@@ -14,8 +14,8 @@ import type { SecretStore } from "@pikit/contracts";
 import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { withAbortSignal } from "@pikit/pi-adapter/execution";
-import executionRemote, { keySandbox } from "./index.ts";
-import { PROTOCOL_PATH, PROTOCOL_STATUS, type ProtocolErrorCode, type WireExecState } from "./protocol.ts";
+import executionRemote, { keySandbox, objectSandbox } from "./index.ts";
+import { AGENT_HEADER, PROTOCOL_PATH, PROTOCOL_STATUS, type ProtocolErrorCode, type WireExecState } from "./protocol.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const TOKEN = "execution-remote-test-token-0123456789";
@@ -29,7 +29,7 @@ function secrets(values: Record<string, string>) {
   return defineComponent({ name: "secrets-test", setup: (pikit) => pikit.provide("secrets", store) });
 }
 
-type Seen = { sandbox: string; operation: string; body: Record<string, unknown>; authorization: string | null };
+type Seen = { sandbox: string; operation: string; body: Record<string, unknown>; authorization: string | null; agent: string | null };
 type Reply = unknown | { status: ProtocolErrorCode; message?: string } | (() => unknown);
 
 /** A fake sandbox host: `replies[operation]` answers (a value is `{ ok: true, value }`), in turn when it is a list. */
@@ -41,7 +41,7 @@ function fakeHost(replies: Record<string, Reply | Reply[]>) {
     async fetch(request) {
       const [sandbox = "", operation = ""] = new URL(request.url).pathname.slice(PROTOCOL_PATH.length + 1).split("/");
       const body = (await request.json()) as Record<string, unknown>;
-      seen.push({ sandbox, operation, body, authorization: request.headers.get("authorization") });
+      seen.push({ sandbox, operation, body, authorization: request.headers.get("authorization"), agent: request.headers.get(AGENT_HEADER) });
       const listed = replies[operation];
       let reply = Array.isArray(listed) ? (listed.length > 1 ? listed.shift() : listed[0]) : listed;
       if (typeof reply === "function") reply = await (reply as () => unknown)();
@@ -113,33 +113,66 @@ test("it refuses to start without its token, with a short one, over http to anot
   expect(await startError("https://sandbox.example.com", { host: { env: {} } })).toContain("WORKERS_HOST has no object");
 });
 
-test("on a server, a conversation's sandbox is k-<SHA-256 of its key>, the same for every agent and reset; execution alone works in `sandbox`", async () => {
+const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
+
+test("on a server, a conversation's sandbox is k-<SHA-256 of its key and agent>, the same through resets, every request naming the agent; execution alone works in `sandbox`, naming none", async () => {
   const host = fakeHost({ open: OPEN, exists: true });
   const { workspace, execution } = await started(host.url, { config: { sandbox: "tools" } });
 
   const env = (await workspace.resolve({ key: "telegram:42", agent: "assistant", conversationId: "c-1" }, ctx)).env;
   await env.exists("x", ctx);
-  await (await workspace.resolve({ key: "telegram:42", agent: "other", conversationId: "c-2" }, ctx)).env.exists("x", ctx);
+  const reset = (await workspace.resolve({ key: "telegram:42", agent: "assistant", conversationId: "c-2" }, ctx)).env;
+  await (await workspace.resolve({ key: "telegram:42", agent: "other", conversationId: "c-1" }, ctx)).env.exists("x", ctx);
   await execution.exists("x", ctx);
 
-  const sandbox = await keySandbox("telegram:42");
-  expect(sandbox).toBe(`k-${new Bun.CryptoHasher("sha256").update("telegram:42").digest("hex")}`);
-  expect(host.seen.map((request) => `${request.sandbox} ${request.operation}`)).toEqual([`${sandbox} open`, `${sandbox} exists`, `${sandbox} exists`, "tools open", "tools exists"]);
+  const sandbox = await keySandbox("telegram:42", "assistant");
+  const other = await keySandbox("telegram:42", "other");
+  expect(sandbox).toBe(`k-${sha256("telegram:42\nassistant")}`);
+  expect(other).toBe(`k-${sha256("telegram:42\nother")}`);
+  expect(reset).toBe(env);
+  expect(host.seen.map((request) => `${request.sandbox} ${request.operation} ${request.agent}`)).toEqual([
+    `${sandbox} open assistant`,
+    `${sandbox} exists assistant`,
+    `${other} open other`,
+    `${other} exists other`,
+    "tools open null",
+    "tools exists null",
+  ]);
   expect(env.cwd).toBe("/work");
 });
 
-test("in a Durable Object, every conversation's sandbox is o-<object id>", async () => {
+test("in a Durable Object, each agent of the object has a sandbox of its own, o-<SHA-256 of object id and agent> (a delegated child of another agent too); execution alone works in o-<object id>, naming no agent", async () => {
   const host = fakeHost({ open: OPEN, exists: true });
   const { workspace, execution } = await started(host.url, { object: "a1b2c3" });
 
   const one = (await workspace.resolve({ key: "telegram:42", agent: "assistant", conversationId: "c-1" }, ctx)).env;
   const child = (await workspace.resolve({ key: "delegate:1:t", agent: "helper", conversationId: "c-2", channel: "delegate" }, ctx)).env;
+  const sameAgent = (await workspace.resolve({ key: "delegate:1:u", agent: "assistant", conversationId: "c-3", channel: "delegate" }, ctx)).env;
   await child.exists("x", ctx);
+  await execution.exists("x", ctx);
 
-  expect(one).toBe(execution);
-  expect(child).toBe(execution);
-  expect(new Set(host.seen.map((request) => request.sandbox))).toEqual(new Set(["o-a1b2c3"]));
-  expect(host.seen.filter((request) => request.operation === "open")).toHaveLength(1);
+  const sandbox = await objectSandbox("a1b2c3", "assistant");
+  expect(sandbox).toBe(`o-${sha256("a1b2c3\nassistant")}`);
+  expect(one).not.toBe(execution);
+  expect(child).not.toBe(one);
+  expect(sameAgent).toBe(one);
+  expect(one.id).toBe(`execution-remote:${host.url}#${sandbox}`);
+  expect(host.seen.map((request) => `${request.sandbox} ${request.operation} ${request.agent}`)).toEqual([
+    `${sandbox} open assistant`,
+    `${await objectSandbox("a1b2c3", "helper")} open helper`,
+    `${await objectSandbox("a1b2c3", "helper")} exists helper`,
+    "o-a1b2c3 open null",
+    "o-a1b2c3 exists null",
+  ]);
+});
+
+test("a conversation whose agent is not an agent's name is refused, and nothing is asked of the host", async () => {
+  const host = fakeHost({ open: OPEN });
+  const { workspace } = await started(host.url);
+  for (const agent of ["", "Bad", "_shared", "a/b", "a\nb", `a${"b".repeat(100)}`]) {
+    await expect(workspace.resolve({ key: "telegram:1", agent, conversationId: "c-1" }, ctx)).rejects.toThrow("is not an agent name");
+  }
+  expect(host.seen).toEqual([]);
 });
 
 test("paths are resolved here and sent absolute: relative, `..`, `~`, `file://`", async () => {

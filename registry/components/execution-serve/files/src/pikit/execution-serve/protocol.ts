@@ -14,6 +14,13 @@
  * `SANDBOX_ID` as it is in the URL (no percent-decoding), and a reader or a command opened in one
  * sandbox is unknown in every other.
  *
+ * **The agent.** A request may carry `Pikit-Agent: <agent>` (`AGENT_HEADER`): the agent the sandbox
+ * is for, an agent's name (`AGENT_NAME`, at most 100 characters). execution-remote sends it on every
+ * request of a conversation's sandbox (`workspace`), never on `execution`'s own (no conversation, no
+ * agent). The host resolves the sandbox for that agent (its provider chooses the agent's machine by
+ * it); without it, for no agent. A malformed one is `400 invalid_request`. A header, not a body field:
+ * every operation's body is strict.
+ *
  * **Answers.** `200` with `{ ok: true, value }` or `{ ok: false, error }` (`WireError`: the
  * environment's own `FileError` or `ExecutionError`, code and message, and `spillPath` for a command).
  * Anything else is the protocol's own failure (`ProtocolFailure`): `400 invalid_request`,
@@ -50,16 +57,26 @@ export const PROTOCOL_PATH = "/execution/v1/sandboxes";
 export const ROUTE_KEY = "POST /execution/v1/sandboxes/:sandbox/:operation";
 
 /**
- * A sandbox's id: kebab-case, lowercase (`o-<object id>`, `k-<hash>`, `shared`). The grammar of an
- * agent's name, so a provider that keys its directories by `ConversationRef.agent` (workspace-local)
- * takes it as it is; no `/`, `.`, `%` or `..` can reach a path. At most 100 characters: the host
- * namespaces it (execution-serve's `conversationId` is `remote-<id>`) within a provider's 128.
+ * A sandbox's id: kebab-case, lowercase (`o-<hash>`, `o-<object id>`, `k-<hash>`, `shared`): no `/`,
+ * `.`, `%` or `..` can reach a path. At most 100 characters: the host namespaces it
+ * (execution-serve's `conversationId` is `remote-<id>`, an agentless sandbox's agent `_<id>`) within a
+ * provider's 128.
  */
 export const SANDBOX_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 export const MAX_SANDBOX_ID_LENGTH = 100;
 
 export function isSandboxId(value: string): boolean {
   return value.length <= MAX_SANDBOX_ID_LENGTH && SANDBOX_ID.test(value);
+}
+
+/** The header naming the agent a sandbox is for. */
+export const AGENT_HEADER = "Pikit-Agent";
+/** An agent's name (`@pikit/contracts`'s `AGENT_NAME`): the header's grammar. */
+export const AGENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+export const MAX_AGENT_LENGTH = 100;
+
+export function isAgentName(value: string): boolean {
+  return value.length <= MAX_AGENT_LENGTH && AGENT_NAME.test(value);
 }
 
 /** The secret holding the shared token, by default, on both sides. */

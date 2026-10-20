@@ -2,9 +2,9 @@
  * execution-serve's tests. They are copied with the component and keep running in your project.
  *
  * The sandboxes are a double of a `workspace` provider keyed as execution-gondolin's is: a directory
- * per `ConversationRef.conversationId` alone, which must be `^[A-Za-z0-9_-]{1,128}$` (else it
- * throws), over pi-durable's local environment in a temporary directory, recording every ref it is
- * asked for. Requests go to the route itself, as server-bun hands them over.
+ * per `ConversationRef.conversationId` and `agent`, each of which must be `^[A-Za-z0-9_-]{1,128}$`
+ * (else it throws), over pi-durable's local environment in a temporary directory, recording every
+ * ref it is asked for. Requests go to the route itself, as server-bun hands them over.
  * `execution-remote`'s registry test runs the whole protocol end to end, through HTTP, under
  * pi-durable's `ExecutionEnv` suite.
  */
@@ -19,10 +19,10 @@ import { createLifecycleConformance } from "@pikit/core/testing";
 import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { atCwd } from "@pikit/pi-adapter/execution";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
-import { MAX_COMMANDS, SandboxHost, sandboxConversation } from "./host.ts";
+import { MAX_COMMANDS, SandboxHost, sandboxConversation, type Scope } from "./host.ts";
 import executionServe from "./index.ts";
 import { OutputLog } from "./output.ts";
-import { MAX_SANDBOX_ID_LENGTH, type Operation, PROTOCOL_PATH, type ProtocolFailure, ROUTE_KEY, type Values, type WireExecState } from "./protocol.ts";
+import { AGENT_HEADER, MAX_SANDBOX_ID_LENGTH, type Operation, PROTOCOL_PATH, type ProtocolFailure, ROUTE_KEY, type Values, type WireExecState } from "./protocol.ts";
 
 const TOKEN = "execution-serve-test-token-0123456789";
 const cleanup: (() => void | Promise<void>)[] = [];
@@ -35,7 +35,7 @@ function secrets(values: Record<string, string>) {
   return defineComponent({ name: "secrets-test", setup: (pikit) => pikit.provide("secrets", store) });
 }
 
-/** A workspace per `conversationId` alone (execution-gondolin's rule): `<root>/<conversationId>`, over one local environment. Records what it was asked. */
+/** A workspace per `conversationId` and `agent` (execution-gondolin's rule): `<root>/<conversationId>/<agent>`, over one local environment. Records what it was asked. */
 function sandboxes() {
   const root = mkdtempSync(join(tmpdir(), "execution-serve-test-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
@@ -44,8 +44,8 @@ function sandboxes() {
   const provider: WorkspaceProvider = {
     async resolve(conversation, context) {
       asked.push(conversation);
-      if (!/^[A-Za-z0-9_-]{1,128}$/.test(conversation.conversationId)) throw new Error(`unsafe conversationId ${conversation.conversationId}`);
-      const dir = join(root, conversation.conversationId);
+      for (const name of [conversation.conversationId, conversation.agent]) if (!/^[A-Za-z0-9_-]{1,128}$/.test(name)) throw new Error(`unsafe name ${name}`);
+      const dir = join(root, conversation.conversationId, conversation.agent);
       mkdirSync(dir, { recursive: true });
       return { env: await atCwd(env, dir, toChord(context)) };
     },
@@ -75,12 +75,12 @@ async function served(options: { token?: string; config?: Record<string, unknown
     const request = new Request(`http://sandbox.test${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) });
     return (route as HttpRoute)(request, app.context());
   };
-  const call = async <O extends Operation>(sandbox: string, operation: O, body: unknown) => {
-    const response = await send(`${PROTOCOL_PATH}/${sandbox}/${operation}`, body);
+  const call = async <O extends Operation>(sandbox: string, operation: O, body: unknown, agent?: string) => {
+    const response = await send(`${PROTOCOL_PATH}/${sandbox}/${operation}`, body, { authorization: `Bearer ${TOKEN}`, ...(agent !== undefined && { [AGENT_HEADER]: agent }) });
     return { status: response.status, body: (await response.json()) as { ok: true; value: Values[O] } | { ok: false; error: { code: string } } | ProtocolFailure };
   };
-  const value = async <O extends Operation>(sandbox: string, operation: O, body: unknown): Promise<Values[O]> => {
-    const answer = await call(sandbox, operation, body);
+  const value = async <O extends Operation>(sandbox: string, operation: O, body: unknown, agent?: string): Promise<Values[O]> => {
+    const answer = await call(sandbox, operation, body, agent);
     if (answer.status !== 200 || !("ok" in answer.body) || !answer.body.ok) throw new Error(`${operation}: ${answer.status} ${JSON.stringify(answer.body)}`);
     return answer.body.value;
   };
@@ -138,8 +138,8 @@ test("a sandbox id that is not one (another sandbox's path, an encoded traversal
 
 test("a path is the sandbox's own: relative paths are refused, and an absolute one only ever reaches the sandbox in the URL", async () => {
   const host = await served();
-  mkdirSync(join(host.root, "remote-b"), { recursive: true });
-  writeFileSync(join(host.root, "remote-b", "secret.txt"), "b's");
+  mkdirSync(join(host.root, "remote-b", "_b"), { recursive: true });
+  writeFileSync(join(host.root, "remote-b", "_b", "secret.txt"), "b's");
 
   expect(failureOf(await host.call("a", "readTextFile", { path: "../b/secret.txt" }))).toEqual([400, "invalid_request"]);
   await host.call("a", "readTextFile", { path: "/../../b/secret.txt" });
@@ -148,19 +148,50 @@ test("a path is the sandbox's own: relative paths are refused, and an absolute o
   expect(host.asked.map((ref) => ref.conversationId)).toEqual(["remote-a"]);
 });
 
-test("a sandbox is resolved as the conversation remote-<id>: never one of the host's own (1, 2...), always a safe conversationId", async () => {
+test("a sandbox is resolved as the conversation remote-<id>: never one of the host's own (1, 2...), always a safe conversationId; for no agent, `_<id>`", async () => {
   const host = await served();
   const sandbox = `o-${"0123456789abcdef".repeat(4)}`;
   const opened = await host.value(sandbox, "open", {});
 
-  expect(host.asked).toEqual([{ key: `execution-serve:${sandbox}`, agent: sandbox, conversationId: `remote-${sandbox}` }]);
-  expect(opened.cwd).toBe(join(host.root, `remote-${sandbox}`));
-  expect(sandboxConversation("shared")).toEqual({ key: "execution-serve:shared", agent: "shared", conversationId: "remote-shared" });
+  expect(host.asked).toEqual([{ key: `execution-serve:${sandbox}`, agent: `_${sandbox}`, conversationId: `remote-${sandbox}` }]);
+  expect(opened.cwd).toBe(join(host.root, `remote-${sandbox}`, `_${sandbox}`));
+  expect(sandboxConversation("shared")).toEqual({ key: "execution-serve:shared", agent: "_shared", conversationId: "remote-shared" });
+  expect(sandboxConversation("shared", "developer")).toEqual({ key: "execution-serve:shared", agent: "developer", conversationId: "remote-shared" });
   // The longest id the protocol takes still makes one; a longer one, which the route refuses first, does not.
   expect(sandboxConversation(`a${"b".repeat(MAX_SANDBOX_ID_LENGTH - 1)}`).conversationId).toHaveLength(MAX_SANDBOX_ID_LENGTH + "remote-".length);
   expect(() => sandboxConversation(`a${"b".repeat(127)}`)).toThrow("makes no conversation id");
   expect(() => sandboxConversation("a/../b")).toThrow("makes no conversation id");
   expect(failureOf(await host.call(`a${"b".repeat(MAX_SANDBOX_ID_LENGTH)}`, "open", {}))).toEqual([400, "invalid_request"]);
+});
+
+test("with Pikit-Agent, the sandbox is resolved for that agent: two agents' sandboxes are apart, and each agent finds its own again", async () => {
+  const host = await served();
+  const sandbox = `o-${"ab".repeat(32)}`;
+  const developer = await host.value(sandbox, "open", {}, "developer");
+  const analyst = await host.value(`o-${"cd".repeat(32)}`, "open", {}, "analyst");
+  await host.value(sandbox, "writeFile", { path: `${developer.cwd}/mine.txt`, content: { text: "developer's" } }, "developer");
+
+  expect(host.asked.slice(0, 2)).toEqual([
+    { key: `execution-serve:${sandbox}`, agent: "developer", conversationId: `remote-${sandbox}` },
+    { key: `execution-serve:o-${"cd".repeat(32)}`, agent: "analyst", conversationId: `remote-o-${"cd".repeat(32)}` },
+  ]);
+  expect(developer.cwd).toBe(join(host.root, `remote-${sandbox}`, "developer"));
+  expect(await host.value(`o-${"cd".repeat(32)}`, "exists", { path: `${analyst.cwd}/mine.txt` }, "analyst")).toBe(false);
+  expect(await host.value(sandbox, "readTextFile", { path: `${developer.cwd}/mine.txt` }, "developer")).toBe("developer's");
+  // The header's name is case-insensitive, as every HTTP header's.
+  const lower = await host.send(`${PROTOCOL_PATH}/${sandbox}/open`, {}, { authorization: `Bearer ${TOKEN}`, "pikit-agent": "developer" });
+  expect(((await lower.json()) as { value: Values["open"] }).value.cwd).toBe(developer.cwd);
+});
+
+test("a malformed Pikit-Agent is 400, and no sandbox is asked for", async () => {
+  const host = await served();
+  for (const agent of ["", "Developer", "_a", "-a", "a-", "a_b", "a/b", "..", "a b", `a${"b".repeat(100)}`]) {
+    expect(failureOf(await host.call("a", "open", {}, agent))).toEqual([400, "invalid_request"]);
+  }
+  expect(() => sandboxConversation("a", "_a")).toThrow("Pikit-Agent is not an agent's name");
+  // The longest agent name is one.
+  expect((await host.call("a", "open", {}, `a${"b".repeat(99)}`)).status).toBe(200);
+  expect(host.asked.map((ref) => ref.agent)).toEqual([`a${"b".repeat(99)}`]);
 });
 
 test("an unknown operation is 404, a body that is not the operation's 400", async () => {
@@ -269,28 +300,29 @@ test("a command nobody reads for the lease is stopped, saying so, then forgotten
   const host = new SandboxHost({ resolve: async () => env, leaseMs: 60_000, now: () => now });
   cleanup.push(() => host.close());
   const ctx = BACKGROUND_CONTEXT as Parameters<SandboxHost["serve"]>[3];
+  const a: Scope = { sandbox: "a", conversation: sandboxConversation("a") };
   await env.writeFile("f.txt", "x", toChord(ctx));
   const command = crypto.randomUUID();
-  await host.serve("a", "execStart", { command, run: "sleep 30", cwd: root, wait: 0, linger: 0 }, ctx);
-  const reader = await host.serve("a", "openBinaryReader", { path: join(root, "f.txt"), prefetch: 0 }, ctx);
+  await host.serve(a, "execStart", { command, run: "sleep 30", cwd: root, wait: 0, linger: 0 }, ctx);
+  const reader = await host.serve(a, "openBinaryReader", { path: join(root, "f.txt"), prefetch: 0 }, ctx);
   const handle = reader.ok && "handle" in reader.value ? reader.value.handle : "";
 
   now += 30_000;
   await host.sweep();
-  const kept = await host.serve("a", "execRead", { command, cursor: 0, wait: 0, linger: 0 }, ctx);
+  const kept = await host.serve(a, "execRead", { command, cursor: 0, wait: 0, linger: 0 }, ctx);
   expect(kept.ok && kept.value.done).toBeUndefined();
 
   now += 61_000;
   await host.sweep();
   const deadline = Date.now() + 5000;
-  let stopped = await host.serve("a", "execRead", { command, cursor: 0, wait: 2000, linger: 0 }, ctx);
-  while (stopped.ok && stopped.value.done === undefined && Date.now() < deadline) stopped = await host.serve("a", "execRead", { command, cursor: 0, wait: 2000, linger: 0 }, ctx);
+  let stopped = await host.serve(a, "execRead", { command, cursor: 0, wait: 2000, linger: 0 }, ctx);
+  while (stopped.ok && stopped.value.done === undefined && Date.now() < deadline) stopped = await host.serve(a, "execRead", { command, cursor: 0, wait: 2000, linger: 0 }, ctx);
   expect(stopped.ok && stopped.value.done).toMatchObject({ ok: false, error: { code: "unknown", message: expect.stringContaining("nobody read it for the lease") } });
-  await expect(host.serve("a", "readerInfo", { handle }, ctx)).rejects.toMatchObject({ code: "unknown_handle" });
+  await expect(host.serve(a, "readerInfo", { handle }, ctx)).rejects.toMatchObject({ code: "unknown_handle" });
 
   now += 61_000;
   await host.sweep();
-  await expect(host.serve("a", "execRead", { command, cursor: 0, wait: 0, linger: 0 }, ctx)).rejects.toMatchObject({ code: "unknown_command" });
+  await expect(host.serve(a, "execRead", { command, cursor: 0, wait: 0, linger: 0 }, ctx)).rejects.toMatchObject({ code: "unknown_command" });
 });
 
 test("stopping the host stops its commands, and requests after are 503", async () => {
