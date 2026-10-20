@@ -13,7 +13,7 @@ import type { SqlDatabase } from "@pikit/contracts";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import storageSqlite from "../../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
 import { openSqliteDatabase } from "./testing/sqlite.ts";
-import { openDurableStorage, splitSqlStatements, sqliteDatabaseFrom } from "./sql.ts";
+import { DURABLE_TABLE_PREFIX, openDurableStorage, splitSqlStatements, sqliteDatabaseFrom } from "./sql.ts";
 import { answerOnce, answerWithTool, checkReopened, interruptGeneration, pendingWork, resumeInterrupted } from "./testing/harness.ts";
 
 const directories: string[] = [];
@@ -172,6 +172,24 @@ describe("the facade", () => {
       "SELECT 3",
     ]);
     expect(splitSqlStatements("SELECT CASE WHEN 1 THEN 2 END; SELECT 3")).toEqual(["SELECT CASE WHEN 1 THEN 2 END", "SELECT 3"]);
+  });
+});
+
+describe("table names", () => {
+  test("pi-durable's tables and indexes are runtime-pi's, runtime_pi_*: a host table named like one of them is left alone", async () => {
+    const { db, stop } = await openApp(databasePath());
+    try {
+      await db.run("CREATE TABLE conversations (note TEXT)");
+      await db.run("INSERT INTO conversations (note) VALUES ('mine')");
+      await answerOnce(db);
+      const names = (await db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name")).map((row) => row.name);
+      expect(DURABLE_TABLE_PREFIX).toBe("runtime_pi_");
+      expect(names).toEqual(expect.arrayContaining(["runtime_pi_conversations", "runtime_pi_entries", "runtime_pi_tasks", "runtime_pi_submissions", "runtime_pi_documents", "runtime_pi_durable_schema"]));
+      expect(names.filter((name) => !name.startsWith("runtime_pi_"))).toEqual(["conversations"]);
+      expect(await db.query("SELECT * FROM conversations")).toEqual([{ note: "mine" }]);
+    } finally {
+      await stop();
+    }
   });
 });
 

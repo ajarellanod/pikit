@@ -12,8 +12,9 @@ it into the app.
   conversations with it) and one slash command, `agent.command` `compact` ("/compact" below).
 - **Requires:** `storage.sqlite` (not just portable `storage.sql`): pi-durable keeps every conversation there (its transcript, its state,
   its runs and the messages it holds). On a server that is `storage-sqlite`, in a Cloudflare object
-  `storage-do`. Its tables are pi-durable's (`conversations`, `entries`, `tasks`, `submissions`,
-  `documents`…), unprefixed: one runtime per database; and the answers log, `runtime_pi_answers`.
+  `storage-do`. Its tables are pi-durable's, prefixed like its own (`runtime_pi_conversations`,
+  `runtime_pi_entries`, `runtime_pi_tasks`, `runtime_pi_submissions`…): one runtime per database;
+  and the answers log, `runtime_pi_answers`.
 - **Uses:**
   - `agent.definition`: the agents, one per name;
   - `model.provider`: the providers the agents name as `provider/modelId`;

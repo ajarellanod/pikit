@@ -49,8 +49,10 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 - **exec**: several statements are split (strings, quoted identifiers, comments, trigger bodies
   respected) and, outside a transaction, run in one.
 - **close** waits for the facade's operations and never closes the app's database.
-- **Table names** are pi-durable's, fixed and unprefixed (`conversations`, `entries`, `tasks`,
-  `submissions`, `documents`…): one `storage.sql` holds one pi-durable session. On a server that is
+- **Table names** follow the storage rule: pi-durable's tables and indexes belong to runtime-pi, so
+  they are opened with the prefix `runtime_pi_` (`DURABLE_TABLE_PREFIX`: `runtime_pi_conversations`,
+  `runtime_pi_entries`, `runtime_pi_tasks`, `runtime_pi_submissions`…). The prefix is fixed: one
+  `storage.sql` holds one pi-durable session. On a server that is
   one runtime (many conversations) per database; in a Durable Object, one per object (its root
   first). **One owner**: two processes over one database are unsupported (pi-durable caches the next
   id in memory).

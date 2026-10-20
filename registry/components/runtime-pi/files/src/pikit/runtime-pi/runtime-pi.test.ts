@@ -364,7 +364,7 @@ function flakyStorage() {
                   query: (sql, params) => (isDown ? unreachable() : tx.query(sql, params)),
                   run: (sql, params) => {
                     if (isDown) return unreachable();
-                    if (!fail || !sql.includes("INSERT INTO entries")) return tx.run(sql, params);
+                    if (!fail || !sql.includes("INSERT INTO runtime_pi_entries")) return tx.run(sql, params);
                     fail = false;
                     return unreachable();
                   },

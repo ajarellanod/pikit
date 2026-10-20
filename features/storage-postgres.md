@@ -51,4 +51,4 @@ and upstream, rather than a pikit store.
 - The former scenario 4 removed a sessions provider; today the proof swaps `storage-sqlite`, and
   needs pi-durable on Postgres first.
 - pi-durable's Postgres backend on its own connection, or on `storage.sql` (whose tables would then
-  need the prefix pi-durable lacks, `docs/upstream/pi-durable-table-prefix.md`).
+  need the prefix its SQLite core has since 1.3.0, `runtime_pi_`; `docs/upstream/pi-durable-table-prefix.md`).

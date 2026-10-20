@@ -334,8 +334,8 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   satisfying it alone does not make a provider usable by Pi or the outbox. Both existing providers
   expose both capabilities on the same database. Conversations in Postgres would need a Postgres
   backend of pi-durable's `Storage` (`features/storage-postgres.md`), not another agent runtime.
-  Pi's tables are not prefixed (an exception to the storage rule, proposed upstream), so one
-  SQLite database holds one pi-durable Session.
+  Pi's tables follow the storage rule: they are runtime-pi's, `runtime_pi_*` (pi-durable's prefix
+  option). The prefix is fixed, so one SQLite database holds one pi-durable Session.
 - **C6. Telegram by webhook is its own component.** `channel-telegram-webhook` (Worker half: the
   route, the secret Telegram echoes, the allowed users, `actor.mailbox`; object half: the inbox
   handler and delivery from `agent.submissions`' answers) reuses `channel-telegram`'s client, format

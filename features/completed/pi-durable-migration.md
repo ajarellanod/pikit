@@ -82,9 +82,6 @@ Each has, or will have, a proposal in [`docs/upstream/`](../../docs/upstream/):
   ([proposal](../../docs/upstream/pi-durable-inbox-after-failure.md)).
 - **The scheduler is global:** opening a Harness resumes every conversation's work, not one's
   ([proposal](../../docs/upstream/pi-durable-scheduling-scope.md)).
-- **Table names are unprefixed** (`conversations`, `entries`, `tasks`…), against `storage.sql`'s
-  "prefix your tables" rule, so one database holds one pi-durable Session
-  ([proposal](../../docs/upstream/pi-durable-table-prefix.md)).
 - **One process per storage:** the next id is cached in memory and there is no cross-process lock,
   so two processes over one SQLite file are unsupported ([replicas](../replicas.md)).
 - **A caller's context values (tenant, trace) do not reach tools:** tasks run in the Harness's
@@ -92,7 +89,10 @@ Each has, or will have, a proposal in [`docs/upstream/`](../../docs/upstream/):
 
 Closed upstream: the provider session id (pi-durable 1.0.2,
 [#10424](https://github.com/earendil-works/pi/issues/10424)): each conversation sends its own,
-persisted, so prompt caches keyed on it hit.
+persisted, so prompt caches keyed on it hit. Table names (pi-durable 1.3.0,
+`SqliteStorage.open(database, { prefix })`, [proposal](../../docs/upstream/pi-durable-table-prefix.md)):
+they were unprefixed, against `storage.sql`'s "prefix your tables" rule; runtime-pi's are now
+`runtime_pi_*`.
 
 ## Open questions
 - Whether `pi-durable` ships its own Durable Object facade, or pikit keeps its few lines over

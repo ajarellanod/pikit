@@ -508,8 +508,9 @@ Providers: storage-sqlite (a file, server), storage-do (the Durable Object's SQL
 The same `SqlDatabase` API, transaction and persistence guarantees, with SQLite's dialect: generated
 `INTEGER PRIMARY KEY` rowids, `AUTOINCREMENT` that never reuses committed ids, upserts and `RETURNING`.
 `runtime-pi` and `outbound-durable` require this narrower capability, so composition rejects a
-portable-only SQL provider before either starts. pi-durable's tables are unprefixed: one runtime
-per database. Its facade remains in the Pi adapter; no runtime types enter this contract.
+portable-only SQL provider before either starts. pi-durable's tables are runtime-pi's, prefixed
+`runtime_pi_` like any component's; the prefix is fixed, so one runtime per database. Its facade
+remains in the Pi adapter; no runtime types enter this contract.
 
 Both storage-sqlite and storage-do provide the portable and SQLite capabilities over the same
 database. Suite: `createSqliteDatabaseConformance` (the SQL guarantees plus native-dialect cases),
