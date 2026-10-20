@@ -1,6 +1,6 @@
 ---
 name: pikit
-description: Build on a pikit project or registry: a component (a channel, a tool, a store, a router stage, a model provider, an admin route, a deployment, or a feature's own new kind), an agent extension (prompt sections, hooks on model requests and tool calls, per-conversation state), or a dashboard view or Settings section. Use when the user asks to add behaviour to their pikit assistant, build a feature from a design note in features/, make something others can `pikit add`, or see, operate or set something of it in the dashboard.
+description: Build on a pikit project or registry a component (a channel, a tool, a store, a router stage, a model provider, an admin route, a deployment, or a feature's own new kind), an agent extension (prompt sections, hooks on model requests and tool calls, per-conversation state), or a dashboard view or Settings section. Use when the user asks to add behaviour to their pikit assistant, build a feature from a design note in features/, make something others can `pikit add`, or see, operate or set something of it in the dashboard.
 ---
 
 # Build on pikit
