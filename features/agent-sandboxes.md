@@ -16,7 +16,8 @@ analyst has Python and Google's APIs, and no other agent has either, not even th
 Each agent may get its own machine: the Alpine packages in its VM image, the hosts its VM reaches,
 the secrets its VM can use (as Gondolin placeholders, never the values), its memory and CPUs. An agent
 the configuration does not name gets the base machine. Two agents never share a VM or a workspace,
-also when one delegates to the other.
+also when one delegates to the other. An agent's workspace is its own in each chat, kept through
+`/new`, or, when its profile says `workspace: "agent"`, one for every chat.
 
 ```ts
 "execution-gondolin": {
@@ -40,20 +41,32 @@ now tells the host which agent each request is for. The secrets' values stay in 
 (`.env`): never in the Worker, the bucket, or a VM.
 
 ## Decisions (owner's, 2026-10-20)
-1. **A workspace per agent.** A sandbox is a conversation's and an agent's: a delegated child of
-   another agent works in a sandbox of its own, not its parent's. Results pass through the
-   delegation's answer or through git. A child of the same agent shares its parent's only in a
-   Durable Object (`execution-remote` keys by object and agent); on a server, and with
-   `execution-gondolin` in process, a delegated child is a conversation of its own (its own key and
-   `conversationId`), so it always gets its own sandbox.
+1. **A workspace per chat and agent, on every target** (revised 2026-10-20). The chat is the key of
+   the conversation a person or a channel opened (`originOf(ref).key`: a Google Chat space, a Telegram
+   chat). It survives `/new` (a reset is a new `conversationId` under the same key): the agent sees
+   what its past self wrote in that chat. A delegated child of the same agent works in its parent's
+   workspace on every target (execution-gondolin in process, execution-remote on a server or in a
+   Durable Object, workspace-local); a child of another agent works in that agent's workspace of the
+   chat, not its parent's: results pass through the delegation's answer or through git. Two chats
+   never share one. Before, a sandbox was a conversation's (`conversationId`) on a server: `/new`
+   started empty, and a same-agent child got its own. **Shared across chats, by configuration only:**
+   execution-gondolin's `workspace: "agent"` (on the base or an agent's profile; on `durable`, the
+   sandbox host's) and workspace-local's `per: "agent"` give an agent one workspace for every chat
+   (an agent with the context of everything). **Parallel tasks** of one agent in one chat share its
+   workspace and VM, commands unserialized: by convention each works in a subfolder of its own or a
+   git worktree.
 2. **A profile replaces the base field by field.** A field the profile sets replaces the base's (its
    `allowedHosts` are not added to the base's); a field it leaves out is the base's. What the
    configuration shows is what the agent gets.
 3. **workspace-local behind execution-serve becomes a directory per agent**, as it is on a server
    (that trial setup was never a sandbox): the consequence of the host knowing the real agent. It
-   takes one leading `_` in a name, so an agentless sandbox (`_<sandbox>`) still gets its own.
-4. **Sandbox ids are hashes of the conversation and the agent.** Existing `o-<object id>` and
-   `k-<hash>` sandboxes are orphaned; no migration (pikit 0.0.x promises no compatibility).
+   takes one leading `_` in a name, so an agentless sandbox (`_<sandbox>`) still gets its own. With
+   decision 1, its default is a directory per chat and agent (`per: "chat"`; the chat behind the host
+   is the sandbox), `per: "agent"` the directory per agent.
+4. **Sandbox ids are hashes of the chat and the agent.** Existing `o-<object id>` and
+   `k-<hash>` sandboxes are orphaned, as are execution-gondolin's `conversations/...` directories and
+   workspace-local's `<root>/<agent>/` files under its new default; no migration (pikit 0.0.x promises
+   no compatibility).
 5. **An agent misspelled in `agents` gets the base**: no secret, no network. Fails closed. A server
    App that has `agent.definition`s warns at start for a profile no agent defines; a sandbox host
    knows no agents and cannot.
@@ -65,16 +78,19 @@ now tells the host which agent each request is for. The secrets' values stay in 
   grammar (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, as `defineAgent` checks it) and has at most 100
   characters, a limit of these components' own (`defineAgent` has none: an agent with a longer name
   is refused at `resolve`); anything else is refused at define/start. `Profile` is
-  `{ packages?, allowedHosts?, secrets?, memory?, cpus? }`, each with the base field's own schema.
+  `{ packages?, allowedHosts?, secrets?, memory?, cpus?, workspace? }`, each with the base field's own
+  schema (`workspace`: `"chat"`, the default, or `"agent"`).
   `root`, `idleSeconds`, `maxVms` and `queueSeconds` stay global only.
 - **The effective machine** of an agent: for each field, the profile's when set, else the base's.
   Its reachable hosts: its `allowedHosts` plus its own secrets' hosts. Its packages: its `packages`,
   plus `git` when `proposals` is installed (as today).
-- **The sandbox of a conversation is keyed by `(conversationId, agent)`**, from the
-  `ConversationRef` `resolve` gets. Its files: `<root>/conversations/<conversationId>/<agent>/`
-  (`/workspace` in the guest), its temporary files under `<root>/.execution-gondolin-tmp/` the same
-  way. `agent` must be a safe directory name, `^[A-Za-z0-9_-]{1,128}$`, as `conversationId` is;
-  otherwise `resolve` throws and nothing is made. The VM label is `pikit <agent> <conversationId>`.
+- **The sandbox of a conversation is keyed by `(chat, agent)`**, the chat `originOf(ref).key` of the
+  `ConversationRef` `resolve` gets. Its files: `<root>/chats/<hex SHA-256 of the chat>/<agent>/`
+  (`/workspace` in the guest), or `<root>/agents/<agent>/` with `workspace: "agent"`, its temporary
+  files under `<root>/.execution-gondolin-tmp/` the same way. `agent` must be a safe lowercase
+  directory name, `^[a-z0-9_-]{1,128}$`, and the chat key non-empty; otherwise `resolve` throws and
+  nothing is made. The VM label is `pikit <agent> <first 12 of the chat's hash>` (`pikit <agent>`
+  shared).
   The profile is chosen by `ConversationRef.agent` alone: a key in `agents` equal to it, else the base.
 - `execution`'s own sandbox (`default`, no conversation) always gets the base.
 - **Secrets:** the pool reads every secret name of the base and of every profile (`secrets()`); each
@@ -100,12 +116,16 @@ now tells the host which agent each request is for. The secrets' values stay in 
 - In a Durable Object: a conversation's sandbox is `o-<hex SHA-256 of "<object id>\n<agent>">`
   (64 hex), one per agent of the object, each with its own `RemoteExecutionEnv` kept for the App's
   life. `execution`'s own sandbox stays `o-<object id>`.
-- On a server: `k-<hex SHA-256 of "<conversation key>\n<agent>">`. `execution`'s own stays the
-  configured `sandbox` (`shared`).
+- On a server: `k-<hex SHA-256 of "<chat key>\n<agent>">`, the chat key `originOf(ref).key` (a
+  delegated child's own key chooses nothing). `execution`'s own stays the configured `sandbox`
+  (`shared`). The Durable Object's id already is the chat's: the object is `idFromName` of the chat's
+  key, which a reset keeps, and its delegated children live in it.
 - The agent comes from `resolve(conversation)`'s `ConversationRef.agent`.
 
 ### execution-serve (the ConversationRef it resolves)
-- With `Pikit-Agent`: `{ key: "execution-serve:<sandbox>", agent: <that agent>, conversationId: "remote-<sandbox>" }`.
+- With `Pikit-Agent`: `{ key: "execution-serve:<sandbox>", agent: <that agent>, conversationId: "remote-<sandbox>" }`,
+  no `origin`: the chat is `execution-serve:<sandbox>`, a chat per sandbox (the client's sandbox ids are
+  per chat and agent already); `workspace: "agent"` on the host shares an agent's across sandboxes.
 - Without it: `agent` is `_<sandbox>` (an underscore, outside the agent grammar): it can never match
   a profile key, so an agentless sandbox always gets the base, and workspace-local still gives each
   agentless sandbox a directory of its own.
@@ -145,7 +165,9 @@ and execution-serve's own.
 
 ## Guarantees and tests
 - execution-gondolin (fake guest): the profile chosen by agent; an unknown agent and `default` get the
-  base (no secret, no host); two agents of one conversation get two VMs and two directories; a secret
+  base (no secret, no host); two agents of one chat get two VMs and two directories; a reset and a
+  same-agent delegated child find the chat's files, another chat does not; `workspace: "agent"` one
+  sandbox for every chat; a secret
   reaches only its profile's VMs, also after a rotation; two images with different packages coexist;
   bad agent keys and bad agent names refused; secrets in a profile without a `secrets` provider
   refused at start.
@@ -155,7 +177,7 @@ and execution-serve's own.
 - Across both (`execution-remote/gondolin.test.ts`): remote, serve and gondolin over the fake guest,
   two agents and two profiles: only one gets the secret, an agent with no profile gets the base.
 - The workerd lane (`tests/workerd/test/execution-remote.workerd.ts`): two agents in one real Durable
-  Object reach two sandboxes.
+  Object reach two sandboxes, each found again by a same-agent child and by a reset in a new App.
 - The `execution` and `workspace` conformance suites still pass on every provider.
 
 ## Limits
@@ -171,8 +193,7 @@ and execution-serve's own.
   from the agents it names, and only when every agent of the delegation chain is one of them
   (`support` cannot reach `developer` through an `orchestrator` it may delegate to). Give every agent
   with a profile a `from`: without it, any agent with `delegate` can have a developer child make
-  authenticated GitHub calls and read the answer (in a Durable Object, in the object's developer
-  sandbox). The chain is in keys only tool-delegate makes, checked against the runtime's origin; this
+  authenticated GitHub calls and read the answer (in the chat's developer sandbox, on every target). The chain is in keys only tool-delegate makes, checked against the runtime's origin; this
   is the same logical boundary as above, the reviewed code's, not a process's.
 - **One secret name, one value.** Profiles read secrets by name from the host's one `secrets`: two
   profiles naming `GH_TOKEN` get the same token. Give each agent's token its own name.

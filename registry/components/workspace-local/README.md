@@ -1,6 +1,7 @@
 # workspace-local
 
-Each agent's tools work in a directory of their own, inside execution: order, not isolation.
+Each agent's tools work in a directory of their own in each chat, inside execution: order, not
+isolation.
 
 - **Provides:** `workspace`.
 - **Requires:** `execution` (`execution-local`): the agents' directories are in it.
@@ -12,12 +13,25 @@ Each agent's tools work in a directory of their own, inside execution: order, no
 
 Without it, every agent's tools work in `execution`'s one directory. With it, each agent gets
 `<root>/<agent>/` inside `execution`'s (`.pikit/workspace/agents/support/`,
-`.pikit/workspace/agents/ops/` with `execution-local`'s defaults):
+`.pikit/workspace/agents/ops/` with `execution-local`'s defaults), and in it a directory per chat,
+`_chats/<hex SHA-256 of the chat's key>/` (`per: "chat"`, the default):
 - A tool call in a run asks for the workspace of the run's conversation, and gets `execution`
-  itself, working in its agent's directory. Every conversation of one agent shares it; two agents
-  never do.
+  itself, working in its agent's directory of the conversation's chat. The chat is the key of the
+  conversation a person or a channel opened (`originOf(ref).key`): a reset (`/new`, a new
+  conversation under the same key) works in the same directory and sees what the agent wrote there
+  before, and so does a delegated child of the same agent (its origin's chat, not its own
+  `delegate:...` key). A child of another agent works in that agent's directory of the chat. Two
+  agents never share one; two chats never do.
+- The key is hashed (any string makes one safe name); an empty one is refused, nothing created.
+  `_chats` starts with `_`, which no channel's directory does (`per: "channel"`, below), so the two
+  layouts never meet.
+- Several conversations may work in one directory at once (a reset and the conversation before it, a
+  parent and its background tasks): parallel tasks of one agent keep to a subfolder or a git worktree
+  each.
 - A directory is made on the agent's calls. Removing the component leaves them on disk; the tools
-  go back to `execution`'s directory.
+  go back to `execution`'s directory. Before `per: "chat"` was the default, the files were in
+  `<root>/<agent>/`: they stay there, out of the chats' directories (set `per: "agent"` to keep
+  using them; there is no migration).
 - An agent name that is not kebab-case (`..`, `a/b`, empty) is refused: the tool call fails, and
   nothing is created outside `root`. One leading `_` is allowed: behind execution-serve, an
   agentless sandbox is `_<sandbox id>`, and gets a directory of its own.
@@ -28,6 +42,11 @@ Without it, every agent's tools work in `execution`'s one directory. With it, ea
 
 A tool called outside a run (a test calling it directly) has no conversation, and works in
 `execution`'s directory.
+
+## A directory per agent
+
+With `per: "agent"`, every chat of an agent shares `<root>/<agent>/`: an agent with the context of
+everything, whose chats see and change the same files.
 
 ## A directory per channel
 
@@ -66,7 +85,7 @@ Until then, give `bash` only to the agents that need it, and see `execution-loca
 ```ts
 "workspace-local": {
   root: "agents", // default; relative to execution's working directory, or absolute
-  per: "agent",   // default; "channel" for a directory per channel of each agent
+  per: "chat",    // default; "agent" for one directory per agent, "channel" for one per channel of each agent
 }
 ```
 
@@ -74,8 +93,14 @@ Until then, give `bash` only to the agents that need it, and see `execution-loca
 
 `workspace-local.test.ts` is copied with the component and runs in your project, in temporary
 directories. It covers:
-- the `workspace` conformance suite, and the `execution` one on an agent's directory (with a shell);
-- one directory per agent under `root`, relative to `execution`'s directory or absolute;
+- the `workspace` conformance suite (per chat, per agent, per channel), and the `execution` one on an
+  agent's directory (with a shell);
+- one directory per agent and chat under `root`, relative to `execution`'s directory or absolute;
+- per chat: a reset (`/new`) and a delegated child (and grandchild) of the same agent in the chat's
+  directory, a child of another agent in that agent's, another chat apart; an empty chat key refused,
+  an odd one (`../..`) only a hash; in real runs, a reset of the chat writes beside what the
+  conversation before it wrote, and another chat does not see it;
+- per agent: every chat of an agent in one directory, two agents apart;
 - `per: "channel"`: a directory per channel inside the agent's (`telegram:ops` as `telegram.ops`), the
   agent's own without a channel, unsafe channels refused, and in real runs a later message whose ref
   has no channel still in its conversation's channel directory; the `workspace` suite again with it;

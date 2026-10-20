@@ -26,8 +26,9 @@ import type { DurableMessage, DurableUsage } from "./result.ts";
  */
 export interface WorkspaceProvider {
   /**
-   * The workspace of `conversation`. A provider decides what it is keyed by (`workspace-local`: the
-   * agent, one directory each) and may create it on the first call. It fails, and the tool call with
+   * The workspace of `conversation`. A provider decides what it is keyed by (by default the chat and
+   * the agent: `originOf(conversation).key`, which a reset keeps; workspace-local and
+   * execution-gondolin can share one per agent) and may create it on the first call. It fails, and the tool call with
    * it, rather than hand out a workspace it cannot keep apart from the others.
    */
   resolve(conversation: ConversationRef, context: PikitContext): Promise<Workspace>;

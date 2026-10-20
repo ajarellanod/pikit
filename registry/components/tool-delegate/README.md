@@ -161,7 +161,7 @@ Each sees only the tasks its own conversation started: another's id is an unknow
 - **The child works on its own agent's machine**: with `execution-gondolin` or `execution-remote`, a
   child of another agent gets a sandbox of its own (its agent's packages, hosts and secrets), never
   its parent's; what it made comes back in its answer or through git. A child of the same agent
-  shares its parent's only in a Durable Object (on a server it has its own key, so its own sandbox).
+  works in its parent's, the chat's (its origin's), on every target.
   An agent with a machine of its own (a token) takes tasks only from the agents in its `from`, so no
   other agent with `delegate` can drive it, directly or through another agent ([features/agent-sandboxes.md](https://github.com/ajarellanod/pikit/blob/main/features/agent-sandboxes.md)).
 - **What the child asks the person reaches them**: a completed task's outcome carries its run's parts

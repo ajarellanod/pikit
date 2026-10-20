@@ -49,7 +49,7 @@ export const MAX_ANSWER_BYTES = 4 * 1024 * 1024;
 
 /** What prefixes a remote sandbox's `conversationId`: never one of the host App's own (its runtime numbers them `1`, `2`…). */
 export const CONVERSATION_PREFIX = "remote-";
-/** The `conversationId` a sandbox provider takes (execution-gondolin's rule: a safe directory name). */
+/** The `conversationId` a sandbox provider may key by: a safe directory name. */
 export const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 /** What prefixes an agentless sandbox's `agent`: outside the agent grammar, so it never matches a profile. */
@@ -58,11 +58,12 @@ export const AGENTLESS_PREFIX = "_";
 /**
  * The `ConversationRef` a sandbox is resolved as:
  * - `conversationId` `remote-<id>`: namespaced so it never meets a conversation of the host App's own
- *   runtime, and held to `CONVERSATION_ID` (execution-gondolin keys its sandboxes by it and `agent`);
+ *   runtime, and held to `CONVERSATION_ID` (a safe directory name, for a provider that keys by it);
  * - `agent` the request's `Pikit-Agent` (the provider chooses the agent's machine by it; workspace-local
  *   keys its directories by it), or `_<id>` without one (an agentless sandbox: `execution`'s own of a
  *   client), which no agent name can be;
- * - `key` `execution-serve:<id>`.
+ * - `key` `execution-serve:<id>`, and no `origin`: the chat execution-gondolin and workspace-local key
+ *   by is the sandbox (`originOf` of this ref is the ref).
  * A sandbox id that cannot make one, or an agent that is not an agent's name, is refused
  * (`invalid_request`): never cleaned up into another.
  */

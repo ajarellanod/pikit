@@ -3,7 +3,7 @@
   "name": "execution-remote",
   "version": "0.0.1",
   "title": "Remote sandbox: your agent's files and shell in a sandbox on another machine (execution-serve)",
-  "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per conversation and agent, from a server or a Cloudflare Durable Object.",
+  "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per chat and agent, from a server or a Cloudflare Durable Object.",
   "targets": [
     "server",
     "durable"

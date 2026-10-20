@@ -5,22 +5,24 @@
  *
  * It provides `execution` and `execution.shell` (pi-durable's `ExecutionEnv`, `env.ts`) and
  * `workspace`, which the runtime asks on every tool call for the conversation's environment. A
- * conversation's sandbox is its agent's (`ConversationRef.agent`): every request to it carries
- * `Pikit-Agent: <agent>`, and two agents never share one, also when one delegates to the other. A
- * delegated child of the same agent shares its parent's only in a Durable Object (it lives in the
- * parent's object); on a server its key is its own (`delegate:<depth>:<chain>:<task>`), so is its sandbox.
+ * conversation's sandbox is its chat's and its agent's (`ConversationRef.agent`): the chat is the
+ * conversation a person or a channel opened (`originOf`), so a reset (`/new`) finds the agent's files
+ * again, and a delegated child of the same agent works in its parent's sandbox on every target. Every
+ * request to it carries `Pikit-Agent: <agent>`, and two agents never share one, also when one
+ * delegates to the other.
  * The agent is an agent's name of at most `MAX_AGENT_LENGTH` (100) characters, this component's own
  * bound (`defineAgent` has none): a longer one is refused at `resolve`, saying so (the host answers
  * `400` too). Which sandbox (its id, `protocol.ts`'s `SANDBOX_ID`):
- * - **In a Durable Object** (`WORKERS_HOST` has an object): the object is the conversation (its
- *   delegated children live in it too), so each agent of the object works in
+ * - **In a Durable Object** (`WORKERS_HOST` has an object): the object is the chat (its delegated
+ *   children live in it too), so each agent of the object works in
  *   `o-<hex SHA-256 of "<object id>\n<agent>">`, with an environment of its own kept for the App's
- *   life. The object id is `idFromName(key)`'s: the same for the conversation's whole life, through
- *   evictions, deploys and resets. `execution` alone works in `o-<object id>`, with no agent.
- * - **On a server** (no `WORKERS_HOST`): `workspace` gives each conversation key and agent its own
- *   sandbox, `k-<hex SHA-256 of "<key>\n<agent>">` (through resets, as an object on Cloudflare),
- *   with an environment kept for the App's life: one per key and agent ever resolved, never
- *   forgotten; `execution` alone is the sandbox `sandbox` of the config (`shared`), with no agent.
+ *   life. The object id is `idFromName(key)`'s of the chat's key: the same for the chat's whole life,
+ *   through evictions, deploys and resets. `execution` alone works in `o-<object id>`, with no agent.
+ * - **On a server** (no `WORKERS_HOST`): `workspace` gives each chat and agent its own sandbox,
+ *   `k-<hex SHA-256 of "<chat key>\n<agent>">`, the chat key the origin's (`originOf(ref).key`: a
+ *   delegated child's own `delegate:...` key chooses nothing), with an environment kept for the App's
+ *   life: one per chat and agent ever resolved, never forgotten; `execution` alone is the sandbox
+ *   `sandbox` of the config (`shared`), with no agent.
  * The host makes the sandbox on its first request (its provider's `workspace.resolve`) and keeps it.
  *
  * - **The token** (`PIKIT_SANDBOX_TOKEN`, `tokenSecret`) is read through `secrets` at start: missing,
@@ -38,6 +40,7 @@
  */
 
 import { defineComponent } from "@pikit/core";
+import { originOf } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
 import Type from "typebox";
@@ -71,7 +74,7 @@ async function sha256Hex(text: string): Promise<string> {
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/** The sandbox of a conversation key's agent on a server: `k-` and the SHA-256 of `<key>\n<agent>`, in hex. */
+/** The sandbox of a chat's agent on a server: `k-` and the SHA-256 of `<chat key>\n<agent>`, in hex. */
 export async function keySandbox(key: string, agent: string): Promise<string> {
   return `k-${await sha256Hex(`${key}\n${agent}`)}`;
 }
@@ -112,14 +115,15 @@ export default defineComponent({
     pikit.provide("execution", execution);
     pikit.provide("execution.shell", execution);
 
-    /** Each conversation sandbox's environment (one per agent of the object, or per key and agent), kept for the App's life (its session: the sandbox's cwd). */
+    /** Each conversation sandbox's environment (one per agent of the object, or per chat and agent), kept for the App's life (its session: the sandbox's cwd). */
     const bySandbox = new Map<string, RemoteExecutionEnv>();
     const workspace: WorkspaceProvider = {
       async resolve(conversation, ctx) {
         if (!running) throw new Error(`${NAME}: the workspace was asked for while the app is not running`);
         const agent = conversation.agent;
         if (!isAgentName(agent)) throw new Error(`${NAME}: the conversation's agent ${JSON.stringify(agent.slice(0, 40))} is not an agent name (kebab-case, at most ${MAX_AGENT_LENGTH} characters)`);
-        const sandbox = objectId === undefined ? await keySandbox(conversation.key, agent) : await objectSandbox(objectId, agent);
+        // On a server, the chat: the origin's key, the same through resets and for its delegated children.
+        const sandbox = objectId === undefined ? await keySandbox(originOf(conversation).key, agent) : await objectSandbox(objectId, agent);
         const env = bySandbox.get(sandbox) ?? new RemoteExecutionEnv({ transport, agent, sandbox: () => (running ? sandbox : undefined) });
         bySandbox.set(sandbox, env);
         // Opened before it is handed out: its `cwd` is the sandbox's, and a host that refuses fails this call.

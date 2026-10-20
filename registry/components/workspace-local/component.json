@@ -2,7 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "workspace-local",
   "version": "0.0.1",
-  "description": "Each agent's tools work in a directory of their own, inside execution: order, not isolation.",
+  "description": "Each agent's tools work in a directory of their own in each chat, inside execution: order, not isolation.",
   "targets": [
     "server"
   ],

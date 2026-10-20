@@ -3,19 +3,23 @@
  * QEMU), with its files on the host. A real shell that cannot read the server's files: not `.pikit/`
  * (every conversation, the credentials), not another conversation's workspace, not `.env`.
  *
- * It provides `workspace`, one sandbox per conversation and agent, keyed by the `ConversationRef`'s
- * `conversationId` and `agent` (the README says why): two agents of one conversation get two
- * sandboxes, and a delegated child, a conversation of its own, gets its own whatever its agent. And
- * `execution` and `execution.shell`, one more sandbox (`default`) for a tool called outside a
- * conversation. Each sandbox:
- * - has its files in `<root>/conversations/<conversationId>/<agent>/` on the host, `/workspace` in the guest
+ * It provides `workspace`, one sandbox per chat and agent: the chat is the key of the conversation a
+ * person or a channel opened (`originOf(ref).key`), so a reset (`/new`, a new `conversationId` under
+ * the same key) finds the agent's files again, and a delegated child of the same agent works in its
+ * parent's sandbox, a child of another agent in that agent's own of the chat (the README says why).
+ * With `workspace: "agent"` (the base's or an agent's profile), the agent has one sandbox for every
+ * chat. And `execution` and `execution.shell`, one more sandbox (`default`) for a tool called
+ * outside a conversation. Each sandbox:
+ * - has its files in `<root>/chats/<hex SHA-256 of the chat>/<agent>/` (or `<root>/agents/<agent>/`)
+ *   on the host, `/workspace` in the guest
  *   (a Gondolin VFS mount), and its temporary files in `<root>/.execution-gondolin-tmp/...`,
  *   `/tmp/pikit` in the guest (emptied at start: the one directory this component deletes).
  *   Start refuses a `root` that is the working directory, holds it, or is `/`. The file tools work on the host directories (`env.ts`, `paths.ts`): a
  *   conversation that only reads and writes files never boots a VM. No path, and no link the guest
  *   made, leads them outside these two directories. Each directory from `root` down to them must be
- *   a real one (`made`): a symbolic link there (a guest of the layout before agents could leave
- *   `conversations/<id>/<agent>` as one) refuses the sandbox, nothing mounted or made through it.
+ *   a real one (`made`): a symbolic link there (a guest whose `/workspace` was a directory on the
+ *   way, in another layout or mode, could leave one) refuses the sandbox, nothing mounted or made
+ *   through it.
  * - boots its VM at its first command, closes it after `idleSeconds` without one (`pool.ts`); at most
  *   `maxVms` run at once: a new one closes the VM idle the longest, or waits `queueSeconds` for one.
  *   An image build's VM (below) is not one of them.
@@ -47,10 +51,11 @@
  * Target: `server` (QEMU processes beside the app).
  */
 
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
-import type { ConversationRef } from "@pikit/contracts";
+import { type ConversationRef, originOf } from "@pikit/contracts";
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import Type, { type Static } from "typebox";
@@ -83,6 +88,8 @@ const secretList = (options = {}) =>
 const memory = (options = {}) => Type.String({ pattern: "^[0-9]+[MG]$", ...options });
 const cpus = (options = {}) => Type.Integer({ minimum: 1, ...options });
 const packageList = (options = {}) => Type.Array(Type.String({ pattern: "^[a-z0-9][a-z0-9+._-]*$" }), options);
+/** Whose a workspace is: the chat's and the agent's (`chat`), or the agent's in every chat (`agent`). */
+const workspaceMode = (options = {}) => Type.Union([Type.Literal("chat"), Type.Literal("agent")], options);
 
 /**
  * An agent's machine: each field it sets replaces the base's (its `allowedHosts` are not added to the
@@ -96,6 +103,7 @@ const Profile = Type.Object(
     secrets: Type.Optional(secretList()),
     memory: Type.Optional(memory()),
     cpus: Type.Optional(cpus()),
+    workspace: Type.Optional(workspaceMode()),
   },
   { additionalProperties: false },
 );
@@ -127,8 +135,15 @@ const Config = Type.Object({
    */
   packages: packageList({ default: [] }),
   /**
+   * Whose workspace an agent's sandbox is: `chat`, one per chat (`originOf(ref).key`) and agent,
+   * found again after a reset and shared with the agent's delegated children in that chat; or
+   * `agent`, one per agent for every chat (an agent with the context of everything: every chat's
+   * commands in one VM and one directory).
+   */
+  workspace: workspaceMode({ default: "chat" }),
+  /**
    * A machine per agent, by agent name (`ConversationRef.agent`, exactly): its `packages`,
-   * `allowedHosts`, `secrets`, `memory` and `cpus`, each replacing the base's. An agent not named here
+   * `allowedHosts`, `secrets`, `memory`, `cpus` and `workspace`, each replacing the base's. An agent not named here
    * (a misspelled key too) gets the base.
    */
   agents: Type.Record(Type.String(), Profile, { default: {}, propertyNames: { pattern: AGENT_NAME, maxLength: 100 } }),
@@ -137,14 +152,20 @@ const Config = Type.Object({
 type Profile = Static<typeof Profile>;
 type Secret = Static<ReturnType<typeof secretList>>[number];
 
-/**
- * A `conversationId` that is safe as one directory name: no `/`, no `.`, never empty. pikit's runtime
- * numbers its conversations (`"1"`); anything else that resolves a workspace names it so.
- */
-const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** The directory of a chat: the hex SHA-256 of its key (keys are any string; this is one safe name). */
+function chatDirectory(key: string): string {
+  return createHash("sha256").update(key).digest("hex");
+}
+
+/** The sandbox directories under `root`, by mode: `chats/<chat>/<agent>` and `agents/<agent>`. */
+const CHATS_DIR = "chats";
+const AGENTS_DIR = "agents";
+
+/** The most characters of a chat key a message shows. */
+const SHOWN_KEY = 80;
 
 /**
- * A `ConversationRef.agent` that is safe as one directory name, as `conversationId` is, and lowercase:
+ * A `ConversationRef.agent` that is safe as one directory name (no `/`, no `.`, never empty) and lowercase:
  * two agents never share a directory on a case-insensitive filesystem (agent names and execution-serve's
  * `_<sandbox>` are lowercase).
  */
@@ -160,7 +181,7 @@ export const IMAGE_DIR = ".execution-gondolin-image";
 export const PROFILE_WARNING =
   "execution-gondolin: `agents` names a profile no agent.definition has (misspelled?): no agent gets it, unless it is a live agent's (agents-live), which is not checked";
 
-/** Idle conversation sandboxes kept built; more are dropped, least recently resolved first (`cache.ts`). */
+/** Idle sandboxes of conversations kept built; more are dropped, least recently resolved first (`cache.ts`). */
 export const KEEP_SANDBOXES = 64;
 
 /**
@@ -282,9 +303,9 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
 
       /**
        * Makes a sandbox's directories (again, if someone removed them), refusing it (`whose` names it)
-       * when one on the way from `root` is not a real directory: a guest of the layout before agents
-       * (its `/workspace` was `conversations/<id>/`) may have left `<agent>` as a link to anywhere,
-       * which the VM's mount and the file tools would otherwise follow.
+       * when one on the way from `root` is not a real directory: a guest whose `/workspace` was one of
+       * those on the way (an earlier layout, the other `workspace` mode) may have left the next one as
+       * a link to anywhere, which the VM's mount and the file tools would otherwise follow.
        */
       const made = async (box: Sandbox, whose: string) => {
         await mkdir(root, { recursive: true });
@@ -292,7 +313,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           const wrong = await realDirectories(root, relative(root, dir).split(sep));
           if (wrong !== undefined) {
             throw new Error(
-              `execution-gondolin: the sandbox of ${whose} is refused: ${relative(root, wrong)} (under root) is a symbolic link or a file, not a directory of its own (a guest's, before sandboxes were per agent?); nothing was mounted or made through it: move it away`,
+              `execution-gondolin: the sandbox of ${whose} is refused: ${relative(root, wrong)} (under root) is a symbolic link or a file, not a directory of its own (a guest's, of another layout or mode?); nothing was mounted or made through it: move it away`,
             );
           }
         }
@@ -304,30 +325,44 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
       pikit.provide("execution", defaultEnv);
       pikit.provide("execution.shell", defaultEnv);
 
-      // By `<conversationId>/<agent>` (neither holds a `/`). Bounded: an entry with a VM or a running
-      // command is never dropped, so a conversation's agent never has two.
+      // By the sandbox's path under `root` (`chats/<chat>/<agent>`, `agents/<agent>`). Bounded: an entry
+      // with a VM or a running command is never dropped, so a sandbox never has two.
       const conversations = new SandboxCache<{ box: Sandbox; env: ExecutionEnv }>(
         KEEP_SANDBOXES,
         ({ box }) => box.slot.guest === undefined && box.slot.busy === 0 && box.running.size === 0,
       );
       const provider: WorkspaceProvider = {
         async resolve(conversation: ConversationRef) {
-          const id = conversation.conversationId;
-          if (!CONVERSATION_ID.test(id)) {
-            throw new Error(`execution-gondolin: conversation id ${JSON.stringify(id)} is not a safe directory name (letters, digits, _ and -, at most 128)`);
-          }
           const agent = conversation.agent;
-          if (!AGENT_DIR.test(agent)) {
+          if (typeof agent !== "string" || !AGENT_DIR.test(agent)) {
             throw new Error(`execution-gondolin: agent ${JSON.stringify(agent)} is not a safe directory name (lowercase letters, digits, _ and -, at most 128)`);
           }
-          const found = conversations.get(`${id}/${agent}`, () => {
-            // The agent's own profile, by exact key (an own property: `constructor` is no profile), else the base.
-            const profile = Object.hasOwn(config.agents, agent) ? config.agents[agent] : undefined;
-            const box = sandbox(`conversation-${id}/${agent}`, join("conversations", id, agent), `pikit ${agent} ${id}`, profile);
+          // The agent's own profile, by exact key (an own property: `constructor` is no profile), else the base.
+          const profile = Object.hasOwn(config.agents, agent) ? config.agents[agent] : undefined;
+          let path: string;
+          let label: string;
+          let whose: string;
+          if ((profile?.workspace ?? config.workspace) === "agent") {
+            path = join(AGENTS_DIR, agent);
+            label = `pikit ${agent}`;
+            whose = `agent ${JSON.stringify(agent)} (one for every chat)`;
+          } else {
+            // The chat: the conversation a person or a channel opened, the same through resets and for its delegated children.
+            const chat = originOf(conversation).key;
+            if (typeof chat !== "string" || chat === "") {
+              throw new Error(`execution-gondolin: the conversation's chat (its origin's key) is ${JSON.stringify(chat)}: a sandbox needs a non-empty key`);
+            }
+            const dir = chatDirectory(chat);
+            path = join(CHATS_DIR, dir, agent);
+            label = `pikit ${agent} ${dir.slice(0, 12)}`;
+            whose = `agent ${JSON.stringify(agent)} in chat ${JSON.stringify(chat.slice(0, SHOWN_KEY))}`;
+          }
+          const found = conversations.get(path, () => {
+            const box = sandbox(path, path, label, profile);
             return { box, env: createSandboxEnv(box) };
           });
           // Every call: a directory removed meanwhile is made again, and one made already costs nothing.
-          await made(found.box, `conversation ${JSON.stringify(id)} and agent ${JSON.stringify(agent)}`);
+          await made(found.box, whose);
           return { env: found.env };
         },
       };
