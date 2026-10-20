@@ -1,7 +1,8 @@
 # When pikit moves to Chord
 
-**Decision: not now.** Last validated 2026-10-13, against Pi 1.2.0 (`@earendil-works/chord` 1.2.0),
-with the spike on branch `spike/chord-core` (commit `2036e40`). Next validation: the next Pi pin bump
+**Decision: not now.** Last validated 2026-10-20, against Pi 1.3.0 (`@earendil-works/chord` 1.3.0):
+G1 and G2 only. All gates last ran 2026-10-13 against 1.2.0, with the spike on branch
+`spike/chord-core` (commit `2036e40`). Next validation: the next Pi pin bump
 ([upstream/README.md](upstream/README.md), "At each Pi pin bump", step 4).
 
 "Moving to Chord" means replacing `@pikit/core` with Chord's host runtime: components written against
@@ -27,15 +28,15 @@ Move only when **every** gate passes. Each has a check anyone can run, and its r
 The commands assume the Pi checkout next to this one (`../pi`, AGENTS.md) and `<v>` the Pi version
 being checked (`git -C ../pi fetch --tags` first).
 
-| Gate | Passes when | 1.2.0 |
-|---|---|---|
-| G1 Stable API | Chord says which entry points follow semver, the kernel's among them, and no minor broke them | fail |
-| G2 One Chord | a context of another Chord keeps its cancellation, or the kit enforces one Chord | fail |
-| G3 Kernel guarantees | core's own suite passes over Chord without rebuilding core | fail (44/49) |
-| G4 Green everywhere | the repository and the workerd lane pass over Chord | fail (10 failures) |
-| G5 SPEC decision | SPEC lets the kernel import Pi | not taken |
-| G6 A reason | a feature needs what only Chord gives | none |
-| G7 Worth it | the kernel loses most of its own code | 9 % |
+| Gate | Passes when | 1.2.0 | 1.3.0 |
+|---|---|---|---|
+| G1 Stable API | Chord says which entry points follow semver, the kernel's among them, and no minor broke them | fail | fail |
+| G2 One Chord | a context of another Chord keeps its cancellation, or the kit enforces one Chord | fail | fail |
+| G3 Kernel guarantees | core's own suite passes over Chord without rebuilding core | fail (44/49) | not re-run |
+| G4 Green everywhere | the repository and the workerd lane pass over Chord | fail (10 failures) | not re-run |
+| G5 SPEC decision | SPEC lets the kernel import Pi | not taken | not re-run |
+| G6 A reason | a feature needs what only Chord gives | none | not re-run |
+| G7 Worth it | the kernel loses most of its own code | 9 % | not re-run |
 
 ### G1. Stable API
 
@@ -55,6 +56,11 @@ git -C ../pi show v<v>:packages/chord/CHANGELOG.md | rg -n '^## |Breaking'
 
 *1.2.0: fail.* No stability statement. 1.2.0, a minor, replaced the whole runtime (`defineService`,
 `createFacetHost` and the remote services removed). A kernel on 1.1's Chord would have been rewritten.
+
+*1.3.0: fail.* No stability statement (the README has no match; `docs/spec.md`'s two are "stable
+identity" and "stable readables"). 1.3.0, a minor, lists 17 breaking changes (`Handle` renamed `Ref`,
+typed principals with `createHost({ self })` required, async `ctx.get` and `host.get`, state typed
+`T`, link `PROTOCOL_VERSION` 4).
 
 ### G2. One Chord
 
@@ -77,6 +83,9 @@ Fails while it returns `this.value(ABORT_SIGNAL_CONTEXT_KEY)`. Over the spike, c
 context of the same shape keeps its cancellation when derived" must pass.
 
 *1.2.0: fail.* Unchanged since 1.0 (pikit asked, declined: upstream #10189).
+
+*1.3.0: fail.* Line 24 still returns `this.value(ABORT_SIGNAL_CONTEXT_KEY)`. 1.3.0 rejects a foreign
+ctx on a remote call (`invalid/foreign_ctx`, #10959), which is not reading its signal.
 
 ### G3. Kernel guarantees without rebuilding them
 
@@ -177,3 +186,4 @@ before running. A new Chord API may let the spike drop glue: try it, it is what 
 | 2026-09 | 1.0.0 to 1.0.3 | not now | Chord stays out of the kernel: unstable API, `esbuild` a hard dependency, foreign `abortSignal` dropped (#10189 declined), no events, pipelines, optional dependencies, selection, `describe()` or config validation (features/kit-follow-ups.md, docs/architecture-audit.md). |
 | 2026-10 | 1.1.0 | not now | Nothing changed but the version. Portability no longer an objection (Bun and bare workerd). |
 | 2026-10-13 | 1.2.0 | not now | Runtime rewritten (typed host runtime). `esbuild` gone, only `typebox` 1.3.27 (the kernel's). Spike: Bun and workerd work; G1, G2, G3, G4, G5, G6 fail; G7 9 %. Found the silent two-Chords hang (G2) and the keyed-providers gap (G3.5). |
+| 2026-10-20 | 1.3.0 | not now | G1 and G2 only, both fail: 17 breaking changes in a minor (typed principals, async `get`, protocol 4), no stability statement; `abortSignal` unchanged. Spike not re-run. |

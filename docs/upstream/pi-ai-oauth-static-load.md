@@ -1,6 +1,6 @@
 # Proposal for pi-ai: OAuth refresh and `toAuth` reachable in a bundle
 
-Status: draft for upstream (`@earendil-works/pi-ai`, against 1.2.0). From pikit, whose agents run in
+Status: draft for upstream (`@earendil-works/pi-ai`, against 1.3.0). From pikit, whose agents run in
 Cloudflare Workers (one Durable Object per conversation), bundled by wrangler (esbuild).
 
 ## Problem
@@ -24,7 +24,7 @@ callback servers and GitHub Copilot's model catalog.
 
 ## Evidence
 
-- pi-ai 1.2.0: `dist/auth/oauth/load.js` (`importOAuthModule`), `dist/auth/helpers.js` (`lazyOAuth`:
+- pi-ai 1.3.0 (as 1.2.0): `dist/auth/oauth/load.js` (`importOAuthModule`), `dist/auth/helpers.js` (`lazyOAuth`:
   `refresh` and `toAuth` go through `load` like `login`), `dist/providers/anthropic.js`.
 - pikit's `packages/pi-adapter/src/oauth-flows.test.ts`: a Worker bundled by wrangler 4.143 and run in
   workerd (`wrangler dev`). `anthropicProvider().auth.oauth.refresh(…)` fails with the `TypeError`

@@ -50,7 +50,7 @@ any `scheduler` provider; the tool is a risk class of its own (the model creates
 
 ## Pi first
 One Pi process cannot wake itself when it is not running, and Pi has no clock-driven triggers.
-Pi's durable runtime has `sleep(until)` inside a task (`pi-durable` 1.2.0, which the kit runs on,
+Pi's durable runtime has `sleep(until)` inside a task (`pi-durable` 1.3.0, which the kit runs on,
 [pi-durable migration](completed/pi-durable-migration.md); on a host that is evicted the sleep needs a wake-up,
 `docs/upstream/pi-durable-next-wake.md`), which covers "remind me in two hours" inside one conversation: pikit
 must not build that. A schedule that starts runs across conversations is the host's.
