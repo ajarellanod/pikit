@@ -222,7 +222,7 @@
     },
     "execution-remote": {
       "version": "0.0.1",
-      "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per conversation, from a server or a Cloudflare Durable Object.",
+      "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per conversation and agent, from a server or a Cloudflare Durable Object.",
       "targets": [
         "server",
         "durable"

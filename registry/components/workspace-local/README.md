@@ -19,7 +19,8 @@ Without it, every agent's tools work in `execution`'s one directory. With it, ea
 - A directory is made on the agent's calls. Removing the component leaves them on disk; the tools
   go back to `execution`'s directory.
 - An agent name that is not kebab-case (`..`, `a/b`, empty) is refused: the tool call fails, and
-  nothing is created outside `root`.
+  nothing is created outside `root`. One leading `_` is allowed: behind execution-serve, an
+  agentless sandbox is `_<sandbox id>`, and gets a directory of its own.
 - Everything else is `execution`'s: its shell (so `bash` works when `execution` has one), its
   variables (`execution-local`'s `variables`: a `GITHUB_TOKEN` added there reaches every agent's
   commands), and its stop, which kills the commands still running.

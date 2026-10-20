@@ -63,6 +63,8 @@ line names its area.
   directory per agent, or per sandbox without the header. Breaking: existing sandboxes (`o-<object
   id>`, `k-<hash>`, execution-gondolin's `conversations/<conversationId>/`) are orphaned, with no
   migration.
+- workspace-local: an agent name may start with one `_` (execution-serve's agentless sandboxes,
+  `_<sandbox>`), so a client's `execution` alone still resolves behind it.
 
 ### Contracts
 

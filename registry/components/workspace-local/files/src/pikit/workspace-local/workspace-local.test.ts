@@ -140,7 +140,7 @@ test("an agent name that could leave root is refused, and nothing is created", a
   const dir = temporaryDir();
   const { app, workspace } = await started(dir);
 
-  for (const agent of ["", "..", "../escaped", "a/b", "/tmp", "Support"]) {
+  for (const agent of ["", "..", "../escaped", "a/b", "/tmp", "Support", "_", "__shared", "_../escaped"]) {
     await expect(workspace.resolve(conversation(agent), app.context())).rejects.toThrow("not a safe directory name");
   }
 
@@ -160,6 +160,15 @@ test("per channel, each channel of an agent gets a directory of its own inside t
   // No channel recorded (a ref made by hand): the agent's directory.
   expect(await resolve()).toBe(join(dir, "agents", "support"));
   expect(readdirSync(join(dir, "agents", "support")).sort()).toEqual(["dashboard", "telegram", "telegram.ops"]);
+  await app.stop();
+});
+
+test("an agentless sandbox's name (one leading `_`, execution-serve's) gets a directory of its own", async () => {
+  const dir = temporaryDir();
+  const { app, workspace } = await started(dir);
+
+  expect((await workspace.resolve(conversation("_shared"), app.context())).env.cwd).toBe(join(dir, "agents", "_shared"));
+  expect((await workspace.resolve(conversation("shared"), app.context())).env.cwd).toBe(join(dir, "agents", "shared"));
   await app.stop();
 });
 

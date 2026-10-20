@@ -3,7 +3,9 @@
  * App of server-bun, execution-serve and execution-gondolin (QEMU), over HTTP on 127.0.0.1. What the
  * other tests prove apart, together: a command runs in a Linux guest, a file written through the
  * remote file API is the guest's `/workspace`, two conversations' sandboxes see nothing of each
- * other, and the host's files are out of reach.
+ * other, the host's files are out of reach, and each agent boots its own machine (features/
+ * agent-sandboxes.md): the developer's profile holds a secret placeholder, an agent with no profile
+ * gets the base (no secret, no network), and the two never share a VM or a file.
  *
  * Skipped, saying so, when QEMU is missing (execution-gondolin's own rule). A repository test, not
  * copied with either component: it imports other components' files (SPEC P4).
@@ -25,9 +27,10 @@ import { secretsOf } from "./sandbox-host.test-support.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const TOKEN = "sandbox-token-for-the-gondolin-test-0123456789";
+const GH_TOKEN = "ghp_the-real-value-never-in-a-guest-0123456789";
 const problem = qemuProblem();
 
-const conversation = (key: string): ConversationRef => ({ key, agent: "assistant", conversationId: `c-${key}` });
+const conversation = (key: string, agent = "assistant"): ConversationRef => ({ key, agent, conversationId: `c-${key}` });
 
 /** Runs `command` in `env`, its stdout and exit code. */
 async function run(env: ExecutionEnv, command: string): Promise<{ exitCode: number | undefined; out: string }> {
@@ -48,10 +51,15 @@ if (problem !== undefined) {
     root = mkdtempSync(join(tmpdir(), "pikit-remote-gondolin-"));
     let url: URL | undefined;
     host = await defineApp({
-      components: [secretsOf({ PIKIT_SANDBOX_TOKEN: TOKEN }), executionGondolin, executionServe, createServerBun({ onListening: (listening) => void (url = listening) })],
+      components: [secretsOf({ PIKIT_SANDBOX_TOKEN: TOKEN, GH_TOKEN }), executionGondolin, executionServe, createServerBun({ onListening: (listening) => void (url = listening) })],
       config: {
         "server-bun": { port: 0, hostname: "127.0.0.1" },
-        "execution-gondolin": { root, maxVms: 2, idleSeconds: 30 },
+        "execution-gondolin": {
+          root,
+          maxVms: 2,
+          idleSeconds: 30,
+          agents: { developer: { secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com"] }] } },
+        },
       },
       logger: silentLogger,
     }).create();
@@ -97,6 +105,25 @@ if (problem !== undefined) {
     // The host's sandbox root (alice's files among them) is no path in the guest.
     const hostFiles = await run(bob, `ls ${JSON.stringify(root)} 2>/dev/null || echo unreachable`);
     expect(hostFiles.out).toBe("unreachable\n");
+  }, 300_000);
+
+  test("each agent of one conversation boots its own machine: the developer's secret is a placeholder only it holds", async () => {
+    const developer = (await workspace.resolve(conversation("team", "developer"), ctx)).env;
+    const assistant = (await workspace.resolve(conversation("team"), ctx)).env;
+    expect(developer).not.toBe(assistant); // both see /workspace, each its own
+
+    const held = await run(developer, 'printf "%s" "${GH_TOKEN:-unset}"');
+    expect(held.exitCode).toBe(0);
+    expect(held.out).not.toBe("unset");
+    expect(held.out).not.toContain(GH_TOKEN);
+    const none = await run(assistant, 'printf "%s" "${GH_TOKEN:-unset}"');
+    expect(none.out).toBe("unset");
+    // The base machine reaches nothing, the secret's host included (Gondolin answers 403 itself).
+    const blocked = await run(assistant, "curl -sS -m 20 -o /dev/null -w '%{http_code}' https://api.github.com/");
+    expect(blocked.out).toBe("403");
+
+    expect((await run(developer, "echo developer > mine.txt")).exitCode).toBe(0);
+    expect((await run(assistant, "cat /workspace/mine.txt 2>/dev/null || echo absent")).out).toBe("absent\n");
   }, 300_000);
 }
 

@@ -47,8 +47,7 @@ For a trial on one machine, `execution-local` and `workspace-local` take executi
 workspace-local keys its directories by the agent alone, so each agent then works in
 `<execution-local root>/<workspace-local root>/<agent>`, shared by every conversation and client of
 that agent (as on a server); an agentless sandbox's agent is `_<sandbox id>`, a directory of its own
-for a provider that takes it (workspace-local's agent grammar refuses the underscore today, so a
-client's `execution` alone does not resolve behind it: `503`). Commands run as the server's user:
+(workspace-local takes one leading `_`). Commands run as the server's user:
 **not a sandbox**, see their READMEs.
 
 Deploy it like any server project (`pikit up`: deployment-docker publishes the port on

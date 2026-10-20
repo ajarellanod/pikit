@@ -42,9 +42,11 @@ const Config = Type.Object({
 /**
  * An agent name that is safe as one directory name. `defineAgent` already requires kebab-case, but a
  * `ConversationRef` comes from records and routing: here it becomes a path, so it is checked again.
- * No `/`, no `..`, never empty: a name that could leave `root` is refused, never cleaned up.
+ * No `/`, no `..`, never empty: a name that could leave `root` is refused, never cleaned up. One
+ * leading `_` is allowed: execution-serve names an agentless sandbox `_<sandbox id>`, outside the
+ * agent grammar, and it still gets a directory of its own.
  */
-const AGENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+const AGENT_NAME = /^_?[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 /** One part of a channel instance (`telegram`, `ops` of `telegram:ops`): no `/`, no `.`, never empty. */
 const CHANNEL_PART = /^[a-z][a-z0-9-]*$/;

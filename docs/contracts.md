@@ -26,7 +26,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
 | `agent.submissions` | single | runtime-pi | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
 | `agent.observe` | single | runtime-pi | admin-api, channel-web, memory-summaries | `createAgentObserveConformance` |
-| `agent.definition` | keyed | the project | admin-api?, agents-live?, channel-web?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
+| `agent.definition` | keyed | the project | admin-api?, agents-live?, channel-web?, execution-gondolin?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-schedule, tool-websearch-brave, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |

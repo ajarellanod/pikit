@@ -3,8 +3,10 @@
 **Public appeal:** — (a team of agents where the developer has `gh` and a GitHub token in its VM, the
 analyst has Python and Google's APIs, and no other agent has either, not even through a delegation)
 
-**Specified:** yes (2026-10-21), this note is the frozen interface the implementation follows.
-**Built:** no.
+**Specified:** yes (2026-10-20), this note is the frozen interface the implementation follows.
+**Built** (2026-10-20): `execution-gondolin` (`agents`), `execution-remote` and `execution-serve`
+(`Pikit-Agent`), `workspace-local` (one leading `_`); checked with real micro-VMs
+(`execution-remote/gondolin.test.ts`) and in workerd.
 
 **Needed by:** nothing required. Builds on [sandboxed execution](sandboxed-execution.md)
 (`execution-gondolin`, `execution-remote`, `execution-serve`) and runs on every target they run on,
@@ -37,7 +39,7 @@ sandbox host's (`execution-serve`'s App): the conversation's App only runs `exec
 now tells the host which agent each request is for. The secrets' values stay in the host's `secrets`
 (`.env`): never in the Worker, the bucket, or a VM.
 
-## Decisions (owner's, 2026-10-21)
+## Decisions (owner's, 2026-10-20)
 1. **A workspace per agent.** A sandbox is a conversation's and an agent's: a delegated child of
    another agent works in a sandbox of its own, not its parent's. Results pass through the
    delegation's answer or through git. (A child of the same agent still shares its parent's.)
@@ -45,7 +47,8 @@ now tells the host which agent each request is for. The secrets' values stay in 
    `allowedHosts` are not added to the base's); a field it leaves out is the base's. What the
    configuration shows is what the agent gets.
 3. **workspace-local behind execution-serve becomes a directory per agent**, as it is on a server
-   (that trial setup was never a sandbox): the consequence of the host knowing the real agent.
+   (that trial setup was never a sandbox): the consequence of the host knowing the real agent. It
+   takes one leading `_` in a name, so an agentless sandbox (`_<sandbox>`) still gets its own.
 4. **Sandbox ids are hashes of the conversation and the agent.** Existing `o-<object id>` and
    `k-<hash>` sandboxes are orphaned; no migration (pikit 0.0.x promises no compatibility).
 5. **An agent misspelled in `agents` gets the base**: no secret, no network. Fails closed. A server
@@ -103,6 +106,29 @@ now tells the host which agent each request is for. The secrets' values stay in 
   a profile key, so an agentless sandbox always gets the base, and workspace-local still gives each
   agentless sandbox a directory of its own.
 - A sandbox's readers and commands stay scoped to the sandbox id, as today.
+
+## The GitHub CLI (spike, 2026-10-20)
+Checked in a real Gondolin VM (Alpine 3.23, gh 2.83.0) with `$GH_TOKEN` a placeholder: `gh api`,
+`gh repo view`, `gh pr list`, `git ls-remote`, `git clone` of a private repository and an
+authenticated `git push --dry-run` work; `gh` accepts the placeholder, and git's Basic auth
+(`x-access-token:<placeholder>`) is substituted too. The placeholder sent to any other host is
+refused (`403`).
+
+```ts
+developer: {
+  packages: ["github-cli", "git"],
+  secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }],
+  allowedHosts: ["codeload.github.com", "release-assets.githubusercontent.com"], // tarballs, release assets
+}
+```
+
+- `gh auth setup-git` writes `/root/.gitconfig`, gone at the VM's next boot: run it (or
+  `git -c credential.helper='!gh auth git-credential' ...`) in the session that pushes.
+- `gh` is about 55 MB: the image's root disk keeps about 25 MB free, so clone into `/workspace`.
+- Not checked: real writes (PRs, pushes), release uploads (`uploads.github.com` would need the
+  secret), Git LFS.
+- On celld (spike, celld 0.6.2): execution-remote ran unchanged against a sandbox host; the host
+  needs a publicly trusted TLS certificate (celld checks against Mozilla's roots).
 
 ## Pi first
 Nothing in Pi: `ExecutionEnv` is unchanged, and the agent each tool call runs for is already in the

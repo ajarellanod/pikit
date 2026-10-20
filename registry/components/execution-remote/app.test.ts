@@ -143,6 +143,10 @@ test("behind workspace-local, the host gives each agent a directory, whatever th
     expect(await two.readTextFile("mine.txt", ctx)).toEqual({ ok: true, value: "developer's" });
     expect(analyst.cwd).toBe(join(local.root, "sandboxes", "analyst"));
     expect(await analyst.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
+    // `execution` alone (no agent) resolves too, as `_<sandbox>`: a directory of its own.
+    const written = await remote.execution.writeFile("own.txt", "own", ctx);
+    expect(written.ok).toBe(true);
+    expect(existsSync(join(local.root, "sandboxes", "_shared", "own.txt"))).toBe(true);
   } finally {
     await remote.app.stop();
     await local.stop();
