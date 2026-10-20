@@ -68,6 +68,65 @@ rotation, the unit and the plist (golden lines, escaping, `plutil -lint` on macO
 verify` on Linux), and every command's exact argv against a fake systemd and launchd. The CLI's wizard
 end to end (`PIKIT_E2E=1`) answers the new question both ways.
 
+### Verification still needed
+The manual trial on macOS used a generated project with `provider-faux`: a real launchd agent,
+HTTP messages answered, loopback binding, recovery after `kill -9`, restart, redeploy, log following,
+`dev` refused while the service ran, and `down` and removal keeping `.pikit/`. This does not prove:
+- **A real Linux service:** install and run under a systemd user manager, with and without linger;
+  exercise start, stop, crash recovery and logout. Fake-runner tests and unit syntax checks do not
+  establish this.
+- **Reboot recovery on either platform:** Linux with linger should return at boot; the macOS user
+  agent should return after login, not before it. Neither was tested through a machine reboot.
+- **Production operation:** a real bot over time on each platform, before moving this note to
+  `completed/`.
+
+## Self-improvement without Docker
+Not built. Today `proposals-local` activates deployment-docker's deployer through its Compose file,
+and its doctor checks Compose. deployment-local refuses that file. The wizard still offers the
+self-improvement feature group with deployment-local, so this unsupported combination can be created
+but cannot be started with `pikit up`.
+
+The missing work is not just another supervisor template:
+1. **An independent deployer service**, under systemd or launchd, that survives an app restart and
+   reports its heartbeat and outcomes through the existing `@pikit/contracts/deployer` file protocol
+   (`decisions.json`, `deployer.json`). Keep the dashboard on `proposals`; no new dashboard protocol
+   is needed merely to replace Docker.
+2. **Isolated validation and builds.** Candidate installation scripts, tests, typecheck and UI builds
+   must not run as the host user with access to the home, live state or service control. Gondolin/QEMU
+   is the proposed replacement for check containers, not an implemented deployer runner. A dedicated
+   OS user alone does not supply the filesystem and network isolation of a sandbox. Deploy hooks that
+   need secrets require an explicit, narrow boundary too; the controller must not import candidate
+   project code. Separately, `execution-gondolin` fences the agent's tools and protects the approval
+   files; it does not implement the deployer's check runner.
+3. **Recoverable deployment in the project's directory.** Prepare the candidate apart, keep the last
+   working code and dependencies, stop the app before replacing its files, then start and verify the
+   candidate. Serialize this with manual `up`, `restart` and other deployer attempts, and recheck that
+   the checkout and approved head have not moved. Persist the previous and candidate versions and
+   each transition so a killed deployer or power loss can resume or roll back without running a
+   half-applied tree. A failed activation must restore both code and dependencies and verify the
+   previous app, not just issue a restart.
+4. **Native dependency handling.** Linux VM checks do not prove macOS runtime compatibility; do not
+   copy Linux `node_modules` into a Mac deployment. Define how host-compatible dependencies and
+   artifacts are prepared and retained for rollback without bypassing the isolation above.
+5. **Approval and deployment fences.** Deploy the exact approved head, reject changes to the deployer,
+   supervisor templates and approval path, and refuse a changed or dirty checkout rather than
+   overwriting manual edits. A failure before activation leaves the current app alone.
+6. **State is not a release artifact.** Never automatically restore `.pikit/` with the old code: it
+   holds conversations, credentials and new writes. Code rollback cannot undo SQLite/schema changes;
+   specify which state-changing proposals are reversible and how an irreversible or failed rollback
+   is reported before enabling automatic deployment.
+7. **Integration without Compose.** Let `proposals-local` work with the local supervisor as well as
+   Docker, including its activation and doctor checks; do not just ignore its Compose file. Make the
+   wizard reject or stop offering unsupported feature/deployment combinations. Any shared service
+   registration must be justified by these real producers and consumers, not a speculative framework.
+
+Before shipping: run the existing deployer protocol conformance cases with the local deployer, then
+exercise approval, moved heads, protected paths, conflicts, dirty checkouts, failed checks/builds,
+failed health checks and failed rollback. Kill the deployer during activation and recovery, test
+concurrent/manual operations, and assert that conversations and credentials are retained. Test both
+supervisors and host-native dependencies on real Linux and macOS. This is missing implementation and
+verification, not a guarantee of today's `pikit up`.
+
 ## Open questions
 - **Windows.** Bun runs there, the installer does not (POSIX sh). WSL2 with systemd is the Linux path;
   native Windows would need a service wrapper or Task Scheduler.
@@ -76,10 +135,6 @@ end to end (`PIKIT_E2E=1`) answers the new question both ways.
 - **Services beside the app:** `cloudflared` (expose-cloudflare-tunnel) as a second unit. Today `compose`
   means "run by deployment-docker"; a provider-neutral way to declare them waits for a second component
   that needs one (contract rule 1).
-- **Self-improvement:** a local deployer (snapshots, merge, checks, restart, rollback). Without
-  containers its checks would run the agent's code as you, so it needs system mode or a sandbox first.
-  The wizard still offers `[admin-proposals, proposals-local]` with deployment-local, and `up` refuses
-  it: a preset cannot yet tie a feature to a deployment.
 - **Hangs:** systemd's `WatchdogSec` with `sd_notify` (Bun has no unix datagram sockets).
 - **Shared code:** the entrypoint, the logger and the deploy-hook runners now exist in two or three
   copies (deployment-docker, deployment-cloudflare's hooks, this). A kit package for the server process

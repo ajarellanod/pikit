@@ -74,11 +74,11 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      `wrangler deploy --dry-run`); Approve is refused while they fail, run or never ran, unless the
      operator overrides it. Workers Builds deploys the merge; a failing `/health` rolls it back
      (deployment-cloudflare's `deploy.mjs`).
-   - **`proposals-local`** (server): proposals are branches of a bare repository in the app's state
-     volume (`.pikit/self/project.git`); Approve records the head and the operator in
-     `.pikit/self/decisions.json`; Reject keeps the head under `refs/pikit/rejected/<topic>` and
-     deletes the branch. Nothing to set up: no GitHub, no token, no CI, no systemd.
-   - **The server's deployer** (deployment-docker's `deployer.ts`): a second compose service,
+   - **`proposals-local`** (server, currently with deployment-docker): proposals are branches of a bare
+     repository in the app's state volume (`.pikit/self/project.git`); Approve records the head and the
+     operator in `.pikit/self/decisions.json`; Reject keeps the head under `refs/pikit/rejected/<topic>`
+     and deletes the branch. With Docker, nothing extra to set up: no GitHub, no token, no CI, no systemd.
+   - **The server's deployer with Docker** (deployment-docker's `deployer.ts`): a second compose service,
      `deployer`, activated by proposals-local's manifest-contributed Compose override and built and
      started by the same `pikit up`, restarted by Docker with the app. There is no component-id
      check in the deployment commands. Only it has the Docker socket; it
@@ -170,11 +170,15 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
    build (`pikit: <version> failed /health: rolled back to <previous>`). Never one whose deploy
    changed the Durable Object classes: each version is tagged with its last migration tag, and a
    different one fails the deploy without a rollback (deployment-cloudflare's README, "Rolling back").
-4. The server (**built**): `pikit new` makes the project a git repository (`main`, everything
-   committed; without git it says so and goes on). In `pikit new`, the http preset's feature
-   "Self-improvement" (`--with admin-proposals`: the group `[admin-proposals, proposals-local]`)
+4. The server with `deployment-docker` (**built**): `pikit new` makes the project a git repository
+   (`main`, everything committed; without git it says so and goes on). In `pikit new`, the http preset's
+   feature "Self-improvement" (`--with admin-proposals`: the group `[admin-proposals, proposals-local]`)
    brings the dashboard (`NEEDS_DASHBOARD`) and makes the starter agent name `bash` (`NAMED_FOR`):
-   the steward needs a shell for git and the tests. `pikit up` then starts the deployer.
+   the steward needs a shell for git and the tests. With Docker, `pikit up` then starts the deployer.
+   The deployer for `deployment-local` is **not built**: it refuses proposals-local's Compose file even
+   though the wizard offers the feature. The missing work and its verification belong in
+   [Self-improvement without Docker](deployment-local.md#self-improvement-without-docker), not a second
+   copy of the plan here.
 
 ## Open questions
 - The template's repository: decided, connected after the deploy (Settings → GitHub), not a variable
@@ -184,8 +188,8 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
   fails and it stays until a fix is merged. Marking such a proposal as not reversible, for an
   approval of its own, is not built. A bad merge that passes `/health` is not rolled back either:
   reverting it on GitHub (Workers Builds deploys the revert), or `wrangler rollback` by hand.
-- The server's deployer: decided, a compose service with the socket (no host process, no systemd).
-  Not tried against a real Docker daemon here: compose's project name and the volume are found by
+- Docker's deployer: built as a compose service with the socket (no host process, no systemd in that
+  implementation). Not tried against a real Docker daemon here: compose's project name and the volume are found by
   inspecting its own container, `docker build` builds the merge from its clone (compose.yaml's build
   options beyond `build: .` are not read), and a rootless Docker needs the socket's path changed in
   compose.yaml. `pikit doctor` is not among its checks (the CLI is not in the project).

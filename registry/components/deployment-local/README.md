@@ -110,8 +110,10 @@ Read the log with `pikit logs`, or `jq 'select(.level == "error")' .pikit/logs/a
 
 - **Services beside the app**: `compose` in a component.json means "run by deployment-docker". A
   tunnel (`expose-cloudflare-tunnel`) as a second unit is not built.
-- **Self-improvement's deployer** (proposals-local) runs in Docker. Without containers its checks would
-  run the agent's code as you; it needs a sandbox first.
+- **Self-improvement's deployer** is built only for deployment-docker. With proposals-local installed,
+  `pikit up` here refuses its Compose file, even though the wizard currently offers the feature.
+  The missing local deployer, isolation, rollback and verification are recorded in
+  [Self-improvement without Docker](https://github.com/ajarellanod/pikit/blob/main/features/deployment-local.md#self-improvement-without-docker).
 - **A unit of the system, with a user of its own** (started at boot without a login, fenced from your
   home): it needs `sudo`. Not built.
 - **A hung process**: like Docker's healthcheck, the watchdog restarts on a 503, not on a process that
