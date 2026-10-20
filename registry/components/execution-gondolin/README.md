@@ -1,10 +1,11 @@
 # execution-gondolin
 
-Each conversation's tools work in a Linux micro-VM of its own ([Gondolin](https://github.com/earendil-works/gondolin),
-over QEMU): a real shell that cannot read the server's files or another conversation's, with its files
-on the host, no network but the hosts you allow, and secrets the guest never sees.
+Each agent's tools work, in each chat, in a Linux micro-VM of its own ([Gondolin](https://github.com/earendil-works/gondolin),
+over QEMU): a real shell that cannot read the server's files or another chat's, with its files on the
+host, no network but the hosts you allow, and secrets the guest never sees.
 
-- **Provides:** `workspace` (a sandbox per conversation and agent, each on its agent's machine), and
+- **Provides:** `workspace` (a sandbox per chat and agent, or per agent for every chat, each on its
+  agent's machine), and
   `execution` and `execution.shell` (one more sandbox, `default`, for a tool called outside a
   conversation). All are pi-durable's `ExecutionEnv`.
 - **Uses if present:** `secrets` (required once `secrets` is configured: start refuses without it),
@@ -30,68 +31,92 @@ on the host, no network but the hosts you allow, and secrets the guest never see
 
 With `execution-local`, `bash` runs as the server's OS user: it can read `.pikit/` (the SQLite with
 every conversation, the credentials), `.env`, and every other conversation's workspace. Here a command
-runs as root of a VM that holds only its conversation's files: the host's are not mounted, and its
-network reaches only what you allow.
+runs as root of a VM that holds only its chat's and agent's files: the host's are not mounted, and
+its network reaches only what you allow.
 
 ## How a sandbox is keyed
 
-**By `ConversationRef.conversationId` and `ConversationRef.agent`.** `key` and `channel` do not choose
-the sandbox: the same conversation and agent resolved under another key is the same sandbox. Two agents
-of one conversation get two sandboxes: two directories, two VMs, each on its own agent's machine
-("Machines per agent" below). A delegated child (tool-delegate) is a conversation of its own, with its
-own `conversationId`, so it gets its own sandbox whatever its agent, its parent's agent too. For a
-component that builds a `ConversationRef` itself (`execution-serve`, from a remote sandbox id),
-`conversationId` must be:
+**By chat and agent** (`workspace: "chat"`, the default). The chat is the key of the conversation a
+person or a channel opened: `originOf(ref).key` (`@pikit/contracts`), the conversation's own key, or
+its origin's when it is delegated (a Google Chat space, a Telegram chat). So:
 
-- **unique** among everything that resolves a workspace through this App, including pikit's own
-  conversations, whose ids the runtime numbers (`"1"`, `"2"`...): prefix a remote id (`remote-<id>`);
-- **a safe directory name**: `^[A-Za-z0-9_-]{1,128}$`. Anything else is refused: `resolve` throws, so
-  the tool call fails, and nothing is made on disk.
+- **A reset keeps the workspace.** pikit's runtime gives a reset conversation (`/new`) a new
+  `conversationId` under the same key: the agent finds what its past self wrote in that chat (the
+  transcript starts again, the files do not). `conversationId` and `channel` choose nothing.
+- **A delegated child of the same agent works in its parent's sandbox** (tool-delegate's
+  `delegate:<depth>:<chain>:<task>` key chooses nothing: its origin's does), on a server as in a
+  Durable Object (execution-remote's README). A child of another agent works in that agent's sandbox
+  of the chat: its own machine, its own files, never its parent's. Results pass through the
+  delegation's answer, git, or files the same agent left.
+- **Two chats, two sandboxes**, and two agents of one chat, two: two directories, two VMs, each on its
+  own agent's machine ("Machines per agent" below).
 
-`agent` must be a safe directory name too, and lowercase: `^[a-z0-9_-]{1,128}$` (refused the same way),
-so two agents never share a directory on a case-insensitive filesystem (agent names, and
-execution-serve's `_<sandbox>`, are lowercase). It also chooses the machine: the profile in `agents` whose key is exactly `agent`, else the base. An agent name outside the
-agent grammar (execution-serve's `_<sandbox>` for a request that names no agent) never matches a
-profile, so it gets the base.
+**By agent alone** (`workspace: "agent"`, on the base or in an agent's profile): the agent has one
+sandbox, `<root>/agents/<agent>/` and one VM, whatever the chat: an agent with the context of
+everything (a librarian, a team's notebook). Not the default: every chat it is in sees and changes the
+same files.
 
-Why `conversationId` and not `key`: pikit's runtime gives a reset conversation (`/new`) a new
-`conversationId` under the same key, so a new conversation starts with a new, empty workspace, as it
-starts with a new transcript. The previous conversation's files stay on the host under its id.
+The chat key is any string, so the directory is its hex SHA-256 (64 characters): never a path of its
+own, never two chats in one. An empty key is refused (`resolve` throws, the tool call fails, nothing
+is made). `agent` must be a safe directory name, lowercase: `^[a-z0-9_-]{1,128}$` (refused the same
+way), so two agents never share a directory on a case-insensitive filesystem (agent names, and
+execution-serve's `_<sandbox>`, are lowercase). It also chooses the machine: the profile in `agents`
+whose key is exactly `agent`, else the base. An agent name outside the agent grammar
+(execution-serve's `_<sandbox>` for a request that names no agent) never matches a profile, so it gets
+the base.
+
+**Behind execution-serve** (a sandbox host), the ref has no origin: the chat is its key,
+`execution-serve:<sandbox>`, so each remote sandbox is a chat of its own, and execution-remote already
+chooses the sandbox per chat and agent (per Durable Object and agent on Cloudflare). With
+`workspace: "agent"` in the host's config, the host gives that agent one workspace across every
+sandbox: the decision lives in one place, the host's profiles.
+
+**Several conversations in one sandbox.** A sandbox is shared by every conversation that resolves it:
+a reset and the conversation before it, a parent and its same-agent children (running in parallel
+with `delegate`'s background tasks), and with `workspace: "agent"` every chat. Their commands run at
+once in the same VM and the same `/workspace`; nothing serializes them. Parallel tasks of one agent in
+one chat should each work in a subfolder of their own, or a git worktree (`git worktree add
+task-<id>`), never all at the top.
 
 ## What a sandbox is
 
 ```
-<root>/conversations/<conversationId>/<agent>/                           /workspace in the guest: that agent's files
-<root>/.execution-gondolin-tmp/conversations/<conversationId>/<agent>/   /tmp/pikit in the guest: temporary files, spilled output
-<root>/default/                                                          /workspace of `execution`'s sandbox
-<root>/.execution-gondolin-tmp/default/                                  its /tmp/pikit
+<root>/chats/<chat>/<agent>/                           /workspace in the guest: that agent's files in that chat
+<root>/.execution-gondolin-tmp/chats/<chat>/<agent>/   /tmp/pikit in the guest: temporary files, spilled output
+<root>/agents/<agent>/                                 /workspace of an agent with workspace: "agent" (every chat)
+<root>/.execution-gondolin-tmp/agents/<agent>/         its /tmp/pikit
+<root>/default/                                        /workspace of `execution`'s sandbox
+<root>/.execution-gondolin-tmp/default/                its /tmp/pikit
 ```
+
+`<chat>` is the hex SHA-256 of the chat's key. Earlier versions kept `<root>/conversations/...`: those
+directories are left as they are, used by nothing (no migration).
 
 `root` is `.pikit/gondolin` by default (in `pikit-state` on Docker). `/workspace` is a Gondolin VFS
 mount (`RealFSProvider`) over the host directory, so the files outlive the VM, and a snapshot of a
-conversation is the host's alone
+chat is the host's alone
 ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)).
 `<root>/.execution-gondolin-tmp` is emptied at start (no VM and no tool refers to an earlier
 process's), and `<root>/.execution-gondolin-image/` holds the images with `packages` (below), whose
 checkpoints of an older Gondolin image are removed when a new one is made: the only things this
 component deletes. Start refuses a `root` that is the working directory, one of its ancestors, or `/`.
 
-Each directory from `root` down to a sandbox's two (`conversations`, `<conversationId>`, `<agent>`, and
-their counterparts under `.execution-gondolin-tmp`) must be a directory of its own, checked with
-`lstat` at every `resolve` and made one at a time. Before sandboxes were per agent, a guest's
-`/workspace` was `conversations/<conversationId>/` itself, so a guest of an earlier version may have
-left `developer -> /` there: followed, the agent's VM (Gondolin resolves its mount's links) and the
-file tools would work on the link's target. A link or a file on the way refuses the sandbox: `resolve`
-throws naming the conversation, the agent and the path under `root`, nothing is mounted or made
-through it. Move it away to use that sandbox; the conversation's other agents are not affected. `root`
+Each directory from `root` down to a sandbox's two (`chats`, `<chat>`, `<agent>`, or `agents`,
+`<agent>`, and their counterparts under `.execution-gondolin-tmp`) must be a directory of its own,
+checked with `lstat` at every `resolve` and made one at a time. A guest whose `/workspace` was one of
+them (another layout, a directory the operator moved) may have left the next one as a link,
+`developer -> /`: followed, the agent's VM (Gondolin resolves its mount's links) and the file tools
+would work on the link's target. A link or a file on the way refuses the sandbox: `resolve` throws
+naming the agent, the chat (or "one for every chat") and the path under `root`, nothing is mounted or
+made through it. Move it away to use that sandbox; the chat's other agents are not affected. `root`
 itself is yours, and may be a link.
 
-The process keeps at most 64 idle sandboxes (one conversation's agent each) built (and every one with
+The process keeps at most 64 idle sandboxes (one chat's agent each, or a shared agent's) built (and every one with
 a VM or a command running); an idle one past that is dropped, least recently resolved first, and
 rebuilt at its next `resolve`, its files untouched.
 
 - **Files without a VM.** `read`, `write`, `edit` and every `FileSystem` method work on the host
-  directories directly, with Pi's own `NodeExecutionEnv` underneath: a conversation that never runs a
+  directories directly, with Pi's own `NodeExecutionEnv` underneath: a sandbox that never runs a
   command never boots a VM. Paths are the guest's (`cwd` is `/workspace`, results say
   `/workspace/...`), so the file tools and the shell agree; errors never show host paths.
 - **What the file tools change, the next command sees.** Gondolin's mount caches what the guest saw:
@@ -145,7 +170,7 @@ rebuilt at its next `resolve`, its files untouched.
 
 Each agent may get its own machine: `agents` maps an agent's name (`ConversationRef.agent`, in the
 agent grammar `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 100 characters; any other key is refused at
-start) to a profile of `packages`, `allowedHosts`, `secrets`, `memory` and `cpus`. The 100-character
+start) to a profile of `packages`, `allowedHosts`, `secrets`, `memory`, `cpus` and `workspace`. The 100-character
 limit is this component's own: `defineAgent` in `@pikit/contracts` has none, so an agent with a
 longer name cannot have a profile (it gets the base, and past 128 characters `resolve` refuses it,
 above). A secret's name is a variable name, never
@@ -216,11 +241,12 @@ the rewrite at its next boot.
   memory: "1G",              // default: each VM's memory (QEMU syntax: "512M", "2G")
   cpus: 2,                   // default: each VM's CPUs
   packages: [],              // Alpine packages added to the image, once (git comes with `proposals`)
+  workspace: "chat",         // default: a sandbox per chat and agent; "agent": one per agent, every chat
   agents: {},                // default: a machine per agent, each field replacing the base's
 }
 ```
 
-`allowedHosts`, `secrets`, `memory`, `cpus` and `packages` are the base machine. A team where the
+`allowedHosts`, `secrets`, `memory`, `cpus`, `packages` and `workspace` are the base machine. A team where the
 developer has `gh` and a GitHub token, the analyst Python and Google's APIs, and no other agent either:
 
 ```ts
@@ -232,6 +258,7 @@ developer has `gh` and a GitHub token, the analyst Python and Google's APIs, and
       allowedHosts: ["objects.githubusercontent.com"],
     },
     analyst: { packages: ["py3-pandas"], allowedHosts: ["*.googleapis.com"], memory: "2G" },
+    librarian: { workspace: "agent" }, // one workspace for every chat: the context of everything
   },
 }
 ```
@@ -258,10 +285,16 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 
 ## Decisions
 
-- **Per conversation and agent**: isolation between conversations is what closes the hole (another
-  conversation's files), and a VM boots with its agent's machine, its secrets included, so two agents
-  never share one. A delegated child, a conversation of its own, gets a VM and a workspace of its own
-  whatever its agent, and results pass through the delegation's answer or through git. The VM is cheap and only up while commands run.
+- **Per chat and agent** (the owner's decision, 2026-10-20): the workspace is the agent's in the chat a
+  person or a channel opened, so it survives `/new` (the agent sees what its past self wrote there),
+  and a delegated child of the same agent works in it on every target, as it already did in a Durable
+  Object. Isolation between chats is what closes the hole (another chat's files), and a VM boots with
+  its agent's machine, its secrets included, so two agents never share one: a child of another agent
+  works in that agent's sandbox of the chat. The VM is cheap and only up while commands run.
+- **Shared across chats only when asked** (`workspace: "agent"`): an agent that must know everything
+  gets it, at the price of every chat seeing and changing the same files.
+- **The chat's key hashed**: keys are arbitrary strings (`telegram:12345`, `gchat:spaces/AAA`), the
+  hash is one safe name for any of them.
 - **A profile replaces the base field by field**, and an agent with none gets the base: what the
   configuration shows is what the agent gets, and a misspelled name fails closed.
 - **`execution` is a sandbox too** (`default`): a tool called outside a conversation (a test, a
@@ -298,8 +331,11 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   a response (a clone) in memory, at most 64 MB.
 - **A crash leaves QEMU running**: after a `kill -9` of the server, its QEMU processes may outlive it
   (stop closes them; a container restart ends them all).
-- **Disk**: a conversation's files stay after its VM closes, until you remove them (or
+- **Disk**: a chat's files stay after its VM closes and after a reset, until you remove them (or
   `workspace-snapshot` moves them, once built).
+- **One sandbox, several conversations at once**: a reset and the conversation before it, a parent and
+  its same-agent children, and with `workspace: "agent"` every chat run commands in one VM and one
+  `/workspace`, unserialized ("How a sandbox is keyed" says how parallel tasks keep apart).
 - **Bun**: Gondolin targets Node 22; the server runs it on Bun, which the tests below exercise.
 
 ## Tests
@@ -307,11 +343,16 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 `execution-gondolin.test.ts` runs without QEMU, over a fake VM layer (`fake-guest.test-support.ts`):
 - the `execution` conformance suite on a conversation's environment, files only (`exec` answering
   `shell_unavailable` when no VM boots), the `workspace` suite, and the lifecycle suite;
-- files on the host, in the conversation's directory, at `/workspace`; no VM for file tools; keyed by
-  conversation and agent (two agents of one conversation: two directories, two VMs); unsafe ids and
-  agent names (uppercase too) refused, nothing made; a link or a file on the way from `root` (a
-  conversation's directory, an agent's, the temporary one) refused, nothing made through it; the
-  sandbox cache bounded (idle ones dropped and rebuilt with their files, one with a VM kept);
+- files on the host, in the chat's directory, at `/workspace`; no VM for file tools; keyed by chat
+  (the origin's key, hashed) and agent: `conversationId` and `channel` choose nothing, a reset
+  (`/new`) finds the files and the VM, two chats are apart, two agents of one chat get two directories
+  and two VMs; a delegated child (and grandchild) of the same agent in its parent's sandbox, a child of
+  another agent in that agent's own of the chat, a child of another chat in that chat's;
+  `workspace: "agent"` (a profile's, the base's, a profile's `chat` over the base's) one sandbox at
+  `agents/<agent>` for every chat; unsafe agent names (uppercase too) and empty chat keys refused,
+  nothing made, and an odd key (`../..`) only a hash; a link or a file on the way from `root` (a
+  chat's directory, an agent's, a shared agent's, the temporary ones) refused, nothing made through
+  it; the sandbox cache bounded (idle ones dropped and rebuilt with their files, one with a VM kept);
 - confinement: absolute paths, `..`, links to host paths, to `/etc`, up and out, loops; writes and
   renames through them refused; a link removed, not its target; no host path in errors;
 - `/tmp/pikit` and spill on the host, in `.execution-gondolin-tmp`, emptied at the next start while a
@@ -337,9 +378,9 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 
 `gondolin.test.ts` runs over real VMs where QEMU is installed (skipped, saying so, elsewhere): the
 whole `execution` conformance suite with a real shell (pi-durable's cases too: argv, streams,
-timeouts, symbolic links), a conversation's shell seeing none of another's files nor the host's, the
+timeouts, symbolic links), a chat's shell seeing none of another's files nor the host's, the
 network closed (403), a secret's placeholder in the guest, a timeout killing what the command started,
-and an idle VM closed while its files stay for the next one.
+and an idle VM closed while its files stay for the next one, and for a reset of the chat.
 
 `proposals.test.ts` (a repository test, not copied: it composes proposals-local) runs over real VMs
 too: `createWorkspaceGitConformance`, the steward's git flow against proposals-local's repository

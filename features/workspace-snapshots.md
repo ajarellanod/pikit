@@ -31,10 +31,11 @@ works with them as if they never left. It scales a `server` on disk, as
 [sandboxed execution](sandboxed-execution.md) scales it on isolation.
 
 ### What is missing today
-- **A workspace per conversation.** `workspace-local` gives one directory per agent (or per
-  channel, `per: "channel"`), shared by every conversation of that agent: it cannot be released
-  while another conversation still uses it. `per: "conversation"` adds a directory per
-  conversation id, the unit a snapshot saves and restores.
+- **A workspace per conversation.** `workspace-local` gives one directory per chat and agent (its
+  default, `per: "chat"`, kept through `/new` and shared with same-agent delegated children), per
+  agent or per channel, each shared by several conversations: it cannot be released while another
+  conversation still uses it. `per: "conversation"` adds a directory per conversation id, the unit a
+  snapshot saves and restores.
 - **A `storage.blob` contract**: `put`, `get` and `delete` of large objects by key, streamed, with
   a checksum on `put`. The catalogue has only `storage.sql`, `storage.sqlite` and `storage.kv`.
   Providers: `storage-blob-s3` (any S3 API: AWS, MinIO, R2), later one over R2's binding on

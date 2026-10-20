@@ -1,10 +1,11 @@
 /**
  * A sandbox host for tests: a real App of server-bun, execution-serve, and a `workspace` provider over
  * execution-local in a temporary directory, on `Bun.serve` on a free port of 127.0.0.1. The provider
- * is keyed as execution-gondolin's is, by `(conversationId, agent)`: each sandbox and agent a directory
- * of its own, `<root>/sandboxes/<conversationId>/<agent>` (not a sandbox: the real processes of this
- * machine). With `workspace: "workspace-local"`, it is workspace-local instead (`<root>/sandboxes/<agent>`,
- * the trial setup). Registry only: it imports other components' files, which a component's own files
+ * gives each sandbox and agent a directory of its own, as execution-gondolin does behind execution-serve
+ * (its chat is the sandbox's key, one to one with the `conversationId` this double keys by):
+ * `<root>/sandboxes/<conversationId>/<agent>` (not a sandbox: the real processes of this machine). With
+ * `workspace: "workspace-local"`, it is workspace-local instead
+ * (`<root>/sandboxes/<agent>/_chats/<hash of execution-serve:<sandbox>>`, the trial setup). Registry only: it imports other components' files, which a component's own files
  * never do.
  *
  * `app.test.ts` starts it in its process. The workerd lane (`tests/workerd/test/sandbox-outbound.ts`)
@@ -30,10 +31,10 @@ export function secretsOf(values: Record<string, string>) {
   return defineComponent({ name: "secrets-test", setup: (pikit) => pikit.provide("secrets", store) });
 }
 
-/** A safe directory name: execution-gondolin's rule for `conversationId` and `agent`. */
+/** A safe directory name: execution-serve's rule for `conversationId`, execution-gondolin's for `agent` (and more). */
 const SAFE_NAME = /^[A-Za-z0-9_-]{1,128}$/;
 
-/** `workspace` keyed as execution-gondolin's: `sandboxes/<conversationId>/<agent>` in `execution`; an unsafe name throws. */
+/** `workspace` per sandbox and agent: `sandboxes/<conversationId>/<agent>` in `execution`; an unsafe name throws. */
 const sandboxDirectories = defineComponent({
   name: "workspace-sandboxes-test",
   setup(pikit) {
@@ -55,7 +56,7 @@ const sandboxDirectories = defineComponent({
 export interface SandboxHost {
   url: URL;
   app: App;
-  /** The directory every sandbox is in (`<root>/sandboxes/remote-<sandbox id>/<agent>`, or `<root>/sandboxes/<agent>` behind workspace-local). */
+  /** The directory every sandbox is in (`<root>/sandboxes/remote-<sandbox id>/<agent>`, or `<root>/sandboxes/<agent>/_chats/<hash>` behind workspace-local). */
   root: string;
   stop(): Promise<void>;
 }

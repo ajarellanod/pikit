@@ -66,6 +66,9 @@ async function start(config: Record<string, unknown> = {}, providers: ComponentD
   return { app, root, workspace: provider, logs, env: async (id) => (await provider.resolve({ key: `it:${id}`, agent: "it", conversationId: id }, app.context())).env };
 }
 
+/** The directory under root of chat `it:<id>`'s agent `it` (the hex SHA-256 of the key, computed here). */
+const chatDir = (id: string) => join("chats", new Bun.CryptoHasher("sha256").update(`it:${id}`).digest("hex"), "it");
+
 async function sh(env: ExecutionEnv, command: string, options: Parameters<ExecutionEnv["exec"]>[1] = {}) {
   let output = "";
   const result = await env.exec(command, { ...options, onOutput: (text) => void (output += text) }, ctx);
@@ -104,7 +107,7 @@ if (problem !== undefined) {
     writeFileSync(sentinel, "every conversation");
 
     const own = await sh(one, "cat /workspace/mine.txt");
-    const other = await sh(two, `ls -A /workspace; test -e '${sentinel}' && echo host-visible; test -e '${join(running.root, "conversations", "1", "it")}' && echo sibling-visible; echo done`);
+    const other = await sh(two, `ls -A /workspace; test -e '${sentinel}' && echo host-visible; test -e '${join(running.root, chatDir("1"))}' && echo sibling-visible; echo done`);
 
     expect(own.output).toBe("one's");
     expect(other.output).toBe("done\n");
@@ -144,13 +147,13 @@ if (problem !== undefined) {
     expect(left.output.trim()).toBe("0");
   }, BOOT_MS);
 
-  test("what a command writes in /workspace is on the host; an idle VM is closed, and the next one finds the files", async () => {
+  test("what a command writes in /workspace is on the host; an idle VM is closed, and the next one finds the files, also after a reset of the chat", async () => {
     const running = await start({ idleSeconds: 1 });
     const env = await running.env("idle");
 
     const wrote = await sh(env, "echo kept > made.txt; echo gone > /root/scratch.txt");
     expect(wrote.result).toMatchObject({ ok: true, value: { exitCode: 0 } });
-    expect(readFileSync(join(running.root, "conversations", "idle", "it", "made.txt"), "utf8")).toBe("kept\n");
+    expect(readFileSync(join(running.root, chatDir("idle"), "made.txt"), "utf8")).toBe("kept\n");
 
     const deadline = Date.now() + 30_000;
     while (!running.logs.includes("execution-gondolin: closing an idle VM")) {
@@ -160,6 +163,9 @@ if (problem !== undefined) {
     const again = await sh(env, "cat made.txt; test -e /root/scratch.txt && echo scratch-survived; true");
 
     expect(again.output).toBe("kept\n");
-    expect(existsSync(join(running.root, "conversations", "idle", "it", "made.txt"))).toBe(true);
+    expect(existsSync(join(running.root, chatDir("idle"), "made.txt"))).toBe(true);
+    // A reset of the chat (/new: a new conversationId under the same key) is the same sandbox: its shell finds the file.
+    const reset = (await running.workspace.resolve({ key: "it:idle", agent: "it", conversationId: "after-new" }, running.app.context())).env;
+    expect((await sh(reset, "cat made.txt")).output).toBe("kept\n");
   }, BOOT_MS);
 }

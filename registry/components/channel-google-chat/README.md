@@ -65,8 +65,8 @@ pikit add tool-ask-user workspace-local expose-cloudflare-tunnel
 - `tool-ask-user` gives the agent `askUser`, whose questions this channel draws as cards. An agent
   asks only when it names the tool: add `"askUser"` to its `tools` in
   `src/agents/steward/agent.ts` (`tools: ["read", "write", "edit", "fetch", "websearch", "askUser"]`).
-- `workspace-local` gives `workspace`: each conversation's own directory, where a PDF or an archive
-  sent in the chat is written for the agent's tools.
+- `workspace-local` gives `workspace`: the agent's own directory in each space or thread (its chat,
+  kept through `/new`), where a PDF or an archive sent in the chat is written for the agent's tools.
 - `expose-cloudflare-tunnel` gives `pikit expose`: the public HTTPS URL Google calls.
 - `base` already includes the dashboard with `admin-api` and `settings-store` (`settings`): edit
   the `conversations` setting from its Settings, this component's section.

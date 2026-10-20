@@ -7,7 +7,7 @@ a real Linux, as a server's does. pi-durable's own `read`, `write`, `edit` and `
 `tool-*` components) work on it unchanged.
 
 - **Provides:** `execution` and `execution.shell` (pi-durable's `ExecutionEnv`, `env.ts`) and
-  `workspace` (a sandbox per conversation and agent).
+  `workspace` (a sandbox per chat and agent).
 - **Requires:** `secrets` (the token).
 - **Targets:** `server` and `durable` (only `fetch` and Web Crypto). On Cloudflare it belongs in the
   conversation object's App (the default export of `pikit.config.ts`), not the Worker's.
@@ -41,13 +41,15 @@ pikit doctor                          # execution, execution.shell, workspace: e
 
 ## Which sandbox
 
-A conversation's sandbox is its agent's (`ConversationRef.agent`, which the runtime gives
-`workspace.resolve`): two agents never share one, so **a delegated child of another agent works in a
-sandbox of its own**, not its parent's (results pass through the delegation's answer, or git). A
-child of the same agent shares its parent's only in a Durable Object, where it lives in the parent's
-object; on a server a delegated child has a conversation key of its own
-(`delegate:<depth>:<chain>:<task>`, tool-delegate's README), so it has a sandbox of its own whatever its
-agent. Every request to a conversation's sandbox carries the
+A conversation's sandbox is its chat's and its agent's (`ConversationRef.agent`, which the runtime
+gives `workspace.resolve`). The chat is the conversation a person or a channel opened (`originOf`):
+**a reset (`/new`) works in the same sandbox**, and finds what the agent wrote before it, and **a
+delegated child of the same agent works in its parent's**, on a server as in a Durable Object. Two
+agents never share one, so a delegated child of another agent works in that agent's sandbox of the
+chat, not its parent's (results pass through the delegation's answer, or git). Several conversations
+may then run commands in one sandbox at once (a parent and its background tasks): parallel tasks of
+one agent keep to a subfolder or a git worktree each (execution-gondolin's README). Every request to
+a conversation's sandbox carries the
 header `Pikit-Agent: <agent>`, and the host resolves the sandbox for that agent: execution-gondolin
 there gives it the agent's machine (its packages, hosts, secrets; its README). `execution`'s own
 sandbox has no conversation and names no agent: the host gives it the base machine.
@@ -59,18 +61,23 @@ conversations (execution-serve's README).
 
 - **In a Durable Object** (`WORKERS_HOST`, which deployment-cloudflare puts in the start context, has
   an object): each agent of the object works in `o-<hex SHA-256 of "<object id>\n<agent>">`, with an
-  environment of its own kept for the App's life. The object is `idFromName(key)` of the
-  conversation (its delegated children live in it too): one sandbox per agent for its whole life,
-  through evictions, deploys and resets, as execution-do's files are the object's. A delegated
-  child of the same agent shares its parent's. `execution` alone works in `o-<object id>`.
-- **On a server:** `workspace` gives each conversation key and agent its own sandbox,
-  `k-<hex SHA-256 of "<key>\n<agent>">` (through resets, as an object on Cloudflare). A delegated
-  child's key is its own, so its sandbox is too, even of its parent's agent. `execution`
-  alone, which a conversation's tools never use while `workspace` is installed, is the sandbox
-  `sandbox` (`shared`).
+  environment of its own kept for the App's life. This already is the chat's: the object is
+  `idFromName(key)` of the chat's key, a reset keeps the key (so the object), and its delegated
+  children live in it too. One sandbox per agent for the chat's whole life, through evictions,
+  deploys and resets, as execution-do's files are the object's. `execution` alone works in
+  `o-<object id>`.
+- **On a server:** `workspace` gives each chat and agent its own sandbox,
+  `k-<hex SHA-256 of "<chat key>\n<agent>">`, the chat key the origin's (`originOf(ref).key`): the same
+  through resets, and a delegated child's own key (`delegate:<depth>:<chain>:<task>`) chooses
+  nothing. `execution` alone, which a conversation's tools never use while `workspace` is installed,
+  is the sandbox `sandbox` (`shared`).
 
-The ids are hashes of the conversation and the agent: sandboxes made before that (`o-<object id>` of a
-conversation, `k-<hash of the key>`) are orphaned on the host, never migrated.
+The host gives each sandbox id its own workspace, unless its provider shares an agent's across them
+(execution-gondolin's `workspace: "agent"`: one per agent for every chat, decided on the host).
+
+The ids are hashes of the chat and the agent: sandboxes made before that (`o-<object id>` of a
+conversation, `k-<hash of the key>`, and `k-<hash>` of a delegated child's own key) are orphaned on the
+host, never migrated.
 
 ## The protocol
 
@@ -135,9 +142,9 @@ its host's provider, injected outside the sandbox: execution-gondolin does it at
   id; if that stop is lost too, it runs until it ends or the host's lease (120 s unread) stops it.
 - **An evicted Durable Object** stops reading its command: the host's lease stops it, and pi-durable
   gives the model an `interrupted` result (`tool-bash` is `replay: "unsafe"`).
-- **On a server, an environment per conversation key and agent**, kept for the App's life and never
+- **On a server, an environment per chat and agent**, kept for the App's life and never
   forgotten (as it was per key before): small objects (an id, a working directory), but their number
-  grows with every conversation and agent the App ever resolved, until it restarts. The sandboxes
+  grows with every chat and agent the App ever resolved, until it restarts. The sandboxes
   themselves are the host's and stay until its provider removes them.
 - **Each request is HTTP**, a round trip to the host: a tool call that reads many files is slower
   than on a local disk. Keep the host near the Workers that use it.
@@ -154,7 +161,9 @@ removes them.
 Copied with the component (`execution-remote.test.ts`), against a fake host speaking the protocol
 on a local `Bun.serve`: what setup declares; the start refused without the token, with a short one,
 over http to another machine, or in the Worker's App; the sandbox of a conversation on a server
-(`k-<SHA-256 of key and agent>`) and in a Durable Object (`o-<SHA-256 of object id and agent>`;
+(`k-<SHA-256 of the chat's key and agent>`, the same through a reset; a delegated child, and
+grandchild, of the same agent in its parent's, of another agent in its own of the chat, of another
+chat in that chat's) and in a Durable Object (`o-<SHA-256 of object id and agent>`;
 `execution` alone `o-<object id>`); paths sent absolute; the token only in the
 `Authorization` header and a command's variables the caller's (C7); `Pikit-Agent` on every request of
 a conversation's sandbox and never on `execution`'s, two agents of one key or object in two sandboxes
@@ -167,10 +176,13 @@ In the registry (`app.test.ts`, beside `files/`): against a real execution-serve
 provider keyed by conversation and agent as execution-gondolin's is, over execution-local) on
 `Bun.serve`, pi-durable's `ExecutionEnv` suite and the `workspace` suite pass end to end; pi-durable's
 own tools in a Harness turn (a long `bash` output through the window, its spill file read back); a
-sandbox per key and agent (a delegated child's key its own), per object and agent (a child of the
-same agent in its parent's), each resolved on the host for its agent and
-`execution`'s for none; behind workspace-local, a directory per agent; a quick command and a small
+sandbox per chat and agent (a delegated child of the same agent in its parent's, of another agent in
+that agent's of the chat), per object and agent (a child of the same agent in its parent's), each
+resolved on the host for its agent and `execution`'s for none; behind workspace-local, a directory per
+chat and agent (a reset in the same); a quick command and a small
 read cost one request each; a cancelled command's process does not run on; a wrong token.
 `gondolin.test.ts` runs remote, serve and execution-gondolin together on real micro-VMs (skipped
-without QEMU). pikit also runs the suite in workerd, in a real Durable Object reaching a real host,
-with two agents of one object in two sandboxes (`tests/workerd/test/execution-remote.workerd.ts`).
+without QEMU), a reset of the chat and a same-agent child finding a file, another agent's child not.
+pikit also runs the suite in workerd, in a real Durable Object reaching a real host, with two agents
+of one object in two sandboxes, each found again by a same-agent child and, in a new App, by a reset
+(`tests/workerd/test/execution-remote.workerd.ts`).

@@ -2,7 +2,8 @@
  * The whole remote path on real micro-VMs: a client App with execution-remote, and a sandbox host
  * App of server-bun, execution-serve and execution-gondolin (QEMU), over HTTP on 127.0.0.1. What the
  * other tests prove apart, together: a command runs in a Linux guest, a file written through the
- * remote file API is the guest's `/workspace`, two conversations' sandboxes see nothing of each
+ * remote file API is the guest's `/workspace`, a reset of the chat and a delegated child of the same
+ * agent find it again, two conversations' sandboxes see nothing of each
  * other, the host's files are out of reach, and each agent boots its own machine (features/
  * agent-sandboxes.md): the developer's profile holds a secret placeholder, an agent with no profile
  * gets the base (no secret, no network), and the two never share a VM or a file.
@@ -93,6 +94,19 @@ if (problem !== undefined) {
     const cat = await run(env, "cat note.txt && pwd");
     expect(cat.exitCode).toBe(0);
     expect(cat.out).toBe("from the client/workspace\n"); // the file has no newline of its own
+  }, 300_000);
+
+  test("a reset of the chat (/new) and a delegated child of the same agent find the files; a child of another agent does not", async () => {
+    const origin = conversation("carol");
+    const { env } = await workspace.resolve(origin, ctx);
+    expect((await run(env, "echo before > kept.txt")).exitCode).toBe(0);
+
+    const reset = (await workspace.resolve({ ...origin, conversationId: "c-carol-after-new" }, ctx)).env;
+    const child = (await workspace.resolve({ key: "delegate:1:assistant:t-1", agent: "assistant", conversationId: "c-carol-child", channel: "delegate", origin }, ctx)).env;
+    const other = (await workspace.resolve({ key: "delegate:1:assistant:t-2", agent: "helper", conversationId: "c-carol-helper", channel: "delegate", origin }, ctx)).env;
+    expect((await run(reset, "cat kept.txt")).out).toBe("before\n");
+    expect((await run(child, "cat kept.txt")).out).toBe("before\n");
+    expect((await run(other, "cat /workspace/kept.txt 2>/dev/null || echo absent")).out).toBe("absent\n");
   }, 300_000);
 
   test("two conversations' sandboxes see nothing of each other, and the host is out of reach", async () => {

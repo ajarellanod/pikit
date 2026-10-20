@@ -206,7 +206,7 @@
     },
     "execution-gondolin": {
       "version": "0.0.1",
-      "description": "Each conversation's tools work in a Linux micro-VM of its own (Gondolin, over QEMU): a real shell that cannot read the server's files or other conversations', with its files on the host, no network but the hosts you allow, and secrets the guest never sees.",
+      "description": "Each agent's tools work, in each chat, in a Linux micro-VM of its own (Gondolin, over QEMU): a real shell that cannot read the server's files or other chats', with its files on the host (kept through /new), no network but the hosts you allow, and secrets the guest never sees.",
       "targets": [
         "server"
       ],
@@ -222,7 +222,7 @@
     },
     "execution-remote": {
       "version": "0.0.1",
-      "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per conversation and agent, from a server or a Cloudflare Durable Object.",
+      "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per chat and agent, from a server or a Cloudflare Durable Object.",
       "targets": [
         "server",
         "durable"
@@ -636,7 +636,7 @@
     },
     "workspace-local": {
       "version": "0.0.1",
-      "description": "Each agent's tools work in a directory of their own, inside execution: order, not isolation.",
+      "description": "Each agent's tools work in a directory of their own in each chat, inside execution: order, not isolation.",
       "targets": [
         "server"
       ],

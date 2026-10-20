@@ -24,7 +24,7 @@ a project installs, and agents that name what they may use.
 | Tools per agent | built: an agent has the tools it names (`tool-*`, `tool-mcp`) | — |
 | Roles: command and path rules | `extension-house-rules` (tools by name, by sender) | [policy-tools](policy-tools.md) |
 | A machine per agent: packages, CLIs, hosts, secrets | built: execution-gondolin's machine profiles per agent, a sandbox per conversation and agent, also behind execution-remote and execution-serve (server, celld, Cloudflare) | [agent sandboxes](agent-sandboxes.md) |
-| A workspace per chat space, with context copied in | `workspace-local`, a directory per agent; `ConversationRef.channel` built | [channel context](channel-context.md), [agent folders](agent-folders.md) |
+| A workspace per chat space, with context copied in | `workspace-local`, a directory per chat and agent (its default); `ConversationRef.channel` built | [channel context](channel-context.md), [agent folders](agent-folders.md) |
 | Channels: Google Chat, an HTTP API, Telegram, a task tracker (comments in, comments out) | channel-http, channel-telegram (polling and webhook); Google Chat specified, next | [channel-google-chat](channel-google-chat.md); a task tracker has no note |
 | Routes: which agent answers where | router-basic, router-rules (Routing in the dashboard) | — |
 | Idempotency, per-conversation serialization | built: request ids deduplicated by the runtime, one owner per conversation | [inbound-dedup](inbound-dedup.md) for transports |

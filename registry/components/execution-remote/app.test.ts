@@ -3,9 +3,9 @@
  * sandbox host's App (server-bun on `Bun.serve`, execution-serve, a provider keyed as
  * execution-gondolin's over execution-local in a temporary directory: `sandbox-host.test-support.ts`),
  * talking HTTP on 127.0.0.1. pi-durable's `ExecutionEnv` suite and the `workspace` suite pass end to
- * end; pi-durable's own tools work on it; a sandbox per conversation key and agent on a server, per
- * object and agent on Cloudflare; workspace-local behind the host, a directory per agent; what a
- * command and a read cost in requests.
+ * end; pi-durable's own tools work on it; a sandbox per chat and agent on a server (a reset and a
+ * delegated child of the same agent in it), per object and agent on Cloudflare; workspace-local behind
+ * the host, a directory per chat and agent; what a command and a read cost in requests.
  *
  * A repository test, not copied with the component: it imports other components' files (SPEC P4),
  * so it lives beside `files/`.
@@ -83,7 +83,7 @@ for (const c of createWorkspaceConformance(async () => {
   test(`execution-remote ${c.group}: ${c.name}`, () => c.run());
 }
 
-test("on a server, each conversation key and agent has its own sandbox, k-<SHA-256 of key and agent>, resolved for that agent; execution alone works in `shared`, for no agent", async () => {
+test("on a server, each chat and agent has its own sandbox, k-<SHA-256 of the chat's key and agent>, resolved for that agent; execution alone works in `shared`, for no agent", async () => {
   const one = (await client.workspace.resolve(conversation("telegram:1"), ctx)).env;
   const again = (await client.workspace.resolve({ ...conversation("telegram:1"), conversationId: "after-a-reset" }, ctx)).env;
   const other = (await client.workspace.resolve(conversation("telegram:1", "other-agent"), ctx)).env;
@@ -99,10 +99,14 @@ test("on a server, each conversation key and agent has its own sandbox, k-<SHA-2
   expect(other.cwd).toBe(join(host.root, "sandboxes", `remote-${await keySandbox("telegram:1", "other-agent")}`, "other-agent"));
   expect(await other.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
   expect(await two.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
-  // A delegated child has a key of its own on a server: its own sandbox, even of the parent's agent.
-  const child = (await client.workspace.resolve({ ...conversation("delegate:1:task-1"), channel: "delegate" }, ctx)).env;
-  expect(child.cwd).toBe(join(host.root, "sandboxes", `remote-${await keySandbox("delegate:1:task-1", "assistant")}`, "assistant"));
-  expect(await child.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
+  // A delegated child of the same agent works in its chat's (its origin's) sandbox: its parent's.
+  const origin = conversation("telegram:1");
+  const child = (await client.workspace.resolve({ ...conversation("delegate:1:assistant:task-1"), channel: "delegate", origin }, ctx)).env;
+  expect(child).toBe(one);
+  expect(await child.readTextFile("mine.txt", ctx)).toEqual({ ok: true, value: "one's" });
+  // A child of another agent: that agent's sandbox of the chat.
+  const helper = (await client.workspace.resolve({ ...conversation("delegate:1:assistant:task-2", "other-agent"), channel: "delegate", origin }, ctx)).env;
+  expect(helper).toBe(other);
   expect(existsSync(join(host.root, "sandboxes", "remote-shared", "_shared", "shared.txt"))).toBe(true);
   expect(one.id).toBe(`execution-remote:${host.url.origin}#${sandbox}`);
 });
@@ -133,24 +137,28 @@ test("in a Durable Object, each agent of the object works in a sandbox of its ow
   }
 });
 
-test("behind workspace-local, the host gives each agent a directory, whatever the conversation", async () => {
+test("behind workspace-local, the host gives each chat and agent a directory (the chat: its sandbox, which the client keys by chat and agent)", async () => {
   const local = await startSandboxHost({ token: TOKEN, workspace: "workspace-local" });
   const remote = await startClient(undefined, local);
+  /** workspace-local's directory of the chat `execution-serve:<sandbox>` (the hex SHA-256 of that key). */
+  const chatDir = (sandbox: string) => join("_chats", new Bun.CryptoHasher("sha256").update(`execution-serve:${sandbox}`).digest("hex"));
   try {
     const one = (await remote.workspace.resolve(conversation("telegram:1", "developer"), ctx)).env;
+    const reset = (await remote.workspace.resolve({ ...conversation("telegram:1", "developer"), conversationId: "after-new" }, ctx)).env;
     const two = (await remote.workspace.resolve(conversation("telegram:2", "developer"), ctx)).env;
     const analyst = (await remote.workspace.resolve(conversation("telegram:1", "analyst"), ctx)).env;
     await one.writeFile("mine.txt", "developer's", ctx);
 
-    expect(one.cwd).toBe(join(local.root, "sandboxes", "developer"));
-    expect(two.cwd).toBe(one.cwd);
-    expect(await two.readTextFile("mine.txt", ctx)).toEqual({ ok: true, value: "developer's" });
-    expect(analyst.cwd).toBe(join(local.root, "sandboxes", "analyst"));
+    expect(one.cwd).toBe(join(local.root, "sandboxes", "developer", chatDir(await keySandbox("telegram:1", "developer"))));
+    expect(await reset.readTextFile("mine.txt", ctx)).toEqual({ ok: true, value: "developer's" });
+    expect(two.cwd).toBe(join(local.root, "sandboxes", "developer", chatDir(await keySandbox("telegram:2", "developer"))));
+    expect(await two.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
+    expect(analyst.cwd).toBe(join(local.root, "sandboxes", "analyst", chatDir(await keySandbox("telegram:1", "analyst"))));
     expect(await analyst.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
     // `execution` alone (no agent) resolves too, as `_<sandbox>`: a directory of its own.
     const written = await remote.execution.writeFile("own.txt", "own", ctx);
     expect(written.ok).toBe(true);
-    expect(existsSync(join(local.root, "sandboxes", "_shared", "own.txt"))).toBe(true);
+    expect(existsSync(join(local.root, "sandboxes", "_shared", chatDir("shared"), "own.txt"))).toBe(true);
   } finally {
     await remote.app.stop();
     await local.stop();

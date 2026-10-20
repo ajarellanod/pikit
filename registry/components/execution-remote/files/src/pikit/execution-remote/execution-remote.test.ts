@@ -115,7 +115,7 @@ test("it refuses to start without its token, with a short one, over http to anot
 
 const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
 
-test("on a server, a conversation's sandbox is k-<SHA-256 of its key and agent>, the same through resets, every request naming the agent; execution alone works in `sandbox`, naming none", async () => {
+test("on a server, a conversation's sandbox is k-<SHA-256 of its chat's key and agent>, the same through resets, every request naming the agent; execution alone works in `sandbox`, naming none", async () => {
   const host = fakeHost({ open: OPEN, exists: true });
   const { workspace, execution } = await started(host.url, { config: { sandbox: "tools" } });
 
@@ -139,6 +139,32 @@ test("on a server, a conversation's sandbox is k-<SHA-256 of its key and agent>,
     "tools exists null",
   ]);
   expect(env.cwd).toBe("/work");
+});
+
+test("on a server, a delegated child works in its chat's sandbox (its origin's key): its parent's when of the same agent, its own agent's of the chat otherwise", async () => {
+  const host = fakeHost({ open: OPEN, exists: true });
+  const { workspace } = await started(host.url);
+  const origin = { key: "gchat:spaces/AAA", agent: "assistant", conversationId: "c-1", channel: "google-chat" };
+
+  const parent = (await workspace.resolve(origin, ctx)).env;
+  const same = (await workspace.resolve({ key: "delegate:1:assistant:t-1", agent: "assistant", conversationId: "c-2", channel: "delegate", origin }, ctx)).env;
+  const deeper = (await workspace.resolve({ key: "delegate:2:assistant.assistant:t-2", agent: "assistant", conversationId: "c-3", channel: "delegate", origin }, ctx)).env;
+  const helper = (await workspace.resolve({ key: "delegate:1:assistant:t-3", agent: "helper", conversationId: "c-4", channel: "delegate", origin }, ctx)).env;
+  const otherChat = (await workspace.resolve({ key: "delegate:1:assistant:t-1", agent: "assistant", conversationId: "c-5", channel: "delegate", origin: { ...origin, key: "gchat:spaces/BBB" } }, ctx)).env;
+  await helper.exists("x", ctx);
+
+  expect(same).toBe(parent);
+  expect(deeper).toBe(parent);
+  expect(helper).not.toBe(parent);
+  expect(otherChat).not.toBe(parent);
+  const sandbox = `k-${sha256("gchat:spaces/AAA\nassistant")}`;
+  expect(parent.id).toBe(`execution-remote:${host.url}#${sandbox}`);
+  expect(host.seen.map((request) => `${request.sandbox} ${request.operation} ${request.agent}`)).toEqual([
+    `${sandbox} open assistant`,
+    `k-${sha256("gchat:spaces/AAA\nhelper")} open helper`,
+    `k-${sha256("gchat:spaces/BBB\nassistant")} open assistant`,
+    `k-${sha256("gchat:spaces/AAA\nhelper")} exists helper`,
+  ]);
 });
 
 test("in a Durable Object, each agent of the object has a sandbox of its own, o-<SHA-256 of object id and agent> (a delegated child of another agent too); execution alone works in o-<object id>, naming no agent", async () => {

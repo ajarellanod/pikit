@@ -33,6 +33,20 @@ line names its area.
 
 ### Components
 
+- An agent's workspace is its own in each chat, and survives `/new` (on every target). The chat is the
+  key of the conversation a person or a channel opened (`originOf(ref).key`): a reset (a new
+  `conversationId` under the same key) finds what the agent wrote there, and a delegated child of the
+  same agent works in its parent's workspace; a child of another agent in that agent's of the chat.
+  execution-gondolin keys a sandbox by chat and agent, `<root>/chats/<SHA-256 of the chat's key>/<agent>/`
+  (was `conversations/<conversationId>/<agent>/`), and takes `workspace: "agent"` (on the base or an
+  agent's profile; default `"chat"`): one sandbox, `<root>/agents/<agent>/`, for every chat.
+  execution-remote's server sandboxes are `k-<SHA-256 of the chat's key and agent>` (a delegated
+  child's own key no longer counts); in a Durable Object nothing changes (the object already is the
+  chat's). workspace-local's new default `per: "chat"` is `<root>/<agent>/_chats/<SHA-256 of the
+  chat's key>/`; `per: "agent"` (the old default, `<root>/<agent>/`) and `per: "channel"` stay.
+  Breaking: execution-gondolin's `conversations/` directories, server `k-` sandboxes of delegated
+  children, and workspace-local's `<root>/<agent>/` files (unless `per: "agent"` is set) are left
+  where they are, used by nothing; no migration.
 - tool-delegate: who may delegate to an agent. An entry of `agents` takes `from`, the agents allowed
   to hand it tasks: a call is allowed only when the calling conversation's agent and every agent above
   it in the delegation are in it (no laundering through an allowed agent); refused, nothing starts and

@@ -25,7 +25,8 @@ The allowlist is not a secret store: it hides nothing from a command that looks.
 and the project's `.env` is a file like any other ("It is not a sandbox", below).
 
 `workspace-local` builds on this environment: each agent's directory is inside `root`
-(`<root>/agents/<agent>/` by default), and its commands start with these `variables`.
+(`<root>/agents/<agent>/`, with a directory per chat in it by default), and its commands start with
+these `variables`.
 
 Stopping the app kills the commands still running. It refuses to start when `root` cannot be
 created or written.

@@ -1,12 +1,18 @@
 /**
- * workspace-local: each agent's tools work in a directory of their own (the `workspace` capability,
- * in @pikit/pi-adapter), inside the `execution` installed.
+ * workspace-local: each agent's tools work in a directory of their own in each chat (the `workspace`
+ * capability, in @pikit/pi-adapter), inside the `execution` installed.
  *
  * It provides `workspace` and uses `execution`. The runtime asks it, on every tool call in a run, for
  * the workspace of the run's conversation, and this component answers with `execution` itself, at
- * the agent's directory: `<root>/<agent>/`, created on the agent's calls (`atCwd`, a view of the same
- * environment with another working directory). Every conversation of one agent shares it; two agents
- * never do. Without this component, every agent works in `execution`'s one directory.
+ * the directory of the agent in the conversation's chat (`per: "chat"`, the default):
+ * `<root>/<agent>/_chats/<hex SHA-256 of the chat's key>/`, created on the agent's calls (`atCwd`, a
+ * view of the same environment with another working directory). The chat is the conversation a
+ * person or a channel opened (`originOf(ref).key`): a reset (`/new`) works in the same directory, and
+ * so does a delegated child of the same agent; two agents never share one. `_chats` starts with `_`,
+ * so it is never a channel's directory (below). Without this component, every agent works in
+ * `execution`'s one directory.
+ *
+ * With `per: "agent"`, every chat of an agent shares `<root>/<agent>/`.
  *
  * With `per: "channel"`, each channel of an agent has a directory of its own inside the agent's:
  * `<root>/<agent>/<channel>/`, from the conversation's `ConversationRef.channel`, which the runtime
@@ -27,7 +33,8 @@
  */
 
 import { defineComponent } from "@pikit/core";
-import { type ConversationRef } from "@pikit/contracts";
+import { createHash } from "node:crypto";
+import { type ConversationRef, originOf } from "@pikit/contracts";
 import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { atCwd } from "@pikit/pi-adapter/execution";
 import Type from "typebox";
@@ -35,8 +42,11 @@ import Type from "typebox";
 const Config = Type.Object({
   /** Where the agents' directories go: relative to `execution`'s working directory, or absolute. Created at start. */
   root: Type.String({ minLength: 1, default: "agents" }),
-  /** A directory per agent (`<root>/<agent>/`), or per channel of each agent (`<root>/<agent>/<channel>/`). */
-  per: Type.Union([Type.Literal("agent"), Type.Literal("channel")], { default: "agent" }),
+  /**
+   * A directory per chat of each agent (`<root>/<agent>/_chats/<hash of the chat's key>/`), per agent for
+   * every chat (`<root>/<agent>/`), or per channel of each agent (`<root>/<agent>/<channel>/`).
+   */
+  per: Type.Union([Type.Literal("chat"), Type.Literal("agent"), Type.Literal("channel")], { default: "chat" }),
 });
 
 /**
@@ -61,6 +71,14 @@ export function channelDirectory(channel: string): string | undefined {
   return parts.every((part) => CHANNEL_PART.test(part)) ? parts.join(".") : undefined;
 }
 
+/** Where an agent's chats' directories are, inside its own: starts with `_`, so no channel's directory is it. */
+const CHATS_DIR = "_chats";
+
+/** The directory of a chat: the hex SHA-256 of its key (keys are any string; this is one safe name). */
+function chatDirectory(key: string): string {
+  return createHash("sha256").update(key).digest("hex");
+}
+
 export default defineComponent({
   name: "workspace-local",
   config: Config,
@@ -74,10 +92,20 @@ export default defineComponent({
         if (!AGENT_NAME.test(agent)) {
           throw new Error(`workspace-local: agent name ${JSON.stringify(agent)} is not a safe directory name (kebab-case)`);
         }
-        const channel = config.per === "channel" ? conversation.channel : undefined;
-        const directory = channel === undefined ? undefined : channelDirectory(channel);
-        if (channel !== undefined && directory === undefined) {
-          throw new Error(`workspace-local: channel ${JSON.stringify(channel)} is not a safe directory name (lowercase parts, separated by ":")`);
+        let directory: string | undefined;
+        if (config.per === "chat") {
+          // The chat: the origin's key, the same through resets and for the agent's delegated children.
+          const chat = originOf(conversation).key;
+          if (typeof chat !== "string" || chat === "") {
+            throw new Error(`workspace-local: the conversation's chat (its origin's key) is ${JSON.stringify(chat)}: a directory needs a non-empty key`);
+          }
+          directory = `${CHATS_DIR}/${chatDirectory(chat)}`;
+        } else if (config.per === "channel" && conversation.channel !== undefined) {
+          const channel = conversation.channel;
+          directory = channelDirectory(channel);
+          if (directory === undefined) {
+            throw new Error(`workspace-local: channel ${JSON.stringify(channel)} is not a safe directory name (lowercase parts, separated by ":")`);
+          }
         }
         const env = execution.get();
         const ctx = toChord(context);

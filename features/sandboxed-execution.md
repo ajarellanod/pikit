@@ -7,7 +7,7 @@ sandboxing.
 **Specified:** partly (the former SPEC §8.2 and §8.3 named the components)
 
 **Status:** built on the server as `execution-gondolin` (`registry/components/execution-gondolin`): a
-Gondolin micro-VM (QEMU) per conversation and agent, each agent with its own machine if the config
+Gondolin micro-VM (QEMU) per chat and agent, each agent with its own machine if the config
 gives it a profile ([agent sandboxes](agent-sandboxes.md)), `/workspace` a VFS mount over a host directory, the file
 tools served from the host, network denied but for allowed hosts, secrets as placeholders the host
 replaces (C7). It passes `createDurableExecutionConformance` with a real shell and
@@ -32,14 +32,15 @@ remote host, with their own user, filesystem and network.
 ## How it fits pikit
 - Providers of `execution` and `execution.shell` (Pi's `ExecutionEnv`) that pass
   `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`). No new contract.
-  - `execution-gondolin` (server, built): a Linux micro-VM per conversation and agent, keyed by
-    `ConversationRef.conversationId` and `ConversationRef.agent`. Each agent may have a machine
-    profile (packages, allowed hosts, secrets, memory, CPUs); an agent with none gets the base
+  - `execution-gondolin` (server, built): a Linux micro-VM per chat and agent, keyed by the chat's
+    key (`originOf(ref).key`, hashed) and `ConversationRef.agent`, so it survives `/new`; or per agent
+    for every chat (`workspace: "agent"`). Each agent may have a machine profile (packages, allowed
+    hosts, secrets, memory, CPUs, workspace); an agent with none gets the base
     ([agent sandboxes](agent-sandboxes.md)).
   - `execution-docker` (server): a container per agent, or per conversation.
   - `execution-remote` (both targets, built): a host running `execution-serve` (a server App over a
     `workspace` provider of sandboxes) speaking its protocol over HTTP: a sandbox per Durable Object
-    and agent, or per conversation key and agent on a server, each request naming its agent
+    and agent, or per chat key and agent on a server, each request naming its agent
     (`Pikit-Agent`) so the host's profiles apply; a command started, then read from a cursor, never one long
     request (alarm slices, evictions, subrequest limits). Credentials stay on the host (C7).
   - Hosted sandboxes (Modal, Daytona, E2B…) as `execution-*` components of their own.
@@ -64,10 +65,13 @@ only where each agent's commands run across a service.
   bidirectional frame channels (IPC, a WebSocket) with no `ExecutionEnv` contract over them; a
   Durable Object holds no connection between events. execution-remote's protocol is plain HTTP
   requests, each answered within seconds, commands read from a cursor (its README).
-- ~~Per agent or per conversation, and what it costs.~~ Decided: per conversation and agent
-  ([agent sandboxes](agent-sandboxes.md)): a delegated child of another agent works in a sandbox of
-  its own, not its parent's. (`execution-gondolin`: a VM only while commands run, closed when idle,
-  `maxVms` at most, every profile's VMs counted together.)
+- ~~Per agent or per conversation, and what it costs.~~ Decided: per chat and agent, on every target
+  ([agent sandboxes](agent-sandboxes.md)): the chat is the conversation a person or a channel opened,
+  so the workspace survives `/new` and a delegated child of the same agent shares it; a child of
+  another agent works in that agent's own of the chat. Per agent across chats only when configured
+  (execution-gondolin's `workspace: "agent"`, workspace-local's `per: "agent"`). (`execution-gondolin`:
+  a VM only while commands run, closed when idle, `maxVms` at most, every profile's VMs counted
+  together.)
 
 ## Moved from the former SPEC and ROADMAP
 The former SPEC §8.2 (the schedule it named is gone; features have no order):

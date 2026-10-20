@@ -24,7 +24,7 @@ it into the app.
   - `agent.skill`: the project's skills (its catalog) the agents name in `skills` ("Skills" below);
   - `execution` and `workspace`, if installed: where tools work. Each tool call gets its
     conversation's workspace when a `workspace` provider is installed (`workspace-local`: a directory
-    per agent), otherwise `execution`;
+    per chat and agent), otherwise `execution`;
   - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth tokens).
     pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read only their
     environment variables (`ANTHROPIC_API_KEY`);

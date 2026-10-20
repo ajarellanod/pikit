@@ -5,7 +5,7 @@
  * - `router-rules` sends `ops-room` to `ops` and `support-room` to `support`; any other conversation
  *   goes to `router-basic`'s default agent, `assistant`;
  * - `ops` and `support` both have Pi's real `bash`, and `assistant` has no tools;
- * - `workspace-local` gives each agent its own directory.
+ * - `workspace-local` gives each agent its own directory in each chat.
  * Removing `router-rules` routes everything to `assistant` again, with nothing else changed (SPEC P3).
  */
 
@@ -48,12 +48,13 @@ test("each conversation reaches its agent, with that agent's tools and directory
   const unguarded = await say("support-room", "bash: mkdir keep && rm -rf keep && echo gone", "s1");
   expect(unguarded.body.text).toBe("tool said: gone\n");
 
-  // Each agent's commands run in its own directory.
+  // Each agent's commands run in its own directory of the chat (`<agent>/_chats/<hash of the chat's key>`).
   const opsWrote = await say("ops-room", "bash: echo ops > who.txt && pwd", "o2");
-  expect(opsWrote.body.text).toBe(`tool said: ${join(workspaces, "ops")}\n`);
-  expect(readFileSync(join(workspaces, "ops", "who.txt"), "utf8")).toBe("ops\n");
+  const opsDir = /^tool said: (.+)\n$/.exec(String(opsWrote.body.text))?.[1] ?? "";
+  expect(opsDir).toMatch(new RegExp(`^${join(workspaces, "ops", "_chats")}/[0-9a-f]{64}$`));
+  expect(readFileSync(join(opsDir, "who.txt"), "utf8")).toBe("ops\n");
   const supportLooked = await say("support-room", "bash: pwd && ls", "s2");
-  expect(supportLooked.body.text).toBe(`tool said: ${join(workspaces, "support")}\n`);
+  expect(supportLooked.body.text).toMatch(new RegExp(`^tool said: ${join(workspaces, "support", "_chats")}/[0-9a-f]{64}\n$`));
   expect(existsSync(join(workspaces, "support", "who.txt"))).toBe(false);
 
   // No rule for this conversation: router-basic's default agent, which has no tools at all.

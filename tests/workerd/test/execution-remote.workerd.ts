@@ -4,7 +4,8 @@
  * execution-local, real processes, in a Bun process of its own): pi-durable's `ExecutionEnv` suite,
  * each case in an object of its own (`execution`'s sandbox `o-<object id>`); pi-durable's own tools
  * through the `tool-*` components; the sandbox kept across a new App on the same object (an
- * eviction); two agents of one object in two sandboxes; the Worker's App refused.
+ * eviction); two agents of one object in two sandboxes, each found again by a reset of the chat and by
+ * a delegated child of the same agent; the Worker's App refused.
  */
 
 import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
@@ -105,12 +106,13 @@ it("the object's sandbox outlives its App: a new App on the same object (after a
     await next.app.stop();
   }));
 
-it("two agents of one object (a delegated child of another agent) work in two sandboxes on the host; each agent finds its own again", () =>
+it("two agents of one object (a delegated child of another agent) work in two sandboxes on the host; each agent finds its own again, after a reset of the chat and from a delegated child", () =>
   inObject(async (host) => {
     const { app, workspace } = await started(host);
     const objectId = host.object?.id as string;
-    const developer = (await workspace.resolve({ key: "telegram:1", agent: "developer", conversationId: "c-1" }, ctx)).env;
-    const analyst = (await workspace.resolve({ key: "delegate:c-1:t-1", agent: "analyst", conversationId: "c-2", channel: "delegate" }, ctx)).env;
+    const origin = { key: "telegram:1", agent: "developer", conversationId: "c-1", channel: "telegram" };
+    const developer = (await workspace.resolve(origin, ctx)).env;
+    const analyst = (await workspace.resolve({ key: "delegate:1:developer:t-1", agent: "analyst", conversationId: "c-2", channel: "delegate", origin }, ctx)).env;
     await developer.writeFile("mine.txt", "developer's", ctx);
 
     const sandbox = `o-${await sha256Hex(`${objectId}\ndeveloper`)}`;
@@ -120,10 +122,17 @@ it("two agents of one object (a delegated child of another agent) work in two sa
     expect(developer.cwd.endsWith(`/remote-${sandbox}/developer`)).toBe(true);
     expect(analyst.cwd.endsWith("/analyst")).toBe(true);
     expect(await analyst.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
-    const again = (await workspace.resolve({ key: "delegate:c-1:t-2", agent: "developer", conversationId: "c-3", channel: "delegate" }, ctx)).env;
+    const again = (await workspace.resolve({ key: "delegate:1:developer:t-2", agent: "developer", conversationId: "c-3", channel: "delegate", origin }, ctx)).env;
     expect(again).toBe(developer);
     expect(await again.readTextFile("mine.txt", ctx)).toEqual({ ok: true, value: "developer's" });
     await app.stop();
+
+    // /new: a new conversation under the same key, in the same object, in a new App (an eviction between).
+    const next = await started(host);
+    const reset = (await next.workspace.resolve({ ...origin, conversationId: "c-4" }, ctx)).env;
+    expect(reset.id).toBe(`execution-remote:${ENDPOINT}#${sandbox}`);
+    expect(await reset.readTextFile("mine.txt", ctx)).toEqual({ ok: true, value: "developer's" });
+    await next.app.stop();
   }));
 
 it("it refuses to start in the Worker's App, which has no object", async () => {

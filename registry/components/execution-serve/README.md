@@ -44,9 +44,11 @@ export default defineApp({
 ```
 
 For a trial on one machine, `execution-local` and `workspace-local` take execution-gondolin's place.
-workspace-local keys its directories by the agent alone, so each agent then works in
-`<execution-local root>/<workspace-local root>/<agent>`, shared by every conversation and client of
-that agent (as on a server); an agentless sandbox's agent is `_<sandbox id>`, a directory of its own
+workspace-local keys its directories by agent and chat (its default, `per: "chat"`), the chat here
+being the sandbox (below), so each agent works in
+`<execution-local root>/<workspace-local root>/<agent>/_chats/<hash>` per sandbox; with
+`per: "agent"`, in `<execution-local root>/<workspace-local root>/<agent>`, shared by every sandbox
+of that agent. An agentless sandbox's agent is `_<sandbox id>`, a directory of its own
 (workspace-local takes one leading `_`). Commands run as the server's user:
 **not a sandbox**, see their READMEs.
 
@@ -77,14 +79,22 @@ open port), or a reverse proxy. The clients' config is then
 
   | Field | With `Pikit-Agent` | Without | Who keys by it |
   |---|---|---|---|
-  | `conversationId` | `remote-<id>` | `remote-<id>` | execution-gondolin, with `agent` (a VM and a directory each) |
-  | `agent` | the header's agent | `_<id>` | execution-gondolin (and chooses the agent's machine by it); workspace-local (a directory per agent) |
-  | `key` | `execution-serve:<id>` | `execution-serve:<id>` | |
+  | `conversationId` | `remote-<id>` | `remote-<id>` | none of pikit's providers (held to a safe name for one that does) |
+  | `agent` | the header's agent | `_<id>` | execution-gondolin (and chooses the agent's machine by it); workspace-local |
+  | `key` | `execution-serve:<id>` | `execution-serve:<id>` | execution-gondolin and workspace-local, as the chat (`originOf`: the ref has no `origin`) |
+
+  So each sandbox id is a chat of its own on the host, and the client chooses the sandbox:
+  execution-remote's ids are one per chat and agent (per Durable Object and agent on Cloudflare), so a
+  reset and a delegated child of the same agent reach the same one. Whether an agent's workspace is
+  per chat or one for every chat is the host's provider's decision, in one place:
+  execution-gondolin's `workspace: "agent"` gives that agent one workspace across every sandbox.
+
+
 
   `_<id>` is outside the agent grammar: an agentless sandbox never matches a machine profile (it gets
   the base) and still has an `agent` of its own. `remote-` keeps a sandbox apart from the host App's own conversations, whose ids its runtime
   numbers (`1`, `2` and on): a remote id can never be one of them. `conversationId` is held to
-  `^[A-Za-z0-9_-]{1,128}$` (execution-gondolin's rule, a safe directory name): an id that cannot
+  `^[A-Za-z0-9_-]{1,128}$` (a safe directory name, for a provider that keys by it): an id that cannot
   make one is `400 invalid_request` at the door, never cleaned up into another (the protocol's
   100-character bound keeps every valid id within it). The provider is asked on each request that
   needs the environment and keeps or makes its sandboxes. Its failure is `503`, its message only in
@@ -115,8 +125,8 @@ open port), or a reverse proxy. The clients' config is then
 
 - **Isolation is the provider's.** This layer routes each request to its sandbox's environment and
   keeps handles apart; it does not confine paths (a VM's root is the wall, and a shell would step
-  over any check made here). Behind workspace-local, one sandbox can read another's files, and two
-  sandboxes of one agent are one directory.
+  over any check made here). Behind workspace-local, one sandbox can read another's files, and with
+  its `per: "agent"` two sandboxes of one agent are one directory.
 - **Credentials (SPEC C7).** The token authenticates the client to this host and goes no further: no
   variable, file or command of a sandbox receives it. Nothing secret arrives through the protocol (a
   command's variables are the calling tool's). A sandbox that needs a credential (a model key, a git
@@ -147,8 +157,9 @@ pi-durable walks directories itself without `listFiles`. No network policy here:
 
 ## Tests
 
-Copied with the component (`execution-serve.test.ts`), over a double of a `workspace` provider keyed
-as execution-gondolin's is (a directory per `conversationId` and `agent`, each
+Copied with the component (`execution-serve.test.ts`), over a double of a `workspace` provider with a
+directory per sandbox and agent, as execution-gondolin's is behind this host (keyed by `conversationId`
+and `agent`, each
 `^[A-Za-z0-9_-]{1,128}$` or it throws, over pi-durable's local environment) and the route itself:
 what setup declares, the ref a sandbox is resolved as (`remote-<id>`, the longest id included; the
 header's agent, `_<id>` without one), two agents' sandboxes apart, a malformed `Pikit-Agent` (`400`,
@@ -163,7 +174,7 @@ clock), stopping the host, and the output log (every chunk, a window's skip coun
 output never folded).
 
 The registry also runs the protocol end to end (`execution-remote/app.test.ts`): a real host
-(server-bun, this component, a provider keyed as execution-gondolin's over execution-local, and
-workspace-local for its own case) on `Bun.serve`, with execution-remote passing pi-durable's
+(server-bun, this component, a provider with a directory per sandbox and agent over execution-local,
+and workspace-local for its own case: a directory per chat and agent) on `Bun.serve`, with execution-remote passing pi-durable's
 `ExecutionEnv` suite through it, and from a Durable Object in the workerd lane
 (`tests/workerd/test/execution-remote.workerd.ts`), two agents of one object in two sandboxes.

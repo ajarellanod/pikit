@@ -16,8 +16,11 @@
  *   them apart from the host App's own conversations, which its runtime numbers `1`, `2`…; held to
  *   `^[A-Za-z0-9_-]{1,128}$`), `agent` the header's agent (execution-gondolin chooses its machine by
  *   it), or `_<id>` without one (an agentless sandbox, which gets the base), `key`
- *   `execution-serve:<id>`. An id that makes no such ref, or a malformed header, is `400`, never
- *   cleaned up.
+ *   `execution-serve:<id>` and no `origin`: the key is the chat a provider keys by (execution-gondolin,
+ *   workspace-local), so each sandbox is a chat of its own, and the client's ids (one per chat and
+ *   agent, or per Durable Object and agent) choose it; the provider's own config (execution-gondolin's
+ *   `workspace: "agent"`) can still give an agent one workspace for every sandbox. An id that makes no
+ *   such ref, or a malformed header, is `400`, never cleaned up.
  * - **Readers and commands stay with their sandbox and agent** (`host.ts`): another sandbox's handle,
  *   or one of the same sandbox id under another `Pikit-Agent`, is unknown.
  *   A command nobody reads for `leaseSeconds` is stopped and forgotten, so a client that went away (a

@@ -38,7 +38,14 @@ function temporaryDir(): string {
   return dir;
 }
 
+/** A conversation `conversationId` of `agent` in chat `test:<conversationId>` (one chat each). */
 const ref = (conversationId: string, agent = "support"): ConversationRef => ({ key: `test:${conversationId}`, agent, conversationId });
+/** The directory of chat `test:<id>`, computed here (hex SHA-256 of the key), not by the component. */
+const chat = (id: string, key = `test:${id}`) => new Bun.CryptoHasher("sha256").update(key).digest("hex");
+/** Where the sandbox of chat `test:<id>` and `agent` is under root. */
+const dir = (id: string, agent = "support") => join("chats", chat(id), agent);
+/** The label of that sandbox's VM. */
+const label = (id: string, agent = "support") => `pikit ${agent} ${chat(id).slice(0, 12)}`;
 
 interface Started {
   app: App;
@@ -151,10 +158,10 @@ test("a conversation's files are on the host, in its own directory, at /workspac
   const two = await s.env("2");
 
   expect(one.cwd).toBe("/workspace");
-  expect(one.id).toBe("execution-gondolin:conversation-1/support");
+  expect(one.id).toBe(`execution-gondolin:${dir("1")}`);
   expect(two.id).not.toBe(one.id);
   expect((await one.writeFile("notes/a.txt", "one's", ctx)).ok).toBe(true);
-  expect(readFileSync(join(s.root, "conversations", "1", "support", "notes", "a.txt"), "utf8")).toBe("one's");
+  expect(readFileSync(join(s.root, dir("1"), "notes", "a.txt"), "utf8")).toBe("one's");
   expect(await two.exists("notes/a.txt", ctx)).toEqual({ ok: true, value: false });
   expect(await one.canonicalPath("notes/a.txt", ctx)).toEqual({ ok: true, value: "/workspace/notes/a.txt" });
   expect((await one.fileInfo("notes/a.txt", ctx)).ok && (await one.fileInfo("notes/a.txt", ctx))).toMatchObject({ value: { path: "/workspace/notes/a.txt", name: "a.txt" } });
@@ -167,72 +174,166 @@ test("a conversation's files are on the host, in its own directory, at /workspac
   await s.app.stop();
 });
 
-test("a sandbox is keyed by conversation and agent: the same pair under another key is the same; another agent of the conversation gets its own directory and VM", async () => {
+test("a sandbox is keyed by chat (the origin's key) and agent: conversationId and channel do not choose it; another agent of the chat gets its own directory and VM", async () => {
   const s = await started();
   const first = await s.workspace.resolve({ key: "telegram:1", agent: "support", conversationId: "abc" }, s.app.context());
-  const again = await s.workspace.resolve({ key: "remote:sandbox", agent: "support", conversationId: "abc", channel: "http" }, s.app.context());
-  const child = await s.workspace.resolve({ key: "telegram:1", agent: "developer", conversationId: "abc" }, s.app.context());
+  const again = await s.workspace.resolve({ key: "telegram:1", agent: "support", conversationId: "other-id", channel: "http" }, s.app.context());
+  const developer = await s.workspace.resolve({ key: "telegram:1", agent: "developer", conversationId: "abc" }, s.app.context());
 
   expect(again.env).toBe(first.env);
-  expect(child.env).not.toBe(first.env);
-  expect(child.env.id).toBe("execution-gondolin:conversation-abc/developer");
-  expect((await child.env.writeFile("mine.txt", "developer's", ctx)).ok).toBe(true);
-  expect(readFileSync(join(s.root, "conversations", "abc", "developer", "mine.txt"), "utf8")).toBe("developer's");
+  expect(developer.env).not.toBe(first.env);
+  const tg = chat("", "telegram:1");
+  expect(developer.env.id).toBe(`execution-gondolin:chats/${tg}/developer`);
+  expect((await developer.env.writeFile("mine.txt", "developer's", ctx)).ok).toBe(true);
+  expect(readFileSync(join(s.root, "chats", tg, "developer", "mine.txt"), "utf8")).toBe("developer's");
   expect(await first.env.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
   await run(first.env, "true");
-  await run(child.env, "true");
+  await run(developer.env, "true");
   expect(s.launcher.guests.map((guest) => [guest.spec.label, guest.spec.mounts["/workspace"], guest.spec.mounts["/tmp/pikit"]])).toEqual([
-    ["pikit support abc", join(s.root, "conversations", "abc", "support"), join(s.root, TMP_DIR, "conversations", "abc", "support")],
-    ["pikit developer abc", join(s.root, "conversations", "abc", "developer"), join(s.root, TMP_DIR, "conversations", "abc", "developer")],
+    [`pikit support ${tg.slice(0, 12)}`, join(s.root, "chats", tg, "support"), join(s.root, TMP_DIR, "chats", tg, "support")],
+    [`pikit developer ${tg.slice(0, 12)}`, join(s.root, "chats", tg, "developer"), join(s.root, TMP_DIR, "chats", tg, "developer")],
   ]);
   expect(s.launcher.live).toHaveLength(2);
   await s.app.stop();
 });
 
-test("a conversation id that is not a safe directory name is refused, and nothing is made", async () => {
+test("a reset (/new: a new conversationId under the same key) finds the agent's files of that chat again; another chat does not", async () => {
   const s = await started();
-  for (const id of ["", "..", "a/b", "../escape", "a.b", "x".repeat(129)]) {
-    expect(s.workspace.resolve(ref(id), s.app.context())).rejects.toThrow("not a safe directory name");
-  }
-  expect(existsSync(join(s.root, "escape"))).toBe(false);
-  // The agent names a directory too: anything that is not one lowercase name is refused, before anything
+  const before = (await s.workspace.resolve({ key: "telegram:1", agent: "support", conversationId: "1" }, s.app.context())).env;
+  expect((await before.writeFile("notes.md", "what my past self wrote", ctx)).ok).toBe(true);
+  await run(before, "true");
+
+  const after = (await s.workspace.resolve({ key: "telegram:1", agent: "support", conversationId: "2" }, s.app.context())).env;
+  const elsewhere = (await s.workspace.resolve({ key: "telegram:2", agent: "support", conversationId: "3" }, s.app.context())).env;
+
+  expect(await after.readTextFile("notes.md", ctx)).toEqual({ ok: true, value: "what my past self wrote" });
+  await run(after, "true");
+  // The same VM serves it: one sandbox for the chat and agent.
+  expect(s.launcher.guests).toHaveLength(1);
+  expect(await elsewhere.exists("notes.md", ctx)).toEqual({ ok: true, value: false });
+  expect(elsewhere.id).not.toBe(after.id);
+  await s.app.stop();
+});
+
+test("a delegated child of the same agent works in its parent's sandbox of the chat; a child of another agent in that agent's own of the chat", async () => {
+  const s = await started();
+  const origin = { key: "gchat:spaces/AAA", agent: "developer", conversationId: "1", channel: "google-chat" };
+  const parent = (await s.workspace.resolve(origin, s.app.context())).env;
+  await parent.writeFile("plan.md", "# Plan", ctx);
+
+  const same = (await s.workspace.resolve({ key: "delegate:1:developer:t-1", agent: "developer", conversationId: "2", channel: "delegate", origin }, s.app.context())).env;
+  // A grandchild: its origin is still the chat's.
+  const deeper = (await s.workspace.resolve({ key: "delegate:2:developer.developer:t-2", agent: "developer", conversationId: "3", channel: "delegate", origin }, s.app.context())).env;
+  const analyst = (await s.workspace.resolve({ key: "delegate:1:developer:t-3", agent: "analyst", conversationId: "4", channel: "delegate", origin }, s.app.context())).env;
+  // The analyst of that chat, resolved from its own conversation there: the same as the delegated one.
+  const analystThere = (await s.workspace.resolve({ key: "gchat:spaces/AAA", agent: "analyst", conversationId: "5" }, s.app.context())).env;
+  // A child of the same agent from another chat: that chat's.
+  const otherChat = (await s.workspace.resolve({ key: "delegate:1:developer:t-1", agent: "developer", conversationId: "6", channel: "delegate", origin: { ...origin, key: "gchat:spaces/BBB" } }, s.app.context())).env;
+
+  expect(same).toBe(parent);
+  expect(deeper).toBe(parent);
+  expect(await same.readTextFile("plan.md", ctx)).toEqual({ ok: true, value: "# Plan" });
+  expect(analyst).not.toBe(parent);
+  expect(analystThere).toBe(analyst);
+  expect(analyst.id).toBe(`execution-gondolin:chats/${chat("", "gchat:spaces/AAA")}/analyst`);
+  expect(await analyst.exists("plan.md", ctx)).toEqual({ ok: true, value: false });
+  expect(await otherChat.exists("plan.md", ctx)).toEqual({ ok: true, value: false });
+  // The child's own key chooses nothing.
+  expect(existsSync(join(s.root, "chats", chat("", "delegate:1:developer:t-1")))).toBe(false);
+  await s.app.stop();
+});
+
+test("workspace: \"agent\" (the base's or a profile's) gives the agent one sandbox for every chat, at agents/<agent>; the others stay per chat", async () => {
+  const s = await started({ agents: { librarian: { workspace: "agent" }, developer: { cpus: 1 } } });
+  const one = (await s.workspace.resolve({ key: "telegram:1", agent: "librarian", conversationId: "1" }, s.app.context())).env;
+  const two = (await s.workspace.resolve({ key: "telegram:2", agent: "librarian", conversationId: "2" }, s.app.context())).env;
+  await one.writeFile("index.md", "everything", ctx);
+  await run(one, "true");
+  await run(two, "true");
+
+  expect(two).toBe(one);
+  expect(one.id).toBe("execution-gondolin:agents/librarian");
+  expect(readFileSync(join(s.root, "agents", "librarian", "index.md"), "utf8")).toBe("everything");
+  expect(s.launcher.guests.map((guest) => [guest.spec.label, guest.spec.mounts["/workspace"], guest.spec.mounts["/tmp/pikit"]])).toEqual([
+    ["pikit librarian", join(s.root, "agents", "librarian"), join(s.root, TMP_DIR, "agents", "librarian")],
+  ]);
+  // A profile without `workspace` (and an agent with none) takes the base's: per chat.
+  const developer = (await s.workspace.resolve({ key: "telegram:1", agent: "developer", conversationId: "1" }, s.app.context())).env;
+  expect(developer.id).toBe(`execution-gondolin:chats/${chat("", "telegram:1")}/developer`);
+  await s.app.stop();
+
+  // On the base: every agent shares across chats, unless its profile says `chat`.
+  const shared = await started({ workspace: "agent", agents: { support: { workspace: "chat" } } });
+  const a = (await shared.workspace.resolve({ key: "telegram:1", agent: "ops", conversationId: "1" }, shared.app.context())).env;
+  const b = (await shared.workspace.resolve({ key: "telegram:2", agent: "ops", conversationId: "2" }, shared.app.context())).env;
+  const support = (await shared.workspace.resolve(ref("9"), shared.app.context())).env;
+  expect(b).toBe(a);
+  expect(a.id).toBe("execution-gondolin:agents/ops");
+  expect(support.id).toBe(`execution-gondolin:${dir("9")}`);
+  await shared.app.stop();
+});
+
+test("an agent that is not a safe directory name, or a chat with no key, is refused, and nothing is made", async () => {
+  const s = await started();
+  // The agent names a directory: anything that is not one lowercase name is refused, before anything
   // is made (`Developer` and `developer` would share one on a case-insensitive filesystem).
   for (const agent of ["", "..", "a/b", "../escape", "a.b", "x".repeat(129), "Developer", "_Sandbox"]) {
     await expect(s.workspace.resolve(ref("ok", agent), s.app.context())).rejects.toThrow("is not a safe directory name");
   }
-  expect(existsSync(join(s.root, "conversations", "ok"))).toBe(false);
-  expect(existsSync(join(s.root, TMP_DIR, "conversations", "ok"))).toBe(false);
+  // A chat must have a key: the conversation's own, or its origin's.
+  await expect(s.workspace.resolve({ key: "", agent: "support", conversationId: "1" }, s.app.context())).rejects.toThrow("a sandbox needs a non-empty key");
+  await expect(s.workspace.resolve({ key: "telegram:1", agent: "support", conversationId: "1", origin: { key: "", agent: "support", conversationId: "0" } }, s.app.context())).rejects.toThrow("a sandbox needs a non-empty key");
+  // Any other key is a safe name once hashed: `..` and `/` in it make no path.
+  const odd = (await s.workspace.resolve({ key: "../../escape/..", agent: "support", conversationId: "1" }, s.app.context())).env;
+  expect(odd.id).toBe(`execution-gondolin:chats/${chat("", "../../escape/..")}/support`);
+  expect(existsSync(join(s.root, "..", "escape"))).toBe(false);
+  expect(readdirSync(join(s.root, "chats"))).toEqual([chat("", "../../escape/..")]);
+  expect(existsSync(join(s.root, "agents"))).toBe(false);
   await s.app.stop();
 });
 
 test("a sandbox with a link (or a file) on the way from root is refused, naming it: nothing is mounted or made through it", async () => {
   const outside = temporaryDir();
   writeFileSync(join(outside, "keep.txt"), "the host's");
-  const s = await started();
-  // A guest whose /workspace was conversations/1/ (before sandboxes were per agent) left `developer -> outside`.
-  mkdirSync(join(s.root, "conversations", "1"), { recursive: true });
-  symlinkSync(outside, join(s.root, "conversations", "1", "developer"));
-  // A conversation's directory itself a link, a link in the temporary area, a file.
-  symlinkSync(outside, join(s.root, "conversations", "2"));
-  mkdirSync(join(s.root, TMP_DIR, "conversations", "3"), { recursive: true });
-  symlinkSync(outside, join(s.root, TMP_DIR, "conversations", "3", "support"));
-  writeFileSync(join(s.root, "conversations", "4"), "");
+  const s = await started({ agents: { librarian: { workspace: "agent" }, keeper: { workspace: "agent" } } });
+  // A guest whose /workspace was chats/<chat>/ (another layout) left `developer -> outside`.
+  mkdirSync(join(s.root, "chats", chat("1")), { recursive: true });
+  symlinkSync(outside, join(s.root, dir("1", "developer")));
+  // A chat's directory itself a link, a link in the temporary area, a file.
+  symlinkSync(outside, join(s.root, "chats", chat("2")));
+  mkdirSync(join(s.root, TMP_DIR, "chats", chat("3")), { recursive: true });
+  symlinkSync(outside, join(s.root, TMP_DIR, dir("3")));
+  writeFileSync(join(s.root, "chats", chat("4")), "");
+  // The shared layout: an agent's directory a link, and `agents` of the temporary area a file.
+  mkdirSync(join(s.root, "agents"));
+  symlinkSync(outside, join(s.root, "agents", "librarian"));
+  mkdirSync(join(s.root, TMP_DIR), { recursive: true });
+  writeFileSync(join(s.root, TMP_DIR, "agents"), "");
   const refusal = (id: string, agent: string, path: string) =>
-    `execution-gondolin: the sandbox of conversation "${id}" and agent "${agent}" is refused: ${path} (under root) is a symbolic link or a file`;
+    `execution-gondolin: the sandbox of agent "${agent}" in chat "test:${id}" is refused: ${path} (under root) is a symbolic link or a file`;
+  const shared = (agent: string, path: string) =>
+    `execution-gondolin: the sandbox of agent "${agent}" (one for every chat) is refused: ${path} (under root) is a symbolic link or a file`;
 
-  await expect(s.workspace.resolve(ref("1", "developer"), s.app.context())).rejects.toThrow(refusal("1", "developer", "conversations/1/developer"));
-  await expect(s.workspace.resolve(ref("2", "support"), s.app.context())).rejects.toThrow(refusal("2", "support", "conversations/2"));
-  await expect(s.workspace.resolve(ref("3", "support"), s.app.context())).rejects.toThrow(refusal("3", "support", `${TMP_DIR}/conversations/3/support`));
-  await expect(s.workspace.resolve(ref("4", "support"), s.app.context())).rejects.toThrow(refusal("4", "support", "conversations/4"));
+  await expect(s.workspace.resolve(ref("1", "developer"), s.app.context())).rejects.toThrow(refusal("1", "developer", dir("1", "developer")));
+  await expect(s.workspace.resolve(ref("2", "support"), s.app.context())).rejects.toThrow(refusal("2", "support", `chats/${chat("2")}`));
+  await expect(s.workspace.resolve(ref("3", "support"), s.app.context())).rejects.toThrow(refusal("3", "support", `${TMP_DIR}/${dir("3")}`));
+  await expect(s.workspace.resolve(ref("4", "support"), s.app.context())).rejects.toThrow(refusal("4", "support", `chats/${chat("4")}`));
+  // Checked in the temporary area first, then the workspace.
+  await expect(s.workspace.resolve(ref("5", "librarian"), s.app.context())).rejects.toThrow(shared("librarian", `${TMP_DIR}/agents`));
+  rmSync(join(s.root, TMP_DIR, "agents"));
+  await expect(s.workspace.resolve(ref("5", "librarian"), s.app.context())).rejects.toThrow(shared("librarian", "agents/librarian"));
   // Refused at every resolve, not only the first (the sandbox is cached).
-  await expect(s.workspace.resolve(ref("1", "developer"), s.app.context())).rejects.toThrow(refusal("1", "developer", "conversations/1/developer"));
+  await expect(s.workspace.resolve(ref("1", "developer"), s.app.context())).rejects.toThrow(refusal("1", "developer", dir("1", "developer")));
   expect(readdirSync(outside)).toEqual(["keep.txt"]);
   expect(s.launcher.guests).toHaveLength(0);
 
-  // Another agent of the same conversation is a real directory: it works.
+  // Another agent of the same chat, another shared agent: real directories, they work.
   const { env } = await s.workspace.resolve(ref("1", "support"), s.app.context());
   expect((await env.writeFile("a.txt", "support's", ctx)).ok).toBe(true);
-  expect(readFileSync(join(s.root, "conversations", "1", "support", "a.txt"), "utf8")).toBe("support's");
+  expect(readFileSync(join(s.root, dir("1"), "a.txt"), "utf8")).toBe("support's");
+  const keeper = (await s.workspace.resolve(ref("1", "keeper"), s.app.context())).env;
+  expect((await keeper.writeFile("k.txt", "keeper's", ctx)).ok).toBe(true);
+  expect(readFileSync(join(s.root, "agents", "keeper", "k.txt"), "utf8")).toBe("keeper's");
   expect(readdirSync(outside)).toEqual(["keep.txt"]);
   await s.app.stop();
 });
@@ -240,8 +341,8 @@ test("a sandbox with a link (or a file) on the way from root is refused, naming 
 test("paths never leave the sandbox: absolute, .., and links the guest made, wherever they point", async () => {
   const s = await started();
   const env = await s.env("1");
-  const host = join(s.root, "conversations", "1", "support");
-  const other = join(s.root, "conversations", "2", "support");
+  const host = join(s.root, dir("1"));
+  const other = join(s.root, dir("2"));
   // The server's own state and another conversation's files, next to this one on the host.
   writeFileSync(join(s.root, "state.db"), "every conversation");
   mkdirSync(other, { recursive: true });
@@ -300,19 +401,19 @@ test("temporary files and spilled output are under /tmp/pikit, on the host, in t
   const spillPath = spilled.result.ok ? (spilled.result.value.spillPath as string) : "";
   expect(await env.readTextFile(spillPath, ctx)).toEqual({ ok: true, value: spilled.stdout });
   expect(spilled.stdout).toBe("line-0\nline-1\nline-2\nline-3\nline-4\nline-5\n");
-  expect(existsSync(join(s.root, TMP_DIR, "conversations", "1", "support", spillPath.slice("/tmp/pikit/".length)))).toBe(true);
+  expect(existsSync(join(s.root, TMP_DIR, dir("1"), spillPath.slice("/tmp/pikit/".length)))).toBe(true);
   expect((await env.createTempDir("../escape-", ctx)).ok).toBe(false);
   await s.app.stop();
 
   // A new process: what an earlier one left in its temporary area is gone; the workspace, and a `tmp`
   // that is not the component's, stay.
-  writeFileSync(join(s.root, "conversations", "1", "support", "kept.txt"), "kept");
+  writeFileSync(join(s.root, dir("1"), "kept.txt"), "kept");
   mkdirSync(join(s.root, "tmp"));
   writeFileSync(join(s.root, "tmp", "theirs.txt"), "not the component's");
   const again = await defineApp({ components: [createExecutionGondolin(new FakeLauncher())], config: { "execution-gondolin": { root: s.root } }, logger: silentLogger }).create();
   await again.start();
-  expect(existsSync(join(s.root, TMP_DIR, "conversations", "1"))).toBe(false);
-  expect(existsSync(join(s.root, "conversations", "1", "support", "kept.txt"))).toBe(true);
+  expect(existsSync(join(s.root, TMP_DIR, "chats", chat("1")))).toBe(false);
+  expect(existsSync(join(s.root, dir("1"), "kept.txt"))).toBe(true);
   expect(readFileSync(join(s.root, "tmp", "theirs.txt"), "utf8")).toBe("not the component's");
   await again.stop();
 });
@@ -331,8 +432,8 @@ test("the VM boots at the first command, once, with the conversation's directori
   expect(launcher.guests).toHaveLength(1);
   const [guest] = launcher.guests;
   expect(guest?.spec).toEqual({
-    label: "pikit support 7",
-    mounts: { "/workspace": join(s.root, "conversations", "7", "support"), "/tmp/pikit": join(s.root, TMP_DIR, "conversations", "7", "support") },
+    label: label("7"),
+    mounts: { "/workspace": join(s.root, dir("7")), "/tmp/pikit": join(s.root, TMP_DIR, dir("7")) },
     allowedHosts: [],
     secrets: [],
     memory: "512M",
@@ -346,7 +447,7 @@ test("the VM boots at the first command, once, with the conversation's directori
   ]);
   // Another conversation gets a VM of its own.
   await run(await s.env("8"), "echo");
-  expect(launcher.guests.map((g) => g.spec.mounts["/workspace"])).toEqual([join(s.root, "conversations", "7", "support"), join(s.root, "conversations", "8", "support")]);
+  expect(launcher.guests.map((g) => g.spec.mounts["/workspace"])).toEqual([join(s.root, dir("7")), join(s.root, dir("8"))]);
   await s.app.stop();
   expect(launcher.live).toHaveLength(0);
 });
@@ -450,9 +551,9 @@ test("at maxVms, a new VM closes the one idle the longest; when all run commands
   await three.exec("quick", undefined, ctx);
   // One's VM was idle the longest: closed for three's.
   expect(launcher.guests.map((g) => [g.spec.label, g.closed])).toEqual([
-    ["pikit support 1", true],
-    ["pikit support 2", false],
-    ["pikit support 3", false],
+    [label("1"), true],
+    [label("2"), false],
+    [label("3"), false],
   ]);
 
   const hanging = [two.exec("hang", undefined, ctx), three.exec("hang", undefined, ctx)];
@@ -482,8 +583,8 @@ test("maxVms counts every profile's VMs together: another agent's command closes
   await analyst.exec("quick", undefined, ctx);
   // The developer's VM, idle, was closed for the analyst's: one VM for both machines.
   expect(launcher.guests.map((g) => [g.spec.label, g.spec.cpus, g.spec.memory, g.closed])).toEqual([
-    ["pikit developer 1", 1, "1G", true],
-    ["pikit analyst 1", 2, "2G", false],
+    [label("1", "developer"), 1, "1G", true],
+    [label("1", "analyst"), 2, "2G", false],
   ]);
 
   const hanging = analyst.exec("hang", undefined, ctx);
@@ -497,7 +598,7 @@ test("maxVms counts every profile's VMs together: another agent's command closes
   await analyst.cleanup(ctx);
   expect((await waiting).ok).toBe(true);
   await hanging;
-  expect(launcher.live.map((g) => g.spec.label)).toEqual(["pikit developer 1"]);
+  expect(launcher.live.map((g) => g.spec.label)).toEqual([label("1", "developer")]);
   expect(launcher.guests).toHaveLength(3);
   await s.app.stop();
 });
@@ -584,7 +685,7 @@ test("secrets: read through `secrets` at boot and at each command, given to the 
     { GITHUB_TOKEN: "ghp_real-value-1", NPM_TOKEN: undefined },
     { GITHUB_TOKEN: "ghp_rotated-value-2", NPM_TOKEN: undefined },
   ]);
-  expect(s.logs).toContainEqual({ level: "warn", message: "execution-gondolin: secrets not set, left out of this VM until its next boot", fields: { sandbox: "conversation-1/support", secrets: ["NPM_TOKEN"] } });
+  expect(s.logs).toContainEqual({ level: "warn", message: "execution-gondolin: secrets not set, left out of this VM until its next boot", fields: { sandbox: dir("1"), secrets: ["NPM_TOKEN"] } });
   // Commands get no secret through their variables: only the VM's placeholders carry them.
   expect(guest?.commands.map((c) => c.env)).toEqual([{}, {}]);
   expect(JSON.stringify(s.logs)).not.toContain("value-");
@@ -649,7 +750,7 @@ test("a profile's secret reaches only that agent's VMs, also after a rotation; t
   expect(s.logs.filter((log) => log.message.startsWith("execution-gondolin: secrets not set"))).toEqual([]);
   await run(await envOf("analyst"), "first");
   expect(s.logs.filter((log) => log.message.startsWith("execution-gondolin: secrets not set"))).toEqual([
-    { level: "warn", message: "execution-gondolin: secrets not set, left out of this VM until its next boot", fields: { sandbox: "conversation-1/analyst", secrets: ["NPM_TOKEN"] } },
+    { level: "warn", message: "execution-gondolin: secrets not set, left out of this VM until its next boot", fields: { sandbox: dir("1", "analyst"), secrets: ["NPM_TOKEN"] } },
   ]);
   expect(JSON.stringify(s.logs)).not.toContain("value-");
   await s.app.stop();
@@ -831,7 +932,7 @@ test("conversations' sandboxes are bounded: idle ones are dropped and rebuilt wi
   expect(await s.env("busy")).toBe(busy);
   await busy.cleanup(ctx);
   await running;
-  expect(launcher.guests.filter((guest) => guest.spec.label === "pikit support busy")).toHaveLength(1);
+  expect(launcher.guests.filter((guest) => guest.spec.label === label("busy"))).toHaveLength(1);
   await s.app.stop();
 });
 

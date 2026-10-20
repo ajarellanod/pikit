@@ -1,8 +1,9 @@
 /**
  * execution-serve's tests. They are copied with the component and keep running in your project.
  *
- * The sandboxes are a double of a `workspace` provider keyed as execution-gondolin's is: a directory
- * per `ConversationRef.conversationId` and `agent`, each of which must be `^[A-Za-z0-9_-]{1,128}$`
+ * The sandboxes are a double of a `workspace` provider: a directory per sandbox and agent, as
+ * execution-gondolin gives one per chat (the ref's key, one to one with its `conversationId` here) and
+ * agent; by `ConversationRef.conversationId` and `agent`, each of which must be `^[A-Za-z0-9_-]{1,128}$`
  * (else it throws), over pi-durable's local environment in a temporary directory, recording every
  * ref it is asked for. Requests go to the route itself, as server-bun hands them over.
  * `execution-remote`'s registry test runs the whole protocol end to end, through HTTP, under
@@ -35,7 +36,7 @@ function secrets(values: Record<string, string>) {
   return defineComponent({ name: "secrets-test", setup: (pikit) => pikit.provide("secrets", store) });
 }
 
-/** A workspace per `conversationId` and `agent` (execution-gondolin's rule): `<root>/<conversationId>/<agent>`, over one local environment. Records what it was asked. */
+/** A workspace per `conversationId` and `agent` (per sandbox and agent): `<root>/<conversationId>/<agent>`, over one local environment. Records what it was asked. */
 function sandboxes() {
   const root = mkdtempSync(join(tmpdir(), "execution-serve-test-"));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
