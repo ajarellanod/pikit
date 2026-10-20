@@ -50,6 +50,7 @@ import schedulerAdmit, { SCHEDULER_CHANNEL } from "../../registry/components/sch
 import schedulerSql from "../../registry/components/scheduler-sql/files/src/pikit/scheduler-sql/index.ts";
 import storageKvSql from "../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import toolDelegate from "../../registry/components/tool-delegate/files/src/pikit/tool-delegate/index.ts";
+import { unframed } from "../../registry/components/tool-delegate/unframed.test-support.ts";
 import toolSchedule, { SCHEDULE_TOOL } from "../../registry/components/tool-schedule/files/src/pikit/tool-schedule/index.ts";
 import wakeupsTimers from "../../registry/components/wakeups-timers/files/src/pikit/wakeups-timers/index.ts";
 
@@ -137,7 +138,8 @@ function world() {
       setup(pikit) {
         const auth: AdminAuth = { verify: async (request) => (request.headers.get("authorization") === OPERATOR.authorization ? { id: "operator" } : undefined) };
         pikit.provide("admin.auth", auth);
-        pikit.provideKeyed("model.provider", "faux", scriptedProvider({ onRequest: (request) => void systems.push(JSON.stringify(request.messages.filter((message) => message.role === "system"))) }));
+        // The worker reads its task without delegate's framing: the scripted rules match a message whole.
+        pikit.provideKeyed("model.provider", "faux", unframed(scriptedProvider({ onRequest: (request) => void systems.push(JSON.stringify(request.messages.filter((message) => message.role === "system"))) })));
         pikit.provideKeyed("agent.tool", "pay", payTool(ledger) as unknown as AgentTool);
         pikit.provideKeyed("agent.tool", "hold", held.tool as unknown as AgentTool);
         const coordinator = defineAgent({ name: "coordinator", model: "faux/scripted", tools: ["delegate", "delegate_tasks", "delegate_steer", SCHEDULE_TOOL, "pay"], extensions: ["memory", "approvals"] });

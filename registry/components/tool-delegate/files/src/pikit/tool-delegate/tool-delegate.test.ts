@@ -11,6 +11,7 @@ import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withConte
 import { CONVERSATION, type ConversationRef, type MessagePart } from "@pikit/contracts";
 import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, type DelegatedOutcome, type DelegatedTask, PARTS_DETAIL } from "@pikit/pi-adapter/tools";
 import toolDelegate, {
+  ASK_BACK,
   CANCEL_TOOL,
   createCancelTool,
   createDelegateTool,
@@ -22,6 +23,9 @@ import toolDelegate, {
   chainOf,
   delegateDescription,
   depthOf,
+  framedTask,
+  QUESTION_PREFIX,
+  questionOf,
   STEER_TOOL,
   TASKS_TOOL,
 } from "./index.ts";
@@ -93,13 +97,43 @@ test("its description names each agent with what it is for; its replay is safe",
   expect(tool.replay).toBe("safe");
   expect(tool.description).toBe(delegateDescription(config));
   expect(tool.description).toContain("- researcher: Reads sources.\n- coder: Writes code.");
+  // The convention: a question back is answered by delegating again, with everything.
+  expect(tool.description).toContain(
+    "An answer starting with QUESTION: (waited for or arriving later) means the agent needs that information and did not do the task: answer it by delegating to it again, with everything the previous task had plus the answer: a new task starts with nothing.",
+  );
 });
 
 test("a call runs the task in a child of the agent it names, one level deeper, its sender the delegating agent", async () => {
   const d = delegation();
   expect(textOf(await call({ agent: "researcher", task: "find X" }, d))).toBe('The agent "researcher" answered:\n\ndone');
 
-  expect(d.asked).toEqual([{ how: "run", task: { agent: "researcher", key: "delegate:1:assistant:t9", channel: "delegate", task: "find X", sender: { channel: "delegate", id: "assistant" } } }]);
+  expect(d.asked).toEqual([{ how: "run", task: { agent: "researcher", key: "delegate:1:assistant:t9", channel: "delegate", task: framedTask("find X"), sender: { channel: "delegate", id: "assistant" } } }]);
+});
+
+test("the task a delegated agent receives tells it to ask back with QUESTION: instead of guessing, waited for or not", async () => {
+  expect(QUESTION_PREFIX).toBe("QUESTION:");
+  expect(framedTask("fix the login bug")).toBe(`fix the login bug\n\n${ASK_BACK}`);
+  expect(ASK_BACK).toContain("do not guess: stop, and answer with a line starting with QUESTION: that says exactly what you need");
+  expect(ASK_BACK).toContain("The agent that gave you the task will answer by giving you a new task.");
+
+  const d = delegation();
+  await call({ agent: "coder", task: "fix the login bug" }, d);
+  await call({ agent: "coder", task: "fix the login bug", wait: false }, d);
+  await call({ agent: "coder", task: "fix the login bug" }, d, { key: "delegate:1:assistant:t3", agent: "researcher", conversationId: "8", origin: parent });
+  expect(d.asked.map((each) => each.task.task)).toEqual(Array(3).fill(`fix the login bug\n\n${ASK_BACK}`));
+});
+
+test("a waited-for answer starting with QUESTION: is flagged as a question, with how to answer it; any other answer is unchanged", async () => {
+  const asked = await call({ agent: "coder", task: "fix the login bug" }, delegation({ kind: "completed", text: "QUESTION: which branch?" }));
+  expect(textOf(asked)).toBe(
+    'The agent "coder" needs more information, and did not do the task:\n\nwhich branch?\n\n[To go on, answer it by delegating to it again, with everything the previous task had plus the answer: a new task starts with nothing. If you do not know the answer either, ask the person.]',
+  );
+  // Leading blank lines do not hide it; a question that says nothing says so.
+  expect(textOf(await call({ agent: "coder", task: "x" }, delegation({ kind: "completed", text: "\n  QUESTION:" })))).toStartWith('The agent "coder" needs more information, and did not do the task:\n\n(it did not say what)\n\n');
+  // A question only when the answer starts with it.
+  const answered = await call({ agent: "coder", task: "x" }, delegation({ kind: "completed", text: "Fixed. QUESTION: none" }));
+  expect(textOf(answered)).toBe('The agent "coder" answered:\n\nFixed. QUESTION: none');
+  expect([questionOf("QUESTION: which branch?\nmain or dev"), questionOf("question: lower case"), questionOf("done")]).toEqual(["which branch?\nmain or dev", undefined, undefined]);
 });
 
 test("wait: false starts it, and says its id and that the answer comes later", async () => {
@@ -128,7 +162,7 @@ test("a delegated task always waits for its own delegations, and goes no deeper 
   const d = delegation();
   const task: ConversationRef = { key: "delegate:1:assistant:t3", agent: "researcher", conversationId: "8", origin: parent };
   await call({ agent: "coder", task: "x", wait: false }, d, task);
-  expect(d.asked).toEqual([{ how: "run", task: { agent: "coder", key: "delegate:2:assistant.researcher:t9", channel: "delegate", task: "x", sender: { channel: "delegate", id: "researcher" } } }]);
+  expect(d.asked).toEqual([{ how: "run", task: { agent: "coder", key: "delegate:2:assistant.researcher:t9", channel: "delegate", task: framedTask("x"), sender: { channel: "delegate", id: "researcher" } } }]);
 
   const deepest: ConversationRef = { key: "delegate:2:assistant.researcher:t9", agent: "coder", conversationId: "9", origin: parent };
   await expect(call({ agent: "researcher", task: "x" }, d, deepest)).rejects.toThrow("already 2 delegations deep, the most this project allows");

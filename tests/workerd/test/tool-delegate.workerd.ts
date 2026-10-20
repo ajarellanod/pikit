@@ -20,6 +20,7 @@ import actorsDo from "../../../registry/components/actors-do/files/src/pikit/act
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import toolDelegate from "../../../registry/components/tool-delegate/files/src/pikit/tool-delegate/index.ts";
+import { unframed } from "../../../registry/components/tool-delegate/unframed.test-support.ts";
 import { composeObjects, PLATFORM_BINDING } from "../src/platform.ts";
 import { resetObjects, workerEnv } from "./host.ts";
 
@@ -63,7 +64,8 @@ function agents(held: { released: Promise<void> }) {
     },
   }) as unknown as ToolRegistration;
   const helper = defineAgent({ name: "helper", model: "faux/scripted", tools: [hold, ask] });
-  const provider = scriptedProvider();
+  // The helper reads its task without delegate's framing: the scripted rules match a message whole.
+  const provider = unframed(scriptedProvider());
   return [
     defineComponent({ name: "agents-fixture", setup: (pikit) => [assistant, helper].forEach((agent) => pikit.provideKeyed("agent.definition", agent.name, agent)) }),
     defineComponent({ name: "provider-faux", setup: (pikit) => pikit.provideKeyed("model.provider", provider.id, provider) }),
