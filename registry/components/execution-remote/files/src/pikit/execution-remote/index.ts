@@ -4,15 +4,18 @@
  * Cloudflare a Durable Object cannot run a VM: this is how a conversation there gets a real Linux.
  *
  * It provides `execution` and `execution.shell` (pi-durable's `ExecutionEnv`, `env.ts`) and
- * `workspace`, which the runtime asks on every tool call for the conversation's environment. Which
- * sandbox (its id, `protocol.ts`'s `SANDBOX_ID`):
- * - **In a Durable Object** (`WORKERS_HOST` has an object): the object is the conversation, so every
- *   call there works in `o-<object id>`, `execution` and `workspace` alike (a delegated child
- *   conversation, which lives in the same object, too). The id is `idFromName(key)`'s: the same for
- *   the conversation's whole life, through evictions, deploys and resets.
- * - **On a server** (no `WORKERS_HOST`): `workspace` gives each conversation key its own sandbox,
- *   `k-<SHA-256 of the key, hex>` (one key, one sandbox, through resets, as an object on Cloudflare);
- *   `execution` alone is the sandbox `sandbox` of the config (`shared`).
+ * `workspace`, which the runtime asks on every tool call for the conversation's environment. A
+ * conversation's sandbox is its agent's (`ConversationRef.agent`): every request to it carries
+ * `Pikit-Agent: <agent>`, and two agents never share one, also when one delegates to the other (a
+ * child of the same agent shares its parent's). Which sandbox (its id, `protocol.ts`'s `SANDBOX_ID`):
+ * - **In a Durable Object** (`WORKERS_HOST` has an object): the object is the conversation (its
+ *   delegated children live in it too), so each agent of the object works in
+ *   `o-<hex SHA-256 of "<object id>\n<agent>">`, with an environment of its own kept for the App's
+ *   life. The object id is `idFromName(key)`'s: the same for the conversation's whole life, through
+ *   evictions, deploys and resets. `execution` alone works in `o-<object id>`, with no agent.
+ * - **On a server** (no `WORKERS_HOST`): `workspace` gives each conversation key and agent its own
+ *   sandbox, `k-<hex SHA-256 of "<key>\n<agent>">` (through resets, as an object on Cloudflare);
+ *   `execution` alone is the sandbox `sandbox` of the config (`shared`), with no agent.
  * The host makes the sandbox on its first request (its provider's `workspace.resolve`) and keeps it.
  *
  * - **The token** (`PIKIT_SANDBOX_TOKEN`, `tokenSecret`) is read through `secrets` at start: missing,
@@ -34,7 +37,7 @@ import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
 import Type from "typebox";
 import { RemoteExecutionEnv } from "./env.ts";
-import { DEFAULT_TOKEN_SECRET, isSandboxId, MAX_SANDBOX_ID_LENGTH, MIN_TOKEN_LENGTH, SANDBOX_ID } from "./protocol.ts";
+import { DEFAULT_TOKEN_SECRET, isAgentName, isSandboxId, MAX_AGENT_LENGTH, MAX_SANDBOX_ID_LENGTH, MIN_TOKEN_LENGTH, SANDBOX_ID } from "./protocol.ts";
 import { createTransport } from "./transport.ts";
 
 const NAME = "execution-remote";
@@ -58,10 +61,19 @@ const Config = Type.Object(
   { examples: [{ endpoint: "https://sandbox.example.com" }] },
 );
 
-/** The sandbox of a conversation key on a server: `k-` and the key's SHA-256, in hex. */
-export async function keySandbox(key: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)));
-  return `k-${Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+async function sha256Hex(text: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** The sandbox of a conversation key's agent on a server: `k-` and the SHA-256 of `<key>\n<agent>`, in hex. */
+export async function keySandbox(key: string, agent: string): Promise<string> {
+  return `k-${await sha256Hex(`${key}\n${agent}`)}`;
+}
+
+/** The sandbox of an agent in a Durable Object: `o-` and the SHA-256 of `<object id>\n<agent>`, in hex. */
+export async function objectSandbox(objectId: string, agent: string): Promise<string> {
+  return `o-${await sha256Hex(`${objectId}\n${agent}`)}`;
 }
 
 /** Why `endpoint` cannot be used, or `undefined`. */
@@ -86,26 +98,25 @@ export default defineComponent({
 
     let token: string | undefined;
     let running = false;
-    /** In a Durable Object, the object's sandbox. */
-    let objectSandbox: string | undefined;
+    /** In a Durable Object, the object's id. */
+    let objectId: string | undefined;
     const transport = createTransport({ endpoint: config.endpoint, token: () => token });
 
-    // Built now; the sandbox is known at start (the object's id), and calls before answer that it is not running.
-    const execution = new RemoteExecutionEnv({ transport, sandbox: () => (running ? (objectSandbox ?? config.sandbox) : undefined) });
+    // Built now; the sandbox is known at start (the object's id), and calls before answer that it is not running. No agent.
+    const execution = new RemoteExecutionEnv({ transport, sandbox: () => (running ? (objectId === undefined ? config.sandbox : `o-${objectId}`) : undefined) });
     pikit.provide("execution", execution);
     pikit.provide("execution.shell", execution);
 
-    /** On a server, each conversation key's environment, kept for the App's life (its session: the sandbox's cwd). */
-    const byKey = new Map<string, RemoteExecutionEnv>();
+    /** Each conversation sandbox's environment (one per agent of the object, or per key and agent), kept for the App's life (its session: the sandbox's cwd). */
+    const bySandbox = new Map<string, RemoteExecutionEnv>();
     const workspace: WorkspaceProvider = {
       async resolve(conversation, ctx) {
         if (!running) throw new Error(`${NAME}: the workspace was asked for while the app is not running`);
-        let env = execution;
-        if (objectSandbox === undefined) {
-          const sandbox = await keySandbox(conversation.key);
-          env = byKey.get(sandbox) ?? new RemoteExecutionEnv({ transport, sandbox: () => (running ? sandbox : undefined) });
-          byKey.set(sandbox, env);
-        }
+        const agent = conversation.agent;
+        if (!isAgentName(agent)) throw new Error(`${NAME}: the conversation's agent ${JSON.stringify(agent.slice(0, 40))} is not an agent name (kebab-case, at most ${MAX_AGENT_LENGTH} characters)`);
+        const sandbox = objectId === undefined ? await keySandbox(conversation.key, agent) : await objectSandbox(objectId, agent);
+        const env = bySandbox.get(sandbox) ?? new RemoteExecutionEnv({ transport, agent, sandbox: () => (running ? sandbox : undefined) });
+        bySandbox.set(sandbox, env);
         // Opened before it is handed out: its `cwd` is the sandbox's, and a host that refuses fails this call.
         const opened = await env.open(toChord(ctx));
         if (!opened.ok) throw opened.error;
@@ -128,15 +139,15 @@ export default defineComponent({
         if (secret === undefined) throw new Error(`${NAME}: the secret ${config.tokenSecret} is not set (the token of the sandbox host, execution-serve's)`);
         if (secret.length < MIN_TOKEN_LENGTH) throw new Error(`${NAME}: the secret ${config.tokenSecret} is shorter than ${MIN_TOKEN_LENGTH} characters`);
         token = secret;
-        objectSandbox = sandbox;
+        objectId = host?.object?.id;
         running = true;
       },
       async stop(ctx) {
         // Stop the commands still running, so none outlives the app (on Cloudflare, never called: the
         // host's lease stops what an evicted object left).
         const context = toChord(ctx);
-        await Promise.all([execution, ...byKey.values()].map((env) => env.cleanup(context)));
-        byKey.clear();
+        await Promise.all([execution, ...bySandbox.values()].map((env) => env.cleanup(context)));
+        bySandbox.clear();
         running = false;
         token = undefined;
       },

@@ -11,11 +11,13 @@
  *   (`tokenSecret`) read through `secrets` at start: missing or shorter than 32 characters, the App
  *   does not start. Compared in constant time, as SHA-256 digests (as admin-auth-token does); only
  *   the digest is kept. A request without it is `401` before its body is read.
- * - **A sandbox is `workspace.resolve`** of the `ConversationRef` built from its id
- *   (`sandboxConversation`): `conversationId` `remote-<id>` (execution-gondolin keys its sandboxes by
- *   it alone; the prefix keeps them apart from the host App's own conversations, which its runtime
- *   numbers `1`, `2`…; held to `^[A-Za-z0-9_-]{1,128}$`), `agent` the id (workspace-local keys by
- *   it), `key` `execution-serve:<id>`. An id that makes no such ref is `400`, never cleaned up.
+ * - **A sandbox is `workspace.resolve`** of the `ConversationRef` built from its id and the request's
+ *   `Pikit-Agent` header (`sandboxConversation`): `conversationId` `remote-<id>` (the prefix keeps
+ *   them apart from the host App's own conversations, which its runtime numbers `1`, `2`…; held to
+ *   `^[A-Za-z0-9_-]{1,128}$`), `agent` the header's agent (execution-gondolin chooses its machine by
+ *   it), or `_<id>` without one (an agentless sandbox, which gets the base), `key`
+ *   `execution-serve:<id>`. An id that makes no such ref, or a malformed header, is `400`, never
+ *   cleaned up.
  * - **Readers and commands stay with their sandbox** (`host.ts`): another sandbox's handle is unknown.
  *   A command nobody reads for `leaseSeconds` is stopped and forgotten, so a client that went away (a
  *   Durable Object evicted mid-command) leaves nothing running.
@@ -30,8 +32,9 @@
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import Type from "typebox";
 import Value from "typebox/value";
+import type { ConversationRef } from "@pikit/contracts";
 import { ProtocolError, SandboxHost, sandboxConversation } from "./host.ts";
-import { DEFAULT_TOKEN_SECRET, isOperation, isSandboxId, MAX_SANDBOX_ID_LENGTH, MIN_TOKEN_LENGTH, PROTOCOL_PATH, PROTOCOL_STATUS, type ProtocolFailure, REQUESTS, ROUTE_KEY } from "./protocol.ts";
+import { AGENT_HEADER, DEFAULT_TOKEN_SECRET, isOperation, isSandboxId, MAX_SANDBOX_ID_LENGTH, MIN_TOKEN_LENGTH, PROTOCOL_PATH, PROTOCOL_STATUS, type ProtocolFailure, REQUESTS, ROUTE_KEY } from "./protocol.ts";
 
 const Config = Type.Object({
   /** The name of the secret holding the shared token, not the token: config is never secret. */
@@ -75,9 +78,10 @@ export default defineComponent({
       const [sandbox = "", operation = ""] = parts;
       if (!isSandboxId(sandbox)) return failure("invalid_request", `the sandbox id is not one (kebab-case, lowercase, at most ${MAX_SANDBOX_ID_LENGTH} characters)`);
       if (!isOperation(operation)) return failure("unknown_operation", `no operation ${JSON.stringify(operation.slice(0, 40))}`);
-      // Refused at the door when it makes no ConversationRef for the provider (its conversationId).
+      // Refused at the door when it makes no ConversationRef for the provider (its conversationId, its agent).
+      let conversation: ConversationRef;
       try {
-        sandboxConversation(sandbox);
+        conversation = sandboxConversation(sandbox, request.headers.get(AGENT_HEADER) ?? undefined);
       } catch (error) {
         if (error instanceof ProtocolError) return failure(error.code, error.message);
         throw error;
@@ -100,7 +104,7 @@ export default defineComponent({
       }
 
       try {
-        return Response.json(await running.serve(sandbox, operation, body as never, ctx));
+        return Response.json(await running.serve({ sandbox, conversation }, operation, body as never, ctx));
       } catch (error) {
         if (error instanceof ProtocolError) return failure(error.code, error.message);
         throw error;
@@ -117,12 +121,12 @@ export default defineComponent({
         const sandboxes = new SandboxHost({
           leaseMs: config.leaseSeconds * 1000,
           now: () => background.clock.now(),
-          resolve: async (sandbox, requestCtx) => {
+          resolve: async ({ sandbox, conversation }, requestCtx) => {
             try {
-              return (await workspace.get().resolve(sandboxConversation(sandbox), requestCtx)).env;
+              return (await workspace.get().resolve(conversation, requestCtx)).env;
             } catch (error) {
               // The client learns only that it failed; the log says why (a provider's message may hold host paths).
-              requestCtx.logger.error(`${NAME}: the sandbox could not be resolved`, { sandbox, error: error instanceof Error ? error.message : String(error) });
+              requestCtx.logger.error(`${NAME}: the sandbox could not be resolved`, { sandbox, agent: conversation.agent, error: error instanceof Error ? error.message : String(error) });
               throw new ProtocolError("unavailable", "the sandbox could not be resolved");
             }
           },

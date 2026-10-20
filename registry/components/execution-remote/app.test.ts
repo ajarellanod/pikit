@@ -1,9 +1,10 @@
 /**
  * execution-remote against a real execution-serve: the client's App (secrets, execution-remote) and a
- * sandbox host's App (server-bun on `Bun.serve`, execution-serve, workspace-local over
- * execution-local in a temporary directory: `sandbox-host.test-support.ts`), talking HTTP on
- * 127.0.0.1. pi-durable's `ExecutionEnv` suite and the `workspace` suite pass end to end; pi-durable's
- * own tools work on it; a sandbox per conversation key on a server, per object on Cloudflare; what a
+ * sandbox host's App (server-bun on `Bun.serve`, execution-serve, a provider keyed as
+ * execution-gondolin's over execution-local in a temporary directory: `sandbox-host.test-support.ts`),
+ * talking HTTP on 127.0.0.1. pi-durable's `ExecutionEnv` suite and the `workspace` suite pass end to
+ * end; pi-durable's own tools work on it; a sandbox per conversation key and agent on a server, per
+ * object and agent on Cloudflare; workspace-local behind the host, a directory per agent; what a
  * command and a read cost in requests.
  *
  * A repository test, not copied with the component: it imports other components' files (SPEC P4),
@@ -21,7 +22,7 @@ import { createDurableExecutionConformance, runToolCalls } from "@pikit/pi-adapt
 import { createWorkspaceConformance } from "@pikit/pi-adapter/testing";
 import { withAbortSignal } from "@pikit/pi-adapter/execution";
 import { createBashTool, createReadTool, createWriteTool } from "@pikit/pi-adapter/tools";
-import executionRemote, { keySandbox } from "./files/src/pikit/execution-remote/index.ts";
+import executionRemote, { keySandbox, objectSandbox } from "./files/src/pikit/execution-remote/index.ts";
 import { type SandboxHost, secretsOf, startSandboxHost } from "./sandbox-host.test-support.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -31,7 +32,7 @@ let host: SandboxHost;
 let client: { app: App; workspace: WorkspaceProvider; execution: ExecutionEnv };
 
 /** A client App on `host`, with `components` (a Durable Object's host, for one) around execution-remote. */
-async function startClient(wrap: (components: ReturnType<typeof defineComponent>[]) => ReturnType<typeof defineComponent>[] = (c) => c) {
+async function startClient(wrap: (components: ReturnType<typeof defineComponent>[]) => ReturnType<typeof defineComponent>[] = (c) => c, on: SandboxHost = host) {
   let workspace: Handle<WorkspaceProvider> | undefined;
   let execution: Handle<ExecutionEnv> | undefined;
   const reader = defineComponent({
@@ -43,7 +44,7 @@ async function startClient(wrap: (components: ReturnType<typeof defineComponent>
   });
   const app = await defineApp({
     components: [secretsOf({ PIKIT_SANDBOX_TOKEN: TOKEN }), ...wrap([executionRemote]), reader],
-    config: { "execution-remote": { endpoint: host.url.origin } },
+    config: { "execution-remote": { endpoint: on.url.origin } },
     logger: silentLogger,
   }).create();
   await app.start();
@@ -82,38 +83,69 @@ for (const c of createWorkspaceConformance(async () => {
   test(`execution-remote ${c.group}: ${c.name}`, () => c.run());
 }
 
-test("on a server, each conversation key has its own sandbox, k-<SHA-256 of the key>; execution alone works in `shared`", async () => {
+test("on a server, each conversation key and agent has its own sandbox, k-<SHA-256 of key and agent>, resolved for that agent; execution alone works in `shared`, for no agent", async () => {
   const one = (await client.workspace.resolve(conversation("telegram:1"), ctx)).env;
-  const again = (await client.workspace.resolve(conversation("telegram:1", "other-agent"), ctx)).env;
+  const again = (await client.workspace.resolve({ ...conversation("telegram:1"), conversationId: "after-a-reset" }, ctx)).env;
+  const other = (await client.workspace.resolve(conversation("telegram:1", "other-agent"), ctx)).env;
   const two = (await client.workspace.resolve(conversation("telegram:2"), ctx)).env;
   await one.writeFile("mine.txt", "one's", ctx);
   await client.execution.writeFile("shared.txt", "shared", ctx);
 
-  const sandbox = await keySandbox("telegram:1");
+  const sandbox = await keySandbox("telegram:1", "assistant");
   expect(sandbox).toMatch(/^k-[0-9a-f]{64}$/);
-  expect(one.cwd).toBe(join(host.root, "sandboxes", sandbox));
-  expect(again.cwd).toBe(one.cwd);
-  expect((await again.readTextFile("mine.txt", ctx)).ok).toBe(true);
+  // The host resolved it as `remote-<sandbox>` for the agent the header named.
+  expect(one.cwd).toBe(join(host.root, "sandboxes", `remote-${sandbox}`, "assistant"));
+  expect(again).toBe(one);
+  expect(other.cwd).toBe(join(host.root, "sandboxes", `remote-${await keySandbox("telegram:1", "other-agent")}`, "other-agent"));
+  expect(await other.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
   expect(await two.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
-  expect(existsSync(join(host.root, "sandboxes", "shared", "shared.txt"))).toBe(true);
+  expect(existsSync(join(host.root, "sandboxes", "remote-shared", "_shared", "shared.txt"))).toBe(true);
   expect(one.id).toBe(`execution-remote:${host.url.origin}#${sandbox}`);
 });
 
-test("in a Durable Object, every conversation of the object works in its sandbox, o-<object id>", async () => {
+test("in a Durable Object, each agent of the object works in a sandbox of its own, o-<SHA-256 of object and agent>: a delegated child of another agent too", async () => {
   const objectId = "0123456789abcdef".repeat(4);
   const object = { id: objectId, storage: {}, onAlarm() {}, onDeliver() {} };
   const durable = await startClient((components) => withWorkersHost({ env: {}, object }, components));
   try {
     const root = (await durable.workspace.resolve(conversation("telegram:9"), ctx)).env;
     const child = (await durable.workspace.resolve({ ...conversation("delegate:1:task-1", "helper"), channel: "delegate" }, ctx)).env;
+    const sameAgent = (await durable.workspace.resolve({ ...conversation("delegate:1:task-2"), channel: "delegate" }, ctx)).env;
     await root.writeFile("plan.md", "# Plan", ctx);
 
-    expect(root.cwd).toBe(join(host.root, "sandboxes", `o-${objectId}`));
-    expect(child).toBe(root);
-    expect(durable.execution).toBe(root);
-    expect(await child.readTextFile("plan.md", ctx)).toEqual({ ok: true, value: "# Plan" });
+    const sandbox = await objectSandbox(objectId, "assistant");
+    expect(sandbox).toMatch(/^o-[0-9a-f]{64}$/);
+    expect(root.cwd).toBe(join(host.root, "sandboxes", `remote-${sandbox}`, "assistant"));
+    expect(child.cwd).toBe(join(host.root, "sandboxes", `remote-${await objectSandbox(objectId, "helper")}`, "helper"));
+    expect(await child.exists("plan.md", ctx)).toEqual({ ok: true, value: false });
+    // A child of the same agent shares its parent's sandbox.
+    expect(sameAgent).toBe(root);
+    // `execution` alone is the object's own, for no agent.
+    expect(durable.execution).not.toBe(root);
+    await durable.execution.writeFile("own.txt", "own", ctx);
+    expect(existsSync(join(host.root, "sandboxes", `remote-o-${objectId}`, `_o-${objectId}`, "own.txt"))).toBe(true);
   } finally {
     await durable.app.stop();
+  }
+});
+
+test("behind workspace-local, the host gives each agent a directory, whatever the conversation", async () => {
+  const local = await startSandboxHost({ token: TOKEN, workspace: "workspace-local" });
+  const remote = await startClient(undefined, local);
+  try {
+    const one = (await remote.workspace.resolve(conversation("telegram:1", "developer"), ctx)).env;
+    const two = (await remote.workspace.resolve(conversation("telegram:2", "developer"), ctx)).env;
+    const analyst = (await remote.workspace.resolve(conversation("telegram:1", "analyst"), ctx)).env;
+    await one.writeFile("mine.txt", "developer's", ctx);
+
+    expect(one.cwd).toBe(join(local.root, "sandboxes", "developer"));
+    expect(two.cwd).toBe(one.cwd);
+    expect(await two.readTextFile("mine.txt", ctx)).toEqual({ ok: true, value: "developer's" });
+    expect(analyst.cwd).toBe(join(local.root, "sandboxes", "analyst"));
+    expect(await analyst.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
+  } finally {
+    await remote.app.stop();
+    await local.stop();
   }
 });
 

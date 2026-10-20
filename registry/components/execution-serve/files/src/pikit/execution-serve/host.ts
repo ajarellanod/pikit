@@ -12,8 +12,8 @@
  *   stopped and ends with an `unknown` error saying so.
  * - **Never throws to the route** for the environment's failures: they are `{ ok: false, error }`.
  *
- * The environment is the sandbox provider's (`workspace.resolve`), asked at each request that needs
- * it: the provider keeps or makes its sandboxes. Paths are not confined here: a sandbox's walls are
+ * The environment is the sandbox provider's (`workspace.resolve` of the request's `Scope`'s ref),
+ * asked at each request that needs it: the provider keeps or makes its sandboxes. Paths are not confined here: a sandbox's walls are
  * its provider's (a VM), and a shell would step over any check this layer made.
  */
 
@@ -34,7 +34,7 @@ import {
   withAbortSignal,
 } from "@pikit/pi-adapter/execution";
 import { OutputLog } from "./output.ts";
-import { fromBase64, type Operation, type ProtocolErrorCode, type RequestOf, toBase64, type Values, type WireError, type WireExecState, type WireFileInfo } from "./protocol.ts";
+import { fromBase64, isAgentName, MAX_AGENT_LENGTH, type Operation, type ProtocolErrorCode, type RequestOf, toBase64, type Values, type WireError, type WireExecState, type WireFileInfo } from "./protocol.ts";
 
 /** Running commands per sandbox. */
 export const MAX_COMMANDS = 16;
@@ -50,21 +50,35 @@ export const CONVERSATION_PREFIX = "remote-";
 /** The `conversationId` a sandbox provider takes (execution-gondolin's rule: a safe directory name). */
 export const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+/** What prefixes an agentless sandbox's `agent`: outside the agent grammar, so it never matches a profile. */
+export const AGENTLESS_PREFIX = "_";
+
 /**
- * The `ConversationRef` a sandbox is resolved as, every field derived from its id, so a provider
- * keyed by any of them keeps sandboxes apart:
- * - `conversationId` `remote-<id>`: what execution-gondolin keys its sandboxes by, alone; namespaced
- *   so it never meets a conversation of the host App's own runtime, and held to `CONVERSATION_ID`;
- * - `agent` the id itself (workspace-local keys its directories by it; gondolin names the VM by it);
+ * The `ConversationRef` a sandbox is resolved as:
+ * - `conversationId` `remote-<id>`: namespaced so it never meets a conversation of the host App's own
+ *   runtime, and held to `CONVERSATION_ID` (execution-gondolin keys its sandboxes by it and `agent`);
+ * - `agent` the request's `Pikit-Agent` (the provider chooses the agent's machine by it; workspace-local
+ *   keys its directories by it), or `_<id>` without one (an agentless sandbox: `execution`'s own of a
+ *   client), which no agent name can be;
  * - `key` `execution-serve:<id>`.
- * A sandbox id that cannot make one is refused (`invalid_request`): never cleaned up into another.
+ * A sandbox id that cannot make one, or an agent that is not an agent's name, is refused
+ * (`invalid_request`): never cleaned up into another.
  */
-export function sandboxConversation(sandbox: string): ConversationRef {
+export function sandboxConversation(sandbox: string, agent?: string): ConversationRef {
   const conversationId = `${CONVERSATION_PREFIX}${sandbox}`;
   if (!CONVERSATION_ID.test(conversationId)) {
     throw new ProtocolError("invalid_request", `the sandbox id makes no conversation id (${CONVERSATION_ID.source}): ${JSON.stringify(sandbox.slice(0, 40))}`);
   }
-  return { key: `execution-serve:${sandbox}`, agent: sandbox, conversationId };
+  if (agent !== undefined && !isAgentName(agent)) {
+    throw new ProtocolError("invalid_request", `Pikit-Agent is not an agent's name (kebab-case, at most ${MAX_AGENT_LENGTH} characters): ${JSON.stringify(agent.slice(0, 40))}`);
+  }
+  return { key: `execution-serve:${sandbox}`, agent: agent ?? `${AGENTLESS_PREFIX}${sandbox}`, conversationId };
+}
+
+/** What one request is for: the sandbox (its readers and commands are scoped by its id) and the ref it is resolved as. */
+export interface Scope {
+  readonly sandbox: string;
+  readonly conversation: ConversationRef;
 }
 
 /** A failure of the protocol itself, which the route answers with its status. */
@@ -80,8 +94,8 @@ export class ProtocolError extends Error {
 export type Answer<O extends Operation> = { ok: true; value: Values[O] } | { ok: false; error: WireError };
 
 export interface SandboxHostOptions {
-  /** The sandbox's environment: `workspace.resolve` of its `ConversationRef`. Throws when it cannot be had. */
-  resolve(sandbox: string, ctx: AppContext): Promise<ExecutionEnv>;
+  /** The sandbox's environment: `workspace.resolve` of the scope's `ConversationRef`. Throws when it cannot be had. */
+  resolve(scope: Scope, ctx: AppContext): Promise<ExecutionEnv>;
   leaseMs: number;
   now(): number;
 }
@@ -150,11 +164,11 @@ export class SandboxHost {
 
   constructor(private readonly options: SandboxHostOptions) {}
 
-  /** Serves one operation of `sandbox`. Throws `ProtocolError` for the protocol's failures. */
-  async serve<O extends Operation>(sandbox: string, operation: O, request: RequestOf<O>, ctx: AppContext): Promise<Answer<O>> {
+  /** Serves one operation of `scope`'s sandbox. Throws `ProtocolError` for the protocol's failures. */
+  async serve<O extends Operation>(scope: Scope, operation: O, request: RequestOf<O>, ctx: AppContext): Promise<Answer<O>> {
     if (this.closed) throw new ProtocolError("unavailable", "execution-serve is stopping");
-    const run = this.operations[operation] as (sandbox: string, request: RequestOf<O>, ctx: AppContext) => Promise<Answer<O>>;
-    return run(sandbox, request, ctx);
+    const run = this.operations[operation] as (scope: Scope, request: RequestOf<O>, ctx: AppContext) => Promise<Answer<O>>;
+    return run(scope, request, ctx);
   }
 
   /** Stops the commands nobody read for the lease, forgets the ended ones, closes idle readers. */
@@ -187,8 +201,8 @@ export class SandboxHost {
     await Promise.all(handles.map((handle) => handle.reader.close(BACKGROUND_CONTEXT).catch(() => {})));
   }
 
-  private env(sandbox: string, ctx: AppContext): Promise<ExecutionEnv> {
-    return this.options.resolve(sandbox, ctx);
+  private env(scope: Scope, ctx: AppContext): Promise<ExecutionEnv> {
+    return this.options.resolve(scope, ctx);
   }
 
   private count(sandbox: string, which: "commands" | "handles"): number {
@@ -303,35 +317,35 @@ export class SandboxHost {
   }
 
   /** Each operation, on the sandbox's environment or on what the sandbox opened. */
-  private readonly operations: { [O in Operation]: (sandbox: string, request: RequestOf<O>, ctx: AppContext) => Promise<Answer<O>> } = {
-    open: async (sandbox, _request, ctx) => {
-      const env = await this.env(sandbox, ctx);
+  private readonly operations: { [O in Operation]: (scope: Scope, request: RequestOf<O>, ctx: AppContext) => Promise<Answer<O>> } = {
+    open: async (scope, _request, ctx) => {
+      const env = await this.env(scope, ctx);
       const home = await env.absolutePath("~", toChord(ctx));
       return home.ok ? { ok: true, value: { cwd: env.cwd, home: home.value } } : { ok: false, error: fileFailure(home.error) };
     },
-    fileInfo: async (sandbox, { path }, ctx) => answer(await (await this.env(sandbox, ctx)).fileInfo(path, toChord(ctx)), wireInfo),
-    exists: async (sandbox, { path }, ctx) => answer(await (await this.env(sandbox, ctx)).exists(path, toChord(ctx)), (value) => value),
-    canonicalPath: async (sandbox, { path }, ctx) => answer(await (await this.env(sandbox, ctx)).canonicalPath(path, toChord(ctx)), (value) => value),
-    readTextFile: async (sandbox, { path }, ctx) => answer(await (await this.env(sandbox, ctx)).readTextFile(path, toChord(ctx)), (value) => value),
-    readTextLines: async (sandbox, { path, maxLines }, ctx) =>
-      answer(await (await this.env(sandbox, ctx)).readTextLines(path, maxLines === undefined ? undefined : { maxLines }, toChord(ctx)), (value) => value),
-    readBinaryFile: async (sandbox, { path }, ctx) => answer(await (await this.env(sandbox, ctx)).readBinaryFile(path, toChord(ctx)), (bytes) => ({ base64: toBase64(bytes) })),
-    writeFile: async (sandbox, { path, content }, ctx) => done(await (await this.env(sandbox, ctx)).writeFile(path, contentOf(content), toChord(ctx))),
-    appendFile: async (sandbox, { path, content }, ctx) => done(await (await this.env(sandbox, ctx)).appendFile(path, contentOf(content), toChord(ctx))),
-    truncateFile: async (sandbox, { path, size }, ctx) => done(await (await this.env(sandbox, ctx)).truncateFile(path, size, toChord(ctx))),
-    flushFile: async (sandbox, { path }, ctx) => done(await (await this.env(sandbox, ctx)).flushFile(path, toChord(ctx))),
-    renameFile: async (sandbox, { from, to }, ctx) => done(await (await this.env(sandbox, ctx)).renameFile(from, to, toChord(ctx))),
-    listDir: async (sandbox, { path }, ctx) => answer(await (await this.env(sandbox, ctx)).listDir(path, toChord(ctx)), (entries) => entries.map(wireInfo)),
-    createDir: async (sandbox, { path, recursive }, ctx) => done(await (await this.env(sandbox, ctx)).createDir(path, recursive === undefined ? undefined : { recursive }, toChord(ctx))),
-    remove: async (sandbox, { path, recursive, force }, ctx) =>
-      done(await (await this.env(sandbox, ctx)).remove(path, { ...(recursive !== undefined && { recursive }), ...(force !== undefined && { force }) }, toChord(ctx))),
-    createTempDir: async (sandbox, { prefix }, ctx) => answer(await (await this.env(sandbox, ctx)).createTempDir(prefix, toChord(ctx)), (value) => value),
-    createTempFile: async (sandbox, { prefix, suffix }, ctx) =>
-      answer(await (await this.env(sandbox, ctx)).createTempFile({ ...(prefix !== undefined && { prefix }), ...(suffix !== undefined && { suffix }) }, toChord(ctx)), (value) => value),
+    fileInfo: async (scope, { path }, ctx) => answer(await (await this.env(scope, ctx)).fileInfo(path, toChord(ctx)), wireInfo),
+    exists: async (scope, { path }, ctx) => answer(await (await this.env(scope, ctx)).exists(path, toChord(ctx)), (value) => value),
+    canonicalPath: async (scope, { path }, ctx) => answer(await (await this.env(scope, ctx)).canonicalPath(path, toChord(ctx)), (value) => value),
+    readTextFile: async (scope, { path }, ctx) => answer(await (await this.env(scope, ctx)).readTextFile(path, toChord(ctx)), (value) => value),
+    readTextLines: async (scope, { path, maxLines }, ctx) =>
+      answer(await (await this.env(scope, ctx)).readTextLines(path, maxLines === undefined ? undefined : { maxLines }, toChord(ctx)), (value) => value),
+    readBinaryFile: async (scope, { path }, ctx) => answer(await (await this.env(scope, ctx)).readBinaryFile(path, toChord(ctx)), (bytes) => ({ base64: toBase64(bytes) })),
+    writeFile: async (scope, { path, content }, ctx) => done(await (await this.env(scope, ctx)).writeFile(path, contentOf(content), toChord(ctx))),
+    appendFile: async (scope, { path, content }, ctx) => done(await (await this.env(scope, ctx)).appendFile(path, contentOf(content), toChord(ctx))),
+    truncateFile: async (scope, { path, size }, ctx) => done(await (await this.env(scope, ctx)).truncateFile(path, size, toChord(ctx))),
+    flushFile: async (scope, { path }, ctx) => done(await (await this.env(scope, ctx)).flushFile(path, toChord(ctx))),
+    renameFile: async (scope, { from, to }, ctx) => done(await (await this.env(scope, ctx)).renameFile(from, to, toChord(ctx))),
+    listDir: async (scope, { path }, ctx) => answer(await (await this.env(scope, ctx)).listDir(path, toChord(ctx)), (entries) => entries.map(wireInfo)),
+    createDir: async (scope, { path, recursive }, ctx) => done(await (await this.env(scope, ctx)).createDir(path, recursive === undefined ? undefined : { recursive }, toChord(ctx))),
+    remove: async (scope, { path, recursive, force }, ctx) =>
+      done(await (await this.env(scope, ctx)).remove(path, { ...(recursive !== undefined && { recursive }), ...(force !== undefined && { force }) }, toChord(ctx))),
+    createTempDir: async (scope, { prefix }, ctx) => answer(await (await this.env(scope, ctx)).createTempDir(prefix, toChord(ctx)), (value) => value),
+    createTempFile: async (scope, { prefix, suffix }, ctx) =>
+      answer(await (await this.env(scope, ctx)).createTempFile({ ...(prefix !== undefined && { prefix }), ...(suffix !== undefined && { suffix }) }, toChord(ctx)), (value) => value),
 
-    openBinaryReader: async (sandbox, { path, noFollow, prefetch }, ctx) => {
+    openBinaryReader: async (scope, { path, noFollow, prefetch }, ctx) => {
       const context = toChord(ctx);
-      const opened = await (await this.env(sandbox, ctx)).openBinaryReader(path, noFollow === undefined ? undefined : { noFollow }, context);
+      const opened = await (await this.env(scope, ctx)).openBinaryReader(path, noFollow === undefined ? undefined : { noFollow }, context);
       if (!opened.ok) return { ok: false, error: fileFailure(opened.error) };
       const reader = opened.value;
       const info = await reader.info(context);
@@ -346,41 +360,41 @@ export class SandboxHost {
         if (!bytes.ok) return { ok: false, error: fileFailure(bytes.error) };
         return { ok: true, value: { info: { ...wireInfo(info.value), size: bytes.value.length }, base64: toBase64(bytes.value) } };
       }
-      return { ok: true, value: { info: wireInfo(info.value), handle: this.keep({ kind: "reader", sandbox, reader, used: this.options.now() }) } };
+      return { ok: true, value: { info: wireInfo(info.value), handle: this.keep({ kind: "reader", sandbox: scope.sandbox, reader, used: this.options.now() }) } };
     },
-    readerInfo: async (sandbox, { handle }, ctx) => answer(await this.handle(sandbox, handle, "reader").reader.info(toChord(ctx)), wireInfo),
-    readerRead: async (sandbox, { handle, offset, length }, ctx) =>
-      answer(await this.handle(sandbox, handle, "reader").reader.read(offset, length, toChord(ctx)), (bytes) => ({ base64: toBase64(bytes) })),
-    readerScan: async (sandbox, { handle, startLine, endLine }, ctx) =>
-      answer(await this.handle(sandbox, handle, "reader").reader.scanLines({ startLine, ...(endLine !== undefined && { endLine }) }, toChord(ctx)), (scan) => ({ ...scan })),
-    readerClose: async (sandbox, { handle }, ctx) => {
-      const reader = this.handle(sandbox, handle, "reader");
+    readerInfo: async (scope, { handle }, ctx) => answer(await this.handle(scope.sandbox, handle, "reader").reader.info(toChord(ctx)), wireInfo),
+    readerRead: async (scope, { handle, offset, length }, ctx) =>
+      answer(await this.handle(scope.sandbox, handle, "reader").reader.read(offset, length, toChord(ctx)), (bytes) => ({ base64: toBase64(bytes) })),
+    readerScan: async (scope, { handle, startLine, endLine }, ctx) =>
+      answer(await this.handle(scope.sandbox, handle, "reader").reader.scanLines({ startLine, ...(endLine !== undefined && { endLine }) }, toChord(ctx)), (scan) => ({ ...scan })),
+    readerClose: async (scope, { handle }, ctx) => {
+      const reader = this.handle(scope.sandbox, handle, "reader");
       this.handles.delete(handle);
       await reader.reader.close(toChord(ctx));
       return { ok: true, value: null };
     },
-    openDirReader: async (sandbox, { path }, ctx) => {
-      const opened = await (await this.env(sandbox, ctx)).openDirReader(path, toChord(ctx));
+    openDirReader: async (scope, { path }, ctx) => {
+      const opened = await (await this.env(scope, ctx)).openDirReader(path, toChord(ctx));
       if (!opened.ok) return { ok: false, error: fileFailure(opened.error) };
-      return { ok: true, value: { handle: this.keep({ kind: "dir", sandbox, reader: opened.value, used: this.options.now() }) } };
+      return { ok: true, value: { handle: this.keep({ kind: "dir", sandbox: scope.sandbox, reader: opened.value, used: this.options.now() }) } };
     },
-    dirNext: async (sandbox, { handle, maxEntries }, ctx) =>
-      answer(await this.handle(sandbox, handle, "dir").reader.next(maxEntries, toChord(ctx)), (page) => ({ entries: page.entries.map(wireInfo), done: page.done })),
-    dirClose: async (sandbox, { handle }, ctx) => {
-      const reader = this.handle(sandbox, handle, "dir");
+    dirNext: async (scope, { handle, maxEntries }, ctx) =>
+      answer(await this.handle(scope.sandbox, handle, "dir").reader.next(maxEntries, toChord(ctx)), (page) => ({ entries: page.entries.map(wireInfo), done: page.done })),
+    dirClose: async (scope, { handle }, ctx) => {
+      const reader = this.handle(scope.sandbox, handle, "dir");
       this.handles.delete(handle);
       await reader.reader.close(toChord(ctx));
       return { ok: true, value: null };
     },
 
-    execStart: async (sandbox, request, ctx) => {
-      const env = await this.env(sandbox, ctx);
-      const command = this.start(sandbox, env, request);
+    execStart: async (scope, request, ctx) => {
+      const env = await this.env(scope, ctx);
+      const command = this.start(scope.sandbox, env, request);
       return { ok: true, value: await this.state(command, 0, request.wait, request.linger, ctx) };
     },
-    execRead: async (sandbox, { command, cursor, wait, linger }, ctx) => ({ ok: true, value: await this.state(this.command(sandbox, command), cursor, wait, linger, ctx) }),
-    execKill: async (sandbox, { command: id, cursor, wait }, ctx) => {
-      const command = this.command(sandbox, id);
+    execRead: async (scope, { command, cursor, wait, linger }, ctx) => ({ ok: true, value: await this.state(this.command(scope.sandbox, command), cursor, wait, linger, ctx) }),
+    execKill: async (scope, { command: id, cursor, wait }, ctx) => {
+      const command = this.command(scope.sandbox, id);
       command.stop.abort();
       // A stop never fails on its cursor: one acknowledged already reads from what is kept.
       return { ok: true, value: await this.state(command, command.log.valid(cursor) ? cursor : command.log.acknowledged, wait, wait, ctx) };

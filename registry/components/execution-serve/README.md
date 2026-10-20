@@ -43,9 +43,13 @@ export default defineApp({
 });
 ```
 
-For a trial on one machine, `execution-local` and `workspace-local` take execution-gondolin's place
-(each sandbox is then `<execution-local root>/<workspace-local root>/<sandbox id>`, and commands run
-as the server's user: **not a sandbox**, see their READMEs).
+For a trial on one machine, `execution-local` and `workspace-local` take execution-gondolin's place.
+workspace-local keys its directories by the agent alone, so each agent then works in
+`<execution-local root>/<workspace-local root>/<agent>`, shared by every conversation and client of
+that agent (as on a server); an agentless sandbox's agent is `_<sandbox id>`, a directory of its own
+for a provider that takes it (workspace-local's agent grammar refuses the underscore today, so a
+client's `execution` alone does not resolve behind it: `503`). Commands run as the server's user:
+**not a sandbox**, see their READMEs.
 
 Deploy it like any server project (`pikit up`: deployment-docker publishes the port on
 `127.0.0.1` only). Clients require `https://`, so put TLS in front: `expose-cloudflare-tunnel` (no
@@ -62,17 +66,22 @@ open port), or a reverse proxy. The clients' config is then
 - **The token first.** `Authorization: Bearer <PIKIT_SANDBOX_TOKEN>`, compared in constant time as
   SHA-256 digests (as admin-auth-token does); only the digest is kept. Anything else is `401`
   before the URL's sandbox or the body are looked at.
-- **A sandbox is `workspace.resolve`** of the `ConversationRef` built from its id
-  (`sandboxConversation`, `host.ts`), every field derived from it so a provider keyed by any of them
-  gives each sandbox its own environment:
+- **The agent.** A request may name the agent its sandbox is for, `Pikit-Agent: <agent>` (an
+  agent's name, `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 100 characters): execution-remote sends it
+  for a conversation's sandbox, never for `execution`'s own. A malformed one is `400
+  invalid_request` before any sandbox is asked for. The agent is the client's word: the token holder
+  is trusted to name it (a logical boundary, not a wall against the client's own code).
+- **A sandbox is `workspace.resolve`** of the `ConversationRef` built from its id and the agent
+  (`sandboxConversation`, `host.ts`):
 
-  | Field | Value | Who keys by it |
-  |---|---|---|
-  | `conversationId` | `remote-<id>` | execution-gondolin, alone (`key`, `agent` and `channel` do not choose its sandbox) |
-  | `agent` | `<id>` | workspace-local (a directory per agent); execution-gondolin names the VM by it |
-  | `key` | `execution-serve:<id>` | |
+  | Field | With `Pikit-Agent` | Without | Who keys by it |
+  |---|---|---|---|
+  | `conversationId` | `remote-<id>` | `remote-<id>` | execution-gondolin, with `agent` (a VM and a directory each) |
+  | `agent` | the header's agent | `_<id>` | execution-gondolin (and chooses the agent's machine by it); workspace-local (a directory per agent) |
+  | `key` | `execution-serve:<id>` | `execution-serve:<id>` | |
 
-  `remote-` keeps a sandbox apart from the host App's own conversations, whose ids its runtime
+  `_<id>` is outside the agent grammar: an agentless sandbox never matches a machine profile (it gets
+  the base) and still has an `agent` of its own. `remote-` keeps a sandbox apart from the host App's own conversations, whose ids its runtime
   numbers (`1`, `2` and on): a remote id can never be one of them. `conversationId` is held to
   `^[A-Za-z0-9_-]{1,128}$` (execution-gondolin's rule, a safe directory name): an id that cannot
   make one is `400 invalid_request` at the door, never cleaned up into another (the protocol's
@@ -93,7 +102,8 @@ open port), or a reverse proxy. The clients' config is then
   (pi-durable's `ShellOutputSkip`, counted exactly). `timeout` and `spill` are the sandbox
   environment's own (the spill file is in the sandbox).
 - **Handles are their sandbox's.** A reader or a command of one sandbox, asked for from another, is
-  `404` as one that never existed.
+  `404` as one that never existed. They are scoped by the sandbox id (the client's ids already carry
+  the agent).
 - **The lease.** A command nobody reads for `leaseSeconds` is stopped (its result says so), then
   forgotten; a reader unused as long is closed. A client that went away (a Durable Object evicted in
   the middle of a command) leaves nothing running for long.
@@ -102,7 +112,8 @@ open port), or a reverse proxy. The clients' config is then
 
 - **Isolation is the provider's.** This layer routes each request to its sandbox's environment and
   keeps handles apart; it does not confine paths (a VM's root is the wall, and a shell would step
-  over any check made here). Behind workspace-local, one sandbox can read another's files.
+  over any check made here). Behind workspace-local, one sandbox can read another's files, and two
+  sandboxes of one agent are one directory.
 - **Credentials (SPEC C7).** The token authenticates the client to this host and goes no further: no
   variable, file or command of a sandbox receives it. Nothing secret arrives through the protocol (a
   command's variables are the calling tool's). A sandbox that needs a credential (a model key, a git
@@ -133,9 +144,11 @@ pi-durable walks directories itself without `listFiles`. No network policy here:
 ## Tests
 
 Copied with the component (`execution-serve.test.ts`), over a double of a `workspace` provider keyed
-as execution-gondolin's is (a directory per `conversationId` alone, `^[A-Za-z0-9_-]{1,128}$` or it
-throws, over pi-durable's local environment) and the route itself: what setup declares, the ref a
-sandbox is resolved as (`remote-<id>`, the longest id included),
+as execution-gondolin's is (a directory per `conversationId` and `agent`, each
+`^[A-Za-z0-9_-]{1,128}$` or it throws, over pi-durable's local environment) and the route itself:
+what setup declares, the ref a sandbox is resolved as (`remote-<id>`, the longest id included; the
+header's agent, `_<id>` without one), two agents' sandboxes apart, a malformed `Pikit-Agent` (`400`,
+nothing resolved; the longest name taken),
 the lifecycle suite, the token (missing, another, too short, another scheme: `401` before anything is
 read), sandbox ids that are not one (`..`, encoded traversals, capitals, too long, extra segments),
 paths (relative refused; an absolute one reaches only the URL's sandbox), readers and commands of
@@ -145,6 +158,7 @@ clock), stopping the host, and the output log (every chunk, a window's skip coun
 output never folded).
 
 The registry also runs the protocol end to end (`execution-remote/app.test.ts`): a real host
-(server-bun, this component, workspace-local over execution-local) on `Bun.serve`, with
-execution-remote passing pi-durable's `ExecutionEnv` suite through it, and from a Durable Object in
-the workerd lane (`tests/workerd/test/execution-remote.workerd.ts`).
+(server-bun, this component, a provider keyed as execution-gondolin's over execution-local, and
+workspace-local for its own case) on `Bun.serve`, with execution-remote passing pi-durable's
+`ExecutionEnv` suite through it, and from a Durable Object in the workerd lane
+(`tests/workerd/test/execution-remote.workerd.ts`), two agents of one object in two sandboxes.

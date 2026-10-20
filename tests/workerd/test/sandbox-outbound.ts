@@ -2,7 +2,7 @@
  * The sandbox host execution-remote's tests reach: `vitest.config.ts` sends this outbound service
  * every request to `SANDBOX_HOST`, and it forwards them to a real execution-serve, started once, on
  * the first request, as its own Bun process (`registry/components/execution-remote/sandbox-host.test-support.ts`:
- * server-bun, execution-serve, workspace-local over execution-local in a temporary directory), on a
+ * server-bun, execution-serve, a provider keyed as execution-gondolin's over execution-local in a temporary directory), on a
  * free port of 127.0.0.1. So the client runs in a Durable Object, its requests go through workerd's
  * real `fetch`, and the commands are real processes. No network: the host listens on loopback only.
  *

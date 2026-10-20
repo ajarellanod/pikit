@@ -10,6 +10,7 @@
  *   `absolutePath` and `joinPath` cost no request. Before it, reading `cwd` throws: `workspace`
  *   resolves an environment opened already.
  * - **`id`** is `execution-remote:<endpoint>#<sandbox>`: each sandbox is its own file namespace.
+ * - **`agent`**, when given, goes with every request (`Pikit-Agent`): the host resolves the sandbox for it.
  * - **Readers.** `openBinaryReader` brings a file of up to 1 MiB whole in its answer and serves it from
  *   memory (the file as it was opened, through a rename, as Node's does); a larger one stays open on
  *   the host behind a handle (`readerRead`, `readerScan`, `readerInfo`, `readerClose`). Directory
@@ -93,6 +94,8 @@ export interface RemoteEnvOptions {
   transport: Transport;
   /** The sandbox's id; `undefined` while it is not known (before start). */
   sandbox(): string | undefined;
+  /** The agent a conversation's sandbox is for, sent with every request (`Pikit-Agent`); none for `execution`'s own. */
+  agent?: string;
 }
 
 type Call = <O extends Operation>(operation: O, request: RequestOf<O>, signal: AbortSignal | undefined, timeoutMs?: number) => Promise<CallResult<O>>;
@@ -372,7 +375,7 @@ export class RemoteExecutionEnv implements ExecutionEnv {
   private call: Call = (operation, request, signal, timeoutMs = REQUEST_TIMEOUT_MS) => {
     const sandbox = this.options.sandbox();
     if (sandbox === undefined) return Promise.resolve({ ok: false, failure: { kind: "protocol", status: 503, code: "unavailable", message: "execution-remote is not running" } });
-    return this.options.transport.call(sandbox, operation, request, { signal, timeoutMs });
+    return this.options.transport.call(sandbox, operation, request, { signal, timeoutMs, agent: this.options.agent });
   };
 
   private abs(path: string): string {
