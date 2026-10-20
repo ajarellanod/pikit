@@ -143,7 +143,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/views/<view>/index.tsx` | one view each: its pages and when it shows (below) |
 | `src/components/bui/` | Beautiful UI's primitives (the sidebar, a row's or a header's "…" menu `ActionsMenu`, the composer with its "+", "/" and assistant menus, thinking, tool chips, context cards, pills; an operator's page, records tables, filter chips, a code block), fed by real data |
 | `src/components/ui/` | shadcn/ui primitives, copied and yours (`shadcn add` puts more here), in the same tokens |
-| `src/components/pikit/` | pieces the views share: a transcript (`turnsOf`, `Reply`, `UserBubble`, `MessageView`), an error, the sign-in |
+| `src/components/pikit/` | pieces the views share: a transcript (`turnsOf`, `Reply`, `UserBubble`, `MessageView`), an image opened bigger (`image-viewer`: `ImageViewer`, `ViewableImage`), an error, the sign-in |
 | `src/components/pikit/conversation.tsx`, `context-panel.tsx`, `tab-bar.tsx` | a conversation's view over a `ConversationSource` (its transcript, live events, send, stop: `ConversationView`, `useLive`, `useTranscript`, `useSentMessages`), the Context panel, the tabs: by props only, shared with channel-web's chat page |
 | `src/components/pikit/chat-actions.tsx` | a conversation's menu (Rename, Archive or Restore, Delete) and its dialogs, for the sidebar's rows, the Conversations rows and the conversation's header |
 | `src/components/pikit/party.tsx` | who a conversation is with (`ApiConversation.party`, else made from its key): `PartyChip`, an info button in its header (who it is in its label and tooltip), opening its Details (the channel, the name, the detail, the ids, each with a copy button, a link to where its channel shows them), and `ChannelIcon` before each row of the sidebar and the Conversations page; `CHANNELS` maps a channel's kind to its icon and label |
@@ -171,7 +171,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 `src/lib/` is two shadcn items: `@pikit/lib-ui` (`activity`, `format`, `messages`, `names`, `sounds`,
 `sources`, `theme`, `transcript`: no admin API) and `@pikit/admin-client` (`api`, `admin-api`, `chats`,
 `composition`, `delivery`, `delivery-feed`, `settings`, `views`, `router`, `shell`). Beautiful UI's primitives and the pieces `message`,
-`error-note`, `markdown`, `conversation`, `context-panel` and `tab-bar` import only `lib-ui` and take
+`error-note`, `image-viewer`, `markdown`, `conversation`, `context-panel` and `tab-bar` import only `lib-ui` and take
 their data by props, so another UI project can carry them.
 
 ## Add a view

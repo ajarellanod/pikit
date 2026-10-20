@@ -161,7 +161,7 @@ component's view in it.
 | `@pikit/lib-ui` | `activity`, `format`, `messages`, `names`, `sounds`, `sources`, `theme`, `transcript` (and shadcn's own `utils`, not in the item): no admin API | the pieces that use a helper (`bui`, `message`, `conversation`), the views |
 | `@pikit/admin-client` | `api`, `admin-api`, `chats`, `composition`, `delivery`, `delivery-feed`, `settings`, `views`, `router`, `shell`: the admin API's client and the shell | the views, the Settings dialog and its sections |
 
-The shared pieces (`bui`, `message`, `error-note`, `markdown`, `markdown-engine`, `conversation`,
+The shared pieces (`bui`, `message`, `error-note`, `image-viewer`, `markdown`, `markdown-engine`, `conversation`,
 `context-panel`, `tab-bar`, with `lib-ui`) take everything by props and never fetch, so a UI project
 other than the dashboard (channel-web's chat page) carries them without the admin client. A
 conversation's view (`ConversationView`, features/completed/chat-parity.md) reads through a

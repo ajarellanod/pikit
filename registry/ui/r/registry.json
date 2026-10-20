@@ -46,6 +46,12 @@
       "description": "pikit's error-note piece of the dashboard."
     },
     {
+      "name": "image-viewer",
+      "type": "registry:file",
+      "title": "image-viewer",
+      "description": "pikit's image-viewer piece of the dashboard."
+    },
+    {
       "name": "markdown-engine",
       "type": "registry:file",
       "title": "markdown-engine",

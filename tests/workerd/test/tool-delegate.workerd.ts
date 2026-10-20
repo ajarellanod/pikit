@@ -31,8 +31,9 @@ type Result = { requestId: string; text: string | undefined; tools: string[]; pa
 
 /** The question the helper's `ask` asks. */
 const QUESTION = { type: "question", fallback: "Go ahead? Answer yes or no." } as unknown as MessagePart;
-/** The origin each call of the helper's `ask` read from its conversation. */
+/** The origin each call of the helper's `ask` read from its conversation, and its key. */
 const origins: (ConversationOrigin | undefined)[] = [];
+const keys: (string | undefined)[] = [];
 
 /** The text of the tool results a run added. */
 const toolResults = (messages: readonly unknown[]): string[] =>
@@ -57,6 +58,7 @@ function agents(held: { released: Promise<void> }) {
     replay: "safe",
     execute: async (_args, _api, context) => {
       origins.push(context.value(CONVERSATION)?.origin);
+      keys.push(context.value(CONVERSATION)?.key);
       return withParts({ output: [{ type: "text", text: "Asked." }], control: { terminate: true } }, [QUESTION]);
     },
   }) as unknown as ToolRegistration;
@@ -110,9 +112,9 @@ async function workerApp() {
   };
 }
 
-function compose(results: Result[], held: { released: Promise<void> }) {
+function compose(results: Result[], held: { released: Promise<void> }, from?: string[]) {
   composeObjects([storageDo, actorsDo, ...agents(held), toolDelegate, runtimePi, channelActor(results)], {
-    "tool-delegate": { agents: [{ name: "helper", description: "Helps." }] },
+    "tool-delegate": { agents: [{ name: "helper", description: "Helps.", ...(from !== undefined && { from }) }] },
   });
 }
 
@@ -177,6 +179,7 @@ it("the assistant lists the task it did not wait for and cancels it; it hears on
 it("a background task's child works for the assistant's conversation (its origin), and its question comes back with the assistant's answer", async () => {
   const results: Result[] = [];
   origins.length = 0;
+  keys.length = 0;
   compose(results, { released: Promise.resolve() });
   const worker = await workerApp();
   const key = `test:${crypto.randomUUID()}`;
@@ -184,7 +187,24 @@ it("a background task's child works for the assistant's conversation (its origin
     await worker.send(key, { id: "m1", text: 'call: delegate {"agent":"helper","task":"call: ask {}","wait":false}' });
     await vi.waitFor(() => expect(results.map((each) => each.requestId.split(":")[0])).toEqual(["m1", "delegate-result"]), { timeout: 10_000 });
     expect(origins).toEqual([expect.objectContaining({ key, agent: "assistant" })]);
+    // Its key carries the agents above it: the assistant.
+    expect(keys).toEqual([expect.stringMatching(/^delegate:1:assistant:/)]);
     expect(results[1]?.parts).toEqual([QUESTION]);
+  } finally {
+    await worker.stop();
+  }
+});
+
+it("a helper that takes tasks only from another agent refuses the assistant's, and never runs", async () => {
+  const results: Result[] = [];
+  origins.length = 0;
+  compose(results, { released: Promise.resolve() }, ["helper"]);
+  const worker = await workerApp();
+  try {
+    await worker.send(`test:${crypto.randomUUID()}`, { id: "m1", text: 'call: delegate {"agent":"helper","task":"call: ask {}"}' });
+    await vi.waitFor(() => expect(results.map((each) => each.requestId)).toEqual(["m1"]), { timeout: 10_000 });
+    expect(results[0]?.tools[0]).toContain('the agent "helper" takes tasks only from helper; this conversation (assistant) may not delegate to it');
+    expect(origins).toEqual([]);
   } finally {
     await worker.stop();
   }

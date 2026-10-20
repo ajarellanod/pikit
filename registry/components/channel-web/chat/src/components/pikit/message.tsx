@@ -7,7 +7,8 @@
  * (instructions, tools) are folded away.
  *
  * `turnsOf` builds that from the transcript and what is live (the answer being written, the tools
- * running); `UserBubble` and `Reply` show it (a person's images in the bubble). `MessageView` shows a
+ * running); `UserBubble` and `Reply` show it (a person's images in the bubble, each opening bigger in
+ * `ImageViewer`). `MessageView` shows a
  * single message the same way.
  */
 
@@ -16,6 +17,7 @@ import { Badge } from "@/components/bui/Badge";
 import LoadingState from "@/components/bui/LoadingState";
 import ThinkingState from "@/components/bui/ThinkingState";
 import ToolChips, { type ToolStatus, type ToolStep } from "@/components/bui/ToolChips";
+import { ImageViewer, ViewableImage } from "@/components/pikit/image-viewer";
 import { Markdown } from "@/components/pikit/markdown";
 import { type AssistantMessage, type Image, imageSrc, type Message, OPERATOR_NOTE, type RunningTool, type Text, type ToolResultMessage, type UserMessage } from "@/lib/messages";
 
@@ -249,14 +251,17 @@ const RISE_MS = 220;
 export function UserBubble({ message, risen = 0 }: { message: UserMessage; risen?: number }) {
   const { text, images } = userText(message);
   const [played] = useState(Math.max(0, risen));
+  const [viewing, setViewing] = useState<number>();
   const rise = played < RISE_MS;
+  const viewed = images.map((image, i) => ({ src: imageSrc(image), alt: `Image ${i + 1}` }));
   return (
     <div className={`flex flex-col items-end gap-1 pl-10 sm:pl-24 ${rise ? "rise-in" : ""}`} style={rise && played > 0 ? { animationDelay: `-${played}ms` } : undefined}>
       {images.length > 0 && (
         <div className="flex max-w-full flex-wrap justify-end gap-2">
-          {images.map((image, i) => (
-            <img key={i} className="max-h-56 max-w-[min(100%,320px)] rounded-xl object-contain shadow-hairline" alt={`Image ${i + 1}`} src={imageSrc(image)} loading="lazy" />
+          {viewed.map((image, i) => (
+            <ViewableImage key={i} image={image} onOpen={() => setViewing(i)} frameClassName="max-w-[min(100%,320px)] rounded-xl" className="max-h-56 max-w-full rounded-xl object-contain shadow-hairline" />
           ))}
+          <ImageViewer images={viewed} index={viewing} onIndex={setViewing} onClose={() => setViewing(undefined)} />
         </div>
       )}
       {text !== "" && (

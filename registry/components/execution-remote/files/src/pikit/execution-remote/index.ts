@@ -8,7 +8,7 @@
  * conversation's sandbox is its agent's (`ConversationRef.agent`): every request to it carries
  * `Pikit-Agent: <agent>`, and two agents never share one, also when one delegates to the other. A
  * delegated child of the same agent shares its parent's only in a Durable Object (it lives in the
- * parent's object); on a server its key is its own (`delegate:<depth>:<task>`), so is its sandbox.
+ * parent's object); on a server its key is its own (`delegate:<depth>:<chain>:<task>`), so is its sandbox.
  * The agent is an agent's name of at most `MAX_AGENT_LENGTH` (100) characters, this component's own
  * bound (`defineAgent` has none): a longer one is refused at `resolve`, saying so (the host answers
  * `400` too). Which sandbox (its id, `protocol.ts`'s `SANDBOX_ID`):

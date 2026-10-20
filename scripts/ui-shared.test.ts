@@ -26,6 +26,7 @@ function copy(): string {
 test("no shared piece reaches the admin client, or any file of the dashboard that is not shared", () => {
   expect(SHARED_UI_FILES).toContain("src/components/pikit/message.tsx");
   expect(SHARED_UI_FILES).toContain("src/components/pikit/error-note.tsx");
+  expect(SHARED_UI_FILES).toContain("src/components/pikit/image-viewer.tsx");
   expect(SHARED_UI_FILES).toContain("src/components/bui/PromptBar.tsx");
   expect(SHARED_UI_FILES).toContain("src/lib/messages.ts");
   // The conversation's view, its live state, its Context panel and the tabs (features/completed/chat-parity.md).
