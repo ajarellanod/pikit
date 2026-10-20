@@ -35,8 +35,12 @@ export interface DeploymentModule {
   logs(args: { cwd: string; follow?: boolean; tail?: number }): Promise<unknown>;
   /** A `DeploymentStatus`. */
   status(args: { cwd: string }): Promise<unknown>;
-  /** `pikit dev`: runs the app here until Ctrl-C; resolves with its exit code. */
-  dev?(args: { cwd: string }): Promise<number>;
+  /**
+   * `pikit dev`: runs the app here until Ctrl-C (which reaches its processes through the terminal) or
+   * until `signal` aborts (a SIGTERM to the CLI): it stops them and cleans up as for Ctrl-C; resolves
+   * with its exit code.
+   */
+  dev?(args: { cwd: string; signal: AbortSignal }): Promise<number>;
   /** `AppExec`, where the app runs. */
   exec?(args: { cwd: string } & Parameters<AppExec>[0]): Promise<number>;
   /**

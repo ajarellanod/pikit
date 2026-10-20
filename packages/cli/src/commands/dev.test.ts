@@ -166,3 +166,49 @@ test("an agent on a model that needs no credentials (provider-faux) starts; an i
   expect(started.code).toBe(0);
   expect(existsSync(join(dir, "dev-ran"))).toBe(true);
 }, 60_000);
+
+/** The pids of the fake deployment's children still alive when a test ends (a failed one). */
+const children: number[] = [];
+afterAll(() => children.forEach((pid) => (alive(pid) ? process.kill(pid, "SIGKILL") : undefined)));
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("a SIGTERM to pikit dev reaches the deployment's own dev: its command stops, it cleans up, pikit exits with its code", async () => {
+  const dir = project("faux/echo", true);
+  // As deployment-celld's: writes a secrets file, runs a command until `signal` aborts, deletes the file.
+  writeFileSync(
+    join(dir, "src", "pikit", "deployment-fake", "index.ts"),
+    `import { rmSync, writeFileSync } from "node:fs";
+export async function dev({ signal }: { signal: AbortSignal }): Promise<number> {
+  writeFileSync(".dev.vars", "SECRET=1\\n");
+  const child = Bun.spawn([process.execPath, "-e", 'await Bun.write("child.pid", String(process.pid)); process.on("SIGTERM", () => process.exit(7)); setInterval(() => {}, 1000);'], { stdio: ["ignore", "inherit", "inherit"] });
+  signal.addEventListener("abort", () => child.kill("SIGTERM"));
+  try {
+    return await child.exited;
+  } finally {
+    rmSync(".dev.vars", { force: true });
+  }
+}
+`,
+  );
+  const env = { ...process.env };
+  delete env[KEY];
+  const cli = Bun.spawn([process.execPath, MAIN, "dev"], { cwd: dir, env, stdin: "ignore", stdout: "ignore", stderr: "inherit" });
+  const pidFile = join(dir, "child.pid");
+  for (let i = 0; i < 300 && !existsSync(pidFile); i++) await Bun.sleep(50);
+  const pid = Number(await Bun.file(pidFile).text());
+  children.push(pid);
+  expect(existsSync(join(dir, ".dev.vars"))).toBe(true);
+
+  cli.kill("SIGTERM");
+  expect(await cli.exited).toBe(7);
+  expect(existsSync(join(dir, ".dev.vars"))).toBe(false);
+  expect(alive(pid)).toBe(false);
+}, 60_000);

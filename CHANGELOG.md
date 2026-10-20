@@ -71,6 +71,13 @@ line names its area.
 - `ProposalsRemote`'s `path` variant has `serve(request)`, with its suite
   `createProposalsServeConformance`.
 
+### CLI (`pikit`)
+
+- `pikit dev` stops a deployment's own `dev` on SIGTERM as on Ctrl-C: it aborts the `signal` the
+  deployment's `dev({ cwd, signal })` now gets, so `celld dev` or `wrangler dev` stops and
+  deployment-celld deletes `.dev.vars` and its derived config. Before, the CLI exited alone, leaving
+  the command running and the secrets file on disk.
+
 ## 0.0.1 (2026-10-19)
 
 The first release: a git tag and a GitHub release, not npm (each project carries the kit in its

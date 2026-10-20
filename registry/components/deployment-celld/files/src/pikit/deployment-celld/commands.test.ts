@@ -246,6 +246,19 @@ test("dev runs celld dev on the derived config, with no secret in it: .env's (no
   await expect(dev({ cwd: dir, env: f.env({ PIKIT_CELLD_BIN: join(f.dir, "none") }) })).rejects.toThrow(/celld is not installed here/);
 });
 
+test("dev stops celld when its signal aborts (a SIGTERM to pikit dev), and deletes the derived config and .dev.vars", async () => {
+  const f = fleet();
+  const dir = project({ env: "TELEGRAM_BOT_TOKEN=123:abc\n" });
+  const stop = new AbortController();
+  const running = dev({ cwd: dir, env: f.env({ FAKE_DEV_UNTIL_SIGTERM: "1", FAKE_DEV_CODE: "5" }), signal: stop.signal });
+  for (let i = 0; i < 200 && !f.calls().some((c) => c.args[0] === "dev"); i++) await Bun.sleep(25);
+  expect(existsSync(join(dir, DEV_VARS))).toBe(true);
+  stop.abort();
+  expect(await running).toBe(5);
+  expect(existsSync(join(dir, GENERATED_CONFIG))).toBe(false);
+  expect(existsSync(join(dir, DEV_VARS))).toBe(false);
+});
+
 test("dev writes .dev.vars readable by its owner only", async () => {
   const f = fleet();
   const dir = project();
