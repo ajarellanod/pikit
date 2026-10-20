@@ -36,7 +36,9 @@ before doing it. The steps and settings are at the top of the script.
   MCP tools, health...). Full presets include the dashboard; several agents adds `agents-folders`.
   It sets that up, logs in to the
   model and starts it. Ctrl-C stops it; `pikit new` continues later. `PIKIT_NO_WIZARD=1` skips it. It ends
-  with the lines this shell still needs (`PATH`, `newgrp docker`).
+  with the lines this shell still needs (`PATH`, `newgrp docker`). The wizard reads from the actual
+  terminal device (such as `/dev/ttys004` or `/dev/pts/0`), not the installer's pipe or `/dev/tty`:
+  Bun 1.4.2 on macOS otherwise draws the name prompt but never receives keystrokes.
 
 ## Cloudflare in one line
 
@@ -90,10 +92,12 @@ compatibility with the one before.
   `PIKIT_BUN_VERSION`) with stand-ins for `bun`, `curl` and `git`, without network, and the
   Cloudflare path (`--durable`: no Docker, Node.js checked, the `pikit new` it hands over to) and the
   ref it installs (the highest release tag, else `main`; `PIKIT_REF` first) with stand-ins for `bun`,
-  `git` and `node`; with
-  `PIKIT_INSTALLER_TEST=1`, a real install of this repository's committed `HEAD` into a temporary
-  `HOME`, twice, then `pikit --version`. CI (`.github/workflows/ci.yml`) runs the first part on every
-  pull request; the nightly workflow (`.github/workflows/nightly.yml`) runs it with
+  `git` and `node`. Real pseudo-terminal tests feed the installer through a pipe and check the real
+  wizard accepts its name and Ctrl-C on the server, Cloudflare and `sg docker` paths, and that
+  `PIKIT_NO_WIZARD=1` skips it. These use fake installation commands: no network, sudo or deploy.
+  With `PIKIT_INSTALLER_TEST=1`, a real install of this repository's committed `HEAD` into a temporary
+  `HOME`, twice, then `pikit --version`. CI (`.github/workflows/ci.yml`) runs the first part on Linux
+  and macOS on every pull request; the nightly workflow (`.github/workflows/nightly.yml`) runs it with
   `PIKIT_INSTALLER_TEST=1`.
 - On a clean Debian, by hand (Docker; the repository mounted read-only, the container removed):
 

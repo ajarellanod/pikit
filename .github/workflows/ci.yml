@@ -33,6 +33,18 @@ jobs:
       - run: bun run lint
       - run: bun run registry validate
 
+  # Bun's /dev/tty input regression is macOS-specific: Linux alone cannot catch it.
+  installer-macos:
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun test installer/install.test.ts
+
   # `pikit new` / `configure` / `dev` as a user runs them, for the http and Telegram presets. They need
   # the network (`bun install`), not Docker (`pikit up` runs only with PIKIT_E2E_DOCKER=1, nightly) and
   # not a secret: the model is provider-faux or a dummy key, Telegram is the channel's local fake Bot API.

@@ -283,10 +283,15 @@ else
 fi
 if [ -t 1 ] && (: </dev/tty) 2>/dev/null && [ -z "${PIKIT_NO_WIZARD:-}" ]; then
   say "installed. Now your first agent, step by step:"
+  # Bun on macOS sees /dev/tty as a TTY but receives no input from it. Open the actual
+  # device instead. Save stdout first: command substitution gives tty a pipe for stdout.
+  exec 3<&1
+  WIZARD_TTY="$(tty <&3)"
+  exec 3<&-
   if [ -n "$NEWGRP" ] && has sg; then
-    sg docker -c "exec '$BIN_DIR/pikit' new" </dev/tty || true
+    sg docker -c "exec '$BIN_DIR/pikit' new" <"$WIZARD_TTY" || true
   else
-    "$BIN_DIR/pikit" "$@" </dev/tty || true
+    "$BIN_DIR/pikit" "$@" <"$WIZARD_TTY" || true
   fi
   printf '\n'
 fi

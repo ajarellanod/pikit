@@ -1,5 +1,6 @@
 # Maintenance lessons
 
+- Bun 1.4.2 on macOS identifies stdin redirected from `/dev/tty` as a terminal but never reads its keystrokes. In `curl | sh` installers, reopen the actual terminal device for Bun. Obtain it with `tty` on a saved stdout descriptor: inside command substitution, stdout is already a pipe, so `$(tty <&1)` does not find the terminal. Test the installer through a pipe in a real PTY, not only the CLI directly.
 - Preset loading lives in `packages/cli/src/project/registry-source.ts`; validation is in `packages/cli/src/registry/commands.ts`. There is no `registry/presets.ts` or `src/registry-source.ts`: locate files before reading them.
 - When the user asks for no agents, finish the work in the main session; do not launch or resume subagents. Stop any outstanding delegated edits before taking over their files.
 - Preset integration tests that repeatedly validate the full registry (all channel/feature combinations and dashboard providers) need an explicit timeout, not Bun's 5-second unit-test default.

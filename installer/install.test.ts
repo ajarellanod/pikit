@@ -2,7 +2,9 @@
  * The installer. Always: it is POSIX sh that parses, shellcheck finds nothing when it
  * is installed, and it chooses Bun by its pin and supported range (with stand-ins for `bun`, `curl`
  * and `git`: no network, and it stops before fetching pikit), and which ref it installs (the latest
- * release tag, else main; PIKIT_REF first). With `PIKIT_INSTALLER_TEST=1`: it installs this repository's committed HEAD
+ * release tag, else main; PIKIT_REF first). Pseudo-terminal cases run the real wizard through the
+ * installer's pipe, checking text input, cancellation and skipping it without network or a deploy.
+ * With `PIKIT_INSTALLER_TEST=1`: it installs this repository's committed HEAD
  * (`PIKIT_SOURCE`) into a temporary HOME, twice (it is idempotent), and `pikit --version` runs.
  * Bun is taken from the PATH, so no network is needed but for `bun install`'s cache misses.
  *
@@ -13,6 +15,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 const SCRIPT = join(import.meta.dir, "install.sh");
 const REPO = join(import.meta.dir, "..");
@@ -92,10 +95,9 @@ test("a Bun below the minimum or of the next major is replaced by the pinned one
  * Runs install.sh past pikit's install with stand-ins: a `bun` of a supported version that does
  * nothing else, a `git` that "clones" an empty directory, lists `tags` as the repository's (`git
  * ls-remote --tags` output; null: listing fails) and records the ref it fetches, and a `node` of
- * `nodeVersion`. No network, no terminal (so no `pikit new`): it stops after Docker's step, or
- * Cloudflare's.
+ * `nodeVersion`. No network. Terminal tests replace the Bun stand-in with a proxy to the real CLI.
  */
-function install(args: string[], nodeVersion: string, env: Record<string, string> = {}, tags: string[] | null = []) {
+function installFixture(nodeVersion: string, env: Record<string, string> = {}, tags: string[] | null = []) {
   const home = mkdtempSync(join(tmpdir(), "pikit-install-path-"));
   homes.push(home);
   const bin = join(home, "fake-bin");
@@ -117,8 +119,14 @@ function install(args: string[], nodeVersion: string, env: Record<string, string
   );
   script("node", `echo ${nodeVersion}`);
   script("unzip", "exit 0");
+  return { home, script, env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: tmpdir(), ...env } };
+}
+
+function install(args: string[], nodeVersion: string, env: Record<string, string> = {}, tags: string[] | null = []) {
+  const fixture = installFixture(nodeVersion, env, tags);
+  const { home } = fixture;
   const run = Bun.spawnSync(["sh", SCRIPT, ...args], {
-    env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: tmpdir(), ...env },
+    env: fixture.env,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -191,6 +199,7 @@ test("without --durable, Docker is checked as before and pikit new asks everythi
   expect(run.out).toMatch(/Docker is not installed|Docker with Compose found/);
   expect(run.out).not.toContain("Cloudflare: no Docker needed");
   expect(run.out).toContain("pikit new starts a new agent step by step");
+  expect(run.out).not.toContain("Now your first agent, step by step:");
   expect(install(["--cloud"], "v22.11.0").err).toContain("unknown option --cloud");
 });
 
@@ -200,9 +209,91 @@ test("a pin outside the supported range is refused before anything is installed"
   expect(run.installerArg).toBeNull();
 });
 
+/** The real wizard, reached through the installer's pipe, with no fetch, install, sudo or deploy. */
+function terminalInstall(args: string[], dockerGroup = false, skipWizard = false) {
+  const fixture = installFixture("v22.11.0");
+  fixture.script(
+    "bun",
+    [
+      'case "$1" in',
+      '  --version) exec "$REAL_BUN" --version ;;',
+      '  install) exit 0 ;;',
+      '  *) shift; exec "$REAL_BUN" "$REAL_MAIN" "$@" ;;',
+      "esac",
+    ].join("\n"),
+  );
+  fixture.script("docker", dockerGroup ? 'case "$1" in compose) exit 0 ;; *) exit 1 ;; esac' : "exit 0");
+  if (dockerGroup) {
+    fixture.script("uname", "echo Linux");
+    fixture.script("id", 'case "$*" in -u) echo 1000 ;; -un) echo tester ;; "-nG") echo users ;; "-nG tester") echo "users docker" ;; esac');
+    fixture.script("sg", 'test "$1" = docker && test "$2" = -c || exit 1; echo called > "$HOME/sg-called"; exec sh -c "$3"');
+  }
+  let output = "";
+  const decoder = new TextDecoder();
+  const proc = Bun.spawn(["sh", "-c", 'installer=$1; shift; cat "$installer" | sh -s -- "$@"', "installer-tty", SCRIPT, ...args], {
+    cwd: fixture.home,
+    env: {
+      ...fixture.env,
+      REAL_BUN: process.execPath,
+      REAL_MAIN: join(REPO, "packages", "cli", "src", "main.ts"),
+      TERM: "xterm-256color",
+      ...(skipWizard && { PIKIT_NO_WIZARD: "1" }),
+    },
+    terminal: { cols: 160, rows: 40, data: (_terminal, data) => void (output += decoder.decode(data, { stream: true })) },
+  });
+  const text = () => stripVTControlCharacters(output);
+  return {
+    home: fixture.home,
+    proc,
+    text,
+    async waitFor(expected: string) {
+      const deadline = Date.now() + 5_000;
+      while (!text().includes(expected)) {
+        if (proc.exitCode !== null || Date.now() > deadline) throw new Error(`never printed ${JSON.stringify(expected)}; printed:\n${text()}`);
+        await Bun.sleep(20);
+      }
+    },
+    async close() {
+      proc.terminal?.close();
+      if (proc.exitCode === null) proc.kill();
+      await proc.exited;
+    },
+  };
+}
+
+for (const mode of ["server", "durable", "docker group"] as const) {
+  test(`curl-pipe installer: the ${mode} wizard reads the name and Ctrl-C from its terminal`, async () => {
+    const run = terminalInstall(mode === "durable" ? ["--durable"] : [], mode === "docker group");
+    try {
+      await run.waitFor("Name of your agent");
+      run.proc.terminal?.write("tty-bot\r");
+      await run.waitFor(mode === "durable" ? "Additional channels?" : "Where should it run?");
+      run.proc.terminal?.write("\x03");
+      await run.waitFor("Stopped. Run");
+      await run.waitFor("pikit --help lists the rest.");
+      expect(await run.proc.exited).toBe(0);
+      expect(existsSync(join(run.home, "tty-bot"))).toBe(false);
+      expect(existsSync(join(run.home, "sg-called"))).toBe(mode === "docker group");
+    } finally {
+      await run.close();
+    }
+  }, 15_000);
+}
+
+test("PIKIT_NO_WIZARD skips the wizard even on a terminal", async () => {
+  const run = terminalInstall(["--durable"], false, true);
+  try {
+    await run.waitFor("pikit --help lists the rest.");
+    expect(await run.proc.exited).toBe(0);
+    expect(run.text()).not.toContain("Name of your agent");
+  } finally {
+    await run.close();
+  }
+}, 15_000);
+
 test.skipIf(process.env.PIKIT_INSTALLER_TEST !== "1")(
   "installs from a local checkout into a fresh HOME, twice, and pikit runs",
-  () => {
+  async () => {
     const home = mkdtempSync(join(tmpdir(), "pikit-install-home-"));
     homes.push(home);
     const env = {
@@ -215,15 +306,18 @@ test.skipIf(process.env.PIKIT_INSTALLER_TEST !== "1")(
     const head = Bun.spawnSync(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], { stdout: "pipe" }).stdout.toString().trim();
 
     for (let run = 0; run < 2; run++) {
-      const install = Bun.spawnSync(["sh", SCRIPT], { env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-      expect(install.stderr.toString()).toBe("");
-      expect(install.exitCode).toBe(0);
-      expect(install.stdout.toString()).toContain(`export PATH="${home}/.pikit/bin:$PATH"`);
+      const install = Bun.spawn(["sh", SCRIPT], { env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      const [out, err, code] = await Promise.all([new Response(install.stdout).text(), new Response(install.stderr).text(), install.exited]);
+      expect(err).toBe("");
+      expect(code).toBe(0);
+      expect(out).toContain(`export PATH="${home}/.pikit/bin:$PATH"`);
     }
     const pikit = join(home, ".pikit", "bin", "pikit");
     expect(existsSync(pikit)).toBe(true);
-    const version = Bun.spawnSync([pikit, "--version"], { env, stdout: "pipe" });
-    expect(version.stdout.toString().trim()).toBe(`pikit 0.0.1 (${head})`);
+    const version = Bun.spawn([pikit, "--version"], { env, stdout: "pipe" });
+    const [out, code] = await Promise.all([new Response(version.stdout).text(), version.exited]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe(`pikit 0.0.1 (${head})`);
   },
   300_000,
 );
