@@ -46,7 +46,13 @@ export const InstalledComponentSchema = Type.Object(
      * when it does not depend on them.
      */
     requires: Type.Object(
-      { pikit: Type.String(), contracts: Type.Optional(Type.String()), adapter: Type.Optional(Type.String()) },
+      {
+        pikit: Type.String(),
+        contracts: Type.Optional(Type.String()),
+        adapter: Type.Optional(Type.String()),
+        /** Its manifest's `requires.deployment`: what the project's deployment must support for it. */
+        deployment: Type.Optional(Type.Array(Type.String())),
+      },
       { additionalProperties: false },
     ),
     files: FilesSchema,
@@ -87,6 +93,11 @@ export const InstalledComponentSchema = Type.Object(
      * compose.yaml, whose services run beside the app. Absent when it declared none.
      */
     compose: Type.Optional(Type.String()),
+    /**
+     * Its manifest's `deployment` (a `deployment-*` component's): what it supports for the components
+     * that need it (`requires.deployment`, and a `compose` file). Absent when it declared none.
+     */
+    deployment: Type.Optional(Type.Object({ supports: Type.Array(Type.String()) }, { additionalProperties: false })),
     /**
      * Its manifest's `generated`, by project path: files a hook rewrites (tool-mcp's `seed.ts`), which are
      * never the user's edits. Absent when it declared none.

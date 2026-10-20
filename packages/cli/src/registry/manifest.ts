@@ -29,6 +29,16 @@ import Value from "typebox/value";
 export const TARGETS = ["server", "durable"] as const;
 
 /**
+ * A name of what a deployment supports (`deployment.supports`) and a component needs of it
+ * (`requires.deployment`): lowercase words joined by `.` or `-` (`proposals.deployer`,
+ * `acme.review-host`). An open set: a registry may name its own, and the CLI knows none but this one.
+ */
+export const DEPLOYMENT_REQUIREMENT = "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$";
+
+/** What a `compose` file needs of the deployment: that it runs the Compose files components record. */
+export const COMPOSE_SERVICES = "services.compose";
+
+/**
  * The kit's component kinds: the prefix of every component's name. A kind is a naming decision, so
  * an unknown prefix is refused, not accepted silently; a registry adds its own by declaring them
  * (`declares.kinds`, `registryCatalogue` in capabilities.ts).
@@ -184,9 +194,17 @@ export const ManifestSchema = Type.Object(
               "The @pikit/pi-adapter versions it works with (a semver range); declared when `dependencies` lists @pikit/pi-adapter. Checked and recorded by `pikit add` as `contracts` is.",
           }),
         ),
+        deployment: Type.Optional(
+          Type.Array(Type.String({ pattern: DEPLOYMENT_REQUIREMENT }), {
+            minItems: 1,
+            uniqueItems: true,
+            description:
+              "Written by hand: what the project's one deployment (its `deployment-*` component) must support for this component to work (`proposals.deployer`): names of protocols, never of components, matched against that deployment's `deployment.supports`. A `compose` file implies `services.compose` and is never written here. Never on a deployment itself. `pikit new`, `add`, `remove`, `upgrade` and `doctor` refuse a composition whose deployment does not support it (`project/composition.ts`).",
+          }),
+        ),
         capabilities: Type.Array(Type.String(), { description: "Generated from setup's use() calls." }),
       },
-      { additionalProperties: false, description: "A component depends on capabilities, never on components." },
+      { additionalProperties: false, description: "A component depends on capabilities, never on components; on its deployment, by what it supports (`deployment`)." },
     ),
     optional: Type.Object(
       { capabilities: Type.Array(Type.String(), { description: "Generated from setup's useOptional() and useKeyed() calls." }) },
@@ -306,6 +324,21 @@ export const ManifestSchema = Type.Object(
           "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and `deployment-docker` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. Only for a component whose targets include server.",
       }),
     ),
+    deployment: Type.Optional(
+      Type.Object(
+        {
+          supports: Type.Array(Type.String({ pattern: DEPLOYMENT_REQUIREMENT }), {
+            uniqueItems: true,
+            description:
+              "The protocols this deployment implements beside running the app (`services.compose`: it runs the Compose files components record; `proposals.deployer`: it runs a deployer of @pikit/contracts/deployer). What a component's `requires.deployment` (and `compose`) is matched against. Only what it really does: a name here is a promise the deployment's own checks keep.",
+          }),
+        },
+        {
+          additionalProperties: false,
+          description: "Written by hand, only on a `deployment-*` component: what it supports for the components that need it (`requires.deployment`).",
+        },
+      ),
+    ),
     generated: Type.Optional(
       Type.Array(Type.String({ pattern: OWN_FILE }), {
         uniqueItems: true,
@@ -361,6 +394,12 @@ export const ManifestSchema = Type.Object(
       Type.Array(Type.String(), {
         description:
           "Generated: the `model.provider` keys setup provides, with the default config (`anthropic`: agents name its models `anthropic/<modelId>`). `pikit new` checks the starter agent's model against them before it writes anything.",
+      }),
+    ),
+    extensions: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          "Generated: the `agent.extension` keys setup provides, with the default config (`pikit-self`). A preset's `steward.extensions` is checked against them before `pikit new` writes anything.",
       }),
     ),
     dependencies: Type.Record(Type.String(), Type.String({ minLength: 1 }), {
