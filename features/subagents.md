@@ -72,8 +72,18 @@ What pi-durable does not know is pikit's agents. The runtime adds that layer
 (`maxDepth`), `wait` (`run`) or not (`start`), a delegated task always waiting for its own; and
 `delegate_tasks`, `delegate_steer`, `delegate_cancel` for the tasks not waited for, separate so an
 agent names only those it needs (and `extension-house-rules` can allow them per sender). It owns the
-children's keys (`delegate:<depth>:<task id>`). A tool cannot use `agent.runtime` (the runtime uses
-every tool: a dependency cycle), which is why the delegation comes in the tool's context.
+children's keys (`delegate:<depth>:<chain>:<task id>`, `<chain>` the agents above the child, root
+first, joined by `.`). A tool cannot use `agent.runtime` (the runtime uses every tool: a dependency
+cycle), which is why the delegation comes in the tool's context.
+
+**Who may delegate to an agent** is an agent's `from` in the tool's config: a call to it is allowed
+only when the calling conversation's agent and every agent above it, up to the conversation a person
+or a channel started, are in `from` (so an allowed `orchestrator` does not launder a `support`
+agent's task to a `developer` with a token). The chain is trusted data, never the model's: it is read
+from the calling conversation's key, which only the tool writes, and its first agent must be the
+origin's, which the runtime fixed. A chain that does not check out reaches no restricted agent, and
+its children's chain is written empty (fail closed). The runtime and the contracts are unchanged:
+the tool decides, from what the runtime gives it (`CONVERSATION`).
 
 Not through `admitInbound`: routing picks an agent for a person's message; here the calling agent names
 it, among the tool's config.

@@ -26,7 +26,7 @@ day that decision changes; it is not to be built. From the architecture audit's 
   conversation a person or a channel opened and its tree of delegations descends from, written by the
   runtime's delegation when it creates the child and never by a ref. Code acting for the person behind
   a task (memory, scheduled prompts, approvals) reads `originOf(conversation)`; the child's own key
-  (`delegate:…`) still names only the task.
+  (`delegate:…`) is tool-delegate's, and names the task and the agents above it, for its own checks.
 - **So answers keep finding their chat by the key**, and the proposal below is not needed: no
   component changes a key, Cloudflare's owner stays `idFromName` of the channel's key (C1, C2), and
   `conversation.resolve` is not planned ([pipeline anchors](pipeline-anchors.md)).

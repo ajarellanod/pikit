@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDefinition, type AgentRuntime, type AgentTool, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
+import { type AgentDefinition, type AgentRuntime, type AgentTool, CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
 import { holdTool, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import toolDelegate from "./files/src/pikit/tool-delegate/index.ts";
@@ -25,15 +25,17 @@ afterEach(async () => {
 
 type Result = AppEvents["agent.settled"] | AppEvents["agent.failed"];
 
-/** The helper's `hold`: blocks until released (or its run stops), and records the requests its run took. */
+/** The helper's `hold`: blocks until released (or its run stops), and records the requests its run took and its conversation's key. */
 function hold() {
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
   let started!: () => void;
   const holding = new Promise<void>((resolve) => (started = resolve));
   const seen: (readonly RunRequest[] | undefined)[] = [];
+  const keys: (string | undefined)[] = [];
   const tool = holdTool(async (context) => {
     seen.push(await context.value(RUN_REQUESTS)?.list(context));
+    keys.push(context.value(CONVERSATION)?.key);
     started();
     await new Promise<void>((resolve, reject) => {
       const signal = context.abortSignal;
@@ -43,7 +45,7 @@ function hold() {
     });
     return "released";
   });
-  return { tool, started: holding, release: () => release(), seen };
+  return { tool, started: holding, release: () => release(), seen, keys };
 }
 
 const agents = (helperTools: AgentDefinition["tools"] = []) => [
@@ -96,8 +98,8 @@ async function start(dir: string, list: AgentDefinition[], delegateConfig: Recor
     app,
     stop,
     runtime: () => live().runtime,
-    async ask(key: string, prompt: string, requestId = `${key}:1`): Promise<ConversationRef> {
-      const conversation = { key, agent: "assistant", conversationId: await live().create() };
+    async ask(key: string, prompt: string, requestId = `${key}:1`, agent = "assistant"): Promise<ConversationRef> {
+      const conversation = { key, agent, conversationId: await live().create() };
       await live().runtime.dispatch({ requestId, conversation, prompt, sender: { channel: "test", id: "alice" } }, app.context());
       return conversation;
     },
@@ -206,4 +208,55 @@ test("with maxDepth 1, a delegated task's own delegate call is refused, and its 
   // The helper's own call was refused; it answered anyway, and its answer is the assistant's tool result.
   expect(result.kind).toBe("completed");
   expect(toolResults(result)[0]).toStartWith('The agent "helper" answered:');
+});
+
+/** `developer` takes tasks only from `orchestrator`; `support` and `orchestrator` delegate, and `orchestrator` takes them from anyone. */
+async function guarded(developerTool: AgentTool) {
+  const list = [
+    defineAgent({ name: "support", model: "faux/scripted", tools: ["delegate"] }),
+    defineAgent({ name: "orchestrator", model: "faux/scripted", tools: ["delegate"] }),
+    defineAgent({ name: "developer", model: "faux/scripted", tools: [developerTool] }),
+  ];
+  const delegateConfig = {
+    agents: [
+      { name: "developer", description: "Holds the token.", from: ["orchestrator"] },
+      { name: "orchestrator", description: "Plans." },
+    ],
+    maxDepth: 3,
+  };
+  return start(directory(), list, delegateConfig);
+}
+
+/** A `delegate` call to `agent` with `task`, as the scripted model's prompt. */
+const delegateTo = (agent: string, task: string) => `call: delegate ${JSON.stringify({ agent, task })}`;
+
+test("from: the agent it names delegates to the restricted agent, also through a chain wholly in it; the child's key carries the chain", async () => {
+  const held = hold();
+  held.release();
+  const s = await guarded(held.tool as AgentTool);
+
+  await s.ask("test:7", delegateTo("developer", "hold"), "test:7:1", "orchestrator");
+  expect(toolResults(await s.result("test:7:1"))).toEqual(['The agent "developer" answered:\n\nanswer: hold']);
+  // Two levels: orchestrator, then its child orchestrator.
+  await s.ask("test:8", delegateTo("orchestrator", delegateTo("developer", "hold")), "test:8:1", "orchestrator");
+  expect((await s.result("test:8:1")).kind).toBe("completed");
+
+  expect(held.keys).toEqual([expect.stringMatching(/^delegate:1:orchestrator:/), expect.stringMatching(/^delegate:2:orchestrator\.orchestrator:/)]);
+  expect(held.seen.map((requests) => requests?.[0]?.sender)).toEqual([{ channel: "delegate", id: "orchestrator" }, { channel: "delegate", id: "orchestrator" }]);
+});
+
+test("from: another agent is refused, directly or through an allowed agent, and the restricted agent never runs", async () => {
+  const held = hold();
+  held.release();
+  const s = await guarded(held.tool as AgentTool);
+
+  await s.ask("test:9", delegateTo("developer", "hold"), "test:9:1", "support");
+  const direct = await s.result("test:9:1");
+  expect(direct.kind).toBe("completed");
+  expect(toolResults(direct)[0]).toContain('the agent "developer" takes tasks only from orchestrator; this conversation (support) may not delegate to it');
+  // Laundering: support hands the task to orchestrator, whose child asks for the developer.
+  await s.ask("test:10", delegateTo("orchestrator", delegateTo("developer", "hold")), "test:10:1", "support");
+  expect(toolResults(await s.result("test:10:1"))[0]).toStartWith('The agent "orchestrator" answered:');
+
+  expect(held.keys).toEqual([]);
 });
