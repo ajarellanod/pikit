@@ -74,6 +74,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations, in the channel's key (no contract field); replies in their thread | No |
+| [tool-notify](tool-notify.md) | | An agent sends a message to a chat the operator named (`notify({ to, text })`), never reads it nor gets a reply: on `outbound.queue` through the destination's actor; specified, not built | No |
 | [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation | Open: SPEC §6's git workspace |
 
 Other channels (Signal, iMessage, Matrix, Home Assistant…) get a file when someone needs one.
