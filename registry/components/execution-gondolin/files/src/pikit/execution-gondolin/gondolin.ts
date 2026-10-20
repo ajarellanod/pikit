@@ -126,19 +126,39 @@ export function proposalsHook(proposals: GuestProposals): (request: Request) => 
 /** The image checkpoints made or being made, by file: one build per image and packages in this process. */
 const images = new Map<string, Promise<VmCheckpoint>>();
 
+const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
+
+/**
+ * The checkpoint's file name for Gondolin's image `buildId` with `packages` (in any order, repeats
+ * ignored): `<build id's digest>-<packages' digest>.qcow2`, so one of another build can be told apart.
+ */
+export function imageFile(buildId: string, packages: readonly string[]): string {
+  return `${digest(buildId)}-${digest(JSON.stringify([...new Set(packages)].sort()))}.qcow2`;
+}
+
+/**
+ * The files of an image directory (`names`) to remove once a checkpoint of `buildId` is made: those of
+ * another build id (its checkpoints and partial ones), and partial ones another process left. The
+ * checkpoints of this build, whatever their packages (another agent's machine), stay, and so do this
+ * process's partial ones (another agent's image being made now).
+ */
+export function staleImages(names: readonly string[], buildId: string, pid = process.pid): string[] {
+  const build = `${digest(buildId)}-`;
+  return names.filter((name) => !(name.startsWith(build) && (name.endsWith(".qcow2") || name.endsWith(`.${pid}.partial`))));
+}
+
 /**
  * Gondolin's image with `spec.packages` added, as a checkpoint in `spec.imageDir` named by the image's
- * build id and the packages: loaded when it is there, else made once (a VM that reaches only
- * `ALPINE_MIRROR` runs `apk add`), then the others in the directory, made for another image or other
- * packages, are removed.
+ * build id and the packages (`imageFile`): loaded when it is there, else made once (a VM that reaches
+ * only `ALPINE_MIRROR` runs `apk add`), then the files of another build are removed (`staleImages`).
  */
 async function imageWith(spec: GuestSpec): Promise<VmCheckpoint> {
   const assets = await ensureGuestAssets();
   const buildId = loadAssetManifest(dirname(assets.rootfsPath))?.buildId;
   if (buildId === undefined) throw new Error("Gondolin's guest image has no build id, so packages cannot be added to it: set `packages` to none");
   const packages = [...new Set(spec.packages)].sort();
-  const key = createHash("sha256").update(JSON.stringify({ buildId, packages })).digest("hex").slice(0, 16);
-  const file = join(spec.imageDir, `${key}.qcow2`);
+  const name = imageFile(buildId, packages);
+  const file = join(spec.imageDir, name);
   let found = images.get(file);
   if (found === undefined) {
     found = (async () => {
@@ -146,7 +166,7 @@ async function imageWith(spec: GuestSpec): Promise<VmCheckpoint> {
       await mkdir(spec.imageDir, { recursive: true });
       const { httpHooks, env } = createHttpHooks({ allowedHosts: [ALPINE_MIRROR] });
       const vm = await VM.create({ httpHooks, env, memory: spec.memory, cpus: spec.cpus, sessionLabel: "pikit image" });
-      const partial = join(spec.imageDir, `${key}.${process.pid}.partial`);
+      const partial = join(spec.imageDir, `${name.slice(0, -".qcow2".length)}.${process.pid}.partial`);
       try {
         const added = await vm.exec(["apk", "add", "--no-cache", ...packages]);
         if (added.exitCode !== 0) {
@@ -160,7 +180,7 @@ async function imageWith(spec: GuestSpec): Promise<VmCheckpoint> {
         throw error;
       }
       await rename(partial, file);
-      for (const name of await readdir(spec.imageDir)) if (name !== `${key}.qcow2`) await rm(join(spec.imageDir, name), { force: true });
+      for (const stale of staleImages(await readdir(spec.imageDir), buildId)) await rm(join(spec.imageDir, stale), { force: true });
       return VmCheckpoint.load(file);
     })();
     images.set(file, found);
@@ -169,7 +189,8 @@ async function imageWith(spec: GuestSpec): Promise<VmCheckpoint> {
   return await found;
 }
 
-class GondolinGuest implements Guest {
+/** A booted VM. Exported for the tests of `refreshSecrets`, which touches only the secrets it booted with. */
+export class GondolinGuest implements Guest {
   private commands = 0;
   /** Secrets removed since boot: Gondolin cannot bring one back, the next boot does. */
   private readonly removed = new Set<string>();
@@ -182,6 +203,7 @@ class GondolinGuest implements Guest {
   ) {}
 
   refreshSecrets(values: Readonly<Record<string, string | undefined>>): void {
+    // Only the secrets this VM booted with: `values` holds every agent's, and none is ever added.
     for (const [name, value] of this.values) {
       if (this.removed.has(name)) continue;
       const now = values[name];

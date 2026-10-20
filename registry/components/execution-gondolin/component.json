@@ -15,7 +15,8 @@
   "optional": {
     "capabilities": [
       "secrets",
-      "proposals"
+      "proposals",
+      "agent.definition"
     ]
   },
   "provides": [
