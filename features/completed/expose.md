@@ -147,4 +147,5 @@ Nothing in Pi: exposing a process to the internet is the deployment's, not the a
    could use instead, with ingress rules, for a platform's development app (Google Chat's console wants
    a fixed URL). A second connector on the production tunnel would share its traffic: never that.
 3. **Cloudflare Access** in front of `/admin/*`, when an operator wants the dashboard from anywhere.
-4. **`deployment-systemd`** (not built) would run `cloudflared` as a unit, not a compose service.
+4. **`deployment-local`** (a systemd or launchd service of this machine) refuses this component: it
+   would run `cloudflared` as a second unit, not a compose service ([deployment-local](../deployment-local.md)).

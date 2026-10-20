@@ -59,7 +59,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [conversation-routing](conversation-routing.md) | | Decided: a conversation is one chat of one channel; its key is never rewritten | No |
 | [deployment-celld](deployment-celld.md) | | The `durable` target on your own machines (celld, self-hosted Durable Objects): scale out without Cloudflare. Built (`deployment-celld`, preset `telegram-celld`): deploy, rollback, CI, node templates; moves to `completed/` once a fleet runs it in production | No; it should come, as the self-hosted way to scale out |
 | [deployment-rivet](deployment-rivet.md) | | The `durable` target on Rivet Actors (self-hosted or Rivet Cloud): an alternative to celld, in Bun, with its own host layer (`-rivet`) and a SPEC §4 wording change first | No |
-| [deployment-systemd](deployment-systemd.md) | | Run as a systemd service, without Docker | No |
+| [deployment-local](deployment-local.md) | | The `server` target as a service of this machine, without Docker: systemd on Linux, launchd on macOS. Built (`deployment-local`, the `http` preset's question); moves to `completed/` once it runs in production | No |
 | [deployment-targets](deployment-targets.md) | | Targets as runtime models; Vercel, E2B, exe.dev, Modal without closing deployment | No; the dashboard (SPEC §5) follows its rules |
 | [health](health.md) | | Components report failures; essential ones restart the process | Yes: SPEC §5 and §6 |
 | [inbound-dedup](inbound-dedup.md) | | Transport deduplication for platforms that redeliver | No; only a channel that acts before admission (not Google Chat) |

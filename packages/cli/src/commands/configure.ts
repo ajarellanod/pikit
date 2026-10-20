@@ -150,7 +150,7 @@ async function configureModels(projectDir: string, options: ConfigureOptions, in
     if ("why" in deployed) log.info(`  the deployed app's model credentials cannot be read (${deployed.why}): a login is offered once it can`);
     else there = deployed.stored;
   } else if (lacking.length > 0 && exec !== undefined) {
-    log.step("checking the model credentials where the app runs (`pikit up`); the first time, its image is built (about a minute)");
+    log.step("checking the model credentials where the app runs (`pikit up`); in Docker, the first time builds its image (about a minute)");
     try {
       there = (await checkModelCredentials(projectDir, exec, used)).providers;
     } catch (error) {
@@ -202,7 +202,7 @@ const IN_APP_LOGIN_METHOD: LoginMethod = "code";
  * `credentials.ts` runs pi-ai's flow and stores the tokens with the project's `model.credentials`.
  */
 async function login(projectDir: string, id: string, store: string | undefined, exec: AppExec | undefined, method?: LoginMethod): Promise<void> {
-  if (exec !== undefined) log.step(`logging in to ${id} where the app runs (\`pikit up\`); the first time, its image is built`);
+  if (exec !== undefined) log.step(`logging in to ${id} where the app runs (\`pikit up\`); in Docker, the first time builds its image`);
   const chosen = method ?? (exec === undefined ? undefined : IN_APP_LOGIN_METHOD);
   const args = ["login", id, ...(chosen === undefined ? [] : [PI_LOGIN_METHOD[chosen]])];
   const result =

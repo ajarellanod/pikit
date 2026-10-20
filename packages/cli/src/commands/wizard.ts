@@ -48,8 +48,8 @@ const DEFAULT_TARGET = NEW_PROJECT_TARGETS[0] as string;
 /** What the guided path says of each target, `pikit.json`'s `targets`. */
 const TARGET_TEXT: Record<string, { label: string; hint: string }> = {
   server: {
-    label: "server — a long-lived process (Docker on a VPS)",
-    hint: "or on your own machine while it is on",
+    label: "server — a long-lived process (Docker, or a service of this machine)",
+    hint: "a VPS, or your own machine while it is on",
   },
   durable: {
     label: "durable — on Cloudflare (Workers + Durable Objects), or your own machines (celld)",
@@ -65,6 +65,11 @@ const DEPLOYMENT_TEXT: Record<string, { up: string; upHint: string; running: str
   "deployment-docker": {
     up: "In Docker, in the background (`pikit up`)",
     upHint: "it keeps running after you log out",
+    running: "Your agent is running. In its folder (`cd {name}`): `pikit logs --follow` to watch it, `pikit status`, `pikit down` to stop it.",
+  },
+  "deployment-local": {
+    up: "As a service of this machine, in the background (`pikit up`)",
+    upHint: "systemd on Linux, launchd on macOS; restarted when it fails",
     running: "Your agent is running. In its folder (`cd {name}`): `pikit logs --follow` to watch it, `pikit status`, `pikit down` to stop it.",
   },
   "deployment-celld": {

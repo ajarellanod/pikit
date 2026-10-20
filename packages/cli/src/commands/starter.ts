@@ -362,6 +362,7 @@ export default defineComponent({
  */
 export const DEPLOYMENT_TEXT: Readonly<Record<string, { up: string; then: string; dev?: string }>> = {
   "deployment-docker": { up: "run it in Docker", then: "pikit status, logs, down" },
+  "deployment-local": { up: "run it as a service of this machine (systemd or launchd)", then: "pikit status, logs, down" },
   "deployment-cloudflare": { up: "deploy it to Cloudflare", then: "pikit status, logs" },
   "deployment-celld": { up: "deploy it to your celld fleet", then: "pikit status, logs", dev: "run it here on one celld node (celld dev)" },
 };
@@ -396,7 +397,7 @@ pikit dev         # ${(deployment === undefined ? undefined : DEPLOYMENT_TEXT[de
 ${up}`
       : `pikit configure   # the variables in .env.example, and a model login or API key
 pikit doctor      # the component graph; green when everything is provided and its variables are set
-pikit dev         # run it here, reloading on change; its model login is this machine's: pikit configure --login <provider> --local
+pikit dev         # run it here, reloading on change; its model login is this machine's: pikit configure --login <provider>${deployment === "deployment-local" ? "" : " --local"}
 ${up}`;
   const composition =
     target === "durable"

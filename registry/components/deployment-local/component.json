@@ -1,0 +1,28 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "deployment-local",
+  "version": "0.0.1",
+  "title": "This machine's service: systemd on Linux, launchd on macOS, no Docker",
+  "description": "Runs a pikit project as a service of this machine without Docker: a systemd user unit on Linux, a launchd user agent on macOS, restarted when it exits or /health answers 503. The process entrypoint, its rotated JSON-lines log, the unit and plist templates, and the commands `pikit up | down | restart | logs | status | dev` delegate to.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [],
+  "hooks": {
+    "doctor": "commands.ts"
+  },
+  "dependencies": {},
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

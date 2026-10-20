@@ -170,6 +170,14 @@
       ],
       "path": "components/deployment-docker"
     },
+    "deployment-local": {
+      "version": "0.0.1",
+      "description": "Runs a pikit project as a service of this machine without Docker: a systemd user unit on Linux, a launchd user agent on macOS, restarted when it exits or /health answers 503. The process entrypoint, its rotated JSON-lines log, the unit and plist templates, and the commands `pikit up | down | restart | logs | status | dev` delegate to.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/deployment-local"
+    },
     "email-resend": {
       "version": "0.0.1",
       "description": "`email.send` with Resend's API: one email to one person, from the sender in EMAIL_FROM. Variables only (RESEND_API_KEY, EMAIL_FROM), so both targets.",

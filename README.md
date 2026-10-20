@@ -6,9 +6,9 @@ A kit to run the [Pi](https://github.com/earendil-works/pi) agent as a durable, 
 reachable from your chats and products, remembering conversations, delivering replies reliably. Pi
 is the agent; pikit is everything Pi needs to run as a service in the cloud, and nothing Pi already
 does. Like shadcn/ui, it is a small core plus a registry of components copied into your project as
-source you own: channels, routing, storage, delivery, deployment on a server (Docker) or on
-Cloudflare (a Durable Object per conversation). You build the assistant you need on those bases,
-with your AI, one component at a time. This is release 0.0.1, a git tag: the kit is not on npm (each
+source you own: channels, routing, storage, delivery, deployment on a server (Docker, or a systemd or
+launchd service) or on Cloudflare (a Durable Object per conversation). You build the assistant you
+need on those bases, with your AI, one component at a time. This is release 0.0.1, a git tag: the kit is not on npm (each
 project carries it in its `vendor/`), and no 0.0.x release promises compatibility with the one before.
 
 ## Five minutes
@@ -29,7 +29,7 @@ pikit new my-agent --preset telegram         # or http; --target durable --prese
                                              # --with channel-telegram --with channel-http: both; --with tool-mcp, --ui: features
 cd my-agent
 pikit configure                              # secrets and the model login
-pikit dev                                    # run it here; `pikit up` deploys (Docker or Cloudflare)
+pikit dev                                    # run it here; `pikit up` deploys (Docker, a service of this machine, or Cloudflare)
 pikit add <component>...                     # and remove, upgrade, doctor, logs: `pikit --help`
 ```
 

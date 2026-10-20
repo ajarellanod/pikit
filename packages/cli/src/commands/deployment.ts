@@ -84,7 +84,7 @@ async function checkLocalCredentials(projectDir: string, probed: ProbeResult): P
 async function checkAppCredentials(projectDir: string): Promise<void> {
   const exec = await deploymentExec(projectDir);
   if (exec === undefined) return;
-  log.step("checking the model credentials where the app runs (the first time, its image is built)");
+  log.step("checking the model credentials where the app runs (in Docker, the first time builds its image)");
   const missing = Object.entries((await checkModelCredentials(projectDir, exec)).providers)
     .filter(([, ok]) => !ok)
     .map(([id]) => id);

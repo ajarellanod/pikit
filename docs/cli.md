@@ -156,7 +156,8 @@ It never prints a value, and never touches Pi's own `~/.pi/agent/auth.json`.
 ## pikit dev
 
 Runs the project here after `doctor` passes and the model credentials of this machine are checked:
-the deployment's `dev` when it exports one (`wrangler dev` on Cloudflare, `celld dev` with deployment-celld), else `bun --watch
+the deployment's `dev` when it exports one (`wrangler dev` on Cloudflare, `celld dev` with deployment-celld; deployment-local's
+refuses while its service runs, then runs `main.ts` as below), else `bun --watch
 src/pikit/<deployment>/main.ts` with `.env` loaded (deployment-docker). Either way, a UI project (the
 dashboard, a component's `src/chat/`) is built again (`bun run build` in it) when one of its files
 changes, and the app reloads with the module its build writes. On a server each is also built once at
@@ -174,7 +175,9 @@ Delegated to the installed `deployment-*` component's exported functions
 ([deployment.ts](../packages/cli/src/commands/deployment.ts); see [targets.md](targets.md#deployment-components)).
 `up` first runs `doctor` (skipping the `doctor` hook of a component that has a `beforeDeploy`, which
 `up` runs right before the build) and checks model credentials where the app runs. `restart` exists
-only where the deployment exports it (Docker). With self-improvement on a server (`proposals-local`),
+only where the deployment exports it (Docker, deployment-local). deployment-local runs the app as a
+systemd or launchd service of this machine instead of a container: it refuses a component with a
+Compose file. With self-improvement on a server (`proposals-local`),
 proposals-local contributes a Compose override that activates the deployer next to the app, so `up`
 builds and starts it too (no separate command or host service). The commands do not inspect provider
 names: they add the Compose file of every component that declares one (`compose`, also used for

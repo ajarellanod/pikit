@@ -216,9 +216,11 @@ chmod 755 "$BIN_DIR/pikit"
 "$BIN_DIR/pikit" --version >/dev/null || fail "$BIN_DIR/pikit does not run"
 say "installed $("$BIN_DIR/pikit" --version) as $BIN_DIR/pikit"
 
-# 5. Docker, for `pikit up` on a server only. Without root, using it needs the docker group, which a
-# running shell only gets after `newgrp docker` or a new login: the closing lines say so. On
-# Cloudflare there is no Docker: wrangler deploys, and it runs on Node.js, which is only checked.
+# 5. Docker, for `pikit up` on a server with deployment-docker only: `pikit new` also offers
+# deployment-local, a systemd or launchd service of this machine, which needs no Docker. Without root,
+# using Docker needs the docker group, which a running shell only gets after `newgrp docker` or a new
+# login: the closing lines say so. On Cloudflare there is no Docker: wrangler deploys, and it runs on
+# Node.js, which is only checked.
 NEWGRP=""
 join_docker_group() {
   as_root usermod -aG docker "$(id -un)"
@@ -252,17 +254,19 @@ elif has docker && docker compose version >/dev/null 2>&1; then
     fi
   fi
 elif [ "$OS" = "Darwin" ]; then
-  say "Docker is not installed. pikit up needs it; pikit dev does not."
-  say "  Install Docker Desktop: https://docs.docker.com/desktop/setup/install/mac-install/"
+  say "Docker is not installed. pikit up needs it to run your agent in a container; pikit dev does not."
+  say "  Without it, answer \"This machine's service\" when pikit new asks how it should run (launchd, no Docker)."
+  say "  Or install Docker Desktop: https://docs.docker.com/desktop/setup/install/mac-install/"
 else
-  say "Docker is not installed. pikit up needs it; pikit dev does not."
-  if ask "Install Docker with its official script (https://get.docker.com, runs as root), and add you to the docker group (PIKIT_INSTALL_DOCKER=1 or --install-docker to consent; on Cloudflare no Docker is needed: answer N)?" "$PIKIT_INSTALL_DOCKER"; then
+  say "Docker is not installed. pikit up needs it to run your agent in a container; pikit dev does not."
+  if ask "Install Docker with its official script (https://get.docker.com, runs as root), and add you to the docker group (PIKIT_INSTALL_DOCKER=1 or --install-docker to consent; on Cloudflare, or as a systemd service of this machine, no Docker is needed: answer N)?" "$PIKIT_INSTALL_DOCKER"; then
     curl -fsSL https://get.docker.com -o "$PIKIT_HOME/get-docker.sh"
     as_root sh "$PIKIT_HOME/get-docker.sh"
     rm -f "$PIKIT_HOME/get-docker.sh"
     if [ "$(id -u)" != "0" ]; then join_docker_group; fi
   else
-    say "  Later: https://docs.docker.com/engine/install/ (or rerun this with --install-docker)"
+    say "  Without it, answer \"This machine's service\" when pikit new asks how it should run (systemd, no Docker)."
+    say "  Docker later: https://docs.docker.com/engine/install/ (or rerun this with --install-docker)"
   fi
 fi
 

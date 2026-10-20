@@ -107,6 +107,9 @@ test("on a server the starter agent does not name bash, even installed, and says
 
 test("the README says what `pikit up` does by the installed deployment, never by the target", () => {
   expect(readme("a", ["channel-http", "deployment-docker"])).toContain("pikit up          # or run it in Docker (deployment-docker): then pikit status, logs, down");
+  const local = readme("a", ["channel-http", "deployment-local"]);
+  expect(local).toContain("pikit up          # or run it as a service of this machine (systemd or launchd) (deployment-local): then pikit status, logs, down");
+  expect(local).toContain("model login is this machine's: pikit configure --login <provider>\n");
   expect(readme("a", ["deployment-cloudflare"], "durable")).toContain("pikit up          # or deploy it to Cloudflare (deployment-cloudflare): then pikit status, logs");
   expect(readme("a", ["deployment-fly"])).toContain("pikit up          # or deploy it with deployment-fly (deployment-fly)\n");
   const none = readme("a", ["channel-http"]);

@@ -2,6 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "deployment-cloudflare",
   "version": "0.0.1",
+  "title": "Cloudflare: Workers and a Durable Object per chat, no server to keep",
   "description": "Runs a pikit project on Cloudflare: the Worker and its Durable Objects running the project's two Apps, wrangler.jsonc, and the commands `pikit up | down | logs | status | dev` delegate to.",
   "targets": [
     "durable"

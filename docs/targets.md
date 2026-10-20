@@ -8,7 +8,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | | `server` | `durable` |
 |---|---|---|
 | Model | one long-lived process | one actor (Durable Object) per conversation, evicted between events |
-| Provider today | `deployment-docker` | `deployment-cloudflare`; `deployment-celld` (your machines, celld) |
+| Provider today | `deployment-docker`; `deployment-local` (a systemd or launchd service of this machine) | `deployment-cloudflare`; `deployment-celld` (your machines, celld) |
 | Apps in `pikit.config.ts` | one (default export) | two: the object's (default) and the Worker's (`worker`) |
 | Requests arrive at | `server-bun` (Hono on `Bun.serve`, port 3000) | the Worker (deployment-cloudflare's host), then RPC to an object |
 | `storage.sql`, `storage.sqlite` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
@@ -37,10 +37,14 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
 - **Process.** deployment-docker's container runs `bun src/pikit/deployment-docker/main.ts`
   (`entrypoint.ts`): it recomposes `pikit.config.ts` with target `server` and a JSON-lines logger,
   starts the App with a 30 s deadline (exit 1 on failure, Docker restarts it), stops it on SIGTERM or
-  SIGINT with a 10 s deadline. `compose.yaml`'s `stop_grace_period` is 20 s.
-- **Disk.** `.pikit/` is the volume `pikit-state`: the SQLite database (conversations, the answers log,
-  the outbox, the key-value store), credentials, the agent's workspace. `server` assumes a persistent
-  disk.
+  SIGINT with a 10 s deadline. `compose.yaml`'s `stop_grace_period` is 20 s. deployment-local runs
+  the same entrypoint as a service of this machine, in the project's directory: a systemd user unit
+  (Linux) or a launchd user agent (macOS) restarts it, with the same 20 s stop budget; its app listens
+  on `127.0.0.1` only, logs to `.pikit/logs/app.log`, and restarts on a 503 from `/health`, as Docker's
+  healthcheck does. It has no container: the app runs as you (deployment-local's README, "Isolation").
+- **Disk.** `.pikit/` is the volume `pikit-state` (deployment-local: the project's own `.pikit/`): the
+  SQLite database (conversations, the answers log, the outbox, the key-value store), credentials, the
+  agent's workspace. `server` assumes a persistent disk.
 - **HTTP.** server-bun serves every `http.route`, plus its own `GET /health` (200, or 503 when
   `health` says `down`) and `GET /ready` (200 between `runtime.ready` and `runtime.stopping`). The
   port is published on `127.0.0.1:3000` only.
@@ -48,7 +52,8 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
   a restarted process has none, so each component asks again in `start` from its durable state.
 - **Limits.** One process per storage: conversations-kv's guarantees across two processes are weaker
   (one replica is the supported setup). Tools run as the server's user: `tool-bash` is a real shell.
-- **Dev.** `pikit dev` runs `main.ts` with `bun --watch` and `.env` loaded.
+- **Dev.** `pikit dev` runs `main.ts` with `bun --watch` and `.env` loaded. With deployment-local,
+  `.pikit/` is the service's own, so `pikit dev` refuses while the service runs.
 - **Self-improvement** (`proposals-local`): the project is a git repository (`pikit new` makes it
   one); proposals are branches `pikit/self/<topic>` of a bare repository in the volume
   (`.pikit/self/project.git`), which the steward clones (`file://<path>`) into its workspace and
@@ -114,19 +119,20 @@ A `deployment-*` component runs the App instead of running in it: no default exp
 [deployment-module.ts](../packages/cli/src/project/deployment-module.ts)); `dev` and `exec` are
 optional exports. A project has exactly one.
 
-| Function | deployment-docker | deployment-cloudflare | deployment-celld |
-|---|---|---|---|
-| `up` | `beforeDeploy` hooks, `docker compose up --detach --build --wait` | login check, `beforeDeploy` hooks, `wrangler deploy --tag migrations:<last tag> --secrets-file` (`.env`), wait until `/health` answers from the new version (3 min), roll back if it says its App does not start or never answers (not across a Durable Object migration), then `afterDeploy` hooks | `beforeDeploy` hooks, `build.command`, `celld deploy` of the config derived from `wrangler.jsonc` (`.env`'s secrets as `vars`), wait until `/health` answers the new `PIKIT_DEPLOYMENT` (3 min), roll back by restoring the bucket's previous pointer (S3-compatible buckets; not across a class change), then `afterDeploy` hooks |
-| `down` | `docker compose down` (the volume stays) | `wrangler delete` (deletes every object's data; only at a terminal) | `systemctl stop celld` on each node over SSH, one at a time (deletes nothing) |
-| `restart` | `docker compose restart` | not exported | not exported |
-| `logs` | `docker compose logs [--follow] [--tail N]` | `wrangler tail` (always follows) | `journalctl -u celld` on every node over SSH (`PIKIT_CELLD_SSH`) |
-| `status` | containers, `/health`, `/ready` | `wrangler deployments list`, `/health` | the last deploy from this machine, `celld diagnose --read-only`, `/health` |
-| `dev` | not exported (the CLI runs `main.ts --watch`) | `wrangler dev` | `celld dev` (one node, a local store) |
-| `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | not exported | not exported |
+| Function | deployment-docker | deployment-local | deployment-cloudflare | deployment-celld |
+|---|---|---|---|---|
+| `up` | `beforeDeploy` hooks, `docker compose up --detach --build --wait` | `beforeDeploy` hooks, `bun install`, the UI builds, the unit or plist written, `systemctl --user restart` or `launchctl bootstrap`, wait until it is active and `/health` answers (45 s), then `afterDeploy` hooks | login check, `beforeDeploy` hooks, `wrangler deploy --tag migrations:<last tag> --secrets-file` (`.env`), wait until `/health` answers from the new version (3 min), roll back if it says its App does not start or never answers (not across a Durable Object migration), then `afterDeploy` hooks | `beforeDeploy` hooks, `build.command`, `celld deploy` of the config derived from `wrangler.jsonc` (`.env`'s secrets as `vars`), wait until `/health` answers the new `PIKIT_DEPLOYMENT` (3 min), roll back by restoring the bucket's previous pointer (S3-compatible buckets; not across a class change), then `afterDeploy` hooks |
+| `down` | `docker compose down` (the volume stays) | stop, unload and remove the unit or plist (`.pikit/` stays) | `wrangler delete` (deletes every object's data; only at a terminal) | `systemctl stop celld` on each node over SSH, one at a time (deletes nothing) |
+| `restart` | `docker compose restart` | `systemctl --user restart`, `launchctl kickstart -k` | not exported | not exported |
+| `logs` | `docker compose logs [--follow] [--tail N]` | `.pikit/logs/app.log` and its rotated files | `wrangler tail` (always follows) | `journalctl -u celld` on every node over SSH (`PIKIT_CELLD_SSH`) |
+| `status` | containers, `/health`, `/ready` | the supervisor's state, `/health`, `/ready`, linger | `wrangler deployments list`, `/health` | the last deploy from this machine, `celld diagnose --read-only`, `/health` |
+| `dev` | not exported (the CLI runs `main.ts --watch`) | refuses while the service runs; else the UI builds and `main.ts --watch` | `wrangler dev` | `celld dev` (one node, a local store) |
+| `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | the command here, in the project, with `.env` | not exported | not exported |
 
 Every UI project (a folder of `src/` with a `package.json`: the dashboard's `src/dashboard/`, a
 component's own such as channel-web's `src/chat/`) is built by every deploy: in a stage of the Docker
-image, or by `wrangler.jsonc`'s `build.command` ([dashboard.md](dashboard.md#other-ui-projects)).
+image, in place by deployment-local's `up`, or by `wrangler.jsonc`'s `build.command`
+([dashboard.md](dashboard.md#other-ui-projects)).
 
 On Cloudflare, a deploy without pikit's CLI (a Deploy to Cloudflare template's Workers Builds, which
 deploys every merge) runs `node src/pikit/deployment-cloudflare/deploy.mjs` instead of `pikit up`: the

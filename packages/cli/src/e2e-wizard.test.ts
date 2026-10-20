@@ -52,6 +52,7 @@ const registry = openRegistry(DEFAULT_REGISTRY);
 const CHANNELS = "Where do you want to talk to your agent?";
 const PRESETS = "Which preset do you start from?";
 const FEATURES = "What can it do?";
+const DEPLOYMENTS = "How should it run on this machine?";
 
 /** What a menu shows of a title: the part before ": ", as the wizard's `option` (the rest is the hint). */
 const label = (title: string): string => title.split(": ")[0] as string;
@@ -114,7 +115,7 @@ const SPACE = " ";
 /** Answers "Where should it run?" with `target`; returns where the answer is printed. */
 async function runOn(w: ReturnType<typeof wizard>, target: "server" | "durable"): Promise<number> {
   await w.waitFor("durable — on Cloudflare (Workers + Durable Objects)");
-  expect(w.text()).toContain("server — a long-lived process (Docker on a VPS)");
+  expect(w.text()).toContain("server — a long-lived process (Docker, or a service of this machine)");
   return await answer(w, "Where should it run?", [target]);
 }
 
@@ -178,7 +179,7 @@ async function keys(w: ReturnType<typeof wizard>, ...typed: string[]): Promise<v
 
 /**
  * Answers the name and the server, then in the channels (several at once, the preset's HTTP checked)
- * unchecks HTTP and checks Telegram, and adds nothing in "What can it do?".
+ * unchecks HTTP and checks Telegram, keeps Docker (the default), and adds nothing in "What can it do?".
  */
 async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
   await w.waitFor("Name of your agent");
@@ -195,7 +196,13 @@ async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
     expect(options[i]?.marker).toBe(channels?.defaults.includes(channel.name) ? "◼" : "◻");
   }
   const answered = await answer(w, CHANNELS, [componentLabel("channel-telegram")], at);
-  await w.waitFor(FEATURES, answered);
+  // Every server deployment, Docker under the cursor: the preset's.
+  const deployments = await menu(w, DEPLOYMENTS, answered);
+  expect(deployments.options.map((o) => o.marker)).toEqual(["●", "○"]);
+  expect(shows(deployments.options[0]?.text ?? "", componentLabel("deployment-docker"))).toBe(true);
+  expect(shows(deployments.options[1]?.text ?? "", componentLabel("deployment-local"))).toBe(true);
+  const deployed = await answer(w, DEPLOYMENTS, [componentLabel("deployment-docker")], answered);
+  await w.waitFor(FEATURES, deployed);
   await w.waitFor("Dashboard", answered);
   expect(w.text()).toContain("MCP tools");
   await keys(w, "\r");
@@ -292,7 +299,7 @@ test.skipIf(!E2E)(
 );
 
 test.skipIf(!E2E)(
-  "several channels and a feature: each is installed, and the same command names them all",
+  "several channels, this machine's service and a feature: each is installed, and the same command names them all",
   async () => {
     const w = wizard();
     await w.waitFor("Name of your agent");
@@ -300,14 +307,16 @@ test.skipIf(!E2E)(
     let at = await runOn(w, "server");
     // HTTP stays checked; Telegram is checked too.
     at = await answer(w, CHANNELS, [componentLabel("channel-http"), componentLabel("channel-telegram")], at);
+    at = await answer(w, DEPLOYMENTS, [componentLabel("deployment-local")], at);
     await answer(w, FEATURES, [componentLabel("tool-mcp")], at);
     await w.waitFor("Created two-bot in");
-    await w.waitFor("The same, in a script: pikit new two-bot --preset http --with channel-http --with channel-telegram --with tool-mcp\n");
+    await w.waitFor("The same, in a script: pikit new two-bot --preset http --with channel-http --with channel-telegram --with deployment-local --with tool-mcp\n");
     await w.waitFor("Configure it now?");
     await keys(w, RIGHT, "\r");
     expect(await w.exited).toBe(0);
     const components = Object.keys(JSON.parse(readFileSync(join(parent, "two-bot", "pikit.json"), "utf8")).components);
-    for (const name of ["channel-http", "channel-telegram", "tool-mcp"]) expect(components).toContain(name);
+    for (const name of ["channel-http", "channel-telegram", "deployment-local", "tool-mcp"]) expect(components).toContain(name);
+    expect(components).not.toContain("deployment-docker");
     expect(components).not.toContain("admin-api");
   },
   TIMEOUT,

@@ -25,9 +25,12 @@ before doing it. The steps and settings are at the top of the script.
   `PIKIT_SOURCE` it defaults to that checkout's `HEAD`: what you are working on.
 - `~/.pikit/bin/pikit`: a two-line shim that runs the checkout's CLI with that Bun. The installer
   prints the `PATH` line to add; it edits no shell file.
-- Docker: only `pikit up` on a server needs it. On Linux the official script (`get.docker.com`) runs
-  only with `--install-docker` / `PIKIT_INSTALL_DOCKER=1` or a "y", and with the same consent adds you
-  to the `docker` group; on macOS it points to Docker Desktop. With `--durable` it is skipped.
+- Docker: only `pikit up` on a server with `deployment-docker` (the default) needs it. `pikit new` asks
+  how it should run: in Docker, or as a service of this machine (`deployment-local`: a systemd user
+  unit on Linux, a launchd agent on macOS), which needs no Docker. On Linux the official script
+  (`get.docker.com`) runs only with `--install-docker` / `PIKIT_INSTALL_DOCKER=1` or a "y", and with
+  the same consent adds you to the `docker` group; on macOS it points to Docker Desktop. Without it,
+  both say to answer "This machine's service". With `--durable` it is skipped.
 - Then, on a terminal, it runs `pikit new`: the guided path asks the agent's name, where it runs (a
   server, or Cloudflare), where to talk to it (Telegram, HTTP…, several at once), what it can do
   (the dashboard, routing rules, MCP tools, web search…, any or none), sets that up, logs in to the

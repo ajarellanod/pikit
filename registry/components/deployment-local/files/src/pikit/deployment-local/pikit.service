@@ -1,0 +1,33 @@
+# How this pikit project runs on Linux (deployment-local): a systemd user unit. `pikit up` fills in
+# the double-braced names and writes it to ~/.config/systemd/user/. Edit it here, then `pikit up`.
+
+[Unit]
+Description={{DESCRIPTION}}
+# Never give up restarting, as Docker's `restart: unless-stopped`: a crash loop keeps trying.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory={{PROJECT}}
+# `.env` only, as Compose's `env_file`: not Bun's .env.local or .env.production.
+ExecStart="{{BUN}}" --env-file=.env src/pikit/deployment-local/main.ts
+# PIKIT_SERVICE turns on main.ts's log file and its /health watchdog.
+Environment=PIKIT_SERVICE=1
+Environment=NODE_ENV=production
+Environment="PATH={{PATH}}"
+Environment="HOME={{HOME}}"
+# Any exit restarts it; `systemctl --user stop` (`pikit down`) does not.
+Restart=always
+RestartSec=2
+# SIGTERM to Bun alone: the entrypoint stops the app within its 10 s deadline. Whatever the agent's
+# tools left running is killed after the budget below.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=20
+# Only what is written before the app's logger exists (an import error, a crash); the app's own log
+# is .pikit/logs/app.log.
+StandardOutput=append:{{STDIO}}
+StandardError=append:{{STDIO}}
+
+[Install]
+WantedBy=default.target

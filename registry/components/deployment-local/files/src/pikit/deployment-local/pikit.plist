@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  How this pikit project runs on macOS (deployment-local): a launchd user agent. `pikit up` fills in
+  the double-braced names and writes it to ~/Library/LaunchAgents/. Edit it here, then `pikit up`.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{LABEL}}</string>
+  <!-- `.env` only, as Compose's `env_file`: not Bun's .env.local or .env.production. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{BUN}}</string>
+    <string>--env-file=.env</string>
+    <string>src/pikit/deployment-local/main.ts</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{{PROJECT}}</string>
+  <!-- PIKIT_SERVICE turns on main.ts's log file and its /health watchdog. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PIKIT_SERVICE</key>
+    <string>1</string>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>PATH</key>
+    <string>{{PATH}}</string>
+    <key>HOME</key>
+    <string>{{HOME}}</string>
+  </dict>
+  <!-- Started when loaded, and again whenever it exits, as Docker's `restart: unless-stopped`. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <!-- SIGTERM, then SIGKILL after this many seconds: above the entrypoint's 10 s stop deadline. -->
+  <key>ExitTimeOut</key>
+  <integer>20</integer>
+  <!-- Only what is written before the app's logger exists; the app's own log is .pikit/logs/app.log. -->
+  <key>StandardOutPath</key>
+  <string>{{STDIO}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{STDIO}}</string>
+</dict>
+</plist>

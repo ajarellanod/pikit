@@ -70,7 +70,7 @@ target (K1).
 | `halves` | generated | when `apps.worker` names a half: what each App's half provides, requires and uses |
 | `hooks` | hand | `doctor`, `beforeDeploy`, `afterDeploy`: each a file of `src/pikit/<name>/` exporting a function of that name (below) |
 | `commands` | hand | `pikit <name>` commands it adds: name (kebab-case, never the CLI's own) → `{ file, description }`, the file of `src/pikit/<name>/` exporting `command` (below) |
-| `compose` | hand | a Compose file of `src/pikit/<name>/` whose services run beside the app on a server: `deployment-docker` adds it after its compose.yaml (below) |
+| `compose` | hand | a Compose file of `src/pikit/<name>/` whose services run beside the app on a server: `deployment-docker` adds it after its compose.yaml (below); `deployment-local` refuses it |
 | `generated` | hand | files of `src/pikit/<name>/` a hook or build rewrites |
 | `view` | hand | a folder holding its dashboard view |
 | `ui` | hand | `{ "source": "<folder>", "target": "src/<name>" }`: a UI project of its own (below) |
@@ -100,6 +100,7 @@ In the registry today: `tool-mcp` has `doctor` and `beforeDeploy` (`deploy.ts` w
 listed in `generated`); `channel-telegram-webhook` has `afterDeploy` (sets the Telegram webhook);
 `expose-cloudflare-tunnel` has `doctor` (no Cloudflare API token in `.env`);
 `deployment-celld` has `doctor` (`commands.ts`: celld and esbuild installed, the config derived from `wrangler.jsonc`, the bucket);
+`deployment-local` has `doctor` (`commands.ts`, notes only: the supervisor reachable, linger, the project's path, Compose components);
 `channel-google-chat` has `doctor` (on Cloudflare, its Worker half's config and the default export's
 agree on what both read);
 `admin-api` lists `dashboard-files.ts` in `generated` (written by the dashboard's build, not a hook).
@@ -171,6 +172,7 @@ and `deployment-docker` adds every recorded one after its own compose.yaml, in `
 for `up`, `down`, `restart`, `logs` and `status` (`docker compose -f compose.yaml -f <it>…`; not for
 `exec`'s one-off container). Its paths are relative to the project's directory. Only a component whose
 targets include `server` has one (`registry validate`). `expose-cloudflare-tunnel`'s runs `cloudflared`.
+`deployment-local` runs no Compose file: its `up` refuses a project with one, and its `doctor` says so.
 
 ### Views
 
