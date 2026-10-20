@@ -608,6 +608,15 @@
       ],
       "path": "components/tool-websearch-brave"
     },
+    "tool-websearch-gemini": {
+      "version": "0.0.1",
+      "description": "The `websearch` tool, for the agents that name it: Gemini answers grounded in Google Search, with its sources; the key the model never sees. An alternative to tool-websearch-brave.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/tool-websearch-gemini"
+    },
     "tool-write": {
       "version": "0.0.1",
       "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",

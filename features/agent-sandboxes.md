@@ -166,11 +166,14 @@ and execution-serve's own.
   repositories and permissions.
 - The sandbox host's disk holds every workspace, unreplicated
   ([workspace snapshots](workspace-snapshots.md) is not built).
-- **Delegation reaches a profile.** tool-delegate's `agents` (who a task may be handed to) is one
-  list for every delegating agent: if `developer` is in it, any agent with `delegate` can have a
-  developer child make authenticated GitHub calls and read the answer, and in a Durable Object that
-  child works in the object's developer sandbox. Leave such an agent out of the list, or restrict
-  `delegate` by sender (extension-house-rules). A list per delegating agent is open.
+- **Delegation reaching a profile is closed by `from`.** tool-delegate's `agents` (who a task may be
+  handed to) is one list for every delegating agent, but an agent in it with `from` takes tasks only
+  from the agents it names, and only when every agent of the delegation chain is one of them
+  (`support` cannot reach `developer` through an `orchestrator` it may delegate to). Give every agent
+  with a profile a `from`: without it, any agent with `delegate` can have a developer child make
+  authenticated GitHub calls and read the answer (in a Durable Object, in the object's developer
+  sandbox). The chain is in keys only tool-delegate makes, checked against the runtime's origin; this
+  is the same logical boundary as above, the reviewed code's, not a process's.
 - **One secret name, one value.** Profiles read secrets by name from the host's one `secrets`: two
   profiles naming `GH_TOKEN` get the same token. Give each agent's token its own name.
 - **The host trusts the token holder.** Anyone with the sandbox host's token can name any agent in

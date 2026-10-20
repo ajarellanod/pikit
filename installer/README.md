@@ -23,8 +23,9 @@ before doing it. The steps and settings are at the top of the script.
   compared as numbers; pre-releases and other tags are not releases), or `main` when there is none.
   `PIKIT_REF=main` installs the development branch; any branch, tag or commit works. With
   `PIKIT_SOURCE` it defaults to that checkout's `HEAD`: what you are working on.
-- `~/.pikit/bin/pikit`: a two-line shim that runs the checkout's CLI with that Bun. The installer
-  prints the `PATH` line to add; it edits no shell file.
+- `~/.pikit/bin/pikit`: a small shim that runs the checkout's CLI with that Bun. The installer saves
+  a guarded `PATH` entry in the user's shell startup files, without sudo or replacing existing
+  configuration (see below), and exports it for its own child processes.
 - Docker: only `pikit up` on a server with `deployment-docker` (the default) needs it. `pikit new` asks
   how it should run: in Docker, or as a service of this machine (`deployment-local`: a systemd user
   unit on Linux, a launchd agent on macOS), which needs no Docker. On Linux the official script
@@ -39,9 +40,30 @@ before doing it. The steps and settings are at the top of the script.
   deployment for you.
   It sets that up, logs in to the
   model and starts it. Ctrl-C stops it; `pikit new` continues later. `PIKIT_NO_WIZARD=1` skips it. It ends
-  with the lines this shell still needs (`PATH`, `newgrp docker`). The wizard reads from the actual
+  with any commands this already-open shell still needs (`PATH`, `newgrp docker`). The wizard reads from the actual
   terminal device (such as `/dev/ttys004` or `/dev/pts/0`), not the installer's pipe or `/dev/tty`:
   Bun 1.4.2 on macOS otherwise draws the name prompt but never receives keystrokes.
+
+## PATH and shells
+
+The installer reads `SHELL` and appends one guarded block to:
+
+| Shell | Startup files |
+|---|---|
+| zsh | `${ZDOTDIR:-$HOME}/.zshrc` |
+| bash | `~/.bashrc` and the first existing login file: `~/.bash_profile`, `~/.bash_login`, then `~/.profile`; if none exists, it creates `.profile` |
+| sh or dash (also when `SHELL` is unset) | `~/.profile` |
+
+An existing login file is never hidden by creating a higher-priority one. Existing content and
+symlinks are preserved; reinstalling does not append the same block again, and rereading the block
+adds no duplicate PATH entry. A custom `PIKIT_HOME` is used literally, including spaces and quotes.
+The installer never sources the user's configuration. If a file cannot be updated or the shell is
+unsupported, it warns and leaves the CLI installed, with manual PATH instructions.
+
+New terminals find `pikit` automatically. A process cannot change its parent's environment, so
+`curl | sh` cannot update the terminal that launched it: open a new terminal or paste the printed
+`export PATH=...` there. The wizard and other installer child processes already have the updated
+PATH. No `~/.profile` edit or extra command is needed in each future terminal.
 
 ## Cloudflare in one line
 
@@ -95,7 +117,10 @@ compatibility with the one before.
   `PIKIT_BUN_VERSION`) with stand-ins for `bun`, `curl` and `git`, without network, and the
   Cloudflare path (`--durable`: no Docker, Node.js checked, the `pikit new` it hands over to) and the
   ref it installs (the highest release tag, else `main`; `PIKIT_REF` first) with stand-ins for `bun`,
-  `git` and `node`. Real pseudo-terminal tests feed the installer through a pipe and check the real
+  `git` and `node`. PATH tests cover preserved shell files and symlinks, bash login precedence,
+  `ZDOTDIR`, reinstalling, repeated sourcing, inherited PATH entries, custom paths with shell
+  characters, and a blocked profile or unsupported shell. Installed bash and zsh run with temporary
+  homes to check fresh shells find `pikit`. Real pseudo-terminal tests feed the installer through a pipe and check the real
   wizard accepts its name and Ctrl-C on the server, Cloudflare and `sg docker` paths, and that
   `PIKIT_NO_WIZARD=1` skips it. These use fake installation commands: no network, sudo or deploy.
   With `PIKIT_INSTALLER_TEST=1`, a real install of this repository's committed `HEAD` into a temporary

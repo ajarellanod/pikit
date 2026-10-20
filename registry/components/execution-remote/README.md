@@ -46,7 +46,7 @@ A conversation's sandbox is its agent's (`ConversationRef.agent`, which the runt
 sandbox of its own**, not its parent's (results pass through the delegation's answer, or git). A
 child of the same agent shares its parent's only in a Durable Object, where it lives in the parent's
 object; on a server a delegated child has a conversation key of its own
-(`delegate:<depth>:<task>`, tool-delegate's README), so it has a sandbox of its own whatever its
+(`delegate:<depth>:<chain>:<task>`, tool-delegate's README), so it has a sandbox of its own whatever its
 agent. Every request to a conversation's sandbox carries the
 header `Pikit-Agent: <agent>`, and the host resolves the sandbox for that agent: execution-gondolin
 there gives it the agent's machine (its packages, hosts, secrets; its README). `execution`'s own

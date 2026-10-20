@@ -33,6 +33,14 @@ line names its area.
 
 ### Components
 
+- tool-delegate: who may delegate to an agent. An entry of `agents` takes `from`, the agents allowed
+  to hand it tasks: a call is allowed only when the calling conversation's agent and every agent above
+  it in the delegation are in it (no laundering through an allowed agent); refused, nothing starts and
+  the model reads why; the description says `(only from: ...)`; a `from` name that is no
+  `agent.definition` stops the App at start. Without `from`, any agent may, as before. The chain is
+  in the child's key, now `delegate:<depth>:<chain>:<task id>` (was `delegate:<depth>:<task id>`),
+  checked against the runtime's origin; an untrusted chain reaches no agent with `from`. Breaking:
+  delegated conversations of the old format reach no restricted agent, with no migration.
 - admin-api: `/admin/api/delivery/pending` and `/receipts` give each piece the conversation it
   answers (`conversationId`, from its answer key).
 - outbound-durable: with `health` installed, reports `degraded` while an answer is stuck for over a
@@ -70,6 +78,13 @@ line names its area.
 
 - `ProposalsRemote`'s `path` variant has `serve(request)`, with its suite
   `createProposalsServeConformance`.
+
+### CLI (`pikit`)
+
+- `pikit dev` stops a deployment's own `dev` on SIGTERM as on Ctrl-C: it aborts the `signal` the
+  deployment's `dev({ cwd, signal })` now gets, so `celld dev` or `wrangler dev` stops and
+  deployment-celld deletes `.dev.vars` and its derived config. Before, the CLI exited alone, leaving
+  the command running and the secrets file on disk.
 
 ## 0.0.1 (2026-10-19)
 

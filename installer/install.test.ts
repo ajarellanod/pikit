@@ -4,6 +4,7 @@
  * and `git`: no network, and it stops before fetching pikit), and which ref it installs (the latest
  * release tag, else main; PIKIT_REF first). Pseudo-terminal cases run the real wizard through the
  * installer's pipe, checking text input, cancellation and skipping it without network or a deploy.
+ * PATH cases preserve startup files, use custom paths literally, and run bash/zsh with temporary homes.
  * With `PIKIT_INSTALLER_TEST=1`: it installs this repository's committed HEAD
  * (`PIKIT_SOURCE`) into a temporary HOME, twice (it is idempotent), and `pikit --version` runs.
  * Bun is taken from the PATH, so no network is needed but for `bun install`'s cache misses.
@@ -12,7 +13,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -119,13 +120,18 @@ function installFixture(nodeVersion: string, env: Record<string, string> = {}, t
   );
   script("node", `echo ${nodeVersion}`);
   script("unzip", "exit 0");
-  return { home, script, env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: tmpdir(), ...env } };
+  const environment: Record<string, string> = { HOME: home, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: tmpdir(), ...env };
+  return { home, script, env: environment };
 }
 
 function install(args: string[], nodeVersion: string, env: Record<string, string> = {}, tags: string[] | null = []) {
-  const fixture = installFixture(nodeVersion, env, tags);
+  return runInstall(installFixture(nodeVersion, env, tags), args);
+}
+
+function runInstall(fixture: ReturnType<typeof installFixture>, args = ["--durable"]) {
   const { home } = fixture;
   const run = Bun.spawnSync(["sh", SCRIPT, ...args], {
+    cwd: home,
     env: fixture.env,
     stdin: "ignore",
     stdout: "pipe",
@@ -209,6 +215,116 @@ test("a pin outside the supported range is refused before anything is installed"
   expect(run.installerArg).toBeNull();
 });
 
+async function checkShellPath(fixture: ReturnType<typeof installFixture>, shell: string, args: string[], profile: string, bin: string) {
+  const child = Bun.spawn([shell, ...args, 'command -v pikit; . "$PROFILE"; . "$PROFILE"; printf "%s\\n" "$PATH"'], {
+    cwd: fixture.home,
+    env: { ...fixture.env, PATH: "/usr/bin:/bin", PROFILE: profile },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  expect(code, err).toBe(0);
+  const [found, path] = out.trim().split("\n");
+  expect(found).toBe(join(bin, "pikit"));
+  expect(path?.split(":").filter((entry) => entry === bin)).toHaveLength(1);
+}
+
+test("zsh: preserves .zshrc, configures PATH once, and fresh shells find pikit", async () => {
+  const fixture = installFixture("v22.11.0", { SHELL: "/bin/zsh" });
+  const profile = join(fixture.home, ".zshrc");
+  const original = "# my configuration\nKEEP_ME=yes";
+  writeFileSync(profile, original);
+  const first = runInstall(fixture);
+  expect(first.code).toBe(0);
+  const configured = readFileSync(profile, "utf8");
+  expect(configured.startsWith(`${original}\n`)).toBe(true);
+  expect(configured).toContain("# pikit PATH");
+  expect(runInstall(fixture).code).toBe(0);
+  expect(readFileSync(profile, "utf8")).toBe(configured);
+  const zsh = Bun.which("zsh");
+  if (zsh !== null) await checkShellPath(fixture, zsh, ["-ic"], profile, join(fixture.home, ".pikit", "bin"));
+});
+
+test("zsh: respects ZDOTDIR instead of creating a different .zshrc", async () => {
+  const fixture = installFixture("v22.11.0", { SHELL: "/bin/zsh" });
+  const zdotdir = join(fixture.home, "shell config");
+  fixture.env.ZDOTDIR = zdotdir;
+  expect(runInstall(fixture).code).toBe(0);
+  const profile = join(zdotdir, ".zshrc");
+  expect(existsSync(profile)).toBe(true);
+  expect(existsSync(join(fixture.home, ".zshrc"))).toBe(false);
+  const zsh = Bun.which("zsh");
+  if (zsh !== null) await checkShellPath(fixture, zsh, ["-ic"], profile, join(fixture.home, ".pikit", "bin"));
+});
+
+for (const login of [".bash_profile", ".bash_login", ".profile", "none"] as const) {
+  test(`bash: configures .bashrc and the active login file (${login})`, async () => {
+    const fixture = installFixture("v22.11.0", { SHELL: "/bin/bash" });
+    if (login !== "none") writeFileSync(join(fixture.home, login), "# login configuration\n");
+    if (login === ".bash_profile") writeFileSync(join(fixture.home, ".profile"), "# leave this one alone\n");
+    expect(runInstall(fixture).code).toBe(0);
+    const profile = join(fixture.home, login === "none" ? ".profile" : login);
+    const rc = join(fixture.home, ".bashrc");
+    const before = [readFileSync(profile, "utf8"), readFileSync(rc, "utf8")];
+    expect(runInstall(fixture).code).toBe(0);
+    expect([readFileSync(profile, "utf8"), readFileSync(rc, "utf8")]).toEqual(before);
+    if (login === ".bash_profile") expect(readFileSync(join(fixture.home, ".profile"), "utf8")).toBe("# leave this one alone\n");
+    const bash = Bun.which("bash");
+    if (bash !== null) {
+      await checkShellPath(fixture, bash, ["-lc"], profile, join(fixture.home, ".pikit", "bin"));
+      await checkShellPath(fixture, bash, ["--noprofile", "-ic"], rc, join(fixture.home, ".pikit", "bin"));
+    }
+  });
+}
+
+test("PATH setup preserves a symlinked shell configuration", () => {
+  const fixture = installFixture("v22.11.0", { SHELL: "/bin/zsh" });
+  const target = join(fixture.home, "managed-zshrc");
+  const profile = join(fixture.home, ".zshrc");
+  writeFileSync(target, "# dotfiles configuration\n");
+  symlinkSync(target, profile);
+  expect(runInstall(fixture).code).toBe(0);
+  expect(readlinkSync(profile)).toBe(target);
+  expect(readFileSync(target, "utf8")).toContain("# pikit PATH");
+});
+
+test("an inherited PATH entry still gets persisted, without telling the current shell to add it again", () => {
+  const fixture = installFixture("v22.11.0", { SHELL: "/bin/zsh" });
+  fixture.env.PATH = `${join(fixture.home, ".pikit", "bin")}:${fixture.env.PATH}`;
+  const run = runInstall(fixture);
+  expect(run.code).toBe(0);
+  expect(readFileSync(join(fixture.home, ".zshrc"), "utf8")).toContain("# pikit PATH");
+  expect(run.out).not.toContain("to use pikit in this shell, paste:");
+});
+
+test("PATH setup quotes a custom PIKIT_HOME without executing its shell characters", async () => {
+  const fixture = installFixture("v22.11.0", { SHELL: "/bin/bash" });
+  const custom = join(fixture.home, "pikit space ' [*] $(touch should-not-run)");
+  fixture.env.PIKIT_HOME = custom;
+  expect(runInstall(fixture).code).toBe(0);
+  expect(existsSync(join(fixture.home, "should-not-run"))).toBe(false);
+  const profile = join(fixture.home, ".bashrc");
+  const bash = Bun.which("bash");
+  if (bash !== null) await checkShellPath(fixture, bash, ["--noprofile", "-ic"], profile, join(custom, "bin"));
+  expect(existsSync(join(fixture.home, "should-not-run"))).toBe(false);
+});
+
+test("a blocked profile or unsupported shell leaves the CLI installed and gives manual instructions", () => {
+  const blocked = installFixture("v22.11.0", { SHELL: "/bin/zsh" });
+  mkdirSync(join(blocked.home, ".zshrc"));
+  const failed = runInstall(blocked);
+  expect(failed.code).toBe(0);
+  expect(failed.err).toContain("could not update");
+  expect(failed.out).toContain("export PATH=");
+  expect(existsSync(join(blocked.home, ".pikit", "bin", "pikit"))).toBe(true);
+  const unknown = install(["--durable"], "v22.11.0", { SHELL: "/usr/bin/fish" });
+  expect(unknown.code).toBe(0);
+  expect(unknown.err).toContain("fish");
+  expect(existsSync(join(unknown.home, ".profile"))).toBe(false);
+  expect(unknown.out).toContain("export PATH=");
+});
+
 /** The real wizard, reached through the installer's pipe, with no fetch, install, sudo or deploy. */
 function terminalInstall(args: string[], dockerGroup = false, skipWizard = false) {
   const fixture = installFixture("v22.11.0");
@@ -218,7 +334,7 @@ function terminalInstall(args: string[], dockerGroup = false, skipWizard = false
       'case "$1" in',
       '  --version) exec "$REAL_BUN" --version ;;',
       '  install) exit 0 ;;',
-      '  *) shift; exec "$REAL_BUN" "$REAL_MAIN" "$@" ;;',
+      '  *) shift; printf "%s\\n" "$PATH" > "$HOME/wizard-path"; exec "$REAL_BUN" "$REAL_MAIN" "$@" ;;',
       "esac",
     ].join("\n"),
   );
@@ -274,6 +390,7 @@ for (const mode of ["server", "durable", "docker group"] as const) {
       expect(await run.proc.exited).toBe(0);
       expect(existsSync(join(run.home, "tty-bot"))).toBe(false);
       expect(existsSync(join(run.home, "sg-called"))).toBe(mode === "docker group");
+      expect(readFileSync(join(run.home, "wizard-path"), "utf8").trim().split(":")).toContain(join(run.home, ".pikit", "bin"));
     } finally {
       await run.close();
     }
@@ -310,7 +427,7 @@ test.skipIf(process.env.PIKIT_INSTALLER_TEST !== "1")(
       const [out, err, code] = await Promise.all([new Response(install.stdout).text(), new Response(install.stderr).text(), install.exited]);
       expect(err).toBe("");
       expect(code).toBe(0);
-      expect(out).toContain(`export PATH="${home}/.pikit/bin:$PATH"`);
+      expect(out).toContain(`export PATH='${home}/.pikit/bin':"$PATH"`);
     }
     const pikit = join(home, ".pikit", "bin", "pikit");
     expect(existsSync(pikit)).toBe(true);

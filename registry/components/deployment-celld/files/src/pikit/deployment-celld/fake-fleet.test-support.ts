@@ -87,7 +87,10 @@ if (args[0] === "--version") {
   const config = readFileSync(args[1], "utf8");
   const devVars = existsSync(".dev.vars") ? readFileSync(".dev.vars", "utf8") : undefined;
   note({ config, mode: statSync(args[1]).mode & 0o777, devVars });
-  process.exit(Number(process.env.FAKE_DEV_CODE ?? 0));
+  if (process.env.FAKE_DEV_UNTIL_SIGTERM) {
+    process.on("SIGTERM", () => process.exit(Number(process.env.FAKE_DEV_CODE ?? 0)));
+    setInterval(() => {}, 1000);
+  } else process.exit(Number(process.env.FAKE_DEV_CODE ?? 0));
 } else if (args[0] === "diagnose") {
   note({});
   if (process.env.FAKE_DIAGNOSE) process.stdout.write(process.env.FAKE_DIAGNOSE);

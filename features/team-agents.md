@@ -31,6 +31,7 @@ a project installs, and agents that name what they may use.
 | Rate limits, admission control | none | no note yet |
 | Slash commands, prompt templates | `/new` in the channels; `agent.command` exists, but only admin-api runs it; Pi extensions' commands not | [slash-commands](slash-commands.md) |
 | Delegation, background tasks | `tool-delegate`: run or start, depth limit, answers to the parent | [subagents](subagents.md) |
+| Who may hand work to an agent (one with a token of its own) | `tool-delegate`: an agent's `from`, checked against every agent of the delegation chain, kept in keys only it makes and checked against the runtime's origin (no laundering through another agent) | [subagents](subagents.md), [agent sandboxes](agent-sandboxes.md) |
 | An orchestrator: assign, list, follow, steer and cancel other agents' tasks, read their transcripts | `tool-delegate`: `delegate` (`wait: false` returns an id), `delegate_tasks`, `delegate_steer`, `delegate_cancel`, on `AgentDelegation`'s `list`, `steer`, `cancel`, each conversation its own tasks; reading a child's transcript is open | [subagents](subagents.md) |
 | An agent writes to another chat | none; `outbound.queue.enqueue` reached through the mailbox | no note yet |
 | Questions to the user (`askUser`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) (`askUser`) |

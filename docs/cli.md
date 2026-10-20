@@ -200,7 +200,9 @@ src/pikit/<deployment>/main.ts` with `.env` loaded (deployment-docker). Either w
 dashboard, a component's `src/chat/`) is built again (`bun run build` in it) when one of its files
 changes, and the app reloads with the module its build writes. On a server each is also built once at
 start, alongside the app (wrangler's build command does it on Cloudflare, deployment-celld's `dev` with celld), so a fresh project serves
-its pages before any edit.
+its pages before any edit. Ctrl-C stops it; so does a SIGTERM to `pikit dev` alone, which the CLI
+passes on (to `main.ts`, or as the deployment's `dev` `signal`, so `celld dev` stops and its
+`.dev.vars` is deleted), exiting with the app's code.
 
 ## pikit up | down | restart | logs | status
 

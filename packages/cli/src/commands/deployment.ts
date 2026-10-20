@@ -150,16 +150,21 @@ export async function dev(projectDir: string): Promise<number> {
   const own = existsSync(join(projectDir, "src", "pikit", name, "index.ts")) ? (await loadDeployment(projectDir)).module.dev : undefined;
   if (typeof own === "function") {
     await checkReady(projectDir, "dev");
-    // The command shares this terminal: Ctrl-C reaches it directly, and it owns its shutdown. The CLI
-    // stays until it has exited.
+    // The command shares this terminal: Ctrl-C reaches it directly, and it owns its shutdown. A
+    // SIGTERM reaches the CLI alone: it aborts `signal`, and the command stops (and cleans up) the
+    // same way. The CLI stays until it has exited.
     const wait = () => {};
+    const stop = new AbortController();
+    const abort = () => stop.abort();
     process.on("SIGINT", wait);
+    process.on("SIGTERM", abort);
     const ui = watchUiProjects(projectDir);
     try {
-      return await (own as (args: Record<string, unknown>) => Promise<number>)({ cwd: projectDir });
+      return await (own as (args: Record<string, unknown>) => Promise<number>)({ cwd: projectDir, signal: stop.signal });
     } finally {
       ui.close();
       process.off("SIGINT", wait);
+      process.off("SIGTERM", abort);
     }
   }
   const main = join("src", "pikit", name, "main.ts");

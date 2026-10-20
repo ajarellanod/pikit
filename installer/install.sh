@@ -11,7 +11,8 @@
 #      Bun's own installer when there is none (in ~/.bun, no sudo), and over one outside the range
 #      after asking;
 #   3. fetches pikit with git into ~/.pikit/pikit, at a ref, and runs `bun install` there;
-#   4. writes ~/.pikit/bin/pikit and prints the PATH line to add (it edits no shell file);
+#   4. writes ~/.pikit/bin/pikit and saves its PATH entry in the user's shell startup files;
+#      it prints the command this already-open parent shell still needs;
 #   5. checks Docker, which only `pikit up` on a server needs. On Linux it offers Docker's official
 #      script and the docker group, and does either only with your consent (--install-docker, or "y"
 #      at the prompt); on macOS it points to Docker Desktop. With --durable it skips Docker and
@@ -75,6 +76,9 @@ say() { printf '\033[1mpikit:\033[0m %s\n' "$*"; }
 warn() { printf 'pikit: warning: %s\n' "$*" >&2; }
 fail() { printf 'pikit: error: %s\n' "$*" >&2; exit 1; }
 has() { command -v "$1" >/dev/null 2>&1; }
+
+# One literal shell argument, also for paths containing quotes or shell substitutions.
+shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 # Asks on the terminal, even when the script itself arrives on stdin (curl | sh).
 # $1: the question; $2: "yes" when the answer is already given by a flag.
@@ -211,11 +215,58 @@ mkdir -p "$BIN_DIR"
 cat >"$BIN_DIR/pikit" <<EOF
 #!/bin/sh
 # Written by pikit's installer: runs the CLI of the checkout in $CHECKOUT with Bun.
-exec "$BUN" "$CHECKOUT/packages/cli/src/main.ts" "\$@"
+exec $(shell_quote "$BUN") $(shell_quote "$CHECKOUT/packages/cli/src/main.ts") "\$@"
 EOF
 chmod 755 "$BIN_DIR/pikit"
 "$BIN_DIR/pikit" --version >/dev/null || fail "$BIN_DIR/pikit does not run"
 say "installed $("$BIN_DIR/pikit" --version) as $BIN_DIR/pikit"
+
+QUOTED_BIN="$(shell_quote "$BIN_DIR")"
+# shellcheck disable=SC2016 # $PATH is expanded by the user's shell when it reads the file.
+PATH_EXPORT="$(printf 'export PATH=%s:"$PATH"' "$QUOTED_BIN")"
+PATH_CONFIGURED=1
+add_path_to_profile() {
+  path_profile="$1"
+  if [ -f "$path_profile" ] && grep -Fqx "  *) $PATH_EXPORT ;;" "$path_profile"; then return; fi
+  if [ -e "$path_profile" ] && [ ! -f "$path_profile" ]; then
+    warn "could not update $path_profile: it is not a regular file; configure PATH manually"
+    PATH_CONFIGURED=""
+    return
+  fi
+  say "adding pikit to PATH in $path_profile"
+  # Append only; the guard also avoids duplicate entries when a shell reads the file twice.
+  # shellcheck disable=SC2016 # This is code for the user's shell, not this installer.
+  if mkdir -p "$(dirname "$path_profile")" && printf '\n# pikit PATH\ncase ":$PATH:" in\n  *:%s:*) ;;\n  *) %s ;;\nesac\n' "$QUOTED_BIN" "$PATH_EXPORT" >>"$path_profile"; then
+    :
+  else
+    warn "could not update $path_profile; configure PATH manually"
+    PATH_CONFIGURED=""
+  fi
+}
+LOGIN_SHELL="${SHELL:-sh}"
+case "${LOGIN_SHELL##*/}" in
+  zsh) add_path_to_profile "${ZDOTDIR:-$HOME}/.zshrc" ;;
+  bash)
+    add_path_to_profile "$HOME/.bashrc"
+    # Bash reads only the first existing login file. Do not create one that hides another.
+    for path_login in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+      if [ -e "$path_login" ]; then break; fi
+    done
+    add_path_to_profile "$path_login"
+    ;;
+  sh | dash) add_path_to_profile "$HOME/.profile" ;;
+  *)
+    warn "automatic PATH setup is not supported for $LOGIN_SHELL; add $BIN_DIR to your shell's PATH manually"
+    PATH_CONFIGURED=""
+    ;;
+esac
+# Children (the wizard and its deployment commands) can use pikit immediately. The parent shell
+# of curl | sh cannot inherit this change, so remember whether it still needs the command below.
+PATH_WAS_MISSING=""
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) export PATH="$BIN_DIR:$PATH"; PATH_WAS_MISSING=1 ;;
+esac
 
 # 5. Docker, for `pikit up` on a server with deployment-docker only: `pikit new` also offers
 # deployment-local, a systemd or launchd service of this machine, which needs no Docker. Without root,
@@ -289,7 +340,7 @@ if [ -t 1 ] && (: </dev/tty) 2>/dev/null && [ -z "${PIKIT_NO_WIZARD:-}" ]; then
   WIZARD_TTY="$(tty <&3)"
   exec 3<&-
   if [ -n "$NEWGRP" ] && has sg; then
-    sg docker -c "exec '$BIN_DIR/pikit' new" <"$WIZARD_TTY" || true
+    sg docker -c "exec $(shell_quote "$BIN_DIR/pikit") new" <"$WIZARD_TTY" || true
   else
     "$BIN_DIR/pikit" "$@" <"$WIZARD_TTY" || true
   fi
@@ -299,11 +350,10 @@ fi
 # Done: what this shell still needs. The PATH line comes first: `newgrp` starts a new shell that
 # keeps this environment.
 LINES=""
-# shellcheck disable=SC2016 # $PATH is meant literally: it is the line to paste
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) LINES="$(printf '  export PATH="%s:$PATH"    # add this line to ~/.profile too' "$BIN_DIR")" ;;
-esac
+if [ -n "$PATH_WAS_MISSING" ]; then
+  LINES="  $PATH_EXPORT"
+  if [ -n "$PATH_CONFIGURED" ]; then say "PATH saved for new terminals; this already-open shell still needs the export below."; fi
+fi
 if [ -n "$NEWGRP" ]; then
   LINES="$LINES${LINES:+
 }  newgrp docker    # this shell joins the docker group (or log in again)"

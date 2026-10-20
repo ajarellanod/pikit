@@ -42,15 +42,18 @@ export interface RunResult {
 
 /**
  * Runs `command` in `cwd`, with `env` over the process's own. With `capture`, stdout is returned
- * (stderr still reaches the terminal); without it, the output streams to the terminal.
+ * (stderr still reaches the terminal); without it, the output streams to the terminal. Aborting
+ * `signal` sends it SIGTERM.
  */
-export type Runner = (command: readonly string[], options: { cwd: string; capture: boolean; env?: Record<string, string> }) => Promise<RunResult>;
+export type Runner = (command: readonly string[], options: { cwd: string; capture: boolean; env?: Record<string, string>; signal?: AbortSignal }) => Promise<RunResult>;
 
 export interface CommandOptions {
   /** The project's directory, where `wrangler.jsonc` and `package.json` are. Default: the current directory. */
   cwd?: string;
   /** Default: spawns the project's wrangler. */
   run?: Runner;
+  /** `dev`: aborting it (a SIGTERM to `pikit dev`) stops wrangler, as Ctrl-C does. */
+  signal?: AbortSignal;
 }
 
 /** What the commands that reach the account need to log in (`login`). */
@@ -475,7 +478,7 @@ export async function url(options: CommandOptions = {}): Promise<string | undefi
 
 /**
  * `pikit dev`: the Worker and its objects locally in workerd (`wrangler dev`), reloading on change,
- * with `.env` as its secrets. Resolves with wrangler's exit code.
+ * with `.env` as its secrets, until Ctrl-C or `signal` aborts. Resolves with wrangler's exit code.
  */
 export async function dev(options: CommandOptions = {}): Promise<number> {
   const cwd = options.cwd ?? process.cwd();
@@ -549,14 +552,19 @@ async function wrangler(args: string[], options: CommandOptions, env: Record<str
 }
 
 function run(command: string[], options: CommandOptions, capture: boolean, env: Record<string, string> = {}): Promise<RunResult> {
-  return (options.run ?? spawnRunner)(command, { cwd: options.cwd ?? process.cwd(), capture, ...(Object.keys(env).length > 0 && { env }) });
+  return (options.run ?? spawnRunner)(command, {
+    cwd: options.cwd ?? process.cwd(),
+    capture,
+    ...(Object.keys(env).length > 0 && { env }),
+    ...(options.signal !== undefined && { signal: options.signal }),
+  });
 }
 
 /**
  * The real runner: `wrangler` is the project's (`node_modules/.bin/wrangler`, here or in a parent
  * directory), run without a shell, so no argument is ever interpreted.
  */
-export const spawnRunner: Runner = (command, { cwd, capture, env }) =>
+export const spawnRunner: Runner = (command, { cwd, capture, env, signal }) =>
   new Promise((resolve, reject) => {
     const [name = "", ...args] = command;
     const file = name === "wrangler" ? projectWrangler(cwd) : name;
@@ -571,7 +579,13 @@ export const spawnRunner: Runner = (command, { cwd, capture, env }) =>
     child.on("error", (error: NodeJS.ErrnoException) =>
       reject(error.code === "ENOENT" ? new Error(`\`${file}\` was not found`) : error),
     );
-    child.on("close", (code) => resolve({ code: code ?? 1, stdout }));
+    const stop = () => child.kill("SIGTERM");
+    if (signal?.aborted) stop();
+    signal?.addEventListener("abort", stop, { once: true });
+    child.on("close", (code) => {
+      signal?.removeEventListener("abort", stop);
+      resolve({ code: code ?? 1, stdout });
+    });
   });
 
 function projectWrangler(cwd: string): string | undefined {

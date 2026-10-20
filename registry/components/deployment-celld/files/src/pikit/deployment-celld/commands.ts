@@ -64,9 +64,9 @@ export interface RunResult {
  * Runs `command` in `cwd` with exactly `env` (the caller's environment, already merged). With
  * `capture`, stdout is returned (stderr still reaches the terminal); without it, the output streams
  * to the terminal. `quiet` captures stderr too (a check's own noise: celld's warnings). `timeoutMs` kills
- * it (code 124).
+ * it (code 124). Aborting `signal` sends it SIGTERM.
  */
-export type Runner = (command: readonly string[], options: { cwd: string; capture: boolean; env: Env; timeoutMs?: number; quiet?: boolean }) => Promise<RunResult>;
+export type Runner = (command: readonly string[], options: { cwd: string; capture: boolean; env: Env; timeoutMs?: number; quiet?: boolean; signal?: AbortSignal }) => Promise<RunResult>;
 
 export interface CommandOptions {
   /** The project's directory, where `wrangler.jsonc` and `.env` are. Default: the current directory. */
@@ -77,10 +77,12 @@ export interface CommandOptions {
   run?: Runner;
   /** Where lines go. Default: `console.log`. */
   say?: (line: string) => void;
+  /** `dev`: aborting it (a SIGTERM to `pikit dev`) stops celld, as Ctrl-C does. */
+  signal?: AbortSignal;
 }
 
 /** A `Run` bound to the project (`rollout.mjs`'s), which may also be given a deadline. */
-type ContextRun = (command: string[], options: { capture: boolean; env?: Record<string, string>; timeoutMs?: number; quiet?: boolean }) => Promise<RunResult>;
+type ContextRun = (command: string[], options: { capture: boolean; env?: Record<string, string>; timeoutMs?: number; quiet?: boolean; signal?: AbortSignal }) => Promise<RunResult>;
 
 /** What is resolved once for a command: the directory, the environment with `.env`'s deploy settings, the runner. */
 interface Context {
@@ -95,7 +97,7 @@ function context(options: CommandOptions): Context {
   const env = machineEnv(cwd, options.env ?? process.env);
   const runner = options.run ?? spawnRunner;
   const run: ContextRun = (command, opts) =>
-    runner(command, { cwd, capture: opts.capture, env: { ...env, ...opts.env }, ...(opts.timeoutMs !== undefined && { timeoutMs: opts.timeoutMs }), ...(opts.quiet === true && { quiet: true }) });
+    runner(command, { cwd, capture: opts.capture, env: { ...env, ...opts.env }, ...(opts.timeoutMs !== undefined && { timeoutMs: opts.timeoutMs }), ...(opts.quiet === true && { quiet: true }), ...(opts.signal !== undefined && { signal: opts.signal }) });
   return { cwd, env, run, say: options.say ?? ((line) => console.log(line)) };
 }
 
@@ -465,7 +467,8 @@ export async function url(options: CommandOptions = {}): Promise<string | undefi
  * (`build.command`; the CLI builds them again when they change). `.env`, without the deploy settings,
  * becomes the Worker's variables through `.dev.vars` (0600), which `celld dev` reads instead of `.env`;
  * the derived config and `.dev.vars` are written again when `.env` or `wrangler.jsonc` change, and
- * deleted when it exits. Resolves with celld's exit code.
+ * deleted when it exits (on Ctrl-C, or when `signal` aborts). Resolves with celld's exit code (143
+ * when `signal` aborted before celld started).
  */
 export async function dev(options: CommandOptions = {}): Promise<number> {
   const ctx = context(options);
@@ -486,10 +489,12 @@ export async function dev(options: CommandOptions = {}): Promise<number> {
   });
   try {
     await runBuild({ project: readProjectConfig(cwd), run });
+    if (options.signal?.aborted) return 143;
     const esbuild = esbuildPath(cwd, ctx.env);
     const done = await run([celldBin(ctx.env), "dev", GENERATED_CONFIG, "--watch-ignore", ".pikit/**", "--watch-ignore", "src/*/dist/**"], {
       capture: false,
       env: esbuild === undefined ? {} : { CELLD_ESBUILD: esbuild },
+      ...(options.signal !== undefined && { signal: options.signal }),
     });
     if (done.code === 127) throw new Error("celld is not installed here (or not on the PATH): curl -fsSL https://celld.dev/install.sh | sh, or set PIKIT_CELLD_BIN");
     return done.code;
@@ -600,7 +605,7 @@ function readRecord(cwd: string): (Deployed & { at?: string }) | undefined {
 }
 
 /** The real runner: the command from the PATH of `env`, without a shell, so no argument is ever interpreted. */
-export const spawnRunner: Runner = (command, { cwd, capture, env, timeoutMs, quiet }) =>
+export const spawnRunner: Runner = (command, { cwd, capture, env, timeoutMs, quiet, signal }) =>
   new Promise((resolve) => {
     const [file = "", ...args] = command;
     const stdio = ["inherit", capture ? "pipe" : "inherit", quiet === true ? "pipe" : "inherit"] as const;
@@ -616,5 +621,11 @@ export const spawnRunner: Runner = (command, { cwd, capture, env, timeoutMs, qui
       if (error.code !== "ENOENT") console.error(`\`${file}\` did not start: ${error.message}`);
       resolve(result(127));
     });
-    child.on("close", (code, signal) => resolve(result(code ?? (signal === "SIGTERM" && timeoutMs !== undefined ? 124 : 1))));
+    const stop = () => child.kill("SIGTERM");
+    if (signal?.aborted) stop();
+    signal?.addEventListener("abort", stop, { once: true });
+    child.on("close", (code, killed) => {
+      signal?.removeEventListener("abort", stop);
+      resolve(result(code ?? (killed === "SIGTERM" && timeoutMs !== undefined ? 124 : 1)));
+    });
   });

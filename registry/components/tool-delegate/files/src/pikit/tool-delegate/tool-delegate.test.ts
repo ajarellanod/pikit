@@ -18,6 +18,8 @@ import toolDelegate, {
   createTasksTool,
   DELEGATE_TOOL,
   type DelegateConfig,
+  callersOf,
+  chainOf,
   delegateDescription,
   depthOf,
   STEER_TOOL,
@@ -97,7 +99,7 @@ test("a call runs the task in a child of the agent it names, one level deeper, i
   const d = delegation();
   expect(textOf(await call({ agent: "researcher", task: "find X" }, d))).toBe('The agent "researcher" answered:\n\ndone');
 
-  expect(d.asked).toEqual([{ how: "run", task: { agent: "researcher", key: "delegate:1:t9", channel: "delegate", task: "find X", sender: { channel: "delegate", id: "assistant" } } }]);
+  expect(d.asked).toEqual([{ how: "run", task: { agent: "researcher", key: "delegate:1:assistant:t9", channel: "delegate", task: "find X", sender: { channel: "delegate", id: "assistant" } } }]);
 });
 
 test("wait: false starts it, and says its id and that the answer comes later", async () => {
@@ -124,14 +126,121 @@ test("what the child asked the person goes with the call's result, as its parts,
 
 test("a delegated task always waits for its own delegations, and goes no deeper than maxDepth", async () => {
   const d = delegation();
-  const task: ConversationRef = { key: "delegate:1:t3", agent: "researcher", conversationId: "8" };
+  const task: ConversationRef = { key: "delegate:1:assistant:t3", agent: "researcher", conversationId: "8", origin: parent };
   await call({ agent: "coder", task: "x", wait: false }, d, task);
-  expect(d.asked).toEqual([{ how: "run", task: { agent: "coder", key: "delegate:2:t9", channel: "delegate", task: "x", sender: { channel: "delegate", id: "researcher" } } }]);
+  expect(d.asked).toEqual([{ how: "run", task: { agent: "coder", key: "delegate:2:assistant.researcher:t9", channel: "delegate", task: "x", sender: { channel: "delegate", id: "researcher" } } }]);
 
-  const deepest: ConversationRef = { key: "delegate:2:t9", agent: "coder", conversationId: "9" };
+  const deepest: ConversationRef = { key: "delegate:2:assistant.researcher:t9", agent: "coder", conversationId: "9", origin: parent };
   await expect(call({ agent: "researcher", task: "x" }, d, deepest)).rejects.toThrow("already 2 delegations deep, the most this project allows");
   expect(d.asked).toHaveLength(1);
-  expect([depthOf("telegram:1"), depthOf("delegate:3:t1"), depthOf("delegate:x")]).toEqual([0, 3, 0]);
+  expect([depthOf("telegram:1"), depthOf("delegate:3:a.b.c:t1"), depthOf("delegate:x")]).toEqual([0, 3, 0]);
+});
+
+/** Who may delegate to whom: `developer` takes tasks only from `orchestrator`; `researcher` from anyone. */
+const guarded: DelegateConfig = {
+  agents: [
+    { name: "developer", description: "Uses the GitHub token.", from: ["orchestrator"] },
+    { name: "orchestrator", description: "Plans." },
+    { name: "researcher", description: "Reads sources." },
+  ],
+  maxDepth: 3,
+};
+/** A conversation a person started, of `agent`. */
+const root = (agent: string): ConversationRef => ({ key: `telegram:${agent}`, agent, conversationId: `c-${agent}` });
+/** A delegated conversation of `agent` under `chain` (root first), as the runtime gives it: its origin the root's. */
+const delegated = (chain: string[], agent: string, origin: ConversationRef = root(chain[0] ?? "")): ConversationRef => ({
+  key: `delegate:${chain.length}:${chain.join(".")}:t1`,
+  agent,
+  conversationId: `c-${chain.join(".")}-${agent}`,
+  origin,
+});
+/** Asks for `developer` in `conversation`, both ways, and expects both refused with nothing started. */
+async function refusedBothWays(conversation: ConversationRef, message: string) {
+  const d = delegation();
+  for (const wait of [true, false]) await expect(call({ agent: "developer", task: "push", wait }, d, conversation, guarded)).rejects.toThrow(message);
+  expect(d.asked).toEqual([]);
+}
+
+test("from: an allowed agent a person talks to delegates to it, its child's key carrying the chain", async () => {
+  const d = delegation();
+  expect(textOf(await call({ agent: "developer", task: "push" }, d, root("orchestrator"), guarded))).toBe('The agent "developer" answered:\n\ndone');
+  await call({ agent: "developer", task: "push", wait: false }, d, root("orchestrator"), guarded);
+  expect(d.asked.map((each) => [each.how, each.task.key])).toEqual([
+    ["run", "delegate:1:orchestrator:t9"],
+    ["start", "delegate:1:orchestrator:t9"],
+  ]);
+  expect([depthOf("delegate:1:orchestrator:t9"), chainOf("delegate:1:orchestrator:t9")]).toEqual([1, ["orchestrator"]]);
+});
+
+test("from: an agent it does not name is refused, waited for or not, and nothing is started", async () => {
+  await refusedBothWays(root("support"), 'the agent "developer" takes tasks only from orchestrator; this conversation (support) may not delegate to it');
+});
+
+test("from: laundering through an allowed agent is refused: every agent above the caller must be named too", async () => {
+  // support delegated to orchestrator, which is allowed; the task came from support, which is not.
+  await refusedBothWays(delegated(["support"], "orchestrator"), "this conversation (orchestrator, delegated from support) may not delegate to it");
+  // Two levels: support, then researcher (no from), then orchestrator.
+  await refusedBothWays(delegated(["support", "researcher"], "orchestrator"), "(orchestrator, delegated from support then researcher)");
+});
+
+test("from: a chain wholly in it is allowed, and the child's key carries it one agent longer", async () => {
+  const d = delegation();
+  await call({ agent: "developer", task: "push" }, d, delegated(["orchestrator"], "orchestrator"), guarded);
+  const key = d.asked[0]?.task.key ?? "";
+  expect(key).toBe("delegate:2:orchestrator.orchestrator:t9");
+  expect([depthOf(key), chainOf(key)]).toEqual([2, ["orchestrator", "orchestrator"]]);
+});
+
+test("from: a chain that cannot be trusted reaches no restricted agent; unrestricted ones still, and the distrust goes down", async () => {
+  const untrusted: ConversationRef[] = [
+    // The origin the runtime fixed is not the chain's first agent.
+    delegated(["orchestrator"], "orchestrator", root("support")),
+    // A delegate key without an origin, malformed, of another depth than its chain, the old format, or written empty.
+    { key: "delegate:1:orchestrator:t1", agent: "orchestrator", conversationId: "c" },
+    { ...delegated(["orchestrator"], "orchestrator"), key: "delegate:1:orchestrator" },
+    { ...delegated(["orchestrator"], "orchestrator"), key: "delegate:2:orchestrator:t1" },
+    { ...delegated(["orchestrator"], "orchestrator"), key: "delegate:1:t1" },
+    { ...delegated(["orchestrator"], "orchestrator"), key: "delegate:1::t1" },
+    { ...delegated(["orchestrator"], "orchestrator"), key: "delegate:1:Orchestrator:t1" },
+    // Delegated (an origin) under a key that is not this tool's.
+    { key: "telegram:9", agent: "orchestrator", conversationId: "c", origin: root("orchestrator") },
+  ];
+  for (const conversation of untrusted) {
+    expect(callersOf(conversation)).toBeUndefined();
+    await refusedBothWays(conversation, "this conversation's chain of delegations cannot be verified");
+    const d = delegation();
+    await call({ agent: "researcher", task: "x" }, d, conversation, guarded);
+    // The child's chain is written empty: nothing under it can be trusted either.
+    expect(d.asked[0]?.task.key).toMatch(/^delegate:\d+::t9$/);
+    expect(chainOf(d.asked[0]?.task.key ?? "")).toBeUndefined();
+  }
+  expect([chainOf("telegram:1"), callersOf(root("support"))]).toEqual([[], ["support"]]);
+});
+
+test("from: an unknown agent is refused before it, and it before the depth limit", async () => {
+  const d = delegation();
+  await expect(call({ agent: "stranger", task: "x" }, d, root("support"), guarded)).rejects.toThrow('there is no agent "stranger"');
+  const deep = delegated(["support", "orchestrator", "orchestrator"], "orchestrator");
+  await expect(call({ agent: "developer", task: "x" }, d, deep, guarded)).rejects.toThrow('takes tasks only from orchestrator');
+  expect(d.asked).toEqual([]);
+});
+
+test("from: the description says who may delegate to a restricted agent", () => {
+  expect(delegateDescription(guarded)).toContain("- developer: Uses the GitHub token. (only from: orchestrator)\n- orchestrator: Plans.\n- researcher: Reads sources.");
+});
+
+test("from: start refuses a name in it that is no agent.definition", async () => {
+  const agents = defineComponent({ name: "agents", setup: (pikit) => pikit.provideKeyed("agent.definition", "developer", { name: "developer", model: "x/y" }) });
+  const app = await defineApp({
+    components: [agents, toolDelegate],
+    config: { "tool-delegate": { agents: [{ name: "developer", description: "x", from: ["orchestrator"] }] } },
+    logger: silentLogger,
+  }).create();
+  const failure = await app.start().then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(String((failure as Error).cause)).toContain('"orchestrator" in the from of "developer" is no agent.definition');
 });
 
 test("outside a conversation's run, or to an agent it does not list, nothing is asked", async () => {
@@ -173,8 +282,15 @@ test("delegate_steer sends only to a running task; delegate_cancel stops one, an
   for (const tool of [createTasksTool(), createSteerTool(), createCancelTool()]) expect(tool.replay).toBe("safe");
 });
 
-test("config is checked when the App is defined: at least one agent, each named and described, a depth from 1 to 5", () => {
-  for (const bad of [{ agents: [] }, { agents: [{ name: "", description: "x" }] }, { agents: [{ name: "ok", description: "" }] }, { agents: [{ name: "ok", description: "x" }], maxDepth: 0 }]) {
+test("config is checked when the App is defined: at least one agent, each named and described, a non-empty from of names, a depth from 1 to 5", () => {
+  for (const bad of [
+    { agents: [] },
+    { agents: [{ name: "", description: "x" }] },
+    { agents: [{ name: "ok", description: "" }] },
+    { agents: [{ name: "ok", description: "x" }], maxDepth: 0 },
+    { agents: [{ name: "ok", description: "x", from: [] }] },
+    { agents: [{ name: "ok", description: "x", from: [""] }] },
+  ]) {
     expect(() => defineApp({ components: [toolDelegate], config: { "tool-delegate": bad }, logger: silentLogger })).toThrow("/tool-delegate/");
   }
 });
