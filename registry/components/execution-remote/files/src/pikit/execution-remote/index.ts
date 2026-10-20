@@ -6,16 +6,21 @@
  * It provides `execution` and `execution.shell` (pi-durable's `ExecutionEnv`, `env.ts`) and
  * `workspace`, which the runtime asks on every tool call for the conversation's environment. A
  * conversation's sandbox is its agent's (`ConversationRef.agent`): every request to it carries
- * `Pikit-Agent: <agent>`, and two agents never share one, also when one delegates to the other (a
- * child of the same agent shares its parent's). Which sandbox (its id, `protocol.ts`'s `SANDBOX_ID`):
+ * `Pikit-Agent: <agent>`, and two agents never share one, also when one delegates to the other. A
+ * delegated child of the same agent shares its parent's only in a Durable Object (it lives in the
+ * parent's object); on a server its key is its own (`delegate:<depth>:<task>`), so is its sandbox.
+ * The agent is an agent's name of at most `MAX_AGENT_LENGTH` (100) characters, this component's own
+ * bound (`defineAgent` has none): a longer one is refused at `resolve`, saying so (the host answers
+ * `400` too). Which sandbox (its id, `protocol.ts`'s `SANDBOX_ID`):
  * - **In a Durable Object** (`WORKERS_HOST` has an object): the object is the conversation (its
  *   delegated children live in it too), so each agent of the object works in
  *   `o-<hex SHA-256 of "<object id>\n<agent>">`, with an environment of its own kept for the App's
  *   life. The object id is `idFromName(key)`'s: the same for the conversation's whole life, through
  *   evictions, deploys and resets. `execution` alone works in `o-<object id>`, with no agent.
  * - **On a server** (no `WORKERS_HOST`): `workspace` gives each conversation key and agent its own
- *   sandbox, `k-<hex SHA-256 of "<key>\n<agent>">` (through resets, as an object on Cloudflare);
- *   `execution` alone is the sandbox `sandbox` of the config (`shared`), with no agent.
+ *   sandbox, `k-<hex SHA-256 of "<key>\n<agent>">` (through resets, as an object on Cloudflare),
+ *   with an environment kept for the App's life: one per key and agent ever resolved, never
+ *   forgotten; `execution` alone is the sandbox `sandbox` of the config (`shared`), with no agent.
  * The host makes the sandbox on its first request (its provider's `workspace.resolve`) and keeps it.
  *
  * - **The token** (`PIKIT_SANDBOX_TOKEN`, `tokenSecret`) is read through `secrets` at start: missing,

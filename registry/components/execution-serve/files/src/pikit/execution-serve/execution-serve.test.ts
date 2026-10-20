@@ -228,6 +228,46 @@ test("a reader and a command are their sandbox's: from another, or unknown, they
   await host.value("a", "execKill", { command, cursor: 0, wait: 1000 });
 });
 
+test("a reader and a command are their agent's too: one sandbox id under another Pikit-Agent, or none, finds neither (404)", async () => {
+  const host = await served();
+  const sandbox = `o-${"ef".repeat(32)}`;
+  const developer = await host.value(sandbox, "open", {}, "developer");
+  await host.value(sandbox, "writeFile", { path: `${developer.cwd}/big.txt`, content: { text: "0123456789" } }, "developer");
+  const opened = await host.value(sandbox, "openBinaryReader", { path: `${developer.cwd}/big.txt`, prefetch: 0 }, "developer");
+  if (!("handle" in opened)) throw new Error("expected a handle");
+  const dir = await host.value(sandbox, "openDirReader", { path: developer.cwd }, "developer");
+  const command = crypto.randomUUID();
+  await host.value(sandbox, "execStart", { command, run: "sleep 5", cwd: developer.cwd, wait: 0, linger: 0 }, "developer");
+
+  for (const other of ["analyst", undefined]) {
+    expect(failureOf(await host.call(sandbox, "readerRead", { handle: opened.handle, offset: 0, length: 4 }, other))).toEqual([404, "unknown_handle"]);
+    expect(failureOf(await host.call(sandbox, "readerClose", { handle: opened.handle }, other))).toEqual([404, "unknown_handle"]);
+    expect(failureOf(await host.call(sandbox, "dirNext", { handle: dir.handle, maxEntries: 10 }, other))).toEqual([404, "unknown_handle"]);
+    expect(failureOf(await host.call(sandbox, "execRead", { command, cursor: 0, wait: 0, linger: 0 }, other))).toEqual([404, "unknown_command"]);
+    expect(failureOf(await host.call(sandbox, "execKill", { command, cursor: 0, wait: 0 }, other))).toEqual([404, "unknown_command"]);
+  }
+  // Still the developer's, running and open.
+  expect(atob((await host.value(sandbox, "readerRead", { handle: opened.handle, offset: 2, length: 4 }, "developer")).base64)).toBe("2345");
+  expect((await host.value(sandbox, "execRead", { command, cursor: 0, wait: 0, linger: 0 }, "developer")).done).toBeUndefined();
+  await host.value(sandbox, "execKill", { command, cursor: 0, wait: 1000 }, "developer");
+});
+
+test(`the limits count per sandbox and agent: ${MAX_COMMANDS} commands of one agent leave the same sandbox id free for another`, async () => {
+  const host = await served();
+  const sandbox = `o-${"12".repeat(32)}`;
+  const developer = await host.value(sandbox, "open", {}, "developer");
+  const ids: string[] = [];
+  for (let i = 0; i < MAX_COMMANDS; i++) {
+    const command = crypto.randomUUID();
+    ids.push(command);
+    await host.value(sandbox, "execStart", { command, run: "sleep 5", cwd: developer.cwd, wait: 0, linger: 0 }, "developer");
+  }
+  expect(failureOf(await host.call(sandbox, "execStart", { command: crypto.randomUUID(), run: "true", cwd: developer.cwd, wait: 0, linger: 0 }, "developer"))).toEqual([429, "too_many"]);
+  const analyst = await host.value(sandbox, "open", {}, "analyst");
+  expect((await host.value(sandbox, "execStart", { command: crypto.randomUUID(), run: "true", cwd: analyst.cwd, wait: 2000, linger: 0 }, "analyst")).done).toEqual({ ok: true, value: { exitCode: 0 } });
+  await Promise.all(ids.map((command) => host.value(sandbox, "execKill", { command, cursor: 0, wait: 2000 }, "developer")));
+});
+
 test("execKill stops a running command at once: it ends aborted", async () => {
   const host = await served();
   const a = await host.value("a", "open", {});

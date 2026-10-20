@@ -15,7 +15,7 @@ import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { withAbortSignal } from "@pikit/pi-adapter/execution";
 import executionRemote, { keySandbox, objectSandbox } from "./index.ts";
-import { AGENT_HEADER, PROTOCOL_PATH, PROTOCOL_STATUS, type ProtocolErrorCode, type WireExecState } from "./protocol.ts";
+import { AGENT_HEADER, MAX_AGENT_LENGTH, PROTOCOL_PATH, PROTOCOL_STATUS, type ProtocolErrorCode, type WireExecState } from "./protocol.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const TOKEN = "execution-remote-test-token-0123456789";
@@ -172,6 +172,10 @@ test("a conversation whose agent is not an agent's name is refused, and nothing 
   for (const agent of ["", "Bad", "_shared", "a/b", "a\nb", `a${"b".repeat(100)}`]) {
     await expect(workspace.resolve({ key: "telegram:1", agent, conversationId: "c-1" }, ctx)).rejects.toThrow("is not an agent name");
   }
+  // The 100-character bound is this component's own (defineAgent has none): 101 is refused, saying so.
+  const long = `a${"b".repeat(MAX_AGENT_LENGTH)}`;
+  expect(long).toHaveLength(101);
+  await expect(workspace.resolve({ key: "telegram:1", agent: long, conversationId: "c-1" }, ctx)).rejects.toThrow(`at most ${MAX_AGENT_LENGTH} characters`);
   expect(host.seen).toEqual([]);
 });
 

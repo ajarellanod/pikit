@@ -18,7 +18,8 @@
  *   it), or `_<id>` without one (an agentless sandbox, which gets the base), `key`
  *   `execution-serve:<id>`. An id that makes no such ref, or a malformed header, is `400`, never
  *   cleaned up.
- * - **Readers and commands stay with their sandbox** (`host.ts`): another sandbox's handle is unknown.
+ * - **Readers and commands stay with their sandbox and agent** (`host.ts`): another sandbox's handle,
+ *   or one of the same sandbox id under another `Pikit-Agent`, is unknown.
  *   A command nobody reads for `leaseSeconds` is stopped and forgotten, so a client that went away (a
  *   Durable Object evicted mid-command) leaves nothing running.
  * - **Credentials (SPEC C7).** The token authenticates the client to this host and goes no further:

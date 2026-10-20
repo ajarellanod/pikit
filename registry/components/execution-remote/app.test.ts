@@ -99,6 +99,10 @@ test("on a server, each conversation key and agent has its own sandbox, k-<SHA-2
   expect(other.cwd).toBe(join(host.root, "sandboxes", `remote-${await keySandbox("telegram:1", "other-agent")}`, "other-agent"));
   expect(await other.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
   expect(await two.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
+  // A delegated child has a key of its own on a server: its own sandbox, even of the parent's agent.
+  const child = (await client.workspace.resolve({ ...conversation("delegate:1:task-1"), channel: "delegate" }, ctx)).env;
+  expect(child.cwd).toBe(join(host.root, "sandboxes", `remote-${await keySandbox("delegate:1:task-1", "assistant")}`, "assistant"));
+  expect(await child.exists("mine.txt", ctx)).toEqual({ ok: true, value: false });
   expect(existsSync(join(host.root, "sandboxes", "remote-shared", "_shared", "shared.txt"))).toBe(true);
   expect(one.id).toBe(`execution-remote:${host.url.origin}#${sandbox}`);
 });
@@ -118,7 +122,7 @@ test("in a Durable Object, each agent of the object works in a sandbox of its ow
     expect(root.cwd).toBe(join(host.root, "sandboxes", `remote-${sandbox}`, "assistant"));
     expect(child.cwd).toBe(join(host.root, "sandboxes", `remote-${await objectSandbox(objectId, "helper")}`, "helper"));
     expect(await child.exists("plan.md", ctx)).toEqual({ ok: true, value: false });
-    // A child of the same agent shares its parent's sandbox.
+    // In an object, a child of the same agent shares its parent's sandbox (on a server its key is its own).
     expect(sameAgent).toBe(root);
     // `execution` alone is the object's own, for no agent.
     expect(durable.execution).not.toBe(root);
