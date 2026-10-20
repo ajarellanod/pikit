@@ -2,7 +2,8 @@
  * The dashboard's shell, in Beautiful UI's harness layout: the operator signs in with the token once
  * (a session cookie, `lib/api.ts`), then a sidebar (the App's menu, New chat, Conversations, the views
  * the App's composition allows, each with its dot when it has something to see (`View.badge`), the
- * latest conversations and "View all" when there are more), a main pane with the conversations opened as
+ * latest conversations, the dashboard's own first and the channels' under them in a section that folds
+ * apart, and "View all" when there are more), a main pane with the conversations opened as
  * tabs (and New chat's while it shows; each one closes), and a side panel a page may fill (a
  * conversation's Context). A page that loads with a session still open goes straight in, and `/` opens
  * New chat.
@@ -17,12 +18,12 @@ import { ThemeToggle } from "@/components/bui/ThemeToggle";
 import { useChatActions } from "@/components/pikit/chat-actions";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Mark } from "@/components/pikit/mark";
-import { ChannelIcon, partyOf } from "@/components/pikit/party";
 import { SettingsDialog } from "@/components/pikit/settings-dialog";
 import { SignIn } from "@/components/pikit/sign-in";
 import { TabBar } from "@/components/pikit/tab-bar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setTarget } from "@/lib/activity";
+import { isDashboardKey } from "@/lib/admin-api";
 import { api, type ApiAgents, type ApiApp, type ApiCommands, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
 import { ChatsProvider, useChats } from "@/lib/chats";
 import { BASE, match, navigate, pagePath, usePath } from "@/lib/router";
@@ -161,19 +162,20 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   ];
 
   const chatActions = useChatActions({ shown: openId, onLeft: () => newChat() });
-  const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation): SidebarChat => {
+  // The dashboard's own chats first; the channels' (Telegram, the web chat…) in a section under them.
+  const sidebarChats: SidebarChat[] = [];
+  const channelChats: SidebarChat[] = [];
+  for (const conversation of chats.items ?? []) {
     const id = conversation.conversationId;
-    const { channel } = partyOf(conversation);
-    return {
+    (isDashboardKey(conversation.key) ? sidebarChats : channelChats).push({
       id,
       label: chats.titleOf(conversation),
-      icon: <ChannelIcon kind={channel.kind} label={channel.label} />,
       busy: conversation.busy,
       active: path === pagePath(CHAT, id),
       href: `${BASE}${pagePath(CHAT, id)}`,
       actions: chatActions.actionsOf(conversation, false),
-    };
-  });
+    });
+  }
 
   const Page = found?.page.component;
   const page =
@@ -200,6 +202,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           workspace={{ name, logo: <Mark size={20} /> }}
           items={items}
           chats={sidebarChats}
+          moreChats={{ label: "Channels", chats: channelChats }}
           chatsEmpty={chats.error !== undefined ? "The chats cannot be read" : chats.items === undefined ? "Loading" : "No chats yet"}
           onPickChat={(id) => navigate(pagePath(CHAT, id))}
           {...(chats.hasMore && chatView !== undefined && { viewAll: { href: `${BASE}${CONVERSATIONS_PATH}`, onSelect: () => navigate(CONVERSATIONS_PATH) } })}

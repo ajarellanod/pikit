@@ -3,7 +3,9 @@
  * first `PAGE`, which the sidebar lists, read again every 10 s while the dashboard is active, 30 s on
  * Cloudflare; never more: every one is on the Conversations page, `views/conversations/list.tsx`), the
  * tabs the operator opened, what the commands answered, and the messages sent from here that the
- * conversation does not show yet (shown at once, where they go).
+ * conversation does not show yet (shown at once, where they go). A conversation written to from here
+ * goes first at once (`writtenFirst`), and the list is read again once the message is in (the open
+ * conversation's page calls `reload`).
  *
  * A title names one conversation (a reset's new one has its own). It is the API's
  * (`ApiConversation.title`: a model's, made after its first run, or the operator's, `/name` or `rename`; until then
@@ -23,7 +25,7 @@
  */
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { type SentMessages, useSentMessages } from "@/components/pikit/conversation";
+import { type SentMessages, useSentMessages, writtenFirst } from "@/components/pikit/conversation";
 import { every, usePolling } from "./activity.ts";
 import { cleanTitle, isDashboardKey } from "./admin-api.ts";
 import { type ApiAgent, api, type ApiApp, type ApiConversation, type ApiPage, type ApiRenameRequest, post } from "./api.ts";
@@ -131,7 +133,9 @@ export function useChats(): Chats {
 }
 
 export function ChatsProvider({ children }: { children: ReactNode }) {
-  const [first, setFirst] = useState<ApiPage<ApiConversation>>();
+  /** The first page, and when it was asked for (epoch ms): a slower answer to an older request never replaces it. */
+  const [read, setRead] = useState<{ page: ApiPage<ApiConversation>; at: number }>();
+  const first = read?.page;
   const [changed, setChanged] = useState(0);
   const [error, setError] = useState<Error>();
   const [firsts, setFirsts] = useState<Record<string, string>>({});
@@ -142,8 +146,9 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
   const [gone, setGone] = useState<ReadonlyMap<string, number>>(new Map());
 
   const reload = useCallback(() => {
+    const at = Date.now();
     api<ApiPage<ApiConversation>>(`/conversations?limit=${PAGE}`)
-      .then((page) => (setFirst(page), setError(undefined)))
+      .then((page) => (setRead((current) => (current !== undefined && current.at > at ? current : { page, at })), setError(undefined)))
       .catch((thrown: unknown) => setError(thrown instanceof Error ? thrown : new Error(String(thrown))));
   }, []);
   useEffect(reload, [reload]);
@@ -179,6 +184,7 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sent = useSentMessages();
+  const { lastSentAt } = sent;
 
   const notesOf = useCallback((id: string): CommandNote[] => notes[id] ?? [], [notes]);
   const addNote = useCallback((id: string, command: string, text: string) => {
@@ -211,8 +217,12 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     setTabs((all) => all.map((tab) => (tab.id === from ? { ...tab, id: to } : tab)));
   }, []);
 
-  // One with no key has nothing to show or do: left out; so is one this page just put away.
-  const items = useMemo(() => first?.items.filter((each) => each.key !== undefined && !gone.has(each.conversationId)), [first, gone]);
+  // One with no key has nothing to show or do: left out; so is one this page just put away. One written to since goes first.
+  const items = useMemo(() => {
+    if (read === undefined) return undefined;
+    const listed = read.page.items.filter((each) => each.key !== undefined && !gone.has(each.conversationId));
+    return writtenFirst(listed, read.at, (each) => lastSentAt(each.conversationId));
+  }, [read, gone, lastSentAt]);
 
   const loadArchived = useCallback(() => {
     api<ApiPage<ApiConversation>>(`/conversations?archived=1&limit=${ARCHIVED_PAGE}`)

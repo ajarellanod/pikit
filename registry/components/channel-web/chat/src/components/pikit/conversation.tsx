@@ -98,6 +98,17 @@ export function useSentMessages(): SentMessages {
   return { sentOf, addSent, updateSent, lastSentAt };
 }
 
+/**
+ * A list of conversations read at `readAt` (epoch ms, its request's), newest activity first, with those
+ * written to from this page since (`sentAt`, `SentMessages.lastSentAt`) moved first, the latest first:
+ * a conversation written to again goes up at once, before a newer read lists it there.
+ */
+export function writtenFirst<T>(items: readonly T[], readAt: number, sentAt: (item: T) => number | undefined): T[] {
+  const since = (item: T): number => sentAt(item) ?? 0;
+  const written = items.filter((item) => since(item) > readAt).sort((a, b) => since(b) - since(a));
+  return written.length === 0 ? [...items] : [...written, ...items.filter((item) => since(item) <= readAt)];
+}
+
 const PAGE = 50;
 /** How long after a message sent from here its run is expected, before it is seen going. */
 const ANSWER_EXPECTED_MS = 30_000;

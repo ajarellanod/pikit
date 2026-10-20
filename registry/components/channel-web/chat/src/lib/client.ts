@@ -69,6 +69,8 @@ export async function follow(path: string, onEvent: (event: ChatEvent) => void, 
 
 export interface Loaded<T> {
   data: T | undefined;
+  /** Epoch ms `data` was asked for (`0` before it is read). */
+  at: number;
   error: Error | undefined;
   loading: boolean;
   reload(): void;
@@ -77,6 +79,7 @@ export interface Loaded<T> {
 /** `GET path`, again on `reload()`, and every `everyMs` when given while the person is here (`activity.ts`). `null` loads nothing. */
 export function useGet<T>(path: string | null, everyMs?: number): Loaded<T> {
   const [data, setData] = useState<T>();
+  const [at, setAt] = useState(0);
   const [error, setError] = useState<Error>();
   const [loading, setLoading] = useState(path !== null);
   const [round, setRound] = useState(0);
@@ -87,8 +90,9 @@ export function useGet<T>(path: string | null, everyMs?: number): Loaded<T> {
     if (path === null) return;
     const stop = new AbortController();
     setLoading(true);
+    const asked = Date.now();
     get<T>(path, stop.signal)
-      .then((value) => current.current === path && (setData(value), setError(undefined)))
+      .then((value) => current.current === path && (setData(value), setAt(asked), setError(undefined)))
       .catch((thrown: unknown) => !stop.signal.aborted && setError(thrown instanceof Error ? thrown : new Error(String(thrown))))
       .finally(() => !stop.signal.aborted && setLoading(false));
     return () => stop.abort();
@@ -96,5 +100,5 @@ export function useGet<T>(path: string | null, everyMs?: number): Loaded<T> {
 
   const reload = useCallback(() => setRound((n) => n + 1), []);
   usePolling(reload, path === null ? undefined : everyMs);
-  return { data, error, loading, reload };
+  return { data, at, error, loading, reload };
 }

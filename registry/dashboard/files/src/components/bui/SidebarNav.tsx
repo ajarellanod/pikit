@@ -12,7 +12,9 @@ export { MenuRow, MenuSeparator } from "./ActionsMenu";
  * (its mark and name), primary navigation (an item's icon may
  * carry a dot, `SidebarDot`: its page has something to see), a searchable list of
  * the most recent chats (at most `SIDEBAR_CHATS`, each with its
- * actions menu, `ActionsMenu`; "View all" below them when there
+ * actions menu, `ActionsMenu`; optionally a second list under
+ * them in a section of its own, folded apart and searched alike,
+ * `moreChats`; "View all" below them when there
  * are more: the app's page of every chat, archived ones too), a menu
  * at the foot (Settings, or the caller's label and icon; none
  * without `menu`), and a collapse that keeps every icon in place.
@@ -119,6 +121,7 @@ export default function SidebarNav({
   items,
   chats,
   onPickChat,
+  moreChats,
   viewAll,
   chatsEmpty = "No chats yet",
   defaultCollapsed = false,
@@ -135,6 +138,8 @@ export default function SidebarNav({
   /** the most recent first: the first `SIDEBAR_CHATS` are listed */
   chats: SidebarChat[];
   onPickChat: (id: string) => void;
+  /** a second list under the chats, in a section of its own (`label`) that folds apart, searched alike: shown when it has any */
+  moreChats?: { label: string; chats: SidebarChat[] };
   /** "View all" under the chats, to the app's page of them: given only when there are more than those listed */
   viewAll?: { href?: string; onSelect: () => void; label?: string };
   chatsEmpty?: string;
@@ -145,6 +150,7 @@ export default function SidebarNav({
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspacePosition, setWorkspacePosition] = useState<{ top?: number; bottom?: number; left: number }>({ left: 0 });
   const [chatsOpen, setChatsOpen] = useState(true);
+  const [moreOpen, setMoreOpen] = useState(true);
   /** The chat whose "…" menu is open: one at a time. */
   const [rowMenu, setRowMenu] = useState<string>();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -153,7 +159,23 @@ export default function SidebarNav({
   const searchRef = useRef<HTMLInputElement>(null);
 
   const needle = query.trim().toLowerCase();
-  const visibleChats = chats.slice(0, SIDEBAR_CHATS).filter((chat) => chat.label.toLowerCase().includes(needle));
+  const found = (list: SidebarChat[]) => list.slice(0, SIDEBAR_CHATS).filter((chat) => chat.label.toLowerCase().includes(needle));
+  const visibleChats = found(chats);
+  const visibleMore = moreChats === undefined ? [] : found(moreChats.chats);
+  /** The second section shows when it has chats, and while searching when some are found. */
+  const showMore = moreChats !== undefined && (needle === "" ? moreChats.chats.length > 0 : visibleMore.length > 0);
+  const chatRow = (chat: SidebarChat) => <ChatRow key={chat.id} chat={chat} menuOpen={rowMenu === chat.id} onPick={onPickChat} onMenu={(open) => setRowMenu(open ? chat.id : undefined)} />;
+  const viewAllRow = viewAll !== undefined && (
+    <a
+      data-row
+      href={viewAll.href}
+      onClick={(event) => follow(event, viewAll.onSelect)}
+      className="sidebar-row sidebar-chat-row relative z-10 mx-2 flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[13px] font-medium text-ink-3 transition-colors duration-150 hover:text-ink"
+    >
+      <span className="sidebar-copy min-w-0 flex-1 truncate">{viewAll.label ?? "View all"}</span>
+      <NavArrowRight width={14} height={14} strokeWidth={2} className="sidebar-copy shrink-0" aria-hidden />
+    </a>
+  );
 
   useEffect(() => {
     if (!workspaceOpen) return;
@@ -255,6 +277,7 @@ export default function SidebarNav({
               aria-expanded={searchOpen}
               onClick={() => {
                 setChatsOpen(true);
+                setMoreOpen(true);
                 setSearchOpen(true);
               }}
               className={`absolute top-0 right-0 z-10 flex size-8 items-center justify-center rounded-[8px] text-ink-3 transition-[opacity,background-color,color,transform] hover:bg-hover-2 hover:text-ink active:scale-[0.96] ${searchOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}
@@ -302,22 +325,26 @@ export default function SidebarNav({
 
           {chatsOpen && (
             <GlideGroup>
-              {visibleChats.map((chat) => (
-                <ChatRow key={chat.id} chat={chat} menuOpen={rowMenu === chat.id} onPick={onPickChat} onMenu={(open) => setRowMenu(open ? chat.id : undefined)} />
-              ))}
-              {visibleChats.length === 0 && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">{needle === "" ? chatsEmpty : "No chats found"}</div>}
-              {viewAll !== undefined && (
-                <a
-                  data-row
-                  href={viewAll.href}
-                  onClick={(event) => follow(event, viewAll.onSelect)}
-                  className="sidebar-row sidebar-chat-row relative z-10 mx-2 flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[13px] font-medium text-ink-3 transition-colors duration-150 hover:text-ink"
-                >
-                  <span className="sidebar-copy min-w-0 flex-1 truncate">{viewAll.label ?? "View all"}</span>
-                  <NavArrowRight width={14} height={14} strokeWidth={2} className="sidebar-copy shrink-0" aria-hidden />
-                </a>
-              )}
+              {visibleChats.map(chatRow)}
+              {visibleChats.length === 0 && (needle === "" || !showMore) && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">{needle === "" ? chatsEmpty : "No chats found"}</div>}
+              {!showMore && viewAllRow}
             </GlideGroup>
+          )}
+
+          {showMore && (
+            <>
+              <button
+                type="button"
+                aria-expanded={moreOpen}
+                onClick={() => setMoreOpen((open) => !open)}
+                className="sidebar-copy mx-2 mt-3 mb-1 flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12.5px] font-medium text-ink-3 transition-colors hover:text-ink-2"
+              >
+                <NavArrowDown width={16} height={16} strokeWidth={2} className="transition-transform duration-200" style={{ transform: moreOpen ? "rotate(0deg)" : "rotate(-90deg)" }} />
+                <span>{moreChats?.label}</span>
+              </button>
+              {moreOpen && <GlideGroup>{visibleMore.map(chatRow)}</GlideGroup>}
+              {viewAllRow !== false && <GlideGroup>{viewAllRow}</GlideGroup>}
+            </>
           )}
         </div>
 
