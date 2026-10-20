@@ -76,19 +76,22 @@ export function planComposition(components: readonly DeploymentFacts[]): Composi
   const byName = new Map(components.map((component) => [component.name, component]));
   const deployments = deploymentsOf([...byName.keys()]);
   const issues: CompositionIssue[] = [];
-  if (deployments.length > 1) {
-    issues.push({ code: "deployment_ambiguous", deployments });
-    return { issues };
-  }
-  const deployment = deployments[0];
-  const supported = new Set(deployment === undefined ? [] : (byName.get(deployment)?.deployment?.supports ?? []));
+  // Several deployments are a problem of their own, and each is still checked alone: what one supports
+  // never covers another's gap, and a need none of them supports is never hidden behind the ambiguity.
+  if (deployments.length > 1) issues.push({ code: "deployment_ambiguous", deployments });
+  const deploymentSet = new Set(deployments);
   for (const component of [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))) {
-    if (component.name === deployment) continue;
+    if (deploymentSet.has(component.name)) continue;
     for (const { requirement, via } of deploymentRequirements(component)) {
-      if (deployment === undefined) issues.push({ code: "deployment_missing", component: component.name, requirement, via });
-      else if (!supported.has(requirement)) issues.push({ code: "deployment_requirement_unmet", component: component.name, requirement, via, deployment });
+      if (deployments.length === 0) issues.push({ code: "deployment_missing", component: component.name, requirement, via });
+      for (const deployment of deployments) {
+        if (!(byName.get(deployment)?.deployment?.supports ?? []).includes(requirement)) {
+          issues.push({ code: "deployment_requirement_unmet", component: component.name, requirement, via, deployment });
+        }
+      }
     }
   }
+  const deployment = deployments.length === 1 ? deployments[0] : undefined;
   return { ...(deployment !== undefined && { deployment }), issues: issues.sort(compareIssues) };
 }
 
@@ -97,10 +100,23 @@ export function issueKey(issue: CompositionIssue): string {
   return [issue.code, issue.component ?? "", issue.requirement ?? "", issue.deployment ?? "", (issue.deployments ?? []).join(",")].join("|");
 }
 
-/** The issues of `after` that `before` did not have: what an operation would introduce. */
+/**
+ * What an issue holds unmet, for `introducedIssues`: a component's need, whichever deployment fails it
+ * (none, this one or another), or the set of deployments installed together.
+ */
+function obligationKey(issue: CompositionIssue): string {
+  return issue.code === "deployment_ambiguous" ? `ambiguous|${(issue.deployments ?? []).join(",")}` : `need|${issue.component ?? ""}|${issue.requirement ?? ""}`;
+}
+
+/**
+ * The issues of `after` whose need `before` did not already leave unmet: what an operation would
+ * introduce. A need unmet before stays a pre-existing problem when the deployment that fails it changes
+ * (removed, or swapped for another that does not support it either): the operation made nothing worse,
+ * and `doctor` keeps reporting it, so repairing a project step by step stays possible.
+ */
 export function introducedIssues(before: CompositionPlan, after: CompositionPlan): readonly CompositionIssue[] {
-  const known = new Set(before.issues.map(issueKey));
-  return after.issues.filter((issue) => !known.has(issueKey(issue)));
+  const known = new Set(before.issues.map(obligationKey));
+  return after.issues.filter((issue) => !known.has(obligationKey(issue)));
 }
 
 /** One line for a person: what is wrong, and what would make it right. */

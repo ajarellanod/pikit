@@ -53,7 +53,8 @@ import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { initRepository } from "../project/git.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
-import { kindOf, TARGETS } from "../registry/manifest.ts";
+import { deploymentProblems, kindOf, TARGETS } from "../registry/manifest.ts";
+import { formatCompositionIssue, planComposition } from "../project/composition.ts";
 import { CliError, log } from "../ui.ts";
 import { checkCompatible, installComponent, installUiPackages, notPortable, warnUnchosen } from "./add.ts";
 import { DASHBOARD_DIR, dashboardFiles } from "../project/dashboard.ts";
@@ -140,6 +141,15 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   }
   if (plan !== undefined && plan.problems.length > 0) {
     throw new CliError(`the preset "${plan.preset}" cannot be made with these answers:\n${plan.problems.map((problem) => `  - ${problem}`).join("\n")}`);
+  }
+  // Without a preset (`--ui` alone), the same planner over what would be installed: every path checks.
+  if (plan === undefined) {
+    const manifests = components.map((component) => registry.manifest(component));
+    const problems = [
+      ...manifests.flatMap((manifest) => deploymentProblems(manifest).map((problem) => `${manifest.name}'s component.json: ${problem}`)),
+      ...planComposition(manifests).issues.map(formatCompositionIssue),
+    ];
+    if (problems.length > 0) throw new CliError(`the project cannot be made:\n${problems.map((problem) => `  - ${problem}`).join("\n")}`);
   }
   const installedTools = [...new Set(components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {})))];
   const steward = plan?.steward ?? { tools: [], extensions: [] };

@@ -21,7 +21,7 @@ import { uiComponentsFor } from "../commands/ui.ts";
 import { type CompositionIssue, type CompositionPlan, formatCompositionIssue, introducedIssues, planComposition } from "./composition.ts";
 import { dashboardFiles } from "./dashboard.ts";
 import { withOffers } from "./offers.ts";
-import type { Manifest } from "../registry/manifest.ts";
+import { deploymentProblems, type Manifest } from "../registry/manifest.ts";
 import type { PresetFeature, PresetPolicy, Registry } from "./registry-source.ts";
 
 /** What a preset (or one of its features) grants the starter agent, the steward, by key. */
@@ -81,9 +81,11 @@ export interface ResolvedPresetPlan {
   /** The composition's issues, as issues. */
   issues: readonly CompositionIssue[];
   /**
-   * Everything that refuses this plan, one line each: the composition's issues (formatted), a grant of
-   * a key no chosen component provides, a layout feature or command that does not exist, config for a
-   * component that is not chosen. Empty when `pikit new` may write.
+   * Everything that refuses this plan, one line each: the composition's issues (formatted), a chosen
+   * feature that is not available, a grant of a key no chosen component provides, a layout feature or
+   * command that does not exist, a component's deployment fields the schema does not check
+   * (`deploymentProblems`). Config is kept for the chosen components only (never an offered provider's
+   * or the dashboard's). Empty when `pikit new` may write.
    */
   problems: string[];
 }
@@ -115,6 +117,7 @@ export function resolvePresetPlan(registry: Registry, options: PresetPlanOptions
     ...current.composition.issues.map(formatCompositionIssue).filter((issue) => !said.has(issue)),
     ...refused,
     ...current.uiProblems,
+    ...current.fieldProblems,
     ...current.grantProblems.filter((problem) => !said.has(problem)),
   ];
 
@@ -132,8 +135,9 @@ export function resolvePresetPlan(registry: Registry, options: PresetPlanOptions
     }
   }
 
-  const installed = new Set(current.components);
-  const config = Object.fromEntries(Object.entries(policy.config).filter(([component]) => installed.has(component)));
+  // Only what was chosen (the preset's, the answers, the features): never an offered provider's or the dashboard's.
+  const chosenSet = new Set(current.chosen);
+  const config = Object.fromEntries(Object.entries(policy.config).filter(([component]) => chosenSet.has(component)));
 
   return {
     preset: options.preset,
@@ -153,6 +157,10 @@ export function resolvePresetPlan(registry: Registry, options: PresetPlanOptions
 /** One answer set, composed: what `pikit new` would install, and what it would refuse of it. */
 interface Candidate {
   components: string[];
+  /** What the preset and the answers name, features included: no offered provider, no dashboard component. */
+  chosen: string[];
+  /** The deployment fields of the components the schema does not check (`deploymentProblems`): a registry need not be validated. */
+  fieldProblems: string[];
   ui: boolean;
   uiComponents: string[];
   /** The features every component of which is chosen, by name. */
@@ -201,8 +209,11 @@ function candidate(registry: Registry, options: PresetPlanOptions, policy: Prese
   ];
   const granted = { tools: new Set(granters.flatMap((g) => g.grants.tools)), extensions: new Set(granters.flatMap((g) => g.grants.extensions)) };
   const grantProblems = granters.flatMap(({ who, grants }) => grantMisses(who, grants, provided));
+  const fieldProblems = manifests.flatMap((manifest) => deploymentProblems(manifest).map((problem) => `${manifest.name}'s component.json: ${problem}`));
   return {
     components,
+    chosen,
+    fieldProblems,
     ui,
     uiComponents,
     chosenFeatures: new Set(chosenFeatures.map((feature) => feature.name)),

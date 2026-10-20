@@ -168,10 +168,11 @@ the app:
   what it does (deployment-docker: `services.compose`, `proposals.deployer`); a `compose` file implies
   `services.compose`. They are names of protocols, never of components, and an open set; absent,
   nothing is required or supported. One pure check (`project/composition.ts`), over the manifests or
-  `pikit.json`'s records, answers every command that makes, changes or runs a project, before it
-  writes or runs anything: exactly one deployment (several are never a union), and nothing it does not
-  support. An operation is refused only for what it would introduce, so a wrong project can be
-  repaired, and `--force` does not bypass it.
+  `pikit.json`'s records, answers every command that makes or changes a project before it writes
+  anything, and `doctor` (so `dev` and `up`) before any component's hook, build or deploy runs:
+  exactly one deployment (several are a problem, and never a union: each is checked alone), and
+  nothing it does not support. An operation is refused only for a need it would leave unmet that was
+  met before, so a wrong project can be repaired, and `--force` does not bypass it.
 - `component.json`'s `generated` names the files of its own directory a hook rewrites (tool-mcp's
   `seed.ts`): shipped as a starting point, they are the hooks', never the user's edits, so `pikit
   doctor` does not list them as modified and `pikit remove` deletes them without `--force`.

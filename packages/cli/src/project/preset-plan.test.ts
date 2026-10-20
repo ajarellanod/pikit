@@ -160,3 +160,17 @@ test("pikit new refuses a plan with problems before it makes the directory", asy
   expect(run.err).toContain(unmet);
   expect(existsSync(join(parent, "acme-bot"))).toBe(false);
 }, 60_000);
+
+test("a registry's deployment fields the schema does not check refuse the plan, before pikit new writes anything", async () => {
+  const root = await compositionRegistry(temp(), {
+    "deployment-plain": { title: "Plain hosting", manifest: { deployment: { supports: [] } } },
+    // Only a deployment says what it supports: on another component it is refused, named.
+    "tool-hosted": { title: "Hosted", manifest: { deployment: { supports: [HOST] } } },
+  }, { odd: "title: Odd\ncomponents: [deployment-plain, tool-hosted]\n" });
+  const resolved = resolvePresetPlan(openRegistry(root), { preset: "odd", targets: ["server"] });
+  expect(resolved.problems).toEqual([expect.stringContaining("tool-hosted's component.json:")]);
+  const parent = temp();
+  const made = await runCli(["new", "odd-project", "--preset", "odd", "--registry", root], parent);
+  expect(made.code).toBe(1);
+  expect(existsSync(join(parent, "odd-project"))).toBe(false);
+}, 60_000);

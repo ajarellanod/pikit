@@ -38,6 +38,7 @@ import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
 import { DASHBOARD_DIR } from "../project/dashboard.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
 import { starterModel } from "../project/starter-model.ts";
+import { kindOf } from "../registry/manifest.ts";
 
 // The starter model lives with the check `registry validate` shares.
 export { STARTER_MODEL, starterModel } from "../project/starter-model.ts";
@@ -356,7 +357,7 @@ export const DEPLOYMENT_TEXT: Readonly<Record<string, { up: string; then: string
 
 /** The installed deployment (`deployment-*`), which `pikit up` delegates to; undefined without one. */
 export function deploymentOf(components: readonly string[]): string | undefined {
-  return components.find((component) => component.startsWith("deployment-"));
+  return components.find((component) => kindOf(component) === "deployment");
 }
 
 /** What `pikit up` does in a project with `components` ("run it in Docker"); undefined without a deployment. */

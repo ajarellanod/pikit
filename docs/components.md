@@ -205,9 +205,9 @@ a set of protocol names, `deployment.supports`; what a component needs of it, `r
 - `pikit add` records both in `pikit.json`. One pure check (`planComposition`,
   [composition.ts](../packages/cli/src/project/composition.ts)) answers `new`, the wizard, `add`,
   `remove`, `upgrade`, `ui`, `doctor` (so `dev` and `up`) and `registry validate`: exactly one
-  deployment once something needs one (two are never a union of what each supports), and nothing it
-  does not support. An operation is refused, before it writes, only for what it would introduce;
-  `--force` does not bypass it.
+  deployment (several are a problem, and never a union of what each supports: each is checked
+  alone), and nothing it does not support. An operation is refused, before it writes, only for a need
+  it would leave unmet that was met before; `--force` does not bypass it.
 - A declaration is a promise the deployment's own checks keep: it proves nothing alone.
 
 ### Views
@@ -331,7 +331,8 @@ would leave a channel without a router or routes without a server, or when a fil
 was installed for it goes too, unless something else uses it. Even with `--force`, it refuses to
 introduce a deployment issue (removing the only deployment that supports what another component
 needs: remove that one first), but lets a wrong project be repaired (removing the consumer a
-deployment cannot run, or one of two deployments); `doctor` keeps reporting what remains.
+deployment cannot run, one of two deployments, or a deployment that cannot run what is installed);
+`doctor` keeps reporting what remains, so `remove` then exits 1.
 
 ## Presets
 

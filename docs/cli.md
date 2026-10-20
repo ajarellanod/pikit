@@ -100,8 +100,9 @@ when another component requires a capability only this one provides. `--force` d
 files and removes it even when an agent names one of its keys, when it leaves a channel without a
 router or routes without a server, or when the App does not compose. Not even with `--force` does it
 remove the only deployment that supports what another component needs (remove that one first);
-removing what makes a project wrong (a component its deployment cannot run, one of two deployments)
-is allowed, and `doctor` keeps reporting what remains. To change deployment, remove the old one, then
+removing what makes a project wrong (a component its deployment cannot run, one of two deployments,
+a deployment that cannot run what is installed) is allowed, and `doctor` keeps reporting what
+remains (exit 1). To change deployment, remove the old one, then
 add the new one.
 
 ## pikit upgrade

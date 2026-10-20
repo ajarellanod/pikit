@@ -48,6 +48,7 @@ import {
   formatSchema,
   type Generated,
   HOOKS,
+  kindOf,
   type Manifest,
   ManifestSchema,
   manifestPath,
@@ -207,7 +208,7 @@ function checkComposeFile(componentDir: string, name: string, manifest: Manifest
  * from one of them (`Status`, `restar`), which the CLI would never call.
  */
 async function checkDeploymentExports(componentDir: string, name: string): Promise<string[]> {
-  if (!name.startsWith("deployment-")) return [];
+  if (kindOf(name) !== "deployment") return [];
   let module: Record<string, unknown>;
   try {
     module = (await import(pathToFileURL(entryOf(componentDir, name)).href)) as Record<string, unknown>;

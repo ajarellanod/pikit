@@ -211,11 +211,34 @@ test("a project already wrong (pikit.json edited by hand) can still be repaired:
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
   manifest.components["deployment-acme"].deployment = { supports: ["services.compose"] };
   writeFileSync(join(dir, "pikit.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  // Removing the deployment would add a problem (nothing left to run it), so it is still refused.
-  await refused(dir, ["remove", "deployment-acme"], ["no deployment-* component is installed"]);
+  // Removing the consumer repairs it.
   await ok(dir, ["remove", "tool-reviewer"]);
   expect(components(dir)["tool-reviewer"]).toBeUndefined();
   await ok(dir, ["remove", "deployment-acme"]);
+}, 120_000);
+
+test("a deployment that cannot run what is installed may be removed (to swap it), and doctor keeps saying what is missing", async () => {
+  const dir = project();
+  const from = registry();
+  await ok(dir, ["add", "deployment-acme", "--registry", from, "--yes"]);
+  await ok(dir, ["add", "tool-reviewer", "--registry", from, "--yes"]);
+  // acme no longer says it supports the review host: tool-reviewer's need is unmet already.
+  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
+  manifest.components["deployment-acme"].deployment = { supports: ["services.compose"] };
+  writeFileSync(join(dir, "pikit.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  // Removing it makes nothing worse: the same need stays unmet, with no deployment now. It is removed,
+  // and the doctor that follows says what is still missing (exit 1: never green while it is).
+  const removed = await runCli(["remove", "deployment-acme"], dir);
+  expect(components(dir)["deployment-acme"]).toBeUndefined();
+  expect(removed.code).toBe(1);
+  expect(removed.err).toContain("tool-reviewer needs its deployment to support \"acme.review-host\", and no deployment-* component is installed");
+  const doctor = await runCli(["doctor"], dir);
+  expect(doctor.code).toBe(1);
+  expect(doctor.out + doctor.err).toContain("no deployment-* component is installed");
+  // A deployment that still does not support it may come in its place: installed, and still reported.
+  const plain = await runCli(["add", "deployment-plain", "--registry", from, "--yes"], dir);
+  expect(components(dir)["deployment-plain"]).toBeDefined();
+  expect(plain.err).toContain("which deployment-plain does not");
 }, 120_000);
 
 test("a registry's deployment fields that the schema does not check are refused at add, named", async () => {

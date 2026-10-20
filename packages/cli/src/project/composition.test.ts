@@ -86,14 +86,25 @@ test("no deployment: fine while nothing needs one, a missing deployment for each
   });
 });
 
-test("two deployments are ambiguous, and their supports are never added up", () => {
+test("two deployments are ambiguous, their supports are never added up, and each is still checked alone", () => {
   // Only the second supports what the consumer needs: it must not pass through the first.
   const first: DeploymentFacts = { name: "deployment-alpha", deployment: { supports: [] } };
   const second: DeploymentFacts = { name: "deployment-beta", deployment: { supports: ["acme.review-host"] } };
   const consumer: DeploymentFacts = { name: "review-acme", requires: { deployment: ["acme.review-host"] } };
   const plan = planComposition([second, consumer, first]);
-  expect(plan).toEqual({ issues: [{ code: "deployment_ambiguous", deployments: ["deployment-alpha", "deployment-beta"] }] });
+  expect(plan).toEqual({
+    issues: [
+      { code: "deployment_ambiguous", deployments: ["deployment-alpha", "deployment-beta"] },
+      { code: "deployment_requirement_unmet", component: "review-acme", requirement: "acme.review-host", via: "requires", deployment: "deployment-alpha" },
+    ],
+  });
   expect(plan.deployment).toBeUndefined();
+  // The ambiguity never hides a new need neither supports: adding one to an already ambiguous project is new.
+  const needsY: DeploymentFacts = { name: "widget-y", requires: { deployment: ["acme.y"] } };
+  expect(introducedIssues(planComposition([first, second]), planComposition([first, second, needsY])).map((issue) => [issue.code, issue.deployment])).toEqual([
+    ["deployment_requirement_unmet", "deployment-alpha"],
+    ["deployment_requirement_unmet", "deployment-beta"],
+  ]);
   // Even when each would satisfy everything on its own.
   expect(planComposition([docker, { ...docker, name: "deployment-other" }, proposals])).toEqual({
     issues: [{ code: "deployment_ambiguous", deployments: ["deployment-docker", "deployment-other"] }],
@@ -172,9 +183,13 @@ test("introducedIssues: only the issues the new plan has and the old one did not
   expect(introducedIssues(after, before)).toEqual([]);
   expect(before.issues).toHaveLength(1);
   expect(introducedIssues(after, after)).toEqual([]);
-  // Swapping the deployment introduces the same needs against another deployment: new identities.
+  // A need already unmet stays the same problem when the deployment failing it changes (another that
+  // does not support it either, or none): nothing is made worse, so a repair step by step stays possible.
   const otherLocal = planComposition([{ name: "deployment-native" }, tunnel]);
-  expect(introducedIssues(before, otherLocal)).toEqual([
+  expect(introducedIssues(before, otherLocal)).toEqual([]);
+  expect(introducedIssues(before, planComposition([tunnel]))).toEqual([]);
+  // A need that was met and no longer is, is new: swapping a deployment that supports it for one that does not.
+  expect(introducedIssues(planComposition([docker, tunnel]), otherLocal)).toEqual([
     { code: "deployment_requirement_unmet", component: "expose-cloudflare-tunnel", requirement: "services.compose", via: "compose", deployment: "deployment-native" },
   ]);
   // A second deployment, removing the only one: new issues of their own.

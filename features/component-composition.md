@@ -102,7 +102,7 @@ its issues:
 |---|---|
 | `pikit new` | the whole candidate (the preset with its answers, the features chosen, the providers offered, the dashboard's components) before the directory is made |
 | the wizard | the plan again after each answer: a feature that would add an issue is shown disabled with the reason; the deployment the person chose is never changed for them |
-| `pikit add` | the whole draft, after offers are resolved, before the confirmation and before any write |
+| `pikit add` | the components named, before the confirmation; then the whole draft once the offered providers are accepted, before any write, hook or `bun install` |
 | `pikit remove` | what remains: it may not introduce an issue (removing the only deployment that supports what another component needs) |
 | `pikit upgrade` | every component asked, as one set, before writing; `--dry-run` reports the same |
 | `pikit ui on` | the dashboard's components added to the project, as `add` does |
@@ -110,9 +110,11 @@ its issues:
 | `dev`, `up` | through `doctor`, so an incompatible composition stops before a hook or Docker runs |
 | `registry validate` | every preset's default, each alternative and feature, and their combinations (below) |
 
-- **Only what an operation introduces is refused** (`introducedIssues`). A project that is already
-  wrong can still be repaired: removing the incompatible consumer, or one of two deployments, goes
-  through. What remains wrong is still a problem in `doctor`; finishing an operation never prints
+- **Only what an operation introduces is refused** (`introducedIssues`): a need left unmet that was
+  met before, or a new set of deployments. A need already unmet stays the same problem when the
+  deployment failing it changes (removed, or swapped for another that does not support it either), so
+  a project that is already wrong can still be repaired step by step: removing the incompatible
+  consumer, or one of two deployments, or the deployment that cannot run it, goes through. What remains wrong is still a problem in `doctor`; finishing an operation never prints
   green on its own.
 - **`--force` does not bypass it.** It keeps its meaning for files and kit ranges; it never makes an
   impossible composition runnable. A confirmation is not permission either.
