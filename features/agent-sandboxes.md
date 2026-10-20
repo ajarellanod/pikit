@@ -42,7 +42,10 @@ now tells the host which agent each request is for. The secrets' values stay in 
 ## Decisions (owner's, 2026-10-20)
 1. **A workspace per agent.** A sandbox is a conversation's and an agent's: a delegated child of
    another agent works in a sandbox of its own, not its parent's. Results pass through the
-   delegation's answer or through git. (A child of the same agent still shares its parent's.)
+   delegation's answer or through git. A child of the same agent shares its parent's only in a
+   Durable Object (`execution-remote` keys by object and agent); on a server, and with
+   `execution-gondolin` in process, a delegated child is a conversation of its own (its own key and
+   `conversationId`), so it always gets its own sandbox.
 2. **A profile replaces the base field by field.** A field the profile sets replaces the base's (its
    `allowedHosts` are not added to the base's); a field it leaves out is the base's. What the
    configuration shows is what the agent gets.
@@ -59,8 +62,9 @@ now tells the host which agent each request is for. The secrets' values stay in 
 
 ### execution-gondolin (config and keying)
 - Config gains `agents: Record<string, Profile>` (default `{}`). Each key matches the agent-name
-  grammar (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, `@pikit/contracts`'s `AGENT_NAME`, at most 100
-  characters); anything else is refused at define/start. `Profile` is
+  grammar (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, as `defineAgent` checks it) and has at most 100
+  characters, a limit of these components' own (`defineAgent` has none: an agent with a longer name
+  is refused at `resolve`); anything else is refused at define/start. `Profile` is
   `{ packages?, allowedHosts?, secrets?, memory?, cpus? }`, each with the base field's own schema.
   `root`, `idleSeconds`, `maxVms` and `queueSeconds` stay global only.
 - **The effective machine** of an agent: for each field, the profile's when set, else the base's.
@@ -86,7 +90,7 @@ now tells the host which agent each request is for. The secrets' values stay in 
 
 ### The protocol (execution-remote and execution-serve, both copies of `protocol.ts` identical)
 - Every request may carry the header **`Pikit-Agent: <agent>`**, the agent the sandbox is for:
-  `AGENT_NAME` grammar, at most 100 characters. A malformed one is `400 invalid_request`.
+  agent-name grammar, at most 100 characters. A malformed one is `400 invalid_request`.
   (A header, not a body field: every operation's body schema is strict.)
 - execution-remote sends it on every request of a conversation's sandbox (`workspace`), and never on
   `execution`'s own sandbox (no conversation, no agent).
@@ -162,6 +166,16 @@ and execution-serve's own.
   repositories and permissions.
 - The sandbox host's disk holds every workspace, unreplicated
   ([workspace snapshots](workspace-snapshots.md) is not built).
+- **Delegation reaches a profile.** tool-delegate's `agents` (who a task may be handed to) is one
+  list for every delegating agent: if `developer` is in it, any agent with `delegate` can have a
+  developer child make authenticated GitHub calls and read the answer, and in a Durable Object that
+  child works in the object's developer sandbox. Leave such an agent out of the list, or restrict
+  `delegate` by sender (extension-house-rules). A list per delegating agent is open.
+- **One secret name, one value.** Profiles read secrets by name from the host's one `secrets`: two
+  profiles naming `GH_TOKEN` get the same token. Give each agent's token its own name.
+- **The host trusts the token holder.** Anyone with the sandbox host's token can name any agent in
+  `Pikit-Agent` and get its machine: the token is the fleet's, as the bucket is celld's. Readers and
+  commands are scoped by sandbox and agent, so two agents never share one.
 
 ## Open questions
 - Several sandbox hosts (a GPU machine for one agent): `execution-remote` taking `hosts` and a host per
