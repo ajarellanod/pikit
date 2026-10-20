@@ -517,7 +517,7 @@ test("a storage error fails pi-durable's Harness: the call that hit it rejects, 
         work({
           query: (sql, params) => tx.query(sql, params),
           run: (sql, params) => {
-            if (!failNext || !sql.includes("INSERT INTO submissions")) return tx.run(sql, params);
+            if (!failNext || !sql.includes("INSERT INTO runtime_pi_submissions")) return tx.run(sql, params);
             failNext = false;
             return Promise.reject(new Error("the storage is unreachable"));
           },

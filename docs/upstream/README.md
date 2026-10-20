@@ -9,13 +9,13 @@ here with the Pi version.
 
 | # | Package | Proposal | Hurts pikit | Priority | Status |
 |---|---|---|---|---|---|
-| 1 | pi-durable | [Next due time of sleeping work](#1-next-due-time-of-sleeping-work) | Durable Objects stall after eviction | **high** | open upstream as [#10325](https://github.com/earendil-works/pi/issues/10325) (not ours; reopened, assigned), and again as [#10857](https://github.com/earendil-works/pi/issues/10857) (not ours, open); tracked, not commented ([file](pi-durable-next-wake.md)) |
-| 2 | pi-durable | [Queued inputs stuck after a failed run](#2-queued-inputs-stuck-after-a-failed-run) | A message is never answered until the user writes again | **high** | draft ([file](pi-durable-inbox-after-failure.md)); still so in 1.2.0 |
+| 1 | pi-durable | [Next due time of sleeping work](#1-next-due-time-of-sleeping-work) | Durable Objects stall after eviction | **high** | open upstream as [#10325](https://github.com/earendil-works/pi/issues/10325) (not ours; reopened, assigned), and again as [#10857](https://github.com/earendil-works/pi/issues/10857) (not ours; open, assigned); tracked, not commented ([file](pi-durable-next-wake.md)) |
+| 2 | pi-durable | [Queued inputs stuck after a failed run](#2-queued-inputs-stuck-after-a-failed-run) | A message is never answered until the user writes again | **high** | draft ([file](pi-durable-inbox-after-failure.md)); still so in 1.3.0 |
 | 3 | pi-durable | [Caller context values reach tools](#3-caller-context-values-reach-tools) | Multi-tenant isolation, tracing | medium (high for multi-tenant) | draft (here) |
 | 4 | pi-durable | [Several writers per storage](#4-several-writers-per-storage) | Replicas, Postgres as a shared store | medium | draft (here) |
 | 5 | pi-durable | [Per-conversation scheduling scope](#5-per-conversation-scheduling-scope) | Servers holding many conversations | medium | draft ([file](pi-durable-scheduling-scope.md)) |
 | 6 | pi-durable | [Provider session id](#6-provider-session-id) | Prompt-cache cost on long chats | medium | **shipped** in pi-durable 1.0.2 ([#10424](https://github.com/earendil-works/pi/issues/10424)) |
-| 7 | pi-durable | [Table prefix for `SqliteStorage`](#7-table-prefix-for-sqlitestorage) | Generic table names in a shared database | low | draft ([file](pi-durable-table-prefix.md)) |
+| 7 | pi-durable | [Table prefix for `SqliteStorage`](#7-table-prefix-for-sqlitestorage) | Generic table names in a shared database | low | **shipped** in pi-durable 1.3.0 ([#10937](https://github.com/earendil-works/pi/pull/10937)): pikit's tables are `runtime_pi_*` |
 | 8 | chord | [Foreign parent's `abortSignal`](#8-chord-foreign-parents-abortsignal) | A bridge (`toChord`) in the adapter | low | **declined** ([#10189](https://github.com/earendil-works/pi/issues/10189), `no-action`) |
 | 9 | chord | [`esbuild` only for the bundler](#9-chord-esbuild-only-for-the-bundler) | An unused dependency installed everywhere | low | **solved** in chord 1.2.0, which depends on `typebox` instead (the issue, [#9225](https://github.com/earendil-works/pi/issues/9225), was declined) |
 | 10 | chord | [A stability statement](#10-chord-a-stability-statement) | Why Chord stays out of `@pikit/core` | low | draft (here) |
@@ -33,14 +33,16 @@ Contributions we could offer instead of asking: a Postgres backend of pi-durable
 ([storage-postgres](../../features/storage-postgres.md)). A Durable Object example is no longer one:
 pi-durable 1.1.0 ships `openDurableObjectSqliteStorage`. pikit keeps `storage-do` +
 `openDurableStorage`, because pi's adapter queues its own work on `ctx.storage` apart from
-`storage.sql`'s line, which pikit's own tables share. pi-durable ships its own `ExecutionEnv` suite (`createEnvConformance`); pikit runs it and keeps only the cases it
+`storage.sql`'s line, which pikit's own tables share (1.3.0's adapters share that queue among Pi's
+own storages, and host tables join it only through Pi's adapter, which `storage.sql` does not import). pi-durable ships its own `ExecutionEnv` suite (`createEnvConformance`); pikit runs it and keeps only the cases it
 lacks (`packages/pi-adapter/src/testing/execution.ts`), which could be offered to it.
 
-Re-checked against Pi 1.2.0 (2026-10-13): proposals 1 to 5, 7, 10, 16 and 17 stand as they were (1.2.0
-times no submissions and scopes no scheduling; its scheduler and document cache are only cheaper).
-Chord 1.2.0 solved proposal 9. pi-durable 1.2.0 brought a second case of proposal 18 (the document
-cache's timer), and appends a write of only `kind` and `data` at once, without the boundary that
-places queued inputs: proposal 2's kick is now a queued write (empty `edits`).
+Re-checked against Pi 1.3.0 (2026-10-20): proposals 1 to 5, 10, 12, 15 to 19 stand as they were
+(pi-durable 1.3.0 changed its SQLite storage, the baseline after compaction and image encoding;
+scheduler, Harness, Session and submissions are 1.2.0's; pi-ai's auth is unchanged; Chord 1.3.0
+broke its API again in a minor, with no stability statement). pi-durable 1.3.0 shipped proposal 7.
+At 1.2.0 (2026-10-13): Chord solved proposal 9, the document cache brought a second case of
+proposal 18, and proposal 2's kick became a queued write (empty `edits`).
 
 **Tracked, not commented:** [#10325](https://github.com/earendil-works/pi/issues/10325)
 (proposal 1). The owner decided (2026-10-07) not to comment; check it at each pin bump. Nothing is
@@ -86,7 +88,11 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   pikit. So pikit does not open its own issue nor push `nextDueAt()`, and does not comment there
   (owner's decision, 2026-10-07): it tracks the issue at each pin bump. A second report from someone
   else, [#10857](https://github.com/earendil-works/pi/issues/10857) (2026-10-12, "on a Durable Object,
-  a sleeping task wakes only on the next request"), is open too: tracked the same way.
+  a sleeping task wakes only on the next request"), is open too: tracked the same way. There a
+  maintainer pointed (2026-10-13) at an injected timer, as `now()` is; a PR doing it
+  ([#11079](https://github.com/earendil-works/pi/pull/11079), `HarnessOptions.timer`) was closed
+  unmerged (2026-10-17). [#10535](https://github.com/earendil-works/pi/issues/10535) (another user,
+  open) asks for retry backoff as a `waiting` task with `notBefore`: our "sleeps recorded durably".
 - **To delete when it ships** (sleeping tasks reported by pi-durable with their wake time, or a
   next-due API). Each place below reads pi-durable's private checkpoints:
   - `packages/pi-adapter/src/wakeups.ts`: `checkpointedDue` and the header's list of built-in waits;
@@ -189,9 +195,13 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
 ## 7. Table prefix for `SqliteStorage`
 - **Problem.** Fixed generic table names (`conversations`, `entries`, `tasks`, `submissions`,
   `documents`, …); one database holds one Session.
-- **pikit meanwhile.** An exception to `storage.sql`'s prefix rule; nothing collides today.
 - **Ask.** `SqliteStorage.open(db, { tablePrefix })`. Full text:
   [pi-durable-table-prefix.md](pi-durable-table-prefix.md).
+- **Outcome: shipped.** Not sent by pikit: pi-durable 1.3.0 added `SqliteStorage.open(db, { prefix })`
+  ([#10937](https://github.com/earendil-works/pi/pull/10937)), on every table and index, a SQLite
+  identifier not starting `sqlite_`, existing data not migrated. pikit opens it with `runtime_pi_`
+  (`DURABLE_TABLE_PREFIX`, `packages/pi-adapter/src/sql.ts`); the exception to `storage.sql`'s prefix
+  rule is gone.
 
 ## 8. Chord: foreign parent's `abortSignal`
 - **Problem.** Chord's `withContextValue` reads cancellation through a private key
@@ -219,7 +229,8 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   stable public contract yet (0.87 → 1.0 changed 49 files, +10k/−5k lines). Libraries cannot tell
   what they may build on. 1.2.0 replaced its facet and service runtime outright (a typed host runtime;
   `defineService` and the remote services removed), keeping only `./context`, `./delta` and the
-  replicated-state names, which are what pikit uses.
+  replicated-state names, which are what pikit uses. 1.3.0, a minor, broke the host runtime again
+  (17 breaking changes: typed principals, async `get`), none in what pikit uses.
 - **Ask.** Say which entry points follow semver (at least `@earendil-works/chord/context` and the
   root service API), and mark the rest experimental. With it, pikit could reconsider building
   parts of `@pikit/core` on Chord (`features/kit-follow-ups.md`, "Chord").
@@ -387,7 +398,7 @@ Rules for pikit:
   whether we would implement it.
 - **Written in the owner's own voice.** If an LLM helped, add a clearly labelled AI-disclosure
   comment (as on #10188/#10189).
-- **API or design requests** (proposals 3, 4, 5, 7, 10, 12, 13, 15, 16; 1 is already an open
+- **API or design requests** (proposals 3, 4, 5, 10, 12, 13, 15, 16; 1 is already an open
   issue, which we only comment on) **go to Discord first**, or
   to an RFC (`rfc.earendil.com`) when large. Pi's core is minimal by policy: "if it does not belong in
   core, it should be an extension".

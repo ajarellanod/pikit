@@ -16,6 +16,9 @@
  *   `next_id` column is TEXT), so a safe-integer bigint binds as a number and a larger one throws.
  * - **`close`** waits for the facade's own operations and refuses new ones; it never closes the
  *   database, which belongs to the app (the provider closes it at stop).
+ * - **Table names** follow the storage rule: pi-durable's tables and indexes are runtime-pi's, so
+ *   they start with `runtime_pi_` (`DURABLE_TABLE_PREFIX`: `runtime_pi_conversations`…). The prefix
+ *   is fixed, so one database holds one pi-durable session.
  */
 
 import type { SqlDatabase, SqlStatements, SqlValue } from "@pikit/contracts";
@@ -73,9 +76,12 @@ export function sqliteDatabaseFrom(db: SqlDatabase): SqliteDatabase {
   };
 }
 
+/** The prefix of pi-durable's tables and indexes: they belong to runtime-pi (storage.sql's rule). */
+export const DURABLE_TABLE_PREFIX = "runtime_pi_";
+
 /** pi-durable's `SqliteStorage` over `storage.sql`: creates or migrates its tables, then opens it. */
 export function openDurableStorage(db: SqlDatabase): Promise<SqliteStorage> {
-  return SqliteStorage.open(sqliteDatabaseFrom(db));
+  return SqliteStorage.open(sqliteDatabaseFrom(db), { prefix: DURABLE_TABLE_PREFIX });
 }
 
 function executor(statements: SqlStatements, assertActive: () => void): SqliteExecutor {

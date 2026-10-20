@@ -14,8 +14,8 @@
  * when their agent is gone, and after `abandonPendingAfterHours` when resuming them fails.
  *
  * It uses:
- * - `storage.sql`: where pi-durable keeps every conversation (its tables, unprefixed: one runtime per
- *   database) and the answers log. On a server that is storage-sqlite, in a Cloudflare object storage-do;
+ * - `storage.sql`: where pi-durable keeps every conversation (its tables, `runtime_pi_*`: one runtime
+ *   per database) and the answers log. On a server that is storage-sqlite, in a Cloudflare object storage-do;
  * - `agent.definition`: your agents, one per name (a project component provides them), at most one of
  *   them the steward (`steward: true`, SPEC §6);
  * - `model.provider`: the model providers your agents name as `provider/modelId`;

@@ -185,7 +185,7 @@ it("a run that settled while its log could not be written, then the object evict
     await sql(key, "CREATE TRIGGER test_crash_append BEFORE INSERT ON runtime_pi_answers WHEN EXISTS (SELECT 1 FROM test_crash) BEGIN SELECT RAISE(ABORT, 'the process died'); END");
     await worker.send(key, { id: "m1", text: "again" });
     // pi-durable keeps the request id as JSON.
-    await alarmsUntil(key, async () => expect(await sql(key, `SELECT status FROM submissions WHERE request_id = '"m1"'`)).toEqual([{ status: "done" }]));
+    await alarmsUntil(key, async () => expect(await sql(key, `SELECT status FROM runtime_pi_submissions WHERE request_id = '"m1"'`)).toEqual([{ status: "done" }]));
     // Whatever alarm is left runs out: the settlement stays unlogged and unannounced.
     await runDurableObjectAlarm(objectOf(key));
     expect(answers).toEqual(["answer: hello"]);

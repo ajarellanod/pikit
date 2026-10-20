@@ -1,6 +1,9 @@
 # Proposal for pi-durable: a table prefix for `SqliteStorage`
 
-Status: draft for upstream (`@earendil-works/pi-durable`, against 1.2.0). From pikit, whose
+Status: **shipped** in pi-durable 1.3.0 as `SqliteStorage.open(db, { prefix })`
+([#10937](https://github.com/earendil-works/pi/pull/10937), not sent by pikit); pikit opens it with
+`runtime_pi_` and the exception below is gone. Kept as the record of the ask. Written against 1.2.0
+for `@earendil-works/pi-durable`, from pikit, whose
 components share one SQL database per app (a SQLite file on a server, a Durable Object's SQLite on
 Cloudflare).
 
