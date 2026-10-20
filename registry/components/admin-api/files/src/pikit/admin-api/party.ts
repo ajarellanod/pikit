@@ -39,7 +39,7 @@ export async function partyOf(key: string, conversationId: string, channel: stri
     { label: "Key", value: key },
     { label: "Conversation", value: conversationId },
   ];
-  if (isDashboardKey(key)) return { channel: { kind: "dashboard", label: labelOf("dashboard") }, name: "Operator", ids: own };
+  if (isDashboardKey(key)) return { channel: { kind: "dashboard", label: labelOf("dashboard") }, name: "You", ids: own };
   const kind = channelKindOf(key) ?? "";
   const described = await describeConversation(ctx, key);
   if (described !== undefined) {

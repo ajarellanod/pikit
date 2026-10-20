@@ -647,7 +647,7 @@ test("a reset's new conversation is its key's current one, with the key's agent,
     busy: false,
     usage: ZERO,
     current: true,
-    party: { channel: { kind: "dashboard", label: "Dashboard" }, name: "Operator", ids: [{ label: "Key", value: "dashboard:1" }, { label: "Conversation", value: "c100" }] },
+    party: { channel: { kind: "dashboard", label: "Dashboard" }, name: "You", ids: [{ label: "Key", value: "dashboard:1" }, { label: "Conversation", value: "c100" }] },
   });
   const page = (await (await s.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: Record<string, unknown>[] };
   expect(page.items.map(({ conversationId, key, current }) => ({ conversationId, key, current }))).toEqual([
