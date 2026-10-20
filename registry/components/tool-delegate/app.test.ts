@@ -1,7 +1,7 @@
 /**
  * tool-delegate in a real App: runtime-pi runs the agents on a SQLite file and the model is the scripted
- * faux provider (`faux/scripted`: `call: <tool> <json>` calls a tool, `hold` calls the `hold` tool,
- * anything else is answered `answer: <message>`). `assistant` names `delegate` and hands tasks to
+ * faux provider (`faux/scripted`: `call: <tool> <json>` calls a tool, and so does a tool result that
+ * says one; `hold` calls the `hold` tool; anything else is answered `answer: <message>`). `assistant` names `delegate` and hands tasks to
  * `helper`, which runs in a child conversation of the assistant's.
  *
  * A repository test, not copied with the component: a component's files never import another's (SPEC
@@ -15,6 +15,8 @@ import { join } from "node:path";
 import { type App, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type AgentDefinition, type AgentRuntime, type AgentTool, CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
 import { holdTool, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
+import { defineTool } from "@pikit/pi-adapter/tools";
+import Type from "typebox";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import toolDelegate from "./files/src/pikit/tool-delegate/index.ts";
 
@@ -162,7 +164,7 @@ test("the tasks not waited for: listed, steered and cancelled by their own conve
   const id = /^The task "(\d+)"/.exec(toolResults(await s.result("test:5:1"))[0] ?? "")?.[1] ?? "";
   await held.started;
 
-  expect(toolResults(await s.say(conversation, "call: delegate_tasks {}", "test:5:2"))).toEqual([`- ${id}: the agent "helper", running`]);
+  expect(toolResults(await s.say(conversation, "call: delegate_tasks {}", "test:5:2"))).toEqual([`- ${id}: the agent "helper", running; its latest step: called hold {}: running`]);
   expect(toolResults(await s.say(conversation, `call: delegate_steer ${JSON.stringify({ id, message: "also this" })}`, "test:5:3"))[0]).toStartWith(`The message is with the task "${id}".`);
   // Another conversation does not see it, and cannot stop it.
   const other = await s.ask("test:6", "call: delegate_tasks {}");
@@ -174,8 +176,46 @@ test("the tasks not waited for: listed, steered and cancelled by their own conve
   expect(reported.conversation.conversationId).toBe(conversation.conversationId);
   expect(reported.text).toContain('[The task you delegated to the agent "helper" was stopped before it answered.]');
   expect(toolResults(await s.say(conversation, `call: delegate_cancel ${JSON.stringify({ id })}`, "test:5:5"))).toEqual([`The task "${id}" is stopped.`]);
-  expect(toolResults(await s.say(conversation, `call: delegate_tasks ${JSON.stringify({ id })}`, "test:5:6"))).toEqual([`- ${id}: the agent "helper", aborted`]);
+  // Read with its id: stopped, and its child's hold cut (an error).
+  const [aborted] = toolResults(await s.say(conversation, `call: delegate_tasks ${JSON.stringify({ id })}`, "test:5:6"));
+  expect(aborted).toStartWith(`- ${id}: the agent "helper", aborted\nIts last steps, oldest first`);
+  expect(aborted).toEndWith("\n  - called hold {}: error");
   expect(s.results().filter((r) => r.requestId.startsWith("delegate-result:"))).toHaveLength(1);
+});
+
+/** The helper's `look`: reads nothing, and asks for `hold` next (the scripted model calls it). */
+const look = defineTool({
+  name: "look",
+  description: "Looks at a file",
+  parameters: Type.Object({ path: Type.String() }),
+  replay: "safe",
+  execute: async () => ({ output: [{ type: "text", text: "call: hold {}" }] }),
+}) as unknown as AgentTool;
+
+test("delegate_tasks shows how a task not waited for is going: its helper's tool calls while it runs, and after", async () => {
+  const held = hold();
+  const s = await start(directory(), agents([look, held.tool as AgentTool]));
+  const conversation = await s.ask("test:11", `call: delegate ${JSON.stringify({ agent: "helper", task: 'call: look {"path":"src/app.ts"}', wait: false })}`);
+  const id = /^The task "(\d+)"/.exec(toolResults(await s.result("test:11:1"))[0] ?? "")?.[1] ?? "";
+  await held.started;
+
+  const [running] = toolResults(await s.say(conversation, `call: delegate_tasks ${JSON.stringify({ id })}`, "test:11:2"));
+  expect(running).toMatch(
+    new RegExp(
+      `^- ${id}: the agent "helper", running\nIts last steps, oldest first \\(the last one \\d+ seconds? ago\\):\n  - called look \\{"path":"src/app\\.ts"\\}: ok\n  - called hold \\{\\}: running$`,
+    ),
+  );
+  expect(toolResults(await s.say(conversation, "call: delegate_tasks {}", "test:11:3"))).toEqual([`- ${id}: the agent "helper", running; its latest step: called hold {}: running`]);
+  // Another conversation reads none of it.
+  const other = await s.ask("test:12", `call: delegate_tasks ${JSON.stringify({ id })}`);
+  expect(toolResults(await s.result("test:12:1"))[0]).toContain(`there is no task "${id}" started from this conversation`);
+  expect(other.conversationId).not.toBe(conversation.conversationId);
+
+  held.release();
+  await s.resultWhere((r) => r.requestId.startsWith("delegate-result:"));
+  const [ended] = toolResults(await s.say(conversation, `call: delegate_tasks ${JSON.stringify({ id })}`, "test:11:4"));
+  expect(ended).toContain(`- ${id}: the agent "helper", completed:\nanswer: call: look {"path":"src/app.ts"}\nIts last steps, oldest first`);
+  expect(ended).toEndWith('\n  - called look {"path":"src/app.ts"}: ok\n  - called hold {}: ok\n  - wrote: answer: call: look {"path":"src/app.ts"}');
 });
 
 test("a task nobody waits for still reports after a restart", async () => {

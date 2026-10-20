@@ -9,7 +9,7 @@
 import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import { CONVERSATION, type ConversationRef, type MessagePart } from "@pikit/contracts";
-import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, type DelegatedOutcome, type DelegatedTask, PARTS_DETAIL } from "@pikit/pi-adapter/tools";
+import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, type DelegatedOutcome, type DelegatedTask, type DelegationProgress, PARTS_DETAIL } from "@pikit/pi-adapter/tools";
 import toolDelegate, {
   CANCEL_TOOL,
   createCancelTool,
@@ -29,8 +29,15 @@ import toolDelegate, {
 const config: DelegateConfig = { agents: [{ name: "researcher", description: "Reads sources." }, { name: "coder", description: "Writes code." }], maxDepth: 2 };
 const parent: ConversationRef = { key: "telegram:1", agent: "assistant", conversationId: "7" };
 
-/** A stand-in delegation that answers `outcome`, records each task by how it was asked, and has `tasks` started in the background. */
-function delegation(outcome: DelegatedOutcome = { kind: "completed", text: "done" }, tasks: BackgroundDelegation[] = []) {
+/**
+ * A stand-in delegation that answers `outcome`, records each task by how it was asked, and has `tasks`
+ * started in the background, each with its child's `steps` (none by default).
+ */
+function delegation(
+  outcome: DelegatedOutcome = { kind: "completed", text: "done" },
+  tasks: BackgroundDelegation[] = [],
+  steps: Record<string, Pick<DelegationProgress, "steps" | "updatedAt">> = {},
+) {
   const asked: { how: "run" | "start"; task: DelegatedTask }[] = [];
   const steered: { id: string; message: string }[] = [];
   const statusOf = (id: string) => tasks.find((task) => task.id === id)?.status ?? "not_found";
@@ -44,6 +51,10 @@ function delegation(outcome: DelegatedOutcome = { kind: "completed", text: "done
       return "t9";
     },
     list: async () => tasks,
+    progress: async (_api, id) => {
+      const task = tasks.find((each) => each.id === id);
+      return task === undefined ? "not_found" : { ...task, steps: [], ...steps[id] };
+    },
     steer: async (_api, id, message) => {
       if (statusOf(id) === "running") steered.push({ id, message });
       return statusOf(id);
@@ -261,9 +272,41 @@ test("delegate_tasks lists this conversation's tasks, or one by id; an id it doe
   ];
   const d = delegation(undefined, tasks);
   expect(textOf(await control(createTasksTool(), {}, d))).toBe('- t1: the agent "researcher", running\n- t2: the agent "coder", completed:\nwrote it');
-  expect(textOf(await control(createTasksTool(), { id: "t2" }, d))).toBe('- t2: the agent "coder", completed:\nwrote it');
+  expect(textOf(await control(createTasksTool(), { id: "t2" }, d))).toBe('- t2: the agent "coder", completed:\nwrote it\nIts agent took no step.');
   await expect(control(createTasksTool(), { id: "t3" }, d)).rejects.toThrow('there is no task "t3" started from this conversation');
   expect(textOf(await control(createTasksTool(), {}, delegation()))).toBe("No task was handed over from this conversation without waiting.");
+});
+
+test("delegate_tasks shows how a task is going: with its id, its agent's last steps; in the list, a running task's latest step", async () => {
+  const tasks: BackgroundDelegation[] = [
+    { id: "t1", agent: "researcher", status: "running" },
+    { id: "t2", agent: "coder", status: "completed", result: "wrote it" },
+    { id: "t3", agent: "coder", status: "running" },
+  ];
+  const steps = {
+    t1: {
+      steps: [
+        { kind: "text" as const, text: "Looking at\nthe sources." },
+        { kind: "tool" as const, name: "search", arguments: '{"q":"durable"}', status: "ok" as const },
+        { kind: "tool" as const, name: "fetch", arguments: '{"url":"x"}', status: "running" as const },
+      ],
+      updatedAt: Date.now() - 180_000,
+    },
+    t2: { steps: [{ kind: "tool" as const, name: "write", arguments: "{}", status: "error" as const }] },
+  };
+  const d = delegation(undefined, tasks, steps);
+
+  expect(textOf(await control(createTasksTool(), { id: "t1" }, d))).toBe(
+    '- t1: the agent "researcher", running\nIts last steps, oldest first (the last one 3 minutes ago):\n  - wrote: Looking at the sources.\n  - called search {"q":"durable"}: ok\n  - called fetch {"url":"x"}: running',
+  );
+  // An ended task too; one with no step yet says so.
+  expect(textOf(await control(createTasksTool(), { id: "t2" }, d))).toBe('- t2: the agent "coder", completed:\nwrote it\nIts last steps, oldest first:\n  - called write {}: error');
+  expect(textOf(await control(createTasksTool(), { id: "t3" }, d))).toBe('- t3: the agent "coder", running\nIts agent has taken no step yet.');
+  await expect(control(createTasksTool(), { id: "t4" }, d)).rejects.toThrow('there is no task "t4" started from this conversation');
+  // The list: one line per task, a running one's latest step on it.
+  expect(textOf(await control(createTasksTool(), {}, d))).toBe(
+    '- t1: the agent "researcher", running; its latest step: called fetch {"url":"x"}: running\n- t2: the agent "coder", completed:\nwrote it\n- t3: the agent "coder", running',
+  );
 });
 
 test("delegate_steer sends only to a running task; delegate_cancel stops one, and says when it had ended", async () => {

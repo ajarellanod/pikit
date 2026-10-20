@@ -4,7 +4,8 @@
  * assistant delegates to the helper: the task is a child conversation in the same object's storage
  * (pi-durable's subagents), driven by the same alarm. Waited for, its answer is the call's; not waited
  * for, a background task reports it to the assistant, whose answer is announced like any other; the
- * assistant lists it and cancels it, and hears once that it stopped. The child knows the conversation
+ * assistant lists it, reads how it is going (its child's steps) and cancels it, and hears once that it
+ * stopped. The child knows the conversation
  * it works for (its origin), and what it asks the person comes back with the assistant's answer.
  */
 
@@ -62,7 +63,15 @@ function agents(held: { released: Promise<void> }) {
       return withParts({ output: [{ type: "text", text: "Asked." }], control: { terminate: true } }, [QUESTION]);
     },
   }) as unknown as ToolRegistration;
-  const helper = defineAgent({ name: "helper", model: "faux/scripted", tools: [hold, ask] });
+  // Asks for `hold` next: the scripted model calls the tool a result names.
+  const look = defineTool({
+    name: "look",
+    description: "Looks at a file",
+    parameters: Type.Object({ path: Type.String() }),
+    replay: "safe",
+    execute: async () => ({ output: [{ type: "text", text: "call: hold {}" }] }),
+  }) as unknown as ToolRegistration;
+  const helper = defineAgent({ name: "helper", model: "faux/scripted", tools: [hold, ask, look] });
   const provider = scriptedProvider();
   return [
     defineComponent({ name: "agents-fixture", setup: (pikit) => [assistant, helper].forEach((agent) => pikit.provideKeyed("agent.definition", agent.name, agent)) }),
@@ -161,7 +170,7 @@ it("the assistant lists the task it did not wait for and cancels it; it hears on
     expect(id).toBeDefined();
 
     await worker.send(key, { id: "m2", text: "call: delegate_tasks {}" });
-    await vi.waitFor(() => expect(of("m2")?.tools).toEqual([`- ${id}: the agent "helper", running`]), { timeout: 10_000 });
+    await vi.waitFor(() => expect(of("m2")?.tools).toEqual([`- ${id}: the agent "helper", running; its latest step: called hold {}: running`]), { timeout: 10_000 });
 
     await worker.send(key, { id: "m3", text: `call: delegate_cancel ${JSON.stringify({ id })}` });
     await vi.waitFor(() => expect(results.some((each) => each.requestId.startsWith("delegate-result:"))).toBe(true), { timeout: 10_000 });
@@ -169,8 +178,45 @@ it("the assistant lists the task it did not wait for and cancels it; it hears on
     expect(results.find((each) => each.requestId.startsWith("delegate-result:"))?.text).toContain('[The task you delegated to the agent "helper" was stopped before it answered.]');
 
     await worker.send(key, { id: "m4", text: `call: delegate_tasks ${JSON.stringify({ id })}` });
-    await vi.waitFor(() => expect(of("m4")?.tools).toEqual([`- ${id}: the agent "helper", aborted`]), { timeout: 10_000 });
+    await vi.waitFor(() => expect(of("m4")?.tools[0]).toMatch(new RegExp(`^- ${id}: the agent "helper", aborted\nIts last steps, oldest first .*:\n  - called hold \\{\\}: error$`)), { timeout: 10_000 });
     expect(results.filter((each) => each.requestId.startsWith("delegate-result:"))).toHaveLength(1);
+  } finally {
+    await worker.stop();
+  }
+});
+
+it("the assistant reads how a task it did not wait for is going: its child's tool calls, read in the object's storage, while it runs and after", async () => {
+  const results: Result[] = [];
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  compose(results, { released });
+  const worker = await workerApp();
+  const key = `test:${crypto.randomUUID()}`;
+  const of = (requestId: string) => results.find((each) => each.requestId === requestId);
+  try {
+    await worker.send(key, { id: "m1", text: `call: delegate ${JSON.stringify({ agent: "helper", task: 'call: look {"path":"a.ts"}', wait: false })}` });
+    await vi.waitFor(() => expect(of("m1")).toBeDefined(), { timeout: 10_000 });
+    const id = /^The task "(\d+)"/.exec(of("m1")?.tools[0] ?? "")?.[1];
+    expect(id).toBeDefined();
+
+    // Asked until the child is at its hold: its look done, its hold running.
+    let asked = 1;
+    await vi.waitFor(
+      async () => {
+        const requestId = `m2-${asked++}`;
+        await worker.send(key, { id: requestId, text: `call: delegate_tasks ${JSON.stringify({ id })}` });
+        await vi.waitFor(() => expect(of(requestId)).toBeDefined(), { timeout: 10_000 });
+        expect(of(requestId)?.tools[0]).toMatch(new RegExp(`^- ${id}: the agent "helper", running\nIts last steps, oldest first .*:\n  - called look \\{"path":"a\\.ts"\\}: ok\n  - called hold \\{\\}: running$`));
+      },
+      { timeout: 20_000 },
+    );
+
+    release();
+    await vi.waitFor(() => expect(results.some((each) => each.requestId.startsWith("delegate-result:"))).toBe(true), { timeout: 10_000 });
+    await worker.send(key, { id: "m3", text: `call: delegate_tasks ${JSON.stringify({ id })}` });
+    await vi.waitFor(() => expect(of("m3")).toBeDefined(), { timeout: 10_000 });
+    expect(of("m3")?.tools[0]).toMatch(new RegExp(`^- ${id}: the agent "helper", completed:\n`));
+    expect(of("m3")?.tools[0]).toContain('\n  - called look {"path":"a.ts"}: ok\n  - called hold {}: ok\n  - wrote: answer: call: look {"path":"a.ts"}');
   } finally {
     await worker.stop();
   }

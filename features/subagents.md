@@ -67,10 +67,20 @@ What pi-durable does not know is pikit's agents. The runtime adds that layer
   so one that came after the child's last tool round (and ran on its own) is what the report answers,
   never lost. A cancel marks the task and aborts the child; the report says stopped, once; each submit
   to the child checks the mark after it, so none escapes a cancel.
+- **How a background task is going** (`progress`), for the same conversation only (scoped as `list`):
+  its status and the child's last steps, read from the child's entries in the parent's storage
+  (`tx.scanEntries` in a commit that writes nothing; no call between actors, so in a Durable Object
+  too). Bounded: the last 5 steps, oldest first, each the model's text (at most 300 characters) or a
+  tool call (its name, its arguments as JSON clipped to 120 characters, and `running`, `ok` or
+  `error`), and when the child last wrote (its newest message's time). Running or ended, and after a
+  restart: it is read from the records. It shows the parent what the child's own transcript holds
+  (the arguments its tools were called with, a secret it typed there included), which the parent's
+  storage already holds.
 
 `tool-delegate` is the tool: which agents (each with what it is for, which the model reads), how deep
 (`maxDepth`), `wait` (`run`) or not (`start`), a delegated task always waiting for its own; and
-`delegate_tasks`, `delegate_steer`, `delegate_cancel` for the tasks not waited for, separate so an
+`delegate_tasks` (a running task's latest step in the list; with an id, its last steps),
+`delegate_steer`, `delegate_cancel` for the tasks not waited for, separate so an
 agent names only those it needs (and `extension-house-rules` can allow them per sender). It owns the
 children's keys (`delegate:<depth>:<chain>:<task id>`, `<chain>` the agents above the child, root
 first, joined by `.`). A tool cannot use `agent.runtime` (the runtime uses every tool: a dependency

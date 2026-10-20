@@ -33,6 +33,11 @@ line names its area.
 
 ### Components
 
+- tool-delegate: `delegate_tasks({ id })` shows how a task not waited for is going, running or
+  ended: its agent's last 5 steps, oldest first (what it wrote, at most 300 characters; the tools it
+  called, their arguments clipped to 120 characters, `running`, `ok` or `error`) and how long ago the
+  last one was. Without an id, a running task's line ends with its latest step. Only the
+  conversation's own tasks, as before.
 - tool-delegate: who may delegate to an agent. An entry of `agents` takes `from`, the agents allowed
   to hand it tasks: a call is allowed only when the calling conversation's agent and every agent above
   it in the delegation are in it (no laundering through an allowed agent); refused, nothing starts and
@@ -78,6 +83,12 @@ line names its area.
 
 - `ProposalsRemote`'s `path` variant has `serve(request)`, with its suite
   `createProposalsServeConformance`.
+- `AgentDelegation` (`@pikit/pi-adapter/tools`) has `progress(api, id, context)`: a background task
+  of the calling conversation (another's id is `not_found`) with its child's last steps
+  (`DelegationProgress`, `DelegationStep`; `PROGRESS_STEPS`, `STEP_TEXT_LIMIT`,
+  `STEP_ARGUMENTS_LIMIT`) and `updatedAt`, read from the child's entries in the parent's storage.
+  The scripted test model (`@pikit/pi-adapter/testing`) also calls the tool a tool result names
+  (`call: <tool> <json>`).
 
 ### CLI (`pikit`)
 

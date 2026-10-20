@@ -5,7 +5,8 @@
  *
  * For component and sample tests, more rules: a message `bash: <command>` calls the `bash` tool with
  * that command, and the turn after a `bash` result answers `tool said: <result>`; a message
- * `call: <tool> <json arguments>` calls any tool with those arguments. pi-durable places its
+ * `call: <tool> <json arguments>` calls any tool with those arguments, and so does a tool result whose
+ * first text is one (a chain of calls in one run). pi-durable places its
  * `pi.system` entries (instructions, tools) after the input, so "newest" skips system messages.
  *
  * Neutral: it runs on every target (the workerd lane uses it).
@@ -90,6 +91,8 @@ function respond(context: ModelRequest): ReturnType<typeof fauxAssistantMessage>
   if (last?.role === "user" && textOf(last) === "hold") return fauxAssistantMessage(fauxToolCall("hold", {}), { stopReason: "toolUse" });
   const call = last?.role === "user" ? /^call: (\S+)(?: (.+))?$/s.exec(textOf(last)) : null;
   if (call?.[1] !== undefined) return fauxAssistantMessage(fauxToolCall(call[1], JSON.parse(call[2] ?? "{}")), { stopReason: "toolUse" });
+  const chained = last?.role === "toolResult" ? /^call: (\S+)(?: (.+))?$/s.exec(last.content.find((part) => part.type === "text")?.text ?? "") : null;
+  if (chained?.[1] !== undefined) return fauxAssistantMessage(fauxToolCall(chained[1], JSON.parse(chained[2] ?? "{}")), { stopReason: "toolUse" });
   const command = last?.role === "user" ? /^bash: (.+)$/s.exec(textOf(last))?.[1] : undefined;
   if (command !== undefined) return fauxAssistantMessage(fauxToolCall("bash", { command }), { stopReason: "toolUse" });
   if (last?.role === "toolResult" && last.toolName === "bash") return fauxAssistantMessage(`tool said: ${textOf(last)}`);

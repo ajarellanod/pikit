@@ -13,9 +13,10 @@ import { CONVERSATION, type ConversationOrigin, type ConversationRef, defineAgen
 import type { DurableTool } from "./agent.ts";
 import { ConversationDoc } from "./agent.ts";
 import { toChord } from "./context.ts";
-import { AGENT_DELEGATION, type BackgroundDelegation, RESULT_LIMIT, RESULT_REQUEST_PREFIX } from "./delegation.ts";
+import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { AGENT_DELEGATION, type BackgroundDelegation, type DelegationProgress, PROGRESS_STEPS, RESULT_LIMIT, RESULT_REQUEST_PREFIX, STEP_ARGUMENTS_LIMIT, STEP_TEXT_LIMIT } from "./delegation.ts";
 import { withParts } from "./parts.ts";
-import { databaseFile, holdTool, openWorker, type Worker, type WorkerOptions } from "./test-support.ts";
+import { databaseFile, holdTool, openWorker, scriptedProvider, type Worker, type WorkerOptions } from "./test-support.ts";
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -46,7 +47,7 @@ const delegate = defineTool({
   },
 }) as unknown as DurableTool;
 
-/** The test's control tool: `list`, `steer` or `cancel` on the runtime's delegation; answers with the result as JSON. */
+/** The test's control tool: `list`, `progress`, `steer` or `cancel` on the runtime's delegation; answers with the result as JSON. */
 const control = defineTool({
   name: "control",
   description: "Controls background tasks",
@@ -58,9 +59,11 @@ const control = defineTool({
     const result =
       args.op === "list"
         ? await delegation.list(api, context)
-        : args.op === "steer"
-          ? await delegation.steer(api, args.id ?? "", args.message ?? "", context)
-          : await delegation.cancel(api, args.id ?? "", context);
+        : args.op === "progress"
+          ? await delegation.progress(api, args.id ?? "", context)
+          : args.op === "steer"
+            ? await delegation.steer(api, args.id ?? "", args.message ?? "", context)
+            : await delegation.cancel(api, args.id ?? "", context);
     return { output: [{ type: "text", text: JSON.stringify(result) }] };
   },
 }) as unknown as DurableTool;
@@ -119,6 +122,8 @@ const prepared: ConversationRef[] = [];
 const agents = [
   defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate", "control"] }),
   defineAgent({ name: "helper", model: "faux/scripted", systemPrompt: "You help.", tools: ["hold", "ask"] }),
+  // Many steps, long ones (`busy`): for `progress`.
+  defineAgent({ name: "worker", model: "busy/scripted", tools: ["echo", "hold"] }),
   // Delegates again: a task two delegations deep.
   defineAgent({
     name: "relay",
@@ -509,4 +514,113 @@ test("start: the report brings the child's parts to the parent's answer, once, a
   const logged = (await w2.runtime.submissions.answers.read(undefined, 100)).items.map((item) => item.fact).filter((fact) => fact.requestId.startsWith(RESULT_REQUEST_PREFIX));
   expect(logged.map((fact) => fact.parts)).toEqual([[QUESTION]]);
   expect(w2.results()).toEqual([]);
+});
+
+/** The worker's `echo`: answers its `n`, and fails for 5. */
+const echo = defineTool({
+  name: "echo",
+  description: "Echoes",
+  parameters: Type.Object({ n: Type.Number(), pad: Type.String() }),
+  replay: "safe",
+  execute: async (args) => {
+    if (args.n === 5) throw new Error("five fails");
+    return { output: [{ type: "text", text: `echo ${args.n}` }] };
+  },
+}) as unknown as DurableTool;
+
+/**
+ * The worker's model (`busy/scripted`): after its task, six rounds, each a long text and an `echo` call
+ * with long arguments, then `hold`, then `done`. Its first answer waits for `go`.
+ */
+function busyProvider() {
+  let go!: () => void;
+  const gate = new Promise<void>((resolve) => (go = resolve));
+  const faux = fauxProvider({ provider: "busy", models: [{ id: "scripted" }] });
+  const step: FauxResponseFactory = async (context) => {
+    const lastInput = context.messages.findLastIndex((message) => message.role === "user");
+    const rounds = context.messages.slice(lastInput).filter((message) => message.role === "toolResult").length;
+    if (rounds === 0) await gate;
+    if (rounds < 6) return fauxAssistantMessage([fauxText(`step ${rounds + 1} ${"x".repeat(400)}`), fauxToolCall("echo", { n: rounds + 1, pad: "y".repeat(300) })], { stopReason: "toolUse" });
+    if (rounds === 6) return fauxAssistantMessage(fauxToolCall("hold", {}), { stopReason: "toolUse" });
+    return fauxAssistantMessage("done");
+  };
+  faux.setResponses(Array.from({ length: 100 }, () => step));
+  return { provider: faux.provider, go: () => go() };
+}
+
+/** The `echo` step of round `n`, as `progress` gives it: its arguments clipped. */
+const echoStep = (n: number, status: "ok" | "error") => ({
+  kind: "tool",
+  name: "echo",
+  arguments: `${JSON.stringify({ n, pad: "y".repeat(300) }).slice(0, STEP_ARGUMENTS_LIMIT)} [...]`,
+  status,
+});
+/** The text step of round `n`, clipped. */
+const textStep = (n: number) => ({ kind: "text", text: `${`step ${n} ${"x".repeat(400)}`.slice(0, STEP_TEXT_LIMIT)} [...]` });
+
+test("progress: a running task's last steps (bounded, oldest first, how each call went), then the ended task's; another conversation's id and an unknown one are not_found", async () => {
+  const held = hold();
+  const busy = busyProvider();
+  const w = await (await records()).worker({ tools: { delegate, control, echo, hold: held.tool }, providers: [scriptedProvider(), busy.provider] });
+  const conversation = await w.conversation("assistant");
+  const other = await w.conversation("assistant");
+  await w.dispatch("r1", `call: delegate ${JSON.stringify({ agent: "worker", task: "work", wait: false })}`, conversation);
+  const id = toolResults((await w.result("r1")).messages)[0]?.replace(/^started /, "") ?? "";
+
+  // Before its model answered: running, no step yet; it moved when it took its task.
+  const before = (await controlCall(w, conversation, "r2", { op: "progress", id })) as DelegationProgress;
+  expect(before).toMatchObject({ id, agent: "worker", status: "running", steps: [] });
+  expect(before.updatedAt).toBeNumber();
+
+  busy.go();
+  await held.started;
+  const started = Date.now();
+  const running = (await controlCall(w, conversation, "r3", { op: "progress", id })) as DelegationProgress;
+  expect(running.status).toBe("running");
+  expect(running.steps).toHaveLength(PROGRESS_STEPS);
+  expect(running.steps).toEqual([textStep(5), echoStep(5, "error"), textStep(6), echoStep(6, "ok"), { kind: "tool", name: "hold", arguments: "{}", status: "running" }] as never);
+  expect(running.updatedAt ?? 0).toBeGreaterThanOrEqual(before.updatedAt ?? Infinity);
+  expect(running.updatedAt ?? Infinity).toBeLessThanOrEqual(started);
+
+  expect(await controlCall(w, other, "o1", { op: "progress", id })).toBe("not_found");
+  expect(await controlCall(w, conversation, "r4", { op: "progress", id: "999" })).toBe("not_found");
+
+  held.release();
+  await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  expect(await controlCall(w, conversation, "r5", { op: "progress", id })).toEqual({
+    id,
+    agent: "worker",
+    status: "completed",
+    result: "done",
+    steps: [echoStep(5, "error"), textStep(6), echoStep(6, "ok"), { kind: "tool", name: "hold", arguments: "{}", status: "ok" }, { kind: "text", text: "done" }],
+    updatedAt: expect.any(Number),
+  });
+  // Reading changed nothing: one report, and the task listed as before.
+  expect(reports(w)).toHaveLength(1);
+  expect(await controlCall(w, conversation, "r6", { op: "list" })).toEqual([{ id, agent: "worker", status: "completed", result: "done" }]);
+});
+
+test("progress: read from the records, so a restart keeps it, as list does", async () => {
+  const db = await records();
+  const first = hold();
+  const w1 = await db.worker({ tools: { delegate, control, hold: first.tool } });
+  const conversation = await w1.conversation("assistant");
+  const id = await startTask(w1, conversation, "r1");
+  await first.started;
+  expect(await controlCall(w1, conversation, "r2", { op: "progress", id })).toMatchObject({ status: "running", steps: [{ kind: "tool", name: "hold", arguments: "{}", status: "running" }] });
+  await w1.close();
+
+  const next = hold();
+  next.release();
+  const w2 = await db.worker({ tools: { delegate, control, hold: next.tool } });
+  await w2.runtime.inspect(w2.ctx);
+  await w2.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  // The hold the restart cut is an error (replay unsafe), then the child answered.
+  expect(await controlCall(w2, conversation, "r3", { op: "progress", id })).toMatchObject({
+    status: "completed",
+    steps: [
+      { kind: "tool", name: "hold", arguments: "{}", status: "error" },
+      { kind: "text", text: "answer: hold" },
+    ],
+  });
 });
