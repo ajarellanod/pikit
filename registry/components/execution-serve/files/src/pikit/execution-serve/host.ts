@@ -1,14 +1,16 @@
 /**
  * What execution-serve keeps between requests, and how it serves each operation (protocol.ts) on the
- * sandbox's environment: the readers it opened and the commands it runs, each owned by one sandbox.
+ * sandbox's environment: the readers it opened and the commands it runs, each owned by one sandbox
+ * and agent (`ownerOf`: one environment of the provider).
  *
- * - **Scoped.** A handle (a reader, a command) is found only under the sandbox that opened it: asked
- *   from another, it is `unknown_handle` / `unknown_command`, as one that never existed.
+ * - **Scoped.** A handle (a reader, a command) is found only under the sandbox and the agent that
+ *   opened it: asked from another sandbox, or from the same sandbox id under another `Pikit-Agent`
+ *   (or none), it is `unknown_handle` / `unknown_command`, as one that never existed.
  * - **Leased.** A command nobody reads for `leaseMs` is stopped (a client evicted mid-command never
  *   comes back for it) and, once ended, forgotten; a reader unused as long is closed. `sweep` does it,
  *   on the component's timer.
  * - **Bounded.** At most `MAX_COMMANDS` running commands and `MAX_HANDLES` open readers per sandbox
- *   (`too_many`). Without a window, a command whose unread output passes `MAX_PENDING_BYTES` is
+ *   and agent, that is per environment (`too_many`). Without a window, a command whose unread output passes `MAX_PENDING_BYTES` is
  *   stopped and ends with an `unknown` error saying so.
  * - **Never throws to the route** for the environment's failures: they are `{ ok: false, error }`.
  *
@@ -36,9 +38,9 @@ import {
 import { OutputLog } from "./output.ts";
 import { fromBase64, isAgentName, MAX_AGENT_LENGTH, type Operation, type ProtocolErrorCode, type RequestOf, toBase64, type Values, type WireError, type WireExecState, type WireFileInfo } from "./protocol.ts";
 
-/** Running commands per sandbox. */
+/** Running commands per sandbox and agent (`ownerOf`). */
 export const MAX_COMMANDS = 16;
-/** Open readers per sandbox. */
+/** Open readers per sandbox and agent (`ownerOf`). */
 export const MAX_HANDLES = 64;
 /** Unread output a command without a window may hold before it is stopped. */
 export const MAX_PENDING_BYTES = 64 * 1024 * 1024;
@@ -75,10 +77,19 @@ export function sandboxConversation(sandbox: string, agent?: string): Conversati
   return { key: `execution-serve:${sandbox}`, agent: agent ?? `${AGENTLESS_PREFIX}${sandbox}`, conversationId };
 }
 
-/** What one request is for: the sandbox (its readers and commands are scoped by its id) and the ref it is resolved as. */
+/** What one request is for: the sandbox (its readers and commands are scoped by its id and agent, `ownerOf`) and the ref it is resolved as. */
 export interface Scope {
   readonly sandbox: string;
   readonly conversation: ConversationRef;
+}
+
+/**
+ * Who owns a scope's handles and commands: its sandbox id and its agent (the header's, or `_<id>`
+ * without one, which no agent name can be). One sandbox id under two agents is two environments of
+ * the provider: neither finds the other's readers or commands.
+ */
+export function ownerOf(scope: Scope): string {
+  return `${scope.sandbox}\n${scope.conversation.agent}`;
 }
 
 /** A failure of the protocol itself, which the route answers with its status. */
@@ -100,8 +111,8 @@ export interface SandboxHostOptions {
   now(): number;
 }
 
-type ReaderHandle = { kind: "reader"; sandbox: string; reader: BinaryReader; used: number };
-type DirHandle = { kind: "dir"; sandbox: string; reader: DirReader; used: number };
+type ReaderHandle = { kind: "reader"; owner: string; reader: BinaryReader; used: number };
+type DirHandle = { kind: "dir"; owner: string; reader: DirReader; used: number };
 
 class Command {
   readonly log: OutputLog;
@@ -114,7 +125,7 @@ class Command {
 
   constructor(
     readonly id: string,
-    readonly sandbox: string,
+    readonly owner: string,
     window: RequestOf<"execStart">["window"],
     now: number,
   ) {
@@ -205,23 +216,23 @@ export class SandboxHost {
     return this.options.resolve(scope, ctx);
   }
 
-  private count(sandbox: string, which: "commands" | "handles"): number {
+  private count(owner: string, which: "commands" | "handles"): number {
     let count = 0;
     if (which === "commands") {
-      for (const command of this.commands.values()) if (command.sandbox === sandbox && command.running) count++;
-    } else for (const handle of this.handles.values()) if (handle.sandbox === sandbox) count++;
+      for (const command of this.commands.values()) if (command.owner === owner && command.running) count++;
+    } else for (const handle of this.handles.values()) if (handle.owner === owner) count++;
     return count;
   }
 
-  private handle<K extends "reader" | "dir">(sandbox: string, id: string, kind: K): Extract<ReaderHandle | DirHandle, { kind: K }> {
+  private handle<K extends "reader" | "dir">(scope: Scope, id: string, kind: K): Extract<ReaderHandle | DirHandle, { kind: K }> {
     const handle = this.handles.get(id);
-    if (handle === undefined || handle.sandbox !== sandbox || handle.kind !== kind) throw new ProtocolError("unknown_handle", "no such reader in this sandbox (closed, expired, or the host restarted)");
+    if (handle === undefined || handle.owner !== ownerOf(scope) || handle.kind !== kind) throw new ProtocolError("unknown_handle", "no such reader in this sandbox (closed, expired, or the host restarted)");
     handle.used = this.options.now();
     return handle as Extract<ReaderHandle | DirHandle, { kind: K }>;
   }
 
   private keep(handle: ReaderHandle | DirHandle): string {
-    if (this.count(handle.sandbox, "handles") >= MAX_HANDLES) {
+    if (this.count(handle.owner, "handles") >= MAX_HANDLES) {
       void handle.reader.close(BACKGROUND_CONTEXT).catch(() => {});
       throw new ProtocolError("too_many", `this sandbox has ${MAX_HANDLES} readers open already`);
     }
@@ -230,9 +241,9 @@ export class SandboxHost {
     return id;
   }
 
-  private command(sandbox: string, id: string): Command {
+  private command(scope: Scope, id: string): Command {
     const command = this.commands.get(id);
-    if (command === undefined || command.sandbox !== sandbox) throw new ProtocolError("unknown_command", "no such command in this sandbox (it ended long ago, its lease expired, or the host restarted)");
+    if (command === undefined || command.owner !== ownerOf(scope)) throw new ProtocolError("unknown_command", "no such command in this sandbox (it ended long ago, its lease expired, or the host restarted)");
     command.used = this.options.now();
     return command;
   }
@@ -272,10 +283,11 @@ export class SandboxHost {
     return state;
   }
 
-  private start(sandbox: string, env: ExecutionEnv, request: RequestOf<"execStart">): Command {
+  private start(scope: Scope, env: ExecutionEnv, request: RequestOf<"execStart">): Command {
     if (this.commands.has(request.command)) throw new ProtocolError("invalid_request", "execStart: this command id is in use");
-    if (this.count(sandbox, "commands") >= MAX_COMMANDS) throw new ProtocolError("too_many", `this sandbox runs ${MAX_COMMANDS} commands already`);
-    const command = new Command(request.command, sandbox, request.window, this.options.now());
+    const owner = ownerOf(scope);
+    if (this.count(owner, "commands") >= MAX_COMMANDS) throw new ProtocolError("too_many", `this sandbox runs ${MAX_COMMANDS} commands already`);
+    const command = new Command(request.command, owner, request.window, this.options.now());
     this.commands.set(command.id, command);
     // The command's own context: it outlives the request that started it, until it ends or is stopped.
     const context: Context = withAbortSignal(command.stop.signal, BACKGROUND_CONTEXT);
@@ -360,15 +372,15 @@ export class SandboxHost {
         if (!bytes.ok) return { ok: false, error: fileFailure(bytes.error) };
         return { ok: true, value: { info: { ...wireInfo(info.value), size: bytes.value.length }, base64: toBase64(bytes.value) } };
       }
-      return { ok: true, value: { info: wireInfo(info.value), handle: this.keep({ kind: "reader", sandbox: scope.sandbox, reader, used: this.options.now() }) } };
+      return { ok: true, value: { info: wireInfo(info.value), handle: this.keep({ kind: "reader", owner: ownerOf(scope), reader, used: this.options.now() }) } };
     },
-    readerInfo: async (scope, { handle }, ctx) => answer(await this.handle(scope.sandbox, handle, "reader").reader.info(toChord(ctx)), wireInfo),
+    readerInfo: async (scope, { handle }, ctx) => answer(await this.handle(scope, handle, "reader").reader.info(toChord(ctx)), wireInfo),
     readerRead: async (scope, { handle, offset, length }, ctx) =>
-      answer(await this.handle(scope.sandbox, handle, "reader").reader.read(offset, length, toChord(ctx)), (bytes) => ({ base64: toBase64(bytes) })),
+      answer(await this.handle(scope, handle, "reader").reader.read(offset, length, toChord(ctx)), (bytes) => ({ base64: toBase64(bytes) })),
     readerScan: async (scope, { handle, startLine, endLine }, ctx) =>
-      answer(await this.handle(scope.sandbox, handle, "reader").reader.scanLines({ startLine, ...(endLine !== undefined && { endLine }) }, toChord(ctx)), (scan) => ({ ...scan })),
+      answer(await this.handle(scope, handle, "reader").reader.scanLines({ startLine, ...(endLine !== undefined && { endLine }) }, toChord(ctx)), (scan) => ({ ...scan })),
     readerClose: async (scope, { handle }, ctx) => {
-      const reader = this.handle(scope.sandbox, handle, "reader");
+      const reader = this.handle(scope, handle, "reader");
       this.handles.delete(handle);
       await reader.reader.close(toChord(ctx));
       return { ok: true, value: null };
@@ -376,12 +388,12 @@ export class SandboxHost {
     openDirReader: async (scope, { path }, ctx) => {
       const opened = await (await this.env(scope, ctx)).openDirReader(path, toChord(ctx));
       if (!opened.ok) return { ok: false, error: fileFailure(opened.error) };
-      return { ok: true, value: { handle: this.keep({ kind: "dir", sandbox: scope.sandbox, reader: opened.value, used: this.options.now() }) } };
+      return { ok: true, value: { handle: this.keep({ kind: "dir", owner: ownerOf(scope), reader: opened.value, used: this.options.now() }) } };
     },
     dirNext: async (scope, { handle, maxEntries }, ctx) =>
-      answer(await this.handle(scope.sandbox, handle, "dir").reader.next(maxEntries, toChord(ctx)), (page) => ({ entries: page.entries.map(wireInfo), done: page.done })),
+      answer(await this.handle(scope, handle, "dir").reader.next(maxEntries, toChord(ctx)), (page) => ({ entries: page.entries.map(wireInfo), done: page.done })),
     dirClose: async (scope, { handle }, ctx) => {
-      const reader = this.handle(scope.sandbox, handle, "dir");
+      const reader = this.handle(scope, handle, "dir");
       this.handles.delete(handle);
       await reader.reader.close(toChord(ctx));
       return { ok: true, value: null };
@@ -389,12 +401,12 @@ export class SandboxHost {
 
     execStart: async (scope, request, ctx) => {
       const env = await this.env(scope, ctx);
-      const command = this.start(scope.sandbox, env, request);
+      const command = this.start(scope, env, request);
       return { ok: true, value: await this.state(command, 0, request.wait, request.linger, ctx) };
     },
-    execRead: async (scope, { command, cursor, wait, linger }, ctx) => ({ ok: true, value: await this.state(this.command(scope.sandbox, command), cursor, wait, linger, ctx) }),
+    execRead: async (scope, { command, cursor, wait, linger }, ctx) => ({ ok: true, value: await this.state(this.command(scope, command), cursor, wait, linger, ctx) }),
     execKill: async (scope, { command: id, cursor, wait }, ctx) => {
-      const command = this.command(scope.sandbox, id);
+      const command = this.command(scope, id);
       command.stop.abort();
       // A stop never fails on its cursor: one acknowledged already reads from what is kept.
       return { ok: true, value: await this.state(command, command.log.valid(cursor) ? cursor : command.log.acknowledged, wait, wait, ctx) };

@@ -68,7 +68,9 @@ open port), or a reverse proxy. The clients' config is then
 - **The agent.** A request may name the agent its sandbox is for, `Pikit-Agent: <agent>` (an
   agent's name, `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 100 characters): execution-remote sends it
   for a conversation's sandbox, never for `execution`'s own. A malformed one is `400
-  invalid_request` before any sandbox is asked for. The agent is the client's word: the token holder
+  invalid_request` before any sandbox is asked for. The 100-character bound is these components'
+  own (`defineAgent` has none): execution-remote refuses a longer agent at `resolve`, saying so, and
+  this host answers it `400`. The agent is the client's word: the token holder
   is trusted to name it (a logical boundary, not a wall against the client's own code).
 - **A sandbox is `workspace.resolve`** of the `ConversationRef` built from its id and the agent
   (`sandboxConversation`, `host.ts`):
@@ -100,9 +102,11 @@ open port), or a reverse proxy. The clients' config is then
   output the client was never sent is folded into one skip once more than the window follows it
   (pi-durable's `ShellOutputSkip`, counted exactly). `timeout` and `spill` are the sandbox
   environment's own (the spill file is in the sandbox).
-- **Handles are their sandbox's.** A reader or a command of one sandbox, asked for from another, is
-  `404` as one that never existed. They are scoped by the sandbox id (the client's ids already carry
-  the agent).
+- **Handles are their sandbox's and agent's.** A reader or a command of one sandbox, asked for from
+  another, is `404` as one that never existed; so is one asked for under the same sandbox id with
+  another `Pikit-Agent`, or none (another environment of the provider). The client's ids already
+  carry the agent; scoping by both keeps a token holder that sent one id under two agents from
+  crossing their handles.
 - **The lease.** A command nobody reads for `leaseSeconds` is stopped (its result says so), then
   forgotten; a reader unused as long is closed. A client that went away (a Durable Object evicted in
   the middle of a command) leaves nothing running for long.
@@ -134,7 +138,8 @@ open port), or a reverse proxy. The clients' config is then
 
 ## Limits
 
-Per sandbox: 16 running commands and 64 open readers (`429`). A command without a window whose unread
+Per sandbox and agent (one environment: the same id under two agents counts twice): 16 running
+commands and 64 open readers (`429`). A command without a window whose unread
 output passes 64 MiB is stopped, saying so. An answer carries at most 4 MiB of output (a backlog is
 read in several), a read at most 4 MiB, a whole file sent with its opening at most 1 MiB. `watch` and
 `listFiles` are not in the protocol: execution-remote answers `not_supported` for `watch`, and
@@ -151,7 +156,8 @@ nothing resolved; the longest name taken),
 the lifecycle suite, the token (missing, another, too short, another scheme: `401` before anything is
 read), sandbox ids that are not one (`..`, encoded traversals, capitals, too long, extra segments),
 paths (relative refused; an absolute one reaches only the URL's sandbox), readers and commands of
-another sandbox or unknown (`404`), `execKill`, two sandboxes running at once, the cursor (a lost
+another sandbox, of the same sandbox id under another agent or none, or unknown (`404`), the limits
+counted per sandbox and agent, `execKill`, two sandboxes running at once, the cursor (a lost
 answer read again, an acknowledged cursor refused), the per-sandbox limit, the lease (on a manual
 clock), stopping the host, and the output log (every chunk, a window's skip counted exactly, sent
 output never folded).

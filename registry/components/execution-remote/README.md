@@ -44,7 +44,10 @@ pikit doctor                          # execution, execution.shell, workspace: e
 A conversation's sandbox is its agent's (`ConversationRef.agent`, which the runtime gives
 `workspace.resolve`): two agents never share one, so **a delegated child of another agent works in a
 sandbox of its own**, not its parent's (results pass through the delegation's answer, or git). A
-child of the same agent shares its parent's. Every request to a conversation's sandbox carries the
+child of the same agent shares its parent's only in a Durable Object, where it lives in the parent's
+object; on a server a delegated child has a conversation key of its own
+(`delegate:<depth>:<task>`, tool-delegate's README), so it has a sandbox of its own whatever its
+agent. Every request to a conversation's sandbox carries the
 header `Pikit-Agent: <agent>`, and the host resolves the sandbox for that agent: execution-gondolin
 there gives it the agent's machine (its packages, hosts, secrets; its README). `execution`'s own
 sandbox has no conversation and names no agent: the host gives it the base machine.
@@ -58,10 +61,11 @@ conversations (execution-serve's README).
   an object): each agent of the object works in `o-<hex SHA-256 of "<object id>\n<agent>">`, with an
   environment of its own kept for the App's life. The object is `idFromName(key)` of the
   conversation (its delegated children live in it too): one sandbox per agent for its whole life,
-  through evictions, deploys and resets, as execution-do's files are the object's. `execution` alone
-  works in `o-<object id>`.
+  through evictions, deploys and resets, as execution-do's files are the object's. A delegated
+  child of the same agent shares its parent's. `execution` alone works in `o-<object id>`.
 - **On a server:** `workspace` gives each conversation key and agent its own sandbox,
-  `k-<hex SHA-256 of "<key>\n<agent>">` (through resets, as an object on Cloudflare). `execution`
+  `k-<hex SHA-256 of "<key>\n<agent>">` (through resets, as an object on Cloudflare). A delegated
+  child's key is its own, so its sandbox is too, even of its parent's agent. `execution`
   alone, which a conversation's tools never use while `workspace` is installed, is the sandbox
   `sandbox` (`shared`).
 
@@ -73,7 +77,9 @@ conversation, `k-<hash of the key>`) are orphaned on the host, never migrated.
 `protocol.ts`, an identical copy in execution-serve (change both together; the registry's test fails
 while they differ): `POST <endpoint>/execution/v1/sandboxes/<sandbox>/<operation>`, a JSON body,
 `Authorization: Bearer <token>`, and `Pikit-Agent: <agent>` for a conversation's sandbox (an agent's
-name, at most 100 characters; a malformed one is `400`; a header because every body is strict).
+name, at most 100 characters; a malformed one is `400`; a header because every body is strict). The
+100-character bound is these components' own, not pikit's (`defineAgent` has none): a conversation
+of an agent with a longer name is refused at `workspace.resolve`, saying so, before any request.
 Every `ExecutionEnv` operation is one request; the environment's failures come back as its own
 `FileError` / `ExecutionError` codes, and nothing throws:
 
@@ -129,6 +135,10 @@ its host's provider, injected outside the sandbox: execution-gondolin does it at
   id; if that stop is lost too, it runs until it ends or the host's lease (120 s unread) stops it.
 - **An evicted Durable Object** stops reading its command: the host's lease stops it, and pi-durable
   gives the model an `interrupted` result (`tool-bash` is `replay: "unsafe"`).
+- **On a server, an environment per conversation key and agent**, kept for the App's life and never
+  forgotten (as it was per key before): small objects (an id, a working directory), but their number
+  grows with every conversation and agent the App ever resolved, until it restarts. The sandboxes
+  themselves are the host's and stay until its provider removes them.
 - **Each request is HTTP**, a round trip to the host: a tool call that reads many files is slower
   than on a local disk. Keep the host near the Workers that use it.
 - Isolation, resources and network policy are the sandbox provider's (execution-gondolin's README).
@@ -144,11 +154,12 @@ removes them.
 Copied with the component (`execution-remote.test.ts`), against a fake host speaking the protocol
 on a local `Bun.serve`: what setup declares; the start refused without the token, with a short one,
 over http to another machine, or in the Worker's App; the sandbox of a conversation on a server
-(`k-<hash>`) and in a Durable Object (`o-<id>`); paths sent absolute; the token only in the
+(`k-<SHA-256 of key and agent>`) and in a Durable Object (`o-<SHA-256 of object id and agent>`;
+`execution` alone `o-<object id>`); paths sent absolute; the token only in the
 `Authorization` header and a command's variables the caller's (C7); `Pikit-Agent` on every request of
 a conversation's sandbox and never on `execution`'s, two agents of one key or object in two sandboxes
 (a delegated child of another agent), the same agent always in the same, an agent that is not an
-agent's name refused before any request; the protocol's failures as results; output chunk by chunk from the cursor, with `skipped`; a read retried, a command lost;
+agent's name refused before any request (101 characters too, saying so); the protocol's failures as results; output chunk by chunk from the cursor, with `skipped`; a read retried, a command lost;
 cancellation stopping the command by its id, during its start too, and a throwing `onOutput`; a
 small file whole, a large one in pieces; stop.
 
@@ -156,7 +167,8 @@ In the registry (`app.test.ts`, beside `files/`): against a real execution-serve
 provider keyed by conversation and agent as execution-gondolin's is, over execution-local) on
 `Bun.serve`, pi-durable's `ExecutionEnv` suite and the `workspace` suite pass end to end; pi-durable's
 own tools in a Harness turn (a long `bash` output through the window, its spill file read back); a
-sandbox per key and agent, per object and agent, each resolved on the host for its agent and
+sandbox per key and agent (a delegated child's key its own), per object and agent (a child of the
+same agent in its parent's), each resolved on the host for its agent and
 `execution`'s for none; behind workspace-local, a directory per agent; a quick command and a small
 read cost one request each; a cancelled command's process does not run on; a wrong token.
 `gondolin.test.ts` runs remote, serve and execution-gondolin together on real micro-VMs (skipped
