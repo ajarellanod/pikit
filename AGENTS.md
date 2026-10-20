@@ -1,6 +1,7 @@
 # Maintenance lessons
 
 - Locate guessed documentation/source filenames before reading them: `packages/contracts` and `packages/pi-adapter` have no package-local README; the dashboard's HTTP client is `registry/dashboard/files/src/lib/api.ts`, not `lib/admin.ts`. Generated projects use `src/dashboard/src/lib/api.ts`; list their views instead of assuming `conversations/home.tsx` exists.
+- Locate files even when source comments name them: `packages/pi-adapter/src/skills.ts` does not exist (the runtime loader is in `agent.ts`), and the `features/skills-catalog.md` link in `contracts/src/skill.ts` is stale. Use `find` or `rg --files` before reading.
 - A listener on TCP 9222 does not prove a CDP endpoint is available: check `/json/version` before attaching agent-browser. Chrome's remote-debugging mode may need browser-use's connection flow instead.
 - `wrangler deployments list --json` lists deployments oldest first in the current CLI: select the greatest `created_on`, not element zero, to record the active or rollback version; verify the active version against `/health`.
 
