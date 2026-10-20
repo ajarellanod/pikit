@@ -161,7 +161,7 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 
 1. `pikit-self`, with the docs (`docs/`): cheap, and everything else uses them. Built.
 2. Proposals on Cloudflare (**built**): `admin-proposals` with `proposals-github` and `repo-github-app`
-   (the `telegram-cloudflare` preset's feature group, `--with admin-proposals`), dormant: the
+   (the `cloudflare` preset's feature group, `--with admin-proposals`), dormant: the
    button's form asks no GitHub token, and GitHub is connected from Settings → GitHub. Left: the
    ruleset, advised, which the operator creates on GitHub (the status says whether one applies).
 3. Rollback on Cloudflare (**built**): every deploy, Workers Builds' (the template's deploy command,

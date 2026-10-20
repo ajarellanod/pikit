@@ -1,5 +1,5 @@
 /**
- * The Cloudflare preset's Worker, measured: `pikit new --target durable --preset telegram-cloudflare`
+ * The Cloudflare preset's Worker, measured: `pikit new --target durable --preset cloudflare` (dashboard included)
  * in a temporary directory, then the project's own `wrangler deploy --dry-run --outdir`, named as `pikit
  * up` names it (`--name`, package.json's `name`: the generated wrangler.jsonc has none, and wrangler
  * guesses one only when it detects an AI agent running it, never on CI). Exits 1 when
@@ -17,7 +17,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const PRESET = "telegram-cloudflare";
+const PRESET = "cloudflare";
 const KIB = 1024;
 /**
  * Cloudflare's limit on a Worker's size: 64 MiB uncompressed, on the Free and Paid plans alike, with

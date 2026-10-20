@@ -1,6 +1,6 @@
 /**
  * A Telegram bot on Cloudflare, end to end on this machine (SPEC §4.1): `pikit new --target durable
- * --preset telegram-cloudflare`, `pikit configure` (without a terminal, then walked through in one),
+ * --preset cloudflare --with channel-telegram-webhook`, `pikit configure` (without a terminal, then walked through in one),
  * then the Worker and its objects in workerd (`wrangler dev`, as `pikit dev` runs it, on a free port).
  * `pikit up`'s after-deploy step registers the webhook against it, and a person's message posted to
  * `/telegram` is answered in the chat:
@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { startFakeTelegram } from "../../../registry/components/channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/fake-telegram.test-support.ts";
 import { startFakeOpenRouter } from "../../../registry/components/provider-openrouter/files/src/pikit/provider-openrouter/fake-openrouter.test-support.ts";
+import { TITLE_SYSTEM } from "../../../registry/components/admin-api/files/src/pikit/admin-api/titles.ts";
 import { setConfigEntry } from "./project/config-file.ts";
 
 const E2E = process.env.PIKIT_E2E === "1";
@@ -37,13 +38,15 @@ const STRANGER = { id: 2002, first_name: "Eve" };
 const MODEL_KEY = "sk-or-e2e-dummy-not-a-key";
 const BRAVE_KEY = "brave-e2e-dummy-not-a-key";
 /** This machine's environment without the variables the project reads: one exported here never leaks into the test. */
-const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "OPENROUTER_API_KEY", "BRAVE_API_KEY"];
+const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "OPENROUTER_API_KEY", "BRAVE_API_KEY", "PIKIT_ADMIN_TOKEN"];
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.includes(name))) as Record<string, string>;
 
 const parent = mkdtempSync(join(tmpdir(), "pikit-e2e-telegram-cloudflare-"));
 const project = join(parent, NAME);
 const telegram = startFakeTelegram();
 const openrouter = startFakeOpenRouter();
+// The default dashboard also asks for titles; these are not agent runs.
+const agentRequests = () => openrouter.requests.filter((request) => !JSON.stringify(request.messages).includes(TITLE_SYSTEM));
 afterAll(async () => {
   await telegram.stop();
   await openrouter.stop();
@@ -67,9 +70,9 @@ function env(): Record<string, string> {
 }
 
 test.skipIf(!E2E)(
-  "pikit new --target durable --preset telegram-cloudflare: a bot that composes, bundles, typechecks and passes its tests; doctor asks for Telegram",
+  "cloudflare with explicit Telegram: a bot and dashboard that compose, bundle, typecheck and pass their tests",
   async () => {
-    const created = await pikit(["new", NAME, "--target", "durable", "--preset", "telegram-cloudflare"], { cwd: parent });
+    const created = await pikit(["new", NAME, "--target", "durable", "--preset", "cloudflare", "--with", "channel-telegram-webhook"], { cwd: parent });
     expect(created.err).not.toContain("✗");
     expect(created.code).toBe(0);
 
@@ -117,7 +120,7 @@ test.skipIf(!E2E)(
     expect(missing.err).toContain('the model provider "openrouter" has no credentials');
     expect(missing.err).not.toContain("BRAVE_API_KEY");
 
-    const configured = await pikit(["configure", "--yes"], {
+    const configured = await pikit(["configure", "--yes", "--generate", "PIKIT_ADMIN_TOKEN"], {
       env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: String(OWNER.id), OPENROUTER_API_KEY: MODEL_KEY, BRAVE_API_KEY: BRAVE_KEY },
     });
     expect(configured.err).not.toContain("✗");
@@ -182,6 +185,8 @@ test.skipIf(!E2E)(
     at = await t.waitFor("TELEGRAM_ALLOWED_USERS set", at);
     at = await t.waitFor("◆  BRAVE_API_KEY (Enter skips)", at);
     await t.type(`${BRAVE_KEY}\r`);
+    at = await t.waitFor("PIKIT_ADMIN_TOKEN", at);
+    await t.type("\r");
     at = await t.waitFor('The model provider "openrouter" has no credentials', at);
     // A Cloudflare project stores no login (no model.credentials): the key is the first answer.
     await t.waitFor("Paste an API key", at);
@@ -254,6 +259,25 @@ async function wranglerDev() {
   }
 }
 
+/** Telegram seeing a send precedes the durable receipt. Wait for that receipt before restarting. */
+async function delivered(key: string): Promise<void> {
+  const objects = join(project, ".wrangler", "state", "v3", "do", `${NAME}-Conversation`);
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    for (const file of readdirSync(objects).filter((name) => name.endsWith(".sqlite") && name !== "metadata.sqlite")) {
+      const db = new DatabaseSync(join(objects, file), { readOnly: true });
+      try {
+        if (db.prepare("SELECT name FROM sqlite_master WHERE name = 'outbound_durable_pieces'").all().length === 0) continue;
+        if (db.prepare("SELECT 1 FROM outbound_durable_pieces WHERE conversation_key = ? AND state = 'delivered'").all(key).length > 0) return;
+      } finally {
+        db.close();
+      }
+    }
+    await Bun.sleep(20);
+  }
+  throw new Error(`delivery receipt for ${key} was not committed`);
+}
+
 test.skipIf(!E2E)(
   "in workerd: up's after-deploy hook sets the webhook, a stranger is told their id, and the owner's message is answered in the chat through the object's alarm",
   async () => {
@@ -298,10 +322,11 @@ test.skipIf(!E2E)(
       expect(sent).toContainEqual(expect.objectContaining({ chatId: STRANGER.id, text: expect.stringContaining(`Your Telegram user id is ${STRANGER.id}`) }));
       expect(sent).toContainEqual(expect.objectContaining({ chatId: OWNER.id, text: "answer: hello" }));
 
-      // The model was asked once, with the starter's model and the key from .env.
-      expect(openrouter.requests).toHaveLength(1);
-      expect(openrouter.requests[0]).toMatchObject({ model: "z-ai/glm-5.3-flash", apiKey: MODEL_KEY });
-      expect(JSON.stringify(openrouter.requests[0]?.messages)).toContain("hello");
+      // One agent answer, distinct from the dashboard's background title completion.
+      expect(agentRequests()).toHaveLength(1);
+      expect(agentRequests()[0]).toMatchObject({ model: "z-ai/glm-5.3-flash", apiKey: MODEL_KEY });
+      expect(JSON.stringify(agentRequests()[0]?.messages)).toContain("hello");
+      await delivered(`telegram:${OWNER.id}`);
 
       // workerd's own trace of it: the RPC into the object, and the alarm that drove the run and the delivery.
       const traced = await fetch(`${base}/cdn-cgi/local/explorer/api/local/observability/query`, {
@@ -358,7 +383,7 @@ test.skipIf(!E2E)(
       .filter((line) => line !== "" && !line.startsWith("TELEGRAM_ALLOWED_USERS="));
     writeFileSync(join(project, ".env"), `${[...lines, `TELEGRAM_PASSWORD=${PASSWORD}`].join("\n")}\n`);
     telegram.sent.length = 0;
-    const asked = openrouter.requests.length;
+    const asked = agentRequests().length;
     // No `pikit up` will register anything: nothing is set until the Worker does.
     await fetch(`${telegram.url}/bot${telegram.token}/deleteWebhook`, { method: "POST" });
     expect(telegram.webhookUrl).toBe("");
@@ -390,9 +415,10 @@ test.skipIf(!E2E)(
         [OWNER_OF_BUTTON.id, "answer: hello again"],
       ]);
       // Only the message after logging in reached the model; the password never did.
-      expect(openrouter.requests).toHaveLength(asked + 1);
-      expect(JSON.stringify(openrouter.requests.at(-1)?.messages)).toContain("hello again");
+      expect(agentRequests()).toHaveLength(asked + 1);
+      expect(JSON.stringify(agentRequests().at(-1)?.messages)).toContain("hello again");
       expect(JSON.stringify(openrouter.requests)).not.toContain(PASSWORD);
+      await delivered(`telegram:${OWNER_OF_BUTTON.id}`);
     } finally {
       await stop();
     }

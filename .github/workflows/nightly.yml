@@ -63,7 +63,7 @@ jobs:
         run: bun test packages/cli/src/e2e-cloudflare.test.ts
         env:
           WRANGLER_SEND_METRICS: "false"
-      - name: telegram-cloudflare preset against the fake Bot API and OpenRouter (workerd)
+      - name: cloudflare with optional Telegram against the fake Bot API and OpenRouter (workerd)
         if: ${{ !cancelled() }}
         run: bun test packages/cli/src/e2e-telegram-cloudflare.test.ts
         env:

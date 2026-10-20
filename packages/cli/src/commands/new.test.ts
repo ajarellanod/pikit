@@ -13,9 +13,9 @@ import { DEFAULT_REGISTRY } from "../paths.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import type { Manifest } from "../registry/manifest.ts";
 import { runCli } from "../testing/cli.ts";
-import { checkStarterModel, uiComponentsFor } from "./new.ts";
+import { checkStarterModel } from "./new.ts";
 import { starterModel } from "./starter.ts";
-import { UI_COMPONENTS } from "./ui.ts";
+import { UI_COMPONENTS, uiComponentsFor } from "./ui.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -114,17 +114,26 @@ test("new refuses a preset whose starter model's provider it does not install, b
 
   // Accepted: every file is written, then `bun install` fails at once.
   expect((await run("own")).err).toContain("`bun install` failed");
-  expect(readFileSync(join(parent, "own", "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "alpha/model-1",');
+  expect(readFileSync(join(parent, "own", "src", "agents", "steward", "agent.ts"), "utf8")).toContain('model: "alpha/model-1",');
 }, 60_000);
 
-test("--ui brings admin-api, and the defaults for admin.auth and settings that the chosen components do not provide; a default the preset chose is the preset's", () => {
+test("the default dashboard brings admin-api, and the defaults for admin.auth and settings that the chosen components do not provide; a default the preset chose is the preset's", () => {
   const builtin = openRegistry(DEFAULT_REGISTRY);
-  expect(uiComponentsFor(builtin, builtin.preset("http"), ["server"])).toEqual([...UI_COMPONENTS]);
-  expect(uiComponentsFor(builtin, builtin.preset("telegram-cloudflare"), ["durable"])).toEqual([...UI_COMPONENTS]);
+  expect(uiComponentsFor(builtin, builtin.preset("base"), ["server"])).toEqual([...UI_COMPONENTS]);
+  expect(uiComponentsFor(builtin, builtin.preset("cloudflare"), ["durable"])).toEqual([...UI_COMPONENTS]);
   // agents-live's group installs settings-store: the preset's, never recorded as the dashboard's.
-  const live = builtin.preset("http", ["agents-live"]);
+  const live = builtin.preset("base", ["agents-live"]);
   expect(live).toContain("settings-store");
   expect(uiComponentsFor(builtin, live, ["server"])).toEqual(["admin-auth-token", "admin-api"]);
+});
+
+test("a default dashboard with no template is refused before any project files are written", async () => {
+  const root = registry({ own: "components: [provider-alpha, runtime-fake]\nmodel: alpha/model-1\nui: true\n" });
+  const parent = temp();
+  const run = await runCli(["new", "fresh", "--preset", "own", "--registry", root], parent);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("has no dashboard (dashboard/files/)");
+  expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 
 test("--ui with other providers of admin.auth and settings: decided by what their manifests declare in each App of the target", () => {

@@ -26,7 +26,7 @@ anyone who needs the container's isolation, self-improvement's deployer, or serv
   `dev` and `exec`; no CLI code knows systemd or launchd. Nothing in `@pikit/contracts`, `@pikit/core`
   or the capability catalogue: a deployment provides and requires no capability.
 - The name follows the registry's `-local` (`execution-local`, `workspace-local`): this machine.
-- **The `http` preset asks** "How should it run on this machine?" (`choose: kind: deployment`):
+- **The `base` preset asks** "How should it run on this machine?" (`choose: kind: deployment`):
   every server deployment answers, `deployment-docker` the default; `--with deployment-local` answers
   it in a script, and `telegram` (its alias) asks it too. A component that answers a question needs a
   `title`, so the three deployments got one.

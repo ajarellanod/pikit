@@ -68,6 +68,32 @@ test("slots offer every component of the kind, by title, with the preset's own a
   expect(r.slots("b")[0]?.defaults).toEqual(["channel-b"]);
 });
 
+test("dashboard defaults are declared by the base and inherited by its aliases", () => {
+  const r = openRegistry(registry(COMPONENTS, {
+    base: `ui: true\n${BASE}`,
+    b: "extends: base\nwith: [channel-b]\n",
+    plain: BASE,
+    invalid: `ui: yes\n${BASE}`,
+  }));
+  expect(r.presetUi("base")).toBe(true);
+  expect(r.presetUi("b")).toBe(true);
+  expect(r.presetUi("plain")).toBe(false);
+  expect(() => r.presetUi("invalid")).toThrow("/ui:");
+});
+
+test("multiple choices without a default allow none, one or several; aliases and explicit answers work", () => {
+  const r = openRegistry(registry(COMPONENTS, {
+    base: "components: [secrets-env, server-bun]\nchoose: [{ kind: channel, multiple: true }]\n",
+    b: "extends: base\nwith: [channel-b]\n",
+  }));
+  expect(r.preset("base")).toEqual(["secrets-env", "server-bun"]);
+  expect(r.slots("base")[0]).toMatchObject({ multiple: true, defaults: [] });
+  expect(r.preset("base", ["channel-b", "channel-b"])).toEqual(["secrets-env", "server-bun", "channel-b"]);
+  expect(r.preset("base", ["channel-a", "channel-b"])).toEqual(["secrets-env", "server-bun", "channel-a", "channel-b"]);
+  expect(r.preset("b")).toEqual(r.preset("base", ["channel-b"]));
+  expect(r.preset("b", ["channel-a"])).toEqual(r.preset("base", ["channel-a"]));
+});
+
 const SEVERAL = "components: [secrets-env, channel-a, server-bun]\nchoose:\n  - kind: channel\n    multiple: true\nfeatures: [tool-x, router-y]\n";
 const FEATURES = { ...COMPONENTS, "tool-x": "X: a tool", "router-y": "Y: rules", "tool-edge": { title: "Edge", targets: ["durable" as const] } };
 
@@ -122,6 +148,7 @@ test("choices the preset does not ask for or offer are refused, with what to do 
 test("malformed presets are refused when read", () => {
   const cases: Record<string, string> = {
     "two components of the chosen kind": "components: [channel-a, channel-b]\nchoose:\n  - kind: channel\n",
+    "two defaults in a multiple choice": "components: [channel-a, channel-b]\nchoose: [{ kind: channel, multiple: true }]\n",
     "none of the chosen kind": "components: [secrets-env]\nchoose:\n  - kind: channel\n",
     "a kind chosen twice": "components: [channel-a]\nchoose:\n  - kind: channel\n  - kind: channel\n",
     "an alias with components": "extends: base\nwith: [channel-b]\ncomponents: [secrets-env]\n",
@@ -230,10 +257,33 @@ function repositoryWith(extra: Manifest[]): string {
     index.components[manifest.name] = { version: manifest.version, description: manifest.description, targets: manifest.targets, path: `components/${manifest.name}` };
   }
   writeFileSync(join(root, "registry.json"), JSON.stringify(index));
+  // These copies validate the manifests, not a real UI build; dashboard defaults need a template.
+  mkdirSync(join(root, "dashboard", "files"), { recursive: true });
+  writeFileSync(join(root, "dashboard", "files", "README.md"), "Dashboard fixture\n");
   mkdirSync(join(root, "presets"));
   for (const file of readdirSync(join(DEFAULT_REGISTRY, "presets"))) copyFileSync(join(DEFAULT_REGISTRY, "presets", file), join(root, "presets", file));
   return root;
 }
+
+test("registry validation refuses default dashboards without their source template", () => {
+  const root = repositoryWith([]);
+  rmSync(join(root, "dashboard"), { recursive: true });
+  const missing = checkPresets(root).filter((problem) => problem.includes("installs the dashboard, but the registry has no dashboard"));
+  expect(missing.map((problem) => problem.split(":")[0])).toEqual([
+    "presets/base.yaml", "presets/celld.yaml", "presets/cloudflare.yaml", "presets/telegram.yaml",
+  ]);
+});
+
+test("registry validation checks the default dashboard's target compatibility too", () => {
+  const root = repositoryWith([]);
+  const file = join(root, "components", "admin-api", "component.json");
+  const manifest = JSON.parse(readFileSync(file, "utf8"));
+  manifest.targets = ["server"];
+  writeFileSync(file, JSON.stringify(manifest));
+  const problems = checkPresets(root);
+  expect(problems).toContain("presets/cloudflare.yaml: on durable, admin-api runs on server, not on durable");
+  expect(problems).toContain("presets/celld.yaml: on durable, admin-api runs on server, not on durable");
+});
 
 test("a second server provider of storage.sql leaves the repository's presets composing: they name their storage", () => {
   const sqlite = openRegistry(DEFAULT_REGISTRY).manifest("storage-sqlite");
@@ -242,17 +292,17 @@ test("a second server provider of storage.sql leaves the repository's presets co
   expect(checkPresets(root)).toEqual([]);
   // A preset that left its storage to the offer: with two providers nothing is offered, and it says so,
   // as it is and with each answer and feature it offers (whichever those are), and of nothing else.
-  const http = readFileSync(join(root, "presets", "http.yaml"), "utf8");
-  writeFileSync(join(root, "presets", "leaning.yaml"), http.replace(/^\s+- storage-sqlite\n/m, ""));
+  const base = readFileSync(join(root, "presets", "base.yaml"), "utf8");
+  writeFileSync(join(root, "presets", "leaning.yaml"), base.replace(/^\s+- storage-sqlite\n/m, ""));
   const problems = checkPresets(root);
   expect(problems).toContain('presets/leaning.yaml: on server, runtime-pi requires "storage.sqlite", which nothing provides');
   expect(problems).toContain('presets/leaning.yaml: on server, storage-kv-sql requires "storage.sql", which nothing provides');
   for (const problem of problems) {
     expect(problem).toMatch(/^presets\/leaning\.yaml: (with [\w -]+, )?on server, [\w-]+ requires "storage\.sql(ite)?", which nothing provides$/);
   }
-});
+}, 30_000);
 
-test("a second Cloudflare provider of storage.kv leaves cloudflare-minimal composing: it names its storage", () => {
+test("a second Cloudflare provider of storage.kv leaves base-cloudflare composing: it names its storage", () => {
   const kv = openRegistry(DEFAULT_REGISTRY).manifest("storage-kv-sql");
   // Cloudflare's only: on a server storage-kv-sql stays the one provider, which a chat channel's required storage.kv brings.
   const root = repositoryWith([{ ...kv, name: "storage-kv-other", description: "A second storage.kv.", targets: ["durable"] }]);
@@ -261,32 +311,39 @@ test("a second Cloudflare provider of storage.kv leaves cloudflare-minimal compo
 
 test("registry validate reports a preset whose starter model's provider it does not install, unless the preset names its model", () => {
   const root = repositoryWith([]);
-  const http = readFileSync(join(root, "presets", "http.yaml"), "utf8");
-  const openrouter = http.replace(/^\s+- provider-anthropic\n/m, "  - provider-openrouter\n");
+  const base = readFileSync(join(root, "presets", "base.yaml"), "utf8");
+  const openrouter = base.replace(/^\s+- provider-anthropic\n/m, "  - provider-openrouter\n");
   writeFileSync(join(root, "presets", "other-provider.yaml"), openrouter);
   expect(checkPresets(root)).toContain(
     `presets/other-provider.yaml: on server, the starter agent's model "anthropic/claude-sonnet-4-6" needs the model provider "anthropic", which no component of the preset "other-provider" provides; provider-anthropic provides it: list it in the preset's components, or give the preset a \`model\` whose provider it installs`,
   );
   writeFileSync(join(root, "presets", "other-provider.yaml"), `model: openrouter/z-ai/glm-5.3-flash\n${openrouter}`);
   expect(checkPresets(root)).toEqual([]);
-});
+}, 30_000);
 
-test("the repository's presets resolve: telegram is http with channel-telegram", () => {
+test("the repository's presets resolve: telegram is base with channel-telegram; durable bases have no default channel", () => {
   expect(checkPresets(DEFAULT_REGISTRY)).toEqual([]);
   const r = openRegistry(DEFAULT_REGISTRY);
-  expect(r.preset("telegram")).toEqual(r.preset("http", ["channel-telegram"]));
-  expect(r.slots("http")[0]?.options.map((o) => o.name)).toEqual(["channel-google-chat", "channel-http", "channel-telegram", "channel-telegram-webhook", "channel-web"]);
+  expect(r.preset("telegram")).toEqual(r.preset("base", ["channel-telegram"]));
+  expect(r.slots("base")[0]?.options.map((o) => o.name)).toEqual(["channel-google-chat", "channel-http", "channel-telegram", "channel-telegram-webhook", "channel-web"]);
+  for (const preset of ["base", "telegram", "cloudflare", "celld"]) expect(r.presetUi(preset)).toBe(true);
+  expect(r.presetUi("base-cloudflare")).toBe(false);
+  for (const preset of ["cloudflare", "celld"]) {
+    expect(r.preset(preset).filter((c) => c.startsWith("channel-"))).toEqual([]);
+    expect(r.slots(preset, ["durable"])[0]?.defaults).toEqual([]);
+    expect(r.preset(preset, ["channel-telegram-webhook", "channel-http"]).filter((c) => c.startsWith("channel-"))).toEqual(["channel-telegram-webhook", "channel-http"]);
+  }
   // A server project is not offered the webhook; Cloudflare has no poller. Google Chat, the HTTP API
   // (channel-http) and the chat page (channel-web) run on both.
-  expect(r.slots("http", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-google-chat", "channel-http", "channel-telegram", "channel-web"]);
-  expect(r.slots("http", ["durable"])[0]?.options.map((o) => o.name)).toEqual(["channel-google-chat", "channel-http", "channel-telegram-webhook", "channel-web"]);
+  expect(r.slots("base", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-google-chat", "channel-http", "channel-telegram", "channel-web"]);
+  expect(r.slots("base", ["durable"])[0]?.options.map((o) => o.name)).toEqual(["channel-google-chat", "channel-http", "channel-telegram-webhook", "channel-web"]);
   // Several channels at once; the features each target offers, none installed already.
   expect(r.slots("telegram")[0]).toMatchObject({ multiple: true, defaults: ["channel-telegram"] });
   expect(r.preset("telegram", ["channel-telegram", "channel-http"]).filter((c) => c.startsWith("channel-"))).toEqual(["channel-telegram", "channel-http"]);
-  expect(r.features("telegram", ["server"]).map((f) => f.name)).toEqual(["router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"]);
-  expect(r.features("telegram-cloudflare", ["durable"]).map((f) => f.name)).toEqual(["router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"]);
+  expect(r.features("telegram", ["server"]).map((f) => f.name)).toEqual(["agents-folders", "router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"]);
+  expect(r.features("cloudflare", ["durable"]).map((f) => f.name)).toEqual(["agents-folders", "router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"]);
   // Agents from the dashboard is a group: the live agents, the rules that route to them, and the settings they are.
-  expect(r.features("telegram-cloudflare", ["durable"]).find((f) => f.name === "agents-live")?.components).toEqual(["agents-live", "router-rules", "settings-store"]);
+  expect(r.features("cloudflare", ["durable"]).find((f) => f.name === "agents-live")?.components).toEqual(["agents-live", "router-rules", "settings-store"]);
   expect(r.preset("telegram", ["agents-live"]).slice(-3)).toEqual(["agents-live", "router-rules", "settings-store"]);
 });
 

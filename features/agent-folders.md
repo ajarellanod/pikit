@@ -7,7 +7,7 @@
 agents-live's), the first user of
 [component commands](component-commands.md) (`pikit agents`).
 
-**Needed by:** nothing required. It fills the [skills catalog](completed/skills-catalog.md) and the
+**Needed by:** the optional several-agents path in `pikit new`. It fills the [skills catalog](completed/skills-catalog.md) and the
 per-channel prompt of [channel context](channel-context.md) from files.
 
 ## What it gives
@@ -88,6 +88,8 @@ instructions, so the agent's context lives in `SYSTEM.md`.
 ## Open questions
 - `context/`, files an agent's workspace starts with: a `seed` of workspace-local, copied the first
   time it makes an agent's directory, server only.
-- `pikit new` offering agent folders in its features step, as it offers agents from the dashboard.
+- Built: full presets offer `agents-folders`; `pikit new` asks one agent or several. Several installs
+  the component, writes Steward's prompt to `SYSTEM.md` and runs `pikit agents` once at creation.
+  With a directory argument, `--with agents-folders` selects that path. One keeps the direct registry.
 - `extensions/` per agent: an extension is a component today; an agent-private one could be
   a file the generated component provides under the agent's name.

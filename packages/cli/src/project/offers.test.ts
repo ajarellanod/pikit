@@ -224,9 +224,9 @@ test("what a composed project provides, per App, without the components about to
 });
 
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {
-  // The preset names its storage and key-value store (`presets/http.yaml`), and the runtime provides
+  // The preset names its storage and key-value store (`presets/base.yaml`), and the runtime provides
   // the record of submissions: nothing is brought.
-  const http = registry.preset("http", []);
+  const http = registry.preset("base", []);
   expect(http).toContain("storage-sqlite");
   expect(http).toContain("storage-kv-sql");
   // The neutral conversation registry (SPEC C5), after the runtime that creates its conversations.
@@ -239,7 +239,7 @@ test("pikit new places what a component brings right before it; a provider alrea
 
   // The preset's storage serves the outbox too, and its key-value store the cursor: the chat channel
   // brings only the outbox and its timers.
-  const telegram = registry.preset("http", ["channel-telegram"]);
+  const telegram = registry.preset("base", ["channel-telegram"]);
   const { order, installedFor } = withOffers(registry, telegram);
   const at = order.indexOf("channel-telegram");
   expect(order.slice(at - 2, at + 1)).toEqual(["wakeups-timers", "outbound-durable", "channel-telegram"]);

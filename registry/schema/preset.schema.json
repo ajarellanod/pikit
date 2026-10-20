@@ -21,6 +21,10 @@
           "minItems": 1,
           "description": "The `pikit add` calls, in order."
         },
+        "ui": {
+          "type": "boolean",
+          "description": "Install the dashboard by default, as `pikit new --ui` does. Inherited by aliases."
+        },
         "choose": {
           "type": "array",
           "items": {
@@ -32,7 +36,7 @@
               "kind": {
                 "type": "string",
                 "pattern": "^[a-z][a-z0-9]*$",
-                "description": "Every registry component of this kind answers; the one in `components` is the default."
+                "description": "Every registry component of this kind answers; the one in `components` is the default. A multiple choice may have no default."
               },
               "question": {
                 "type": "string",

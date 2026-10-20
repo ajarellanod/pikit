@@ -78,7 +78,7 @@ test("new with no directory asks only on a terminal; the presets it offers have 
   expect(readdirSync(parent)).toEqual([]);
 
   const presets = openRegistry(DEFAULT_REGISTRY).presets();
-  expect(presets.map((p) => p.name)).toEqual(["cloudflare-minimal", "http", "telegram", "telegram-celld", "telegram-cloudflare"]);
+  expect(presets.map((p) => p.name)).toEqual(["base", "base-cloudflare", "celld", "cloudflare", "telegram"]);
   for (const preset of presets) expect(preset.title).not.toBe(preset.name);
 });
 
@@ -93,7 +93,7 @@ test("new refuses a non-empty directory and an unknown preset before writing any
   expect(unknown.err).toContain('no preset "nope"');
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 
-  const notAsked = await runCli(["new", "fresh", "--preset", "http", "--with", "tool-bash"], parent);
+  const notAsked = await runCli(["new", "fresh", "--preset", "base", "--with", "tool-bash"], parent);
   expect(notAsked.code).toBe(1);
   expect(notAsked.err).toContain("has no choice of tool-* components and does not offer tool-bash; add it after, with `pikit add tool-bash`");
   const noPreset = await runCli(["new", "fresh", "--with", "channel-telegram"], parent);
@@ -131,21 +131,21 @@ test("new --target: an unknown target, and a preset that does not run on the cho
   expect(mars.code).toBe(2);
   expect(mars.err).toContain('--target is one of server, durable, not "mars"');
   // A provider is not a target.
-  const provider = await runCli(["new", "fresh", "--target", "cloudflare", "--preset", "cloudflare-minimal"], parent);
+  const provider = await runCli(["new", "fresh", "--target", "cloudflare", "--preset", "base-cloudflare"], parent);
   expect(provider.code).toBe(2);
   expect(provider.err).toContain('--target is one of server, durable, not "cloudflare"');
 
-  const server = await runCli(["new", "fresh", "--target", "durable", "--preset", "http"], parent);
+  const server = await runCli(["new", "fresh", "--target", "durable", "--preset", "base"], parent);
   expect(server.code).toBe(1);
   expect(server.err).toContain("runs on server, not on this project's durable target");
-  const edge = await runCli(["new", "fresh", "--preset", "cloudflare-minimal"], parent);
+  const edge = await runCli(["new", "fresh", "--preset", "base-cloudflare"], parent);
   expect(edge.code).toBe(1);
   expect(edge.err).toContain("storage-do runs on durable, not on this project's server target");
   // The target is never guessed from the preset, but the refusal says which one it runs on.
-  expect(edge.err).toContain('the preset "cloudflare-minimal" runs on durable: pikit new fresh --target durable --preset cloudflare-minimal');
-  const bot = await runCli(["new", "fresh", "--preset", "telegram-cloudflare"], parent);
+  expect(edge.err).toContain('the preset "base-cloudflare" runs on durable: pikit new fresh --target durable --preset base-cloudflare');
+  const bot = await runCli(["new", "fresh", "--preset", "cloudflare"], parent);
   expect(bot.code).toBe(1);
-  expect(bot.err).toContain("pikit new fresh --target durable --preset telegram-cloudflare");
+  expect(bot.err).toContain("pikit new fresh --target durable --preset cloudflare");
   // A target that was chosen gets no hint: it was not forgotten.
   expect(server.err).not.toContain("runs on server: pikit new");
   expect(existsSync(join(parent, "fresh"))).toBe(false);
@@ -154,7 +154,7 @@ test("new --target: an unknown target, and a preset that does not run on the cho
 test("new --target durable records the target, and writes two Apps, wrangler and the Cloudflare components", async () => {
   const parent = temp();
   // Nothing resolves: `bun install` fails at once, after every file is written.
-  const run = await runCli(["new", "edge", "--target", "durable", "--preset", "cloudflare-minimal"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  const run = await runCli(["new", "edge", "--target", "durable", "--preset", "base-cloudflare"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
   expect(run.err).toContain("`bun install` failed");
   const project = join(parent, "edge");
   const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
@@ -182,13 +182,13 @@ test("new --target durable records the target, and writes two Apps, wrangler and
   expect(readFileSync(join(project, ".gitattributes"), "utf8")).toContain("src/pikit/*/*-files.ts linguist-generated=true -diff\n");
   expect(existsSync(join(project, "wrangler.jsonc"))).toBe(true);
   // The starter's model is one whose provider takes an API key on Cloudflare: OpenRouter's.
-  expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
+  expect(readFileSync(join(project, "src", "agents", "steward", "agent.ts"), "utf8")).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
 }, 60_000);
 
-test("new --target durable --preset telegram-cloudflare: a whole bot, each half in its App, its agent naming the installed tools", async () => {
+test("new cloudflare with explicit Telegram: a whole bot and dashboard, each half in its App", async () => {
   const parent = temp();
   // Nothing resolves: `bun install` fails at once, after every file is written.
-  const run = await runCli(["new", "bot", "--target", "durable", "--preset", "telegram-cloudflare"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  const run = await runCli(["new", "bot", "--target", "durable", "--preset", "cloudflare", "--with", "channel-telegram-webhook"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
   expect(run.err).toContain("`bun install` failed");
   // Every add was accepted: nothing refused, nothing missing in either App along the way.
   expect(run.err).not.toContain("is not provided");
@@ -216,6 +216,9 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
     "tool-websearch-brave",
     "extension-pikit-self",
     "deployment-cloudflare",
+    "admin-api",
+    "admin-auth-token",
+    "settings-store",
   ].sort());
   expect(manifest.components["outbound-durable"].installedFor).toEqual(["channel-telegram-webhook"]);
   expect(manifest.components["channel-telegram-webhook"].hooks).toEqual({ afterDeploy: "src/pikit/channel-telegram-webhook/deploy.ts" });
@@ -223,16 +226,16 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
   const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
   // The Worker checks and routes: secrets, the mailbox, the channel's ingress half (C1).
   expect(config).toContain(
-    "export const worker = defineApp({\n  components: [\n    secretsWorkers,\n    actorsDo,\n    channelTelegramWebhookWorker,\n  ],\n  config: workerConfig,\n});",
+    "export const worker = defineApp({\n  components: [\n    secretsWorkers,\n    actorsDo,\n    channelTelegramWebhookWorker,\n    adminAuthToken,\n    adminApiWorker,\n    settingsStoreWorker,\n  ],\n  config: workerConfig,\n});",
   );
   // The object owns the conversation: everything else, and the router sends every message to the agent.
   expect(config).toContain(
-    "export default defineApp({\n  components: [\n    agents,\n    secretsWorkers,\n    actorsDo,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n    extensionPikitSelf,\n  ],",
+    "export default defineApp({\n  components: [\n    agents,\n    secretsWorkers,\n    actorsDo,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n    extensionPikitSelf,\n    outboundDurable,\n    channelTelegramWebhook,\n    adminAuthToken,\n    adminApi,\n    settingsStore,\n  ],",
   );
-  expect(config).toContain('"router-basic": { defaultAgent: "assistant" },');
+  expect(config).toContain('"router-basic": { defaultAgent: "steward" },');
   expect(config).not.toContain("deploymentCloudflare");
 
-  const agent = readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8");
+  const agent = readFileSync(join(project, "src", "agents", "steward", "agent.ts"), "utf8");
   expect(agent).toContain('model: "openrouter/z-ai/glm-5.3-flash",\n  steward: true,');
   expect(agent).toContain('tools: ["read","write","edit","bash","fetch","websearch"],\n  extensions: ["pikit-self"],');
   // The Telegram variables are the channel's; the Brave key is optional, and so are the model's key
@@ -243,6 +246,34 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
     .map((v) => v.name);
   expect(optional.sort()).toEqual(["BRAVE_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_PASSWORD"]);
 }, 60_000);
+
+for (const [preset, target, deployment] of [
+  ["base", "server", "deployment-docker"],
+  ["cloudflare", "durable", "deployment-cloudflare"],
+  ["celld", "durable", "deployment-celld"],
+] as const) {
+  test(`new ${preset} includes its dashboard without --ui or Telegram`, async () => {
+    const parent = temp();
+    const run = await runCli(["new", "assistant", "--target", target, "--preset", preset], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+    expect(run.err).toContain("`bun install` failed");
+    const project = join(parent, "assistant");
+    const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
+    const names = Object.keys(manifest.components);
+    for (const component of [deployment, "admin-api", "admin-auth-token", "settings-store"]) expect(names).toContain(component);
+    expect(manifest.dashboard.components).toEqual(["admin-auth-token", "admin-api", "settings-store"]);
+    expect(existsSync(join(project, "src", "dashboard", "package.json"))).toBe(true);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.filter((name) => name.startsWith("channel-"))).toEqual(target === "server" ? ["channel-http"] : []);
+    const environment = readFileSync(join(project, ".env.example"), "utf8");
+    expect(environment).toContain("PIKIT_ADMIN_TOKEN");
+    expect(environment).not.toContain("TELEGRAM_");
+    const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
+    expect(config).toContain("    adminApi,");
+    expect(config).not.toContain("src/pikit/channel-telegram");
+    expect(readFileSync(join(project, "src", "agents", "steward", "agent.ts"), "utf8")).toContain('name: "steward"');
+    if (target === "durable") expect(config).toContain("    adminApiWorker,");
+  }, 60_000);
+}
 
 test("add without a terminal needs --yes, and writes nothing without it", async () => {
   const dir = tinyProject();
@@ -260,7 +291,7 @@ test("new records the builtin registry, not this machine's path to it", async ()
   const run = await runCli(["new", "fresh", "--registry", DEFAULT_REGISTRY], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
   expect(run.err).toContain("`bun install` failed");
   // On a server, the starter's model stays Anthropic's.
-  expect(readFileSync(join(parent, "fresh", "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "anthropic/claude-sonnet-4-6",');
+  expect(readFileSync(join(parent, "fresh", "src", "agents", "steward", "agent.ts"), "utf8")).toContain('model: "anthropic/claude-sonnet-4-6",');
   const manifest = JSON.parse(readFileSync(join(parent, "fresh", "pikit.json"), "utf8"));
   expect(manifest.version).toBe(1);
   expect(manifest.registries).toEqual({ default: "builtin" });

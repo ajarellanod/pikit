@@ -6,9 +6,10 @@ writes and edits files and runs commands in its workspace.
 
 This is a fixture of the repository, not a generated project. `pikit.config.ts` imports the
 components straight from `registry/`, so its tests run the registry's own code. `pikit new --preset
-http` copies them to `src/pikit/` instead, with one swap: its conversation registry is the neutral
-one, `conversations-kv` over `storage-kv-sql` (pointers in `.pikit/pikit.db`), where this sample
-keeps `conversations-file`, the registry's other provider, so that both run end to end.
+base` copies them to `src/pikit/` instead, and includes a dashboard and its providers. Its conversation
+registry is the neutral one, `conversations-kv` over `storage-kv-sql` (pointers in `.pikit/pikit.db`),
+where this sample keeps `conversations-file`, so that both providers run end to end. The sample
+retains its own `assistant` agent; generated projects start with Steward (`steward`).
 
 | Component | Does |
 |---|---|
@@ -72,7 +73,7 @@ docker compose down                         # `pikit down`: the state volume sta
 This compose.yaml is `deployment-docker`'s, adapted to this monorepo: `@pikit/*` are workspace
 packages here, not published ones, so the image is built from the repository's root
 (`context: ../..`) with its own `Dockerfile` and `Dockerfile.dockerignore`. A project made with
-`pikit new --preset http` uses the component's files unchanged. The container runs as the user
+`pikit new --preset base` uses the component's files unchanged. The container runs as the user
 `bun`, keeps `.pikit/` on the volume `pikit-state`, and listens on `127.0.0.1:3000` only.
 
 To log in with a Claude subscription instead of an API key, run the login inside the container, so
@@ -148,7 +149,7 @@ Run from the repository root:
 - `test/docker.test.ts`: the sample's Docker files keep `deployment-docker`'s promises: no `.env`,
   `.pikit` or `node_modules` in the image, a non-root user, the volume where the state is, and a stop
   that fits in the grace period.
-- `test/preset.test.ts`: `registry/presets/http.yaml` lists every registry component of this sample,
+- `test/preset.test.ts`: `registry/presets/base.yaml` lists every registry component of this sample,
   and `deployment-docker`.
 
 The entrypoint's own tests (signals, deadlines, exit codes, logs) are in

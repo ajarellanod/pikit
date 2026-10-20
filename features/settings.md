@@ -169,7 +169,7 @@ A feature component (`agents-live`, with `router-rules`), offered by `pikit new`
 - **admin-api**: `GET /admin/api/agents` lists the live agents after the code's (`live: true`,
   `description`, `steward: false`); a dashboard conversation may start with one, and the new-conversation
   picker offers them (read again after a change in Agents).
-- **The CLI**: a preset's feature may be a group; `http` and `telegram-cloudflare` offer
+- **The CLI**: a preset's feature may be a group; `base` and `cloudflare` offer
   `[agents-live, router-rules, settings-store]` ("Agents from the dashboard").
 - **Tests**: the directory suite on agents-live (a settings double; and in workerd over settings-store
   on storage-do), runtime-pi's `live-agents.test.ts`, router-rules from settings and with a directory,

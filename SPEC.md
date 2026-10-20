@@ -402,7 +402,9 @@ captures identity before normalization/routing, so in-place mutation cannot turn
 
 **How it fits pikit.**
 - **It is a project's choice, not a component.** A project is made with a UI or without one
-  (`pikit new --ui`, or the wizard's question), and `pikit ui on` / `pikit ui off` changes it later.
+  (a preset's `ui: true`, `pikit new --ui`, or the wizard's question), and `pikit ui on` /
+  `pikit ui off` changes it later. Full launch presets include it by default; the durable ones need
+  no external channel to reach their first agent, Steward (`steward`, with `steward: true`).
   With a UI the project has `src/dashboard/`, and that folder is all that says so (P4: absence, not
   flags): without it nothing is built or served. The UI is a frontend project with its own toolchain,
   not code that runs in the App, so a project that does not want it does not carry that toolchain. Its

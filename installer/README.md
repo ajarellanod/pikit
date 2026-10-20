@@ -5,7 +5,7 @@
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh                                 # asks before anything with sudo
 curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --yes --install-docker    # a script's consent
-curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable                 # a Telegram bot on Cloudflare
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable                 # a dashboard assistant on Cloudflare
 ```
 
 It is POSIX sh (`set -eu`), idempotent (running it again updates pikit), and says what it does
@@ -31,9 +31,10 @@ before doing it. The steps and settings are at the top of the script.
   (`get.docker.com`) runs only with `--install-docker` / `PIKIT_INSTALL_DOCKER=1` or a "y", and with
   the same consent adds you to the `docker` group; on macOS it points to Docker Desktop. Without it,
   both say to answer "This machine's service". With `--durable` it is skipped.
-- Then, on a terminal, it runs `pikit new`: the guided path asks the agent's name, where it runs (a
-  server, or Cloudflare), where to talk to it (Telegram, HTTP…, several at once), what it can do
-  (the dashboard, routing rules, MCP tools, web search…, any or none), sets that up, logs in to the
+- Then, on a terminal, it runs `pikit new`: the guided path asks the project's name, where it runs,
+  its channels, whether you will use one agent or several, and its optional features (routing rules,
+  MCP tools, health...). Full presets include the dashboard; several agents adds `agents-folders`.
+  It sets that up, logs in to the
   model and starts it. Ctrl-C stops it; `pikit new` continues later. `PIKIT_NO_WIZARD=1` skips it. It ends
   with the lines this shell still needs (`PATH`, `newgrp docker`).
 
@@ -45,26 +46,34 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
 
 `--durable` (or `PIKIT_DURABLE=1`) changes two steps, and nothing else:
 
-- **No Docker.** Nothing runs on this machine once the bot is deployed, so Docker is neither checked
+- **No Docker.** Nothing runs on this machine once the assistant is deployed, so Docker is neither checked
   nor offered. Instead it checks **Node.js >= 22**, which wrangler (Cloudflare's CLI, a dev dependency
   of each project) runs on, and says how to install it when it is missing or older; it does not
   install it.
-- **`pikit new --target durable --preset telegram-cloudflare`** instead of `pikit new`: a Telegram
-  bot on Cloudflare Workers, a Durable Object per chat. It asks:
-  1. the bot's name (its folder), and what it can do besides (the dashboard, routing rules, MCP
-     tools, a health check: any or none, `pikit add` adds one later), then writes it and runs
-     `bun install`;
-  2. "Configure it now?": the bot's token from @BotFather (checked with Telegram), who may talk to it
-     (send the bot a message; it asks you to allow the sender), a Brave Search key (optional: Enter
-     skips) and the OpenRouter key. The webhook's secret is generated;
+- **`pikit new --target durable --preset cloudflare`** instead of `pikit new`: an assistant on
+  Cloudflare Workers, with a dashboard and a Durable Object per conversation. It asks:
+  1. the project's name, optional external channels (none is fine), one agent or several, and
+     optional features. It writes the project and runs `bun install`. Steward is the first agent;
+     several agents adds `agents-folders` and an initial generated registry;
+  2. "Configure it now?": the admin token for `/admin/`, the OpenRouter key, and an optional Brave
+     Search key. No Telegram token, allowlist or webhook is needed unless Telegram was selected;
   3. "Start it?", "On Cloudflare": `pikit up`. If wrangler is not logged in, it offers `wrangler
      login`, which opens your browser (sign up there if you have no account). On the account's first
-     deploy, wrangler asks for its `workers.dev` subdomain. Then it deploys, waits until the new
-     version answers, and sets Telegram's webhook.
+     deploy, wrangler asks for its `workers.dev` subdomain. It deploys and waits until the new
+     version answers. Open `/admin/` at the Worker's URL and sign in with `PIKIT_ADMIN_TOKEN`.
 
-Without the flag, answering "durable — on Cloudflare" to `pikit new`'s "Where should it run?" leads to the same
-bot (on Linux without Docker, the installer asks about Docker first: answer N). By hand, in a project: `pikit new my-bot --target
-durable --preset telegram-cloudflare`, `cd my-bot`, `pikit configure`, `pikit up`.
+Without the flag, choose the durable target and the Cloudflare preset in `pikit new` (on Linux
+without Docker, the installer asks about Docker first: answer N). By hand:
+
+```sh
+pikit new my-agent --target durable --preset cloudflare
+cd my-agent
+pikit configure
+pikit up
+```
+
+For Telegram, add `--with channel-telegram-webhook` to creation, or install it later with
+`pikit add channel-telegram-webhook`. The dashboard works independently of that channel.
 
 **Costs.** Cloudflare's Workers Free plan is enough (100,000 requests a day, 5 GB of Durable Object
 storage; the Paid plan, $5 a month, raises them). What you pay for is the model's tokens (OpenRouter),

@@ -12,6 +12,8 @@ import { PIKIT_ROOT as REPO } from "../paths.ts";
 import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp } from "../project/apps.ts";
 import { DEPLOYMENT_EXPORTS } from "../project/deployment-module.ts";
 import { withOffers } from "../project/offers.ts";
+import { dashboardFiles } from "../project/dashboard.ts";
+import { uiComponentsFor } from "../commands/ui.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, type Registry, readPreset } from "../project/registry-source.ts";
 import { starterModel, starterModelProblem } from "../project/starter-model.ts";
 import { capabilityEntry, type RegistryCatalogue, registryCatalogue } from "./capabilities.ts";
@@ -419,6 +421,9 @@ export function checkPresets(root: string, catalogue: RegistryCatalogue = regist
     try {
       const isAlias = readPreset(root, name).extends !== undefined;
       const components = registry.preset(name);
+      const ui = registry.presetUi(name);
+      if (ui && dashboardFiles(registry) === undefined) report("installs the dashboard, but the registry has no dashboard (dashboard/files/)");
+      const composition = (chosen: string[], target: string) => ui ? [...chosen, ...uiComponentsFor(registry, chosen, [target])] : chosen;
       for (const component of components) registry.manifest(component);
       if (new Set(components).size !== components.length) report("lists a component twice");
       const targets = TARGETS.filter((target) => components.every((c) => registry.manifest(c).targets.includes(target)));
@@ -427,7 +432,7 @@ export function checkPresets(root: string, catalogue: RegistryCatalogue = regist
         report(`no target runs all its components (${TARGETS.map((t) => `not on ${t}: ${not(t).join(", ")}`).join("; ")})`);
       }
       for (const target of targets) {
-        compositionProblems(registry, components, target, catalogue).forEach((p) => report(`on ${target}, ${p}`));
+        compositionProblems(registry, composition(components, target), target, catalogue).forEach((p) => report(`on ${target}, ${p}`));
         // The starter agent `pikit new` writes must name a model provider the preset installs.
         const model = registry.presetModel(name) ?? starterModel(target);
         const problem = starterModelProblem(registry, components, target, model, name);
@@ -448,7 +453,7 @@ export function checkPresets(root: string, catalogue: RegistryCatalogue = regist
       }
       for (const target of isAlias ? [] : targets) {
         const composes = (choices: string[]) =>
-          compositionProblems(registry, registry.preset(name, choices), target, catalogue).forEach((p) => report(`with ${choices.join(" and ")}, on ${target}, ${p}`));
+          compositionProblems(registry, composition(registry.preset(name, choices), target), target, catalogue).forEach((p) => report(`with ${choices.join(" and ")}, on ${target}, ${p}`));
         const slots = registry.slots(name, [target]);
         const features = registry.features(name, [target]).map((f) => f.name);
         for (const slot of slots) {
@@ -475,16 +480,22 @@ function compositionProblems(registry: Registry, components: readonly string[], 
   const targets = [target];
   const providers: Record<AppName, Map<string, string[]>> = { default: new Map(), worker: new Map() };
   const required: [AppName, string, string][] = [];
+  const incompatible: string[] = [];
   for (const name of withOffers(registry, components, targets).order) {
-    for (const [app, half] of declaredByApp(registry.manifest(name), targets)) {
+    const manifest = registry.manifest(name);
+    if (!manifest.targets.includes(target)) incompatible.push(`${name} runs on ${manifest.targets.join(" or ")}, not on ${target}`);
+    for (const [app, half] of declaredByApp(manifest, targets)) {
       for (const capability of half.provides) providers[app].set(capability, [...(providers[app].get(capability) ?? []), name]);
       for (const capability of half.requires) required.push([app, capability, name]);
     }
   }
   const where = (app: AppName) => (hasWorkerApp(targets) ? ` in ${APP_LABEL[app]}` : "");
-  const problems = required
-    .filter(([app, capability]) => !providers[app].has(capability) && capabilityEntry(capability, catalogue)?.providedBy !== "project")
-    .map(([app, capability, name]) => `${name} requires "${capability}"${where(app)}, which nothing provides`);
+  const problems = [
+    ...incompatible,
+    ...required
+      .filter(([app, capability]) => !providers[app].has(capability) && capabilityEntry(capability, catalogue)?.providedBy !== "project")
+      .map(([app, capability, name]) => `${name} requires "${capability}"${where(app)}, which nothing provides`),
+  ];
   for (const app of ["default", "worker"] as const) {
     for (const [capability, names] of providers[app]) {
       if (names.length > 1 && capabilityEntry(capability, catalogue)?.mode === "single") problems.push(`"${capability}" takes one provider${where(app)}, and ${names.join(" and ")} each provide it`);

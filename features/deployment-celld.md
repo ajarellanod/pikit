@@ -4,7 +4,7 @@
 
 **Specified:** idea, with a spike and stability tests (2026-10-07, celld 0.6.1). It should come: the self-hosted way to
 scale out (owner's decision, 2026-10-07). **Built** (2026-10-19, celld 0.6.2): the component `deployment-celld` and the
-preset `telegram-celld` ("Built" below); it moves to `completed/` once a fleet runs it in production.
+preset `celld` ("Built" below); it moves to `completed/` once a fleet runs it in production.
 
 **Needed by:** nothing required.
 
@@ -38,7 +38,7 @@ need a host timer ([next wake](../docs/upstream/pi-durable-next-wake.md)): pikit
 runs on celld unchanged.
 
 ## The spike
-`pikit new --target durable --preset telegram-cloudflare` with `provider-faux` (`faux/scripted`), a
+`pikit new --target durable --preset cloudflare --with channel-telegram-webhook` with `provider-faux` (`faux/scripted`), a
 fake Telegram (`apiBase`) and webhook updates posted locally; first on `wrangler dev` as the control.
 
 - **Changes, all in `wrangler.jsonc`:** drop `build`, `observability` and `version_metadata` (celld
@@ -139,7 +139,7 @@ A spike tool `sandbox` ran commands in a container per conversation through `@cl
 
 ## Built
 `registry/components/deployment-celld` (its README has the details), checked end to end on a Mac: `pikit new
---preset telegram-celld` with `faux/scripted` and a fake Telegram, `pikit dev` (`celld dev`) answering a webhook; then
+--preset celld --with channel-telegram-webhook` with `faux/scripted` and a fake Telegram, `pikit dev` (`celld dev`) answering a webhook; then
 two celld 0.6.2 nodes on a local rustfs bucket: `pikit up` (deploy, wait, webhook set), a broken deploy rolled back
 (both nodes back on the previous deployment within one poll), `deploy.mjs` under Node, and a conversation's files
 kept across a graceful stop of the node that held it.

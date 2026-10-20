@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
-import { agent, BUNFIG, gitignore, introduction, NEEDS_DASHBOARD, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterExtensions, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
+import { agent, agentPrompt, BUNFIG, gitignore, introduction, NEEDS_DASHBOARD, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterExtensions, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
 
 test("a project is ready for a registry of its own and a dashboard: tsc and bun test leave registry/ and src/dashboard/ out, and its lib has ES2023", () => {
   const config = JSON.parse(tsconfig()) as { compilerOptions: { lib: string[] }; exclude: string[] };
@@ -15,27 +15,37 @@ test("a project is ready for a registry of its own and a dashboard: tsc and bun 
   expect(BUNFIG).toContain(`pathIgnorePatterns = ["registry/**", "src/dashboard/**"]`);
 });
 
-test("the starter prompt says where the agent is reached: by the channels being installed", () => {
-  expect(introduction([{ name: "channel-http" }])).toBe("You are a helpful assistant reached over an HTTP API, by programs and the people behind them.");
-  expect(introduction([{ name: "channel-telegram" }])).toBe("You are a helpful assistant that people talk to in Telegram chats.");
+test("the starter prompt names Steward and says where it is reached", () => {
+  expect(introduction([{ name: "channel-http" }])).toBe("You are Steward, a helpful assistant reached over an HTTP API, by programs and the people behind them.");
+  expect(introduction([{ name: "channel-telegram" }])).toBe("You are Steward, a helpful assistant that people talk to in Telegram chats.");
   expect(introduction([{ name: "channel-telegram-webhook" }])).toBe(introduction([{ name: "channel-telegram" }]));
   // A channel the starter does not know is named by its title; none at all, by nothing.
-  expect(introduction([{ name: "channel-slack", title: "Slack: talk to your agent in a channel" }])).toBe("You are a helpful assistant reached through Slack.");
-  expect(introduction([])).toBe("You are a helpful assistant.");
+  expect(introduction([{ name: "channel-slack", title: "Slack: talk to your agent in a channel" }])).toBe("You are Steward, a helpful assistant reached through Slack.");
+  expect(introduction([])).toBe("You are Steward, a helpful assistant.");
   expect(introduction([{ name: "channel-http" }, { name: "channel-telegram" }])).toContain("HTTP API, by programs and the people behind them, and that people talk to in Telegram chats.");
 });
 
 test("the starter agent's file carries that prompt, quoted for TypeScript", () => {
   const file = agent([], "faux/echo", [{ name: "channel-telegram" }]);
 
-  expect(file).toContain(`"You are a helpful assistant that people talk to in Telegram chats. Answer briefly and plainly.",`);
+  expect(file).toContain(`systemPrompt: "You are Steward, a helpful assistant that people talk to in Telegram chats. Answer briefly and plainly.",`);
   expect(file).toContain(`model: "faux/echo"`);
   expect(file).not.toContain("HTTP API");
 });
 
 test("the starter agent is the project's steward, with pikit-self or without it", () => {
-  expect(agent([], "faux/echo")).toContain('  model: "faux/echo",\n  steward: true,\n');
+  expect(agent([], "faux/echo")).toContain('  name: "steward",\n  model: "faux/echo",\n  steward: true,\n');
   expect(agent(["read"], "faux/echo", [], "server", ["pikit-self"])).toContain("  steward: true,\n");
+});
+
+test("agent folders keep the prompt in SYSTEM.md only, with the same tools and steward identity", () => {
+  const file = agent(["read", "bash"], "faux/echo", [], "server", ["pikit-self"], ["agents-folders"]);
+  expect(file).toContain('name: "steward"');
+  expect(file).toContain("steward: true");
+  expect(file).not.toContain("systemPrompt:");
+  expect(file).toContain("SYSTEM.md");
+  expect(file).toContain('tools: ["read"]');
+  expect(agentPrompt(["read"])).toBe("You are Steward, a helpful assistant. Answer briefly and plainly. You work in a workspace directory: use your tools to read, write and edit files there.");
 });
 
 test("the starter agent names pikit-self when extension-pikit-self is installed, and no extension otherwise", () => {
@@ -123,6 +133,16 @@ test("the README says what `pikit up` does by the installed deployment, never by
   expect(celld).toContain("pikit up          # or deploy it to your celld fleet (deployment-celld): then pikit status, logs");
   expect(celld).toContain("pikit dev         # run it here on one celld node (celld dev), reloading on change");
   expect(readme("a", ["deployment-cloudflare"], "durable")).toContain("pikit dev         # run it here in workerd (wrangler dev), reloading on change");
+});
+
+test("the README explains the selected agent-editing workflow", () => {
+  const one = readme("a", []);
+  expect(one).toContain("**Steward**");
+  expect(one).toContain("src/agents/steward/agent.ts");
+  expect(one).not.toContain("prompt in `src/agents/steward/SYSTEM.md`");
+  const several = readme("a", ["agents-folders"]);
+  expect(several).toContain("src/agents/steward/SYSTEM.md");
+  expect(several).toContain("doctor refuses stale output");
 });
 
 test("a durable project ignores what wrangler and celld keep locally, and the config a celld deploy derives with the secrets in it", () => {

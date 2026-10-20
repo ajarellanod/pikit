@@ -18,7 +18,7 @@ rolls back when the new version is unhealthy.
 - **npm dependencies:** `isomorphic-git` 1.42.3, `diff` 8.0.4, `typebox`.
 
 ```sh
-pikit add admin-proposals proposals-local    # or: pikit new --preset http --with admin-proposals
+pikit add admin-proposals proposals-local    # or: pikit new --preset base --with admin-proposals
 ```
 
 ## How a change goes

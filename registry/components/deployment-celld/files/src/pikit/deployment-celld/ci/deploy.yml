@@ -51,7 +51,7 @@ jobs:
           S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          # The app's secrets: one line per variable of .env.example (the telegram-celld preset's here).
+          # The app's secrets: one line per variable of .env.example (the celld preset's here; add selected channels' variables too).
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ALLOWED_USERS: ${{ vars.TELEGRAM_ALLOWED_USERS }}

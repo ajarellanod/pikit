@@ -41,7 +41,7 @@ agent at it, and assert the answer:
 
 ```sh
 pikit add provider-faux --yes
-# src/agents/assistant/agent.ts: model: "faux/scripted" (or "faux/echo")
+# src/agents/steward/agent.ts: model: "faux/scripted" (or "faux/echo")
 pikit dev
 curl -H "authorization: Bearer $PIKIT_HTTP_TOKEN" -d '{"conversationId":"t1","text":"hello"}' \
   http://127.0.0.1:3000/v1/messages      # {"requestId":"…","text":"faux: hello"}

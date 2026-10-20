@@ -1,5 +1,10 @@
 # Maintenance lessons
 
+- Preset loading lives in `packages/cli/src/project/registry-source.ts`; validation is in `packages/cli/src/registry/commands.ts`. There is no `registry/presets.ts` or `src/registry-source.ts`: locate files before reading them.
+- When the user asks for no agents, finish the work in the main session; do not launch or resume subagents. Stop any outstanding delegated edits before taking over their files.
+- Preset integration tests that repeatedly validate the full registry (all channel/feature combinations and dashboard providers) need an explicit timeout, not Bun's 5-second unit-test default.
+- With the dashboard installed, model requests include background conversation titles. E2e tests must distinguish those completions from agent runs, and wait for durable delivery receipts before restarting a Worker.
+
 - Locate guessed documentation/source filenames before reading them: `packages/contracts` and `packages/pi-adapter` have no package-local README; the dashboard's HTTP client is `registry/dashboard/files/src/lib/api.ts`, not `lib/admin.ts`. Generated projects use `src/dashboard/src/lib/api.ts`; list their views instead of assuming `conversations/home.tsx` exists.
 - Locate files even when source comments name them: `packages/pi-adapter/src/skills.ts` does not exist (the runtime loader is in `agent.ts`), and the `features/skills-catalog.md` link in `contracts/src/skill.ts` is stale. Use `find` or `rg --files` before reading.
 - A listener on TCP 9222 does not prove a CDP endpoint is available: check `/json/version` before attaching agent-browser. Chrome's remote-debugging mode may need browser-use's connection flow instead.

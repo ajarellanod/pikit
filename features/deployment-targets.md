@@ -21,14 +21,14 @@ not whose machine it is. Providers are `deployment-*` components on a target:
 | Runtime model | Target | What it guarantees | Providers (each a `deployment-*`) |
 |---|---|---|---|
 | Long-lived process | `server` | a process that stays up, a persistent local disk, in-process timers, one process per storage | Docker on a VPS (`deployment-docker`), systemd, exe.dev (persistent VMs over SSH), E2B (sandboxes, persistence to check), Modal (containers; its SDK is Python-first, so likely a container image plus a thin deploy script), Fly, Railway |
-| Actor per conversation | `durable` | one actor (a Durable Object) per conversation, its own SQLite, one alarm, eviction between events, work in slices (`driveSlice`) | Cloudflare (`deployment-cloudflare`) |
+| Actor per conversation | `durable` | one actor (a Durable Object) per conversation, its own SQLite, one alarm, eviction between events, work in slices (`driveSlice`) | Cloudflare (`deployment-cloudflare`), self-hosted celld (`deployment-celld`) |
 | Stateless functions | (future) `functions` | a request-scoped invocation, no local disk, concurrent instances, a time limit | Vercel (Functions), others alike |
 
 `server` guarantees a persistent disk: a provider without one supplies it (a volume), and its
 `deployment-*` checks it in `pikit doctor`; otherwise it is not `server`. The pieces specific to the
-only `durable` provider keep its name (`deployment-cloudflare`, `actors-do`,
-`secrets-workers`, `@pikit/contracts/cloudflare`, `WORKERS_HOST`, the presets `telegram-cloudflare`
-and `cloudflare-minimal`); only the target is `durable`, the runtime model.
+Cloudflare-compatible `durable` environment keep their platform/API names (`deployment-cloudflare`, `actors-do`,
+`secrets-workers`, `@pikit/contracts/cloudflare`, `WORKERS_HOST`, the presets `cloudflare`
+and `base-cloudflare`); only the target is `durable`, the runtime model.
 
 Facts about each provider (persistence, limits, pricing) are checked when its component is built;
 this table records the model, not promises.

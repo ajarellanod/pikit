@@ -19,7 +19,7 @@ which squash-merges it, or rejects it, which closes it. Workers Builds deploys t
 - **npm dependencies:** `typebox`.
 
 ```sh
-pikit add admin-proposals proposals-github repo-github-app   # or: pikit new --target durable --preset telegram-cloudflare --with admin-proposals
+pikit add admin-proposals proposals-github repo-github-app   # or: pikit new --target durable --preset cloudflare --with channel-telegram-webhook --with admin-proposals
 ```
 
 ## GitHub access, in one module

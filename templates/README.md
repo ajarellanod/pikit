@@ -8,7 +8,10 @@ commit it was made from.
 
 | Template | Made from | Published at |
 |---|---|---|
-| `telegram-cloudflare` | `pikit new pikit-telegram-bot --target durable --preset telegram-cloudflare --ui --with admin-proposals` (with `proposals-github`) | `github.com/ajarellanod/pikit-telegram-cloudflare` |
+| `telegram-cloudflare` | `pikit new pikit-telegram-bot --target durable --preset cloudflare --with admin-proposals --with channel-telegram-webhook` (with `proposals-github`) | `github.com/ajarellanod/pikit-telegram-cloudflare` |
+
+The template is explicitly for Telegram: it selects `channel-telegram-webhook` on the otherwise
+channel-free `cloudflare` preset. Its key, repository and Worker name are unchanged.
 
 ## Making one
 

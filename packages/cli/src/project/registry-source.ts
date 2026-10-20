@@ -24,7 +24,7 @@ export interface PresetSlot {
   question: string;
   /** Several answers at once (channels: Telegram and HTTP), not one. */
   multiple: boolean;
-  /** The preset's own components of that kind (one, unless an alias answers several): the answer when nobody chooses. */
+  /** The preset's defaults: zero or one in a base, possibly several in an alias. */
   defaults: string[];
   /** Every registry component of that kind, by name. `title` falls back to the name. */
   options: { name: string; title: string }[];
@@ -49,6 +49,8 @@ export interface Registry {
   preset(name: string, choices?: readonly string[]): string[];
   /** Every preset, with the `title` `pikit new` shows for it, by name. An alias names its base in `extends`. */
   presets(): { name: string; title: string; extends?: string }[];
+  /** Whether the preset (its base, for an alias) installs the dashboard by default. */
+  presetUi(name: string): boolean;
   /** The starter agent's model the preset (its base, for an alias) declares; `undefined` leaves it to `pikit new`. */
   presetModel(name: string): string | undefined;
   /**
@@ -136,8 +138,10 @@ export function openRegistry(path: string): Registry {
       };
       apply(aliased);
       apply(choices);
-      // `readPreset` checked that each chosen kind has exactly one component in the list: its place.
       const components = base.components.flatMap((c) => answers.get(kindOf(c)) ?? [c]);
+      // An optional multiple choice may have no default component to replace (dashboard-only bases).
+      const listedKinds = new Set(base.components.map(kindOf));
+      for (const [kind, selected] of answers) if (!listedKinds.has(kind)) components.push(...selected);
       return [...components, ...features.filter((c) => !components.includes(c))];
     },
     presets() {
@@ -151,6 +155,9 @@ export function openRegistry(path: string): Registry {
           const preset = readPreset(root, name);
           return { name, title: preset.title ?? name, ...(preset.extends !== undefined && { extends: preset.extends }) };
         });
+    },
+    presetUi(name) {
+      return presetBase(root, name).base.ui === true;
     },
     presetModel(name) {
       return presetBase(root, name).base.model;
@@ -254,11 +261,12 @@ const BasePresetSchema = Type.Object(
   {
     title: Title,
     components: Type.Array(Type.String({ pattern: KEBAB }), { minItems: 1, description: "The `pikit add` calls, in order." }),
+    ui: Type.Optional(Type.Boolean({ description: "Install the dashboard by default, as `pikit new --ui` does. Inherited by aliases." })),
     choose: Type.Optional(
       Type.Array(
         Type.Object(
           {
-            kind: Type.String({ pattern: "^[a-z][a-z0-9]*$", description: "Every registry component of this kind answers; the one in `components` is the default." }),
+            kind: Type.String({ pattern: "^[a-z][a-z0-9]*$", description: "Every registry component of this kind answers; the one in `components` is the default. A multiple choice may have no default." }),
             question: Type.Optional(Type.String({ pattern: TEXT, description: "What `pikit new` asks. Default: \"Which <kind>?\"." })),
             multiple: Type.Optional(
               Type.Boolean({ description: "Several answers at once (a channel: any of them; a router: one), all of them replacing the listed one. Default: false." }),
@@ -312,7 +320,8 @@ const AliasPresetSchema = Type.Object(
  * question. Nothing reads which preset a project came from. YAML 1.2. Either:
  * - a base: `components`, and optionally `choose`, one question per kind whose answers are every
  *   registry component of that kind (the listed one is the default; `multiple`: several of them),
- *   `features`, the components (or groups of them) offered to add, and `model`, the starter agent's; or
+ *   `features`, the components (or groups of them) offered to add, `ui`, the default dashboard, and
+ *   `model`, the starter agent's. A multiple choice may have no default; or
  * - an alias: `extends` a base and answers some of its questions with `with`, as `--with` does.
  */
 export const PresetSchema = Type.Union([BasePresetSchema, AliasPresetSchema], {
@@ -343,10 +352,12 @@ export function readPreset(root: string, name: string): Preset {
   const preset = raw as Static<typeof BasePresetSchema>;
   const kinds = (preset.choose ?? []).map((c) => c.kind);
   if (new Set(kinds).size !== kinds.length) throw new Error(`${at}: \`choose\` lists a kind twice`);
-  for (const kind of kinds) {
-    // The default is the one listed component of that kind: none or several leaves nothing to replace.
+  for (const { kind, multiple } of preset.choose ?? []) {
     const listed = preset.components.filter((c) => kindOf(c) === kind);
-    if (listed.length !== 1) throw new Error(`${at}: \`choose\` kind "${kind}" needs exactly one ${kind}-* component in \`components\`, found ${listed.length}`);
+    const optional = multiple === true;
+    if (listed.length > 1 || (listed.length === 0 && !optional)) {
+      throw new Error(`${at}: \`choose\` kind "${kind}" needs ${optional ? "at most" : "exactly"} one ${kind}-* component in \`components\`, found ${listed.length}`);
+    }
   }
   for (const feature of featureGroups(preset).flat()) {
     // Offered is not installed already; and `--with` of a chosen kind answers the question, not this.

@@ -35,11 +35,11 @@ not available to personal Gmail accounts).
 ### 1. The project
 
 ```sh
-pikit new my-agent --preset http --with channel-google-chat
+pikit new my-agent --preset base --with channel-google-chat
 cd my-agent
 ```
 
-The `http` preset is the server's composition (run in Docker by `deployment-docker`); `--with
+The `base` preset is the server's composition (run in Docker by `deployment-docker`); `--with
 channel-google-chat` answers its channel question with this channel instead of `channel-http`. That
 gives what this channel needs, each by a capability:
 
@@ -60,19 +60,18 @@ Then what makes it whole:
 
 ```sh
 pikit add tool-ask-user workspace-local expose-cloudflare-tunnel
-pikit ui on
 ```
 
 - `tool-ask-user` gives the agent `askUser`, whose questions this channel draws as cards. An agent
   asks only when it names the tool: add `"askUser"` to its `tools` in
-  `src/agents/assistant/agent.ts` (`tools: ["read", "write", "edit", "fetch", "websearch", "askUser"]`).
+  `src/agents/steward/agent.ts` (`tools: ["read", "write", "edit", "fetch", "websearch", "askUser"]`).
 - `workspace-local` gives `workspace`: each conversation's own directory, where a PDF or an archive
   sent in the chat is written for the agent's tools.
 - `expose-cloudflare-tunnel` gives `pikit expose`: the public HTTPS URL Google calls.
-- `pikit ui on` adds the dashboard with `admin-api` and `settings-store` (`settings`): the
-  `conversations` setting is then edited from its Settings, this component's section.
+- `base` already includes the dashboard with `admin-api` and `settings-store` (`settings`): edit
+  the `conversations` setting from its Settings, this component's section.
 
-`pikit add` and `pikit ui on` end with `pikit doctor`; the variables they name are set in step 4.
+`pikit add` ends with `pikit doctor`; the variables it names are set in step 4.
 
 ### 2. The public URL
 

@@ -166,14 +166,16 @@ test("PIKIT_REF wins over the latest release, without listing tags; a listing th
   expect(failed.fetched).toBeNull();
 });
 
-test("--durable skips Docker, checks the Node.js wrangler runs on, and hands over to the Cloudflare bot", () => {
+test("--durable skips Docker, checks the Node.js wrangler runs on, and selects the Cloudflare dashboard preset", () => {
   const run = install(["--durable"], "v22.11.0");
   expect(run.err).toBe("");
   expect(run.code).toBe(0);
   expect(run.out).toContain("Cloudflare: no Docker needed");
   expect(run.out).toContain("Node.js v22.11.0 found: wrangler can run");
   expect(run.out).not.toMatch(/Docker is not installed|Docker with Compose found|docker group/);
-  expect(run.out).toContain("pikit new --target durable --preset telegram-cloudflare starts another Telegram bot on Cloudflare");
+  expect(run.out).toContain("pikit new --target durable --preset cloudflare starts another agent on Cloudflare with a dashboard");
+  expect(run.out).not.toContain("Telegram");
+  expect(readFileSync(SCRIPT, "utf8")).toContain("set -- new --target durable --preset cloudflare");
   expect(existsSync(join(run.home, ".pikit", "bin", "pikit"))).toBe(true);
 
   // PIKIT_DURABLE=1 is the same; an old Node.js is named, and the install still completes.

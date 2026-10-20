@@ -18,38 +18,48 @@ pikit new <dir> [--target server|durable] [--preset <name> [--with <component>].
 ```
 
 - Without `<dir>`, the guided path ([wizard.ts](../packages/cli/src/commands/wizard.ts)) asks the
-  agent's name, where it runs, the preset, then two multi-selects: **where you talk to it** (every
-  `channel-*` of the target, several at once, the preset's checked; skipped when the target has one)
-  and **what it can do** (the dashboard and the preset's `features`, none checked). Then it runs
+  project's name, where it runs, the preset, **its channels** (every `channel-*` of the target,
+  several at once), **one agent or several**, and **optional features**. Full presets include the
+  dashboard; `cloudflare` and `celld` start with no external channel and accept an empty selection.
+  Several agents selects `agents-folders`; one keeps the simple code registry. Then it runs
   `new`, `configure`, and `up` or `dev`, and prints the same as one command. Flags answer its
   questions. Running it again with the same name continues.
 - With `<dir>` ([new.ts](../packages/cli/src/commands/new.ts)): writes the project's own files
   ([starter.ts](../packages/cli/src/commands/starter.ts): `pikit.config.ts` (two Apps on `durable`),
-  the agent `src/agents/assistant/agent.ts` provided by `src/extensions/agents.ts`, `package.json`,
+  Steward (`src/agents/steward/agent.ts`, `steward: true`) provided by `src/extensions/agents.ts`, `package.json`,
   `tsconfig.json`, `bunfig.toml`, `.gitignore`, `.gitattributes`, a README, the skills in
   `.agents/skills/`), vendors the kit packages into `vendor/` as tarballs, adds every component of the
-  preset as `pikit add` does, runs `bun install` once, and ends with `pikit doctor`. On `server` it
+  preset as `pikit add` does, runs `bun install` once, and ends with `pikit doctor`. With
+  `agents-folders`, the prompt is in `SYSTEM.md` and creation runs `pikit agents` once before doctor;
+  later folder changes need that command explicitly. On `server` it
   then makes the project a git repository on `main`, everything committed (self-improvement's deployer
   merges there); without git it says so and goes on.
 - `--target` is recorded in `pikit.json` (`server` by default). A preset for another target is refused.
 - `--with` answers both steps. For a kind the preset asks with `multiple: true` (channels), the
-  `--with`s of that kind are the whole answer: `--preset http --with channel-telegram` is Telegram
+  `--with`s of that kind are the whole answer: `--preset base --with channel-telegram` is Telegram
   alone, `--with channel-http --with channel-telegram` both. Another kind's `--with` replaces the
   preset's component of that kind; a feature's `--with` adds it. `--ui` adds the dashboard
-  ([dashboard.md](dashboard.md)). `--registry` uses another registry folder.
+  ([dashboard.md](dashboard.md)) for presets that do not already include it. A preset declares
+  `ui: true`; aliases inherit it. A multiple choice may have no default component: selecting a
+  channel then adds it rather than replacing one. `--registry` uses another registry folder.
 - A preset's `features` ([features/cli-features.md](../features/cli-features.md)) are opt-in
-  components or groups: on `http`, `router-rules`, `tool-mcp`, `health-registry` and
-  Self-improvement (`--with admin-proposals`: with `proposals-local`); on
-  `telegram-cloudflare`, `router-rules`, `tool-mcp`, `health-registry` and Self-improvement (with
-  `proposals-github` and `repo-github-app`). Self-improvement brings the dashboard (as `--ui`), and on a
+  components or groups: `agents-folders`, `router-rules`, `agents-live`, `tool-mcp`, `health-registry`
+  and Self-improvement (`--with admin-proposals`: with `proposals-local` on `base` and `telegram`;
+  on `cloudflare` and `celld`, with
+  `proposals-github` and `repo-github-app`). `--with agents-folders` selects several code agents
+  without a terminal. Self-improvement also brings the dashboard when not included, and on a
   server the starter agent names `bash` (the steward runs git and the tests in its shell).
   `registry validate` checks each one composes alone and all together.
 - Everything refusable is refused before the first write. A failure after it leaves the directory
   marked `UNFINISHED`.
 
-Presets in [registry/presets](../registry/presets): `http` (server, channel-http), `telegram` (an
-alias of `http` with channel-telegram), `telegram-cloudflare` (durable), `telegram-celld` (durable, the same
-on your own machines with celld), `cloudflare-minimal` (durable, storage only).
+Presets in [registry/presets](../registry/presets): `base` (server, HTTP and dashboard), `telegram`
+(an alias of `base` with Telegram polling and the same dashboard), `cloudflare` (durable on
+Cloudflare) and `celld` (durable on your fleet), both with a dashboard and no default external
+channel; `base-cloudflare` is storage-only infrastructure, with no runtime or dashboard.
+
+For Telegram on Cloudflare, opt in explicitly:
+`pikit new my-bot --target durable --preset cloudflare --with channel-telegram-webhook`.
 
 ## pikit add
 

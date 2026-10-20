@@ -6,7 +6,7 @@
  * has presets for several), the preset to start from (only when several base presets run there), each
  * of that preset's questions (`choose`: where to talk to the agent is "which channel-* components",
  * several at once, answered by every one in the registry that runs there, by its `title`), what it can
- * do (several at once: the dashboard and the preset's `features`, each by its `title`), then runs
+ * do (one or several agents, then optional features). Full presets include the dashboard; then it runs
  * `new`, `configure` (each component's own step, then the model's login) and `up` or `dev`: the same
  * functions the commands run, nothing of its own. Each answer is a component `new` installs as
  * `pikit add` does, with the providers it brings. It knows nothing about Telegram, any channel or any platform: the choices
@@ -16,11 +16,11 @@
  *
  * `--target`, `--preset` and `--with` answer their questions (a `--with` of a feature, or `--ui`, answers
  * "what can it do?"): the installer's `--durable` runs `pikit new --target durable --preset
- * telegram-cloudflare`, which asks the name, where to talk to the agent (when several channels run
- * there; the preset's own checked) and what it can do.
+ * cloudflare`, which asks the name, optional external channels and what it can do. The preset's
+ * dashboard is included without selecting an external channel.
  *
- * It offers presets that make an agent you talk to, those with a channel-* component, when a target
- * has any: `cloudflare-minimal`, storage only, is for `pikit new <dir> --preset`.
+ * It offers presets that make an agent you talk to, through a channel or their default dashboard,
+ * when a target has any: `base-cloudflare`, storage only, is for `pikit new <dir> --preset`.
  *
  * Ctrl-C stops it at any question. Running `pikit new` again with the same name continues with the
  * project already written: configuring and starting it again is harmless, because `configure` only
@@ -120,8 +120,9 @@ export async function newWizard(parentDir: string, options: WizardOptions = {}):
       target = options.target ?? (await chooseTarget(registry, options.preset));
       const preset = options.preset ?? (await choosePreset(registry, target));
       const answers = await answerSlots(registry, preset, target, options.with ?? []);
+      const agents = await chooseAgents(registry, preset, target, answers);
       const { features, ui } = await chooseFeatures(registry, preset, target, answers, options.ui);
-      const choices = [...answers, ...features];
+      const choices = [...answers, ...agents, ...features];
       const creating = spinner(`Creating ${name}: its components, then \`bun install\``);
       try {
         await newProject(project.dir, { preset, with: choices, registry: registryPath, target, next: false, quiet: true, ui });
@@ -132,7 +133,7 @@ export async function newWizard(parentDir: string, options: WizardOptions = {}):
       creating.stop(`Created ${name} in ${project.dir}`);
       const registryFlag = options.registry === undefined ? "" : ` --registry ${options.registry}`;
       const targetFlag = target === DEFAULT_TARGET ? "" : ` --target ${target}`;
-      log.info(`The same, in a script: pikit new ${name}${targetFlag} --preset ${preset}${choices.map((c) => ` --with ${c}`).join("")}${ui ? " --ui" : ""}${registryFlag}`);
+      log.info(`The same, in a script: pikit new ${name}${targetFlag} --preset ${preset}${choices.map((c) => ` --with ${c}`).join("")}${ui && !registry.presetUi(preset) ? " --ui" : ""}${registryFlag}`);
     }
 
     if (!(await confirm("Configure it now? (where you talk to it, and the model's login)", true))) return later(name, "configure");
@@ -198,10 +199,10 @@ async function choosePreset(registry: Registry, target: string): Promise<string>
   return await choose("Which preset do you start from?", bases.map((preset) => option(preset.name, preset.title)));
 }
 
-/** The base presets that run on `target`: those with a channel (an agent you talk to) when it has any. */
+/** Prefer bases with a channel or a default dashboard over infrastructure-only presets. */
 function basesFor(registry: Registry, target: string): { name: string; title: string }[] {
   const bases = registry.presets().filter((preset) => preset.extends === undefined && runsOn(registry, preset.name, target));
-  const talking = bases.filter((preset) => registry.preset(preset.name).some((component) => kindOf(component) === "channel"));
+  const talking = bases.filter((preset) => registry.presetUi(preset.name) || registry.preset(preset.name).some((component) => kindOf(component) === "channel"));
   return talking.length > 0 ? talking : bases;
 }
 
@@ -212,16 +213,16 @@ function runsOn(registry: Registry, preset: string, target: string): boolean {
 /**
  * The preset's questions, each answered by a component of its kind (or several, `multiple`), but those
  * `--with` answers; returns the answers that differ from the preset's own, `--with`'s first. A
- * `multiple` question is answered by one at least: an agent nobody can talk to is not a start.
+ * `multiple` question with no default allows none: the preset's dashboard is already a channel.
  */
 async function answerSlots(registry: Registry, preset: string, target: string, given: readonly string[]): Promise<string[]> {
   const choices = [...given];
   const answered = new Set(given.map(kindOf));
   // Only answers the new project can install: a component for another target would fail in `new`.
   for (const slot of registry.slots(preset, [target])) {
-    if (slot.options.length < 2 || answered.has(slot.kind)) continue;
+    if (slot.options.length === 0 || (slot.options.length === 1 && slot.defaults.length === 1) || answered.has(slot.kind)) continue;
     const options = slot.options.map((o) => option(o.name, o.title));
-    const picked = slot.multiple ? await chooseSeveral(slot.question, options, slot.defaults, true) : [await choose(slot.question, options, slot.defaults[0])];
+    const picked = slot.multiple ? await chooseSeveral(slot.question, options, slot.defaults, slot.defaults.length > 0) : [await choose(slot.question, options, slot.defaults[0])];
     // In the menu's order, whatever order they were checked in: the same answers print the same command.
     const answers = slot.options.map((o) => o.name).filter((name) => picked.includes(name));
     // Any other answer replaces the preset's own, so all of them are named (`registry.preset`).
@@ -230,20 +231,32 @@ async function answerSlots(registry: Registry, preset: string, target: string, g
   return choices;
 }
 
+/** Agent folders are opt-in: one Steward needs no generated catalog; several agents do. */
+async function chooseAgents(registry: Registry, preset: string, target: string, given: readonly string[]): Promise<string[]> {
+  if (given.includes("agents-folders") || !registry.features(preset, [target]).some((feature) => feature.name === "agents-folders")) return [];
+  const count = await choose("Will you use one agent or several?", [
+    { value: "one", label: "One agent", hint: "Steward; edit its agent.ts directly" },
+    { value: "several", label: "Several agents", hint: "Steward first; agents-folders adds prompts and skills beside each agent" },
+  ], "one");
+  return count === "several" ? ["agents-folders"] : [];
+}
+
 /**
- * What it can do, several at once, none checked: the dashboard (when the registry has one) and the
- * preset's features that run on the target. `--ui`, or a `--with` that names a feature, answers it.
+ * Optional features, none checked: the dashboard only when not already included, and features
+ * other than agent folders (which have their own question). Explicit feature flags answer it.
  */
 async function chooseFeatures(registry: Registry, preset: string, target: string, given: readonly string[], ui: boolean | undefined): Promise<{ features: string[]; ui: boolean }> {
   const features = registry.features(preset, [target]);
-  if (ui !== undefined || features.some((f) => given.includes(f.name))) return { features: [], ui: ui === true };
+  const defaultUi = registry.presetUi(preset);
+  if (defaultUi) log.info("Dashboard included: talk to your agent at /admin/; external channels are optional.");
+  if (ui !== undefined || features.some((f) => given.includes(f.name))) return { features: [], ui: defaultUi || ui === true };
   const options = [
-    ...(dashboardFiles(registry) === undefined ? [] : [{ value: DASHBOARD, label: "Dashboard", hint: "a web UI at /admin/ to follow, steer and stop conversations" }]),
-    ...features.map((f) => option(f.name, f.title)),
+    ...(defaultUi || dashboardFiles(registry) === undefined ? [] : [{ value: DASHBOARD, label: "Dashboard", hint: "a web UI at /admin/ to follow, steer and stop conversations" }]),
+    ...features.filter((f) => f.name !== "agents-folders").map((f) => option(f.name, f.title)),
   ];
-  if (options.length === 0) return { features: [], ui: false };
+  if (options.length === 0) return { features: [], ui: defaultUi };
   const answer = await chooseSeveral("What can it do? (any, or none: `pikit add` adds one later)", options);
-  return { features: features.map((f) => f.name).filter((name) => answer.includes(name)), ui: answer.includes(DASHBOARD) };
+  return { features: features.map((f) => f.name).filter((name) => answer.includes(name)), ui: defaultUi || answer.includes(DASHBOARD) };
 }
 
 /** A title is "Name: what it is"; the part after the colon is the option's hint. */

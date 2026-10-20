@@ -1,6 +1,6 @@
 /**
  * A project on Cloudflare, end to end on this machine (SPEC §4.1): `pikit new --target durable
- * --preset cloudflare-minimal`, `pikit doctor`, the project's own tests (with its `wrangler deploy
+ * --preset base-cloudflare`, `pikit doctor`, the project's own tests (with its `wrangler deploy
  * --dry-run`) and typecheck, then `pikit dev` (wrangler dev, workerd) answering `/health` from the
  * object's App. Then a Telegram agent on Cloudflare: `pikit add` of secrets-workers and
  * actors-do (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
@@ -48,7 +48,7 @@ async function run(command: string[], cwd = project) {
 test.skipIf(!E2E)(
   "pikit new --target durable: a project that composes, bundles, typechecks and passes its own tests",
   async () => {
-    const created = await run([process.execPath, MAIN, "new", "edge-bot", "--target", "durable", "--preset", "cloudflare-minimal"], parent);
+    const created = await run([process.execPath, MAIN, "new", "edge-bot", "--target", "durable", "--preset", "base-cloudflare"], parent);
     expect(created.err).not.toContain("✗");
     expect(created.code).toBe(0);
     expect(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).targets).toEqual(["durable"]);
@@ -133,7 +133,7 @@ test.skipIf(!E2E)(
   "a Telegram agent on Cloudflare: each add puts each half in its App, with what it offers, and is green; the project installs, typechecks and passes its tests; in workerd it answers a message; remove undoes both Apps",
   async () => {
     const configPath = join(project, "pikit.config.ts");
-    const agentPath = join(project, "src", "agents", "assistant", "agent.ts");
+    const agentPath = join(project, "src", "agents", "steward", "agent.ts");
     const before = readFileSync(configPath, "utf8");
     const agentBefore = readFileSync(agentPath, "utf8");
     const preset = lists();
@@ -158,7 +158,7 @@ test.skipIf(!E2E)(
     const routed = await run([process.execPath, MAIN, "add", "router-basic", "--yes"]);
     expect(routed.err).toContain("defaultAgent");
     expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components)).toContain("router-basic");
-    writeFileSync(configPath, setConfigEntry(readFileSync(configPath, "utf8"), "router-basic", `{ defaultAgent: "assistant" }`));
+    writeFileSync(configPath, setConfigEntry(readFileSync(configPath, "utf8"), "router-basic", `{ defaultAgent: "steward" }`));
 
     // The channel: its object half needs actor.inbox and wakeups (actors-do), the runtime and
     // the rest in the object's App; its Worker half, actor.mailbox (actors-do) in the Worker's.

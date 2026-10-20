@@ -60,12 +60,13 @@ export interface Template {
 
 export const TEMPLATES: Record<string, Template> = {
   "telegram-cloudflare": {
-    preset: "telegram-cloudflare",
+    preset: "cloudflare",
     target: "durable",
     ui: true,
+    // The Cloudflare preset has no external channel: this Telegram-specific template opts in.
     // Self-improvement, dormant (the group admin-proposals and repo-github-app): connected after deploying,
     // from the dashboard's Settings → GitHub, never in the form.
-    with: ["admin-proposals"],
+    with: ["admin-proposals", "channel-telegram-webhook"],
     bun: "1.4.2",
     name: "pikit-telegram-bot",
     description: "An AI agent in Telegram, on Cloudflare: a pikit project.",

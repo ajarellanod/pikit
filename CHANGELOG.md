@@ -401,9 +401,12 @@ promises compatibility with the one before: no aliases, migrations or readers of
   comes back there). The CSP lets a form post to `https://github.com` (repo-github-app's Connect).
 
 ### Presets
-- `http` and `telegram` (Docker on a server; conversations on `conversations-kv` over
-  `storage-kv-sql`), `telegram-cloudflare`, `telegram-celld` (the same Apps on a celld fleet) and
-  `cloudflare-minimal` (`--target durable`). A preset is a
+- `base` and its `telegram` alias (Docker on a server; conversations on `conversations-kv` over
+  `storage-kv-sql`), `cloudflare`, `celld` (the same Apps on a celld fleet) and `base-cloudflare`
+  (`--target durable`, storage only). Full presets include the dashboard; `cloudflare` and `celld`
+  install no external channel unless selected. The first agent is Steward (`steward`), with
+  `steward: true`. The wizard asks one or several agents: several opts into `agents-folders`,
+  writes the prompt to `SYSTEM.md` and generates the registry once at creation. A preset is a
   list of `pikit add`s; its `choose` questions pick a channel (`multiple`: several at once), and its
   `features` are the components `pikit new` offers to add. The starter agent's prompt says where
   it is reached, and its model is one the preset installs; on a server it does not name `bash`,
@@ -412,7 +415,7 @@ promises compatibility with the one before: no aliases, migrations or readers of
   `proposals-local` on a server, with `proposals-github` and `repo-github-app` on Cloudflare; it brings the
   dashboard.
   Every preset that runs an agent installs `extension-pikit-self`, and the starter agent, the
-  project's steward (`steward: true`), names it. Both `http` and `telegram-cloudflare` install `tool-fetch` and
+  project's steward (`steward: true`), names it. Both `base` and `cloudflare` install `tool-fetch` and
   `tool-websearch-brave` (Brave's key optional), and the starter agent names them.
 
 ### CLI (`pikit`)
@@ -423,8 +426,8 @@ promises compatibility with the one before: no aliases, migrations or readers of
   writes. Every folder of `src/` with a `package.json` is a UI project: deployment-docker's `ui` stage
   and deployment-cloudflare's `build.command` build each one; `pikit dev` builds each at start on a server
   (wrangler's build command does on Cloudflare) and again when its files change.
-- `new` (guided in a terminal: target, preset, channels, several at once, then what it can do: the
-  dashboard and the preset's features; `--with` answers both in a script), `add` (one or several names, one
+- `new` (guided in a terminal: target, preset, channels, one or several agents, then optional
+  features; full presets include the dashboard, and `--with` answers choices in a script), `add` (one or several names, one
   transaction), `remove`, `upgrade` (three-way merge
   of your edits from `pikit-bases/`; a kit behind the CLI is a plan of its own, shown in `--dry-run`,
   and `doctor` notes it), `configure` (secrets, generated tokens, model logins), `doctor`,

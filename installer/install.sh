@@ -17,8 +17,9 @@
 #      at the prompt); on macOS it points to Docker Desktop. With --durable it skips Docker and
 #      checks Node.js >= 22 instead, which wrangler (Cloudflare's CLI, in each project) runs on;
 #   6. on a terminal, runs `pikit new`, which asks everything and starts your first agent; with
-#      --durable, `pikit new --target durable --preset telegram-cloudflare`, a Telegram bot on
-#      Cloudflare, which asks its name, `pikit configure`'s questions, then deploys it with `pikit up`
+#      --durable, `pikit new --target durable --preset cloudflare`, a Cloudflare agent
+#      with a dashboard (no external channel by default), which asks its name and configuration,
+#      then deploys it with `pikit up`
 #      (PIKIT_NO_WIZARD=1 skips it; Ctrl-C stops it, and `pikit new` continues later).
 # Running it again updates pikit and changes nothing else. It never runs sudo without saying so
 # first and asking, and it never runs as a side effect what it did not print.
@@ -37,7 +38,7 @@
 #                         supported range with PIKIT_BUN_VERSION (not Docker)
 #   PIKIT_INSTALL_DOCKER=1  consent to Docker's official install script on Linux
 #   PIKIT_DURABLE=1       the durable target on Cloudflare, as --durable: no Docker, and `pikit new`
-#                         makes a Telegram bot on Cloudflare
+#                         makes an agent with a dashboard on Cloudflare
 
 set -eu
 
@@ -272,11 +273,11 @@ fi
 
 # 6. The first agent, step by step: `pikit new` with no arguments asks everything (its name, where it
 # runs, where to talk to it, the channel's setup, the model's login) and starts it. With --durable,
-# its flags answer where it runs and the preset: a Telegram bot on Cloudflare. Only on a terminal;
+# its flags answer where it runs and the preset: a Cloudflare agent with a dashboard. Only on a terminal;
 # Ctrl-C stops it, and `pikit new` continues later. With a new docker group, `sg` gives it that group
 # now, since this shell only gets it at the next login.
 if [ -n "$PIKIT_DURABLE" ]; then
-  set -- new --target durable --preset telegram-cloudflare
+  set -- new --target durable --preset cloudflare
 else
   set -- new
 fi
@@ -307,7 +308,7 @@ if [ -n "$LINES" ]; then
   printf '\n%s\n\n' "$LINES"
 fi
 if [ -n "$PIKIT_DURABLE" ]; then
-  say "pikit $* starts another Telegram bot on Cloudflare, step by step; pikit --help lists the rest."
+  say "pikit $* starts another agent on Cloudflare with a dashboard, step by step; pikit --help lists the rest."
 else
   say "pikit new starts a new agent step by step; pikit --help lists the rest."
 fi

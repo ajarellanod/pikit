@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=../schema/preset.schema.json
+# An assistant on Cloudflare, reached through its dashboard (SPEC C1):
+#   pikit new my-agent --target durable --preset cloudflare
+#   pikit configure   # the admin token and OpenRouter key; Brave Search is optional
+#   pikit up          # deploy, then open /admin/ on the Worker's URL
+# No external channel is installed by default. Choose any with --with, for example
+# --with channel-telegram-webhook, or several channels together.
+# `pikit add` puts each component's half in its App: the Worker receives requests,
+# and a Durable Object per conversation owns the runtime, storage and execution.
+title: "An agent on Cloudflare: a dashboard, a Worker and a Durable Object per conversation"
+ui: true
+components:
+  - secrets-workers
+  - actors-do
+  - storage-do
+  - storage-kv-sql
+  - provider-openrouter
+  - runtime-pi
+  - conversations-kv
+  - router-basic
+  - execution-do
+  - tool-read
+  - tool-write
+  - tool-edit
+  - tool-bash
+  - tool-fetch
+  - tool-websearch-brave
+  - extension-pikit-self
+  - deployment-cloudflare
+choose:
+  - kind: channel
+    question: "Additional channels? (optional; the dashboard is included)"
+    multiple: true
+features:
+  - agents-folders
+  - router-rules
+  - [agents-live, router-rules, settings-store]
+  - tool-mcp
+  - health-registry
+  # Connected after deploying: Settings > GitHub > Connect. No GitHub setup required at creation.
+  - [admin-proposals, proposals-github, repo-github-app]

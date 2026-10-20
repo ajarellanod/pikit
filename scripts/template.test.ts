@@ -93,9 +93,13 @@ test("the UI projects' builds run the installer's Bun through npx, the rest of w
   expect(() => pinBun(pinned, "1.4.2")).toThrow(/update scripts\/template.ts's pinBun/);
 });
 
-test("the button asks for every secret the components need, and nothing else", () => {
+test("the Telegram template opts into its channel and asks for every secret the components need, and nothing else", () => {
   const registry = openRegistry(DEFAULT_REGISTRY);
+  expect(TEMPLATE.preset).toBe("cloudflare");
+  expect(registry.preset(TEMPLATE.preset)).not.toContain("channel-telegram-webhook");
+  expect(TEMPLATE.with).toContain("channel-telegram-webhook");
   const components = [...registry.preset(TEMPLATE.preset, TEMPLATE.with), ...(TEMPLATE.ui ? UI_COMPONENTS : [])];
+  expect(components).toContain("channel-telegram-webhook");
   // Self-improvement comes in, dormant, with repo-github-app: GitHub is connected from the dashboard, no token is in the form.
   expect(components).toContain("admin-proposals");
   expect(components).toContain("proposals-github");
@@ -398,7 +402,7 @@ test.skipIf(!E2E)(
       expect(prompt).toContain(`https://github.com/ajarellanod/pikit/tree/${commit}/docs/concepts.md`);
       expect(prompt).toContain("Target: durable.");
       expect(prompt).toContain("- channel-telegram-webhook: ");
-      expect(prompt).toContain("- assistant (the steward): model openrouter/z-ai/glm-5.3-flash; tools read, write, edit, bash, fetch, websearch; extensions pikit-self");
+      expect(prompt).toContain("- steward (the steward): model openrouter/z-ai/glm-5.3-flash; tools read, write, edit, bash, fetch, websearch; extensions pikit-self");
 
       // The dashboard, built by wrangler's build: its page for anyone, its API for the token only.
       const page = await fetch(`${base}/admin/`);

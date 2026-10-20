@@ -4,7 +4,7 @@
  * components, several at once) and what it can do (the dashboard and the preset's features), writes
  * the project, then runs the channel's own setup and the model's step, and offers to start it.
  * On Cloudflare, chosen in the menu or with the installer's `--target durable --preset
- * telegram-cloudflare`, it writes the Telegram bot.
+ * cloudflare`, it writes a dashboard assistant without requiring an external channel.
  *
  * The registry decides what each menu lists, and in which order: the test reads each menu as the
  * wizard draws it and goes to an option by its label (a component's or preset's title), never by its
@@ -19,7 +19,7 @@
  */
 
 import { afterAll, afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.test-support.ts";
@@ -51,7 +51,9 @@ afterEach(() => {
 const registry = openRegistry(DEFAULT_REGISTRY);
 const CHANNELS = "Where do you want to talk to your agent?";
 const PRESETS = "Which preset do you start from?";
+const EXTRA_CHANNELS = "Additional channels? (optional; the dashboard is included)";
 const FEATURES = "What can it do?";
+const AGENTS = "Will you use one agent or several?";
 const DEPLOYMENTS = "How should it run on this machine?";
 
 /** What a menu shows of a title: the part before ": ", as the wizard's `option` (the rest is the hint). */
@@ -186,7 +188,7 @@ async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
   w.type("my-bot\r");
   const at = await runOn(w, "server");
   // Every channel of the registry that runs on a server, in the registry's order; the preset's checked.
-  const [channels] = registry.slots("http", ["server"]);
+  const [channels] = registry.slots("base", ["server"]);
   expect(channels?.defaults).toEqual(["channel-http"]);
   expect(channels?.options.map((o) => o.name)).toContain("channel-telegram");
   const { options } = await menu(w, CHANNELS, at);
@@ -202,7 +204,8 @@ async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
   expect(shows(deployments.options[0]?.text ?? "", componentLabel("deployment-docker"))).toBe(true);
   expect(shows(deployments.options[1]?.text ?? "", componentLabel("deployment-local"))).toBe(true);
   const deployed = await answer(w, DEPLOYMENTS, [componentLabel("deployment-docker")], answered);
-  await w.waitFor(FEATURES, deployed);
+  const agents = await answer(w, AGENTS, ["One agent"], deployed);
+  await w.waitFor(FEATURES, agents);
   await w.waitFor("Dashboard", answered);
   expect(w.text()).toContain("MCP tools");
   await keys(w, "\r");
@@ -234,7 +237,7 @@ test.skipIf(!E2E)(
     await nameAndTelegram(w);
     await w.waitFor("Created my-bot in");
     // What was answered, as the command that answers it without a terminal.
-    await w.waitFor("The same, in a script: pikit new my-bot --preset http --with channel-telegram");
+    await w.waitFor("The same, in a script: pikit new my-bot --preset base --with channel-telegram");
     await w.waitFor("Configure it now?");
     await Bun.sleep(100);
     w.type(RIGHT);
@@ -242,7 +245,10 @@ test.skipIf(!E2E)(
     w.type("\r");
     expect(await w.exited).toBe(0);
     expect(w.text()).toContain("Later: cd my-bot && pikit configure && pikit up");
-    expect(readFileSync(join(project, "pikit.json"), "utf8")).toContain('"channel-telegram"');
+    const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
+    expect(manifest.components["channel-telegram"]).toBeDefined();
+    expect(manifest.components["agents-folders"]).toBeUndefined();
+    expect(readFileSync(join(project, "src", "agents", "steward", "agent.ts"), "utf8")).toContain('name: "steward"');
   },
   TIMEOUT,
 );
@@ -281,8 +287,9 @@ test.skipIf(!E2E)(
     w.type("\r");
     // The preset's websearch tool asks for its optional key: Enter skips it.
     at = await w.waitFor("BRAVE_API_KEY (Enter skips)", at);
-    await Bun.sleep(100);
-    w.type("\r");
+    await keys(w, "\r");
+    at = await w.waitFor("PIKIT_ADMIN_TOKEN", at);
+    await keys(w, "\r");
     await answer(w, "Start it?", ["Not now"], at);
 
     expect(await w.exited).toBe(0);
@@ -308,35 +315,39 @@ test.skipIf(!E2E)(
     // HTTP stays checked; Telegram is checked too.
     at = await answer(w, CHANNELS, [componentLabel("channel-http"), componentLabel("channel-telegram")], at);
     at = await answer(w, DEPLOYMENTS, [componentLabel("deployment-local")], at);
+    at = await answer(w, AGENTS, ["Several agents"], at);
     await answer(w, FEATURES, [componentLabel("tool-mcp")], at);
     await w.waitFor("Created two-bot in");
-    await w.waitFor("The same, in a script: pikit new two-bot --preset http --with channel-http --with channel-telegram --with deployment-local --with tool-mcp\n");
+    await w.waitFor("The same, in a script: pikit new two-bot --preset base --with channel-http --with channel-telegram --with deployment-local --with agents-folders --with tool-mcp\n");
     await w.waitFor("Configure it now?");
     await keys(w, RIGHT, "\r");
     expect(await w.exited).toBe(0);
     const components = Object.keys(JSON.parse(readFileSync(join(parent, "two-bot", "pikit.json"), "utf8")).components);
     for (const name of ["channel-http", "channel-telegram", "deployment-local", "tool-mcp"]) expect(components).toContain(name);
     expect(components).not.toContain("deployment-docker");
-    expect(components).not.toContain("admin-api");
+    expect(components).toContain("admin-api");
+    expect(components).toContain("agents-folders");
+    expect(readFileSync(join(parent, "two-bot", "src", "extensions", "agents.ts"), "utf8")).toContain("written by `pikit agents`");
+    expect(existsSync(join(parent, "two-bot", "src", "agents", "steward", "SYSTEM.md"))).toBe(true);
   },
   TIMEOUT,
 );
 
 /**
- * Answers what the registry makes the wizard ask after `from` for the Telegram bot on Cloudflare: the
- * preset (when several run there), its channels (when several do: the preset's own, kept), and the
- * dashboard in "What can it do?"; then declines "Configure it now?" once the bot is written. Returns
+ * Answers the preset, optional channels (none by default), and optional features. The dashboard is
+ * included without selecting it. Declines configuration once the project is written. Returns
  * what the wizard printed.
  */
-async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string, from = 0): Promise<string> {
-  expect(registry.slots("telegram-cloudflare", ["durable"])[0]?.defaults).toEqual(["channel-telegram-webhook"]);
+async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string, from = 0, channels: string[] = [], preset = "cloudflare", several = false): Promise<string> {
+  expect(registry.slots(preset, ["durable"])[0]?.defaults).toEqual([]);
   let at = from;
   for (;;) {
-    const question = await w.nextQuestion([PRESETS, CHANNELS, FEATURES], at);
+    const question = await w.nextQuestion([PRESETS, EXTRA_CHANNELS, AGENTS, FEATURES], at);
     if (question === FEATURES) break;
-    at = await answer(w, question, [question === PRESETS ? presetLabel("telegram-cloudflare") : componentLabel("channel-telegram-webhook")], at);
+    const wanted = question === PRESETS ? [presetLabel(preset)] : question === AGENTS ? [several ? "Several agents" : "One agent"] : channels.map(componentLabel);
+    at = await answer(w, question, wanted, at);
   }
-  await answer(w, FEATURES, ["Dashboard"], at);
+  await answer(w, FEATURES, [], at);
   await w.waitFor(`Created ${name} in`, 0, 180_000);
   await w.waitFor("Configure it now?");
   await Bun.sleep(100);
@@ -346,36 +357,79 @@ async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string, 
   expect(await w.exited).toBe(0);
   const pikitJson = JSON.parse(readFileSync(join(parent, name, "pikit.json"), "utf8")) as { targets: string[]; components: Record<string, unknown> };
   expect(pikitJson.targets).toEqual(["durable"]);
-  expect(Object.keys(pikitJson.components)).toContain("channel-telegram-webhook");
-  expect(Object.keys(pikitJson.components)).toContain("deployment-cloudflare");
+  expect(Object.keys(pikitJson.components).filter((c) => c.startsWith("channel-")).sort()).toEqual([...channels].sort());
+  expect(Object.keys(pikitJson.components)).toContain(preset === "celld" ? "deployment-celld" : "deployment-cloudflare");
   expect(Object.keys(pikitJson.components)).toContain("admin-api");
+  expect(existsSync(join(parent, name, "src", "dashboard", "package.json"))).toBe(true);
   return w.text();
 }
 
 test.skipIf(!E2E)(
-  "Cloudflare, chosen in the menu: the Telegram bot on Cloudflare is written, and the same command is printed",
+  "Cloudflare, chosen in the menu: a dashboard assistant with no external channel, and the same command is printed",
   async () => {
     const w = wizard();
     await w.waitFor("Name of your agent");
     w.type("cf-bot\r");
     const text = await writtenNotConfigured(w, "cf-bot", await runOn(w, "durable"));
-    // The preset's own channel, kept: nothing to add to the command.
-    expect(text).toContain("The same, in a script: pikit new cf-bot --target durable --preset telegram-cloudflare --ui");
+    expect(text).toContain("The same, in a script: pikit new cf-bot --target durable --preset cloudflare\n");
+    expect(text).toContain("Dashboard included");
+    expect(text).not.toContain("TELEGRAM_BOT_TOKEN");
     expect(text).toContain("Later: cd cf-bot && pikit configure && pikit up");
   },
   TIMEOUT,
 );
 
 test.skipIf(!E2E)(
-  "the installer's --durable: pikit new --target durable --preset telegram-cloudflare asks neither where it runs nor which preset",
+  "the installer's --durable: cloudflare asks neither where it runs nor which preset, and accepts no external channels",
   async () => {
-    const w = wizard({}, ["--target", "durable", "--preset", "telegram-cloudflare"]);
+    const w = wizard({}, ["--target", "durable", "--preset", "cloudflare"]);
     await w.waitFor("Name of your agent");
     w.type("flag-bot\r");
     const text = await writtenNotConfigured(w, "flag-bot");
     expect(text).not.toContain("Where should it run?");
     expect(text).not.toContain(PRESETS);
-    expect(text).toContain("The same, in a script: pikit new flag-bot --target durable --preset telegram-cloudflare --ui");
+    expect(text).toContain("The same, in a script: pikit new flag-bot --target durable --preset cloudflare\n");
   },
   TIMEOUT,
 );
+
+test.skipIf(!E2E)("celld with several agents generates Steward's folder registry without an external channel", async () => {
+  const w = wizard({}, ["--target", "durable", "--preset", "celld"]);
+  await w.waitFor("Name of your agent");
+  w.type("celld-team\r");
+  const text = await writtenNotConfigured(w, "celld-team", 0, [], "celld", true);
+  expect(text).toContain("--preset celld --with agents-folders");
+  const dir = join(parent, "celld-team");
+  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
+  expect(manifest.components["agents-folders"]).toBeDefined();
+  expect(readFileSync(join(dir, "src", "extensions", "agents.ts"), "utf8")).toContain("written by `pikit agents`");
+  expect(readFileSync(join(dir, "src", "agents", "steward", "SYSTEM.md"), "utf8")).toContain("You are Steward");
+  expect(readFileSync(join(dir, "src", "agents", "steward", "agent.ts"), "utf8")).not.toContain("systemPrompt:");
+}, TIMEOUT);
+
+test.skipIf(!E2E)("a sole optional channel is offered unchecked, not silently skipped or selected", async () => {
+  const root = join(parent, "single-channel-registry");
+  mkdirSync(join(root, "presets"), { recursive: true });
+  const index: Record<string, unknown> = {};
+  for (const name of ["storage-empty", "channel-one"]) {
+    const dir = join(root, "components", name);
+    mkdirSync(dir, { recursive: true });
+    const manifest = {
+      name, version: "0.0.1", description: name, title: name, targets: ["durable"],
+      requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] },
+      provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }],
+    };
+    writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));
+    index[name] = { version: "0.0.1", description: name, targets: ["durable"], path: `components/${name}` };
+  }
+  writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
+  writeFileSync(join(root, "presets", "one.yaml"), `ui: true\ncomponents: [storage-empty]\nchoose:\n  - kind: channel\n    multiple: true\n    question: Extra channels?\n`);
+  const w = wizard({}, ["--target", "durable", "--preset", "one", "--registry", root]);
+  await w.waitFor("Name of your agent");
+  w.type("one-option\r");
+  const shown = await menu(w, "Extra channels?");
+  expect(shown.options).toEqual([{ marker: "◻", text: "channel-one" }]);
+  await keys(w, String.fromCharCode(3));
+  expect(await w.exited).toBe(130);
+  expect(existsSync(join(parent, "one-option"))).toBe(false);
+}, TIMEOUT);

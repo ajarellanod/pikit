@@ -30,20 +30,20 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
 The installer puts `pikit` on the machine (git, curl, Bun, as for a server), skips Docker, which
 Cloudflare does not need, and checks Node.js >= 22, which wrangler runs on (it says how to install
 it if it is missing). Then, at the terminal, it runs
-`pikit new --target durable --preset telegram-cloudflare`, which asks, in order:
+`pikit new --target durable --preset cloudflare`, which asks, in order:
 
-1. **the bot's name**, its folder (`my-agent` on Enter); then it writes the project and runs `bun install`;
-2. **"Configure it now?"**: `pikit configure`'s questions, below: the bot's token from @BotFather,
-   who may talk to it (you send it a message), the webhook's secret (generated), a Brave Search key
-   (optional) and the OpenRouter key;
+1. **the project's name**, optional external channels, one agent or several, and optional features.
+   The dashboard is included; no external channel is required. Several agents adds `agents-folders`;
+2. **"Configure it now?"**: the admin token for `/admin/`, optional Brave Search key and OpenRouter
+   key. Only selected channels ask for their own credentials;
 3. **"Start it?"**, "On Cloudflare": `pikit up`. If wrangler is not logged in to Cloudflare, it asks
    "Log in now? It opens your browser" and runs `wrangler login` (create a free account there if you
    have none). On an account's first deploy, wrangler asks for its `workers.dev` subdomain, the
    `<subdomain>.workers.dev` every Worker of the account answers at: choose one. Then it deploys,
-   waits for `/health`, and sets the Telegram webhook. Write to the bot: it answers.
+   waits for `/health`. Open `/admin/` at the Worker's URL and sign in with `PIKIT_ADMIN_TOKEN`.
 
 Without the installer, the same is `pikit new` (answer "durable — on Cloudflare" to "Where should it run?"), or
-the three commands below. Ctrl-C stops at any question; `pikit new` again, with the same name,
+the commands below. Ctrl-C stops at any question; `pikit new` again, with the same name,
 continues where you left off.
 
 **What it costs.** Cloudflare's **Workers Free plan is enough**: pikit's Cloudflare decisions were
@@ -51,10 +51,23 @@ proven on it (SPEC §4.1). It allows 100,000 requests a day (Telegram's updates,
 alarms count) and 5 GB of Durable Object storage per account; the Workers Paid plan ($5 a month)
 raises both. What you pay for is the **model's tokens**, to OpenRouter, per message.
 
-## Your Telegram bot on Cloudflare
+## Your assistant on Cloudflare
 
 ```sh
-pikit new my-bot --target durable --preset telegram-cloudflare
+pikit new my-agent --target durable --preset cloudflare
+cd my-agent
+pikit configure
+pikit up
+```
+
+Steward is `src/agents/steward/agent.ts`; the dashboard is at `/admin/`. No Telegram variables or
+webhook are needed. `base-cloudflare` is the infrastructure-only alternative, without a runtime or
+dashboard. For several code agents, add `--with agents-folders` when creating the project.
+
+## Your Telegram bot on Cloudflare (optional)
+
+```sh
+pikit new my-bot --target durable --preset cloudflare --with channel-telegram-webhook
 cd my-bot
 pikit configure
 pikit up
@@ -63,13 +76,14 @@ pikit up
 - **`new`** writes the bot: a Worker that receives Telegram's updates, and one Durable Object per chat
   running the agent (`channel-telegram-webhook`, `runtime-pi`, OpenRouter's models, a workspace and a
   shell in the object with `execution-do`, web fetch and search), each half in its App of
-  `pikit.config.ts`. The agent, `src/agents/assistant/agent.ts`, uses `openrouter/z-ai/glm-5.3-flash`
+  `pikit.config.ts`. The agent, `src/agents/steward/agent.ts`, uses `openrouter/z-ai/glm-5.3-flash`
   and names every installed tool.
 - **`configure`** asks, in order: the bot's token (from @BotFather, checked with Telegram), who may
   talk to it (send the bot a message; it reads it and asks you to allow the sender), the webhook's
   secret (generated), the Brave Search key (optional: Enter skips, and only web search needs it) and
-  the OpenRouter key. Everything goes to `.env` (mode 0600). Without a terminal, export them instead:
-  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`, `OPENROUTER_API_KEY`, `BRAVE_API_KEY`.
+  the admin token and OpenRouter key. Everything goes to `.env` (mode 0600). Without a terminal,
+  export `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`, `OPENROUTER_API_KEY`, and optionally
+  `BRAVE_API_KEY`; run `pikit configure --yes --generate PIKIT_ADMIN_TOKEN`.
 - **`up`** logs in to Cloudflare if wrangler is not (below), deploys the Worker with `.env`'s variables
   as its secrets (`wrangler deploy`), waits until `/health` answers from the
   version it deployed, then tells Telegram where to post (`setWebhook` at `<workers.dev URL>/telegram`,

@@ -1,5 +1,5 @@
 /**
- * Five minutes, end to end, as a user runs it (SPEC P2): `pikit new my-agent --preset http`,
+ * Five minutes, end to end, as a user runs it (SPEC P2): `pikit new my-agent --preset base`,
  * `pikit configure`, then the agent answers a message sent to `pikit dev`. The model is provider-faux
  * (a fake model for tests only, installed here: no account, no network), so the answer is known:
  * `faux: <the message>`, through channel-http, runtime-pi and pi-durable as a real model's would be.
@@ -54,10 +54,10 @@ async function sh(command: string[], cwd = project) {
 const git = (...args: string[]) => sh(["git", "-c", "user.email=e2e@pikit.test", "-c", "user.name=e2e", ...args]);
 
 test.skipIf(!E2E)(
-  "pikit new --preset http: a project that composes, with one copy of @pikit/core and one of @pikit/contracts",
+  "pikit new --preset base: a project that composes, with one copy of @pikit/core and one of @pikit/contracts",
   async () => {
     const started = performance.now();
-    const created = await pikit(["new", "my-agent", "--preset", "http"], { cwd: parent });
+    const created = await pikit(["new", "my-agent", "--preset", "base"], { cwd: parent });
     timings.new = performance.now() - started;
     expect(created.err).not.toContain("✗");
     expect(created.code).toBe(0);
@@ -70,12 +70,12 @@ test.skipIf(!E2E)(
     const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
     expect(config).toContain("    runtimePi,\n");
     expect(config).not.toContain("deploymentDocker");
-    // HTTP answers in the response: nothing offers it durable delivery, so none is installed. The
-    // runtime provides its record of submissions itself, over the storage the preset names: nothing
-    // is installed for it.
+    // HTTP answers in the response; the default dashboard brings the delivery queue. The runtime
+    // provides its submissions over the storage the preset names.
     const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
-    expect(Object.keys(manifest.components)).not.toContain("outbound-durable");
-    expect(Object.values(manifest.components as Record<string, { installedFor?: string[] }>).filter((c) => c.installedFor !== undefined)).toEqual([]);
+    expect(manifest.components["outbound-durable"].installedFor).toEqual(["admin-api"]);
+    expect(manifest.components["wakeups-timers"].installedFor).toEqual(["outbound-durable"]);
+    expect(manifest.dashboard).toBeDefined();
     expect(manifest.components["storage-sqlite"].installedFor).toBeUndefined();
     // The neutral conversation registry, over the key-value store the preset names (SPEC C5).
     expect(manifest.components["conversations-kv"].installedFor).toBeUndefined();
@@ -83,7 +83,7 @@ test.skipIf(!E2E)(
     expect(Object.keys(manifest.components)).not.toContain("conversations-file");
     // tool-bash is installed, but on a server the starter agent does not name it.
     expect(Object.keys(manifest.components)).toContain("tool-bash");
-    expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('tools: ["read","write","edit","fetch","websearch"],');
+    expect(readFileSync(join(project, "src", "agents", "steward", "agent.ts"), "utf8")).toContain('tools: ["read","write","edit","fetch","websearch"],');
     // The README says where pikit is.
     expect(readFileSync(join(project, "README.md"), "utf8")).toContain(`It runs from the kit's checkout at \`${PIKIT_ROOT}\``);
     // Portable: the registry is this CLI's, by name, not by this machine's path.
@@ -132,7 +132,7 @@ test.skipIf(!E2E)(
   "configure without a terminal: a generated token and a key from the environment, never printed",
   async () => {
     const started = performance.now();
-    const configured = await pikit(["configure", "--yes", "--generate", "PIKIT_HTTP_TOKEN"], { env: { ANTHROPIC_API_KEY: DUMMY_KEY } });
+    const configured = await pikit(["configure", "--yes", "--generate", "PIKIT_HTTP_TOKEN", "--generate", "PIKIT_ADMIN_TOKEN"], { env: { ANTHROPIC_API_KEY: DUMMY_KEY } });
     timings.configure = performance.now() - started;
     expect(configured.code).toBe(0);
 
@@ -154,7 +154,7 @@ test.skipIf(!E2E)(
   "pikit dev answers /health and /ready, 401 without the token, and a message with the agent's answer",
   async () => {
     // The starter's prompt says where it is reached: this preset's channel is the HTTP API.
-    const agentPath = join(project, "src", "agents", "assistant", "agent.ts");
+    const agentPath = join(project, "src", "agents", "steward", "agent.ts");
     const agentBefore = readFileSync(agentPath, "utf8");
     expect(agentBefore).toContain("reached over an HTTP API");
     // A model with no account: provider-faux (tests only), and the starter agent on it.
@@ -216,6 +216,10 @@ test.skipIf(!E2E)(
 test.skipIf(!E2E)(
   "P3: add then remove leaves no trace, and remove refuses to leave a required capability unprovided",
   async () => {
+    // Removing the default dashboard is supported. This scenario then exercises server removal
+    // without any remaining admin routes; UI on/off's own suites cover its provider ownership.
+    expect((await pikit(["ui", "off"])).code).toBe(0);
+    expect(existsSync(join(project, "src", "dashboard"))).toBe(false);
     // `pikit new` made the repository; what the steps above changed is committed too.
     expect((await git("add", "-A")).code).toBe(0);
     expect((await git("commit", "-qm", "configured", "--allow-empty")).code).toBe(0);
@@ -280,7 +284,7 @@ test.skipIf(!E2E)(
 test.skipIf(!E2E)(
   "pikit new with two channels, every feature the preset offers and the dashboard: doctor is green once configured",
   async () => {
-    const features = ["router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"];
+    const features = ["agents-folders", "router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"];
     const args = ["new", "many", "--preset", "telegram", "--with", "channel-telegram", "--with", "channel-http", ...features.flatMap((f) => ["--with", f]), "--ui"];
     const created = await pikit(args, { cwd: parent });
     expect(created.err).not.toContain("✗");
@@ -297,7 +301,9 @@ test.skipIf(!E2E)(
     // deployer's service is in compose.yaml, and the project is a git repository.
     expect(components).toContain("proposals-local");
     expect(existsSync(join(many, "src/dashboard/src/settings/admin-proposals/index.tsx"))).toBe(true);
-    expect(readFileSync(join(many, "src/agents/assistant/agent.ts"), "utf8")).toContain('"bash"');
+    expect(readFileSync(join(many, "src/agents/steward/agent.ts"), "utf8")).toContain('"bash"');
+    expect(existsSync(join(many, "src/agents/steward/SYSTEM.md"))).toBe(true);
+    expect(readFileSync(join(many, "src/extensions/agents.ts"), "utf8")).toContain("written by `pikit agents`");
     expect(readFileSync(join(many, "compose.yaml"), "utf8")).toContain("  deployer:\n");
     expect(existsSync(join(many, ".git"))).toBe(true);
 

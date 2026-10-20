@@ -1,5 +1,5 @@
 /**
- * The `http` preset is this sample's composition: exactly the registry components
+ * The `base` preset is this sample's composition: exactly the registry components
  * `pikit.config.ts` lists, plus `deployment-docker`, which runs it and is not in `pikit.config.ts`,
  * less the provider `runtime-pi` brings itself (offered providers), which `pikit new`
  * installs with it. The storage is the preset's own: it names it rather than rely on the registry
@@ -18,7 +18,7 @@ import definition from "../pikit.config.ts";
  * line, so no YAML parser is needed.
  */
 function preset(): string[] {
-  const text = readFileSync(new URL("../../../registry/presets/http.yaml", import.meta.url), "utf8");
+  const text = readFileSync(new URL("../../../registry/presets/base.yaml", import.meta.url), "utf8");
   const components = /^components:\n((?:(?:\s+-\s+[a-z0-9-]+|\s*#.*|\s*)\n)*)/m.exec(text)?.[1] ?? "";
   return [...components.matchAll(/^\s+-\s+([a-z0-9-]+)\s*$/gm)].map(([, name]) => name ?? "");
 }
@@ -29,7 +29,7 @@ const PROJECT_LOCAL = new Set(["agents"]);
 const SAMPLE_REGISTRY = "conversations-file";
 const PRESET_REGISTRY = ["storage-kv-sql", "conversations-kv"];
 
-test("the http preset lists exactly the sample's registry components, and deployment-docker, with the neutral conversation registry", () => {
+test("the base preset lists exactly the sample's registry components, and deployment-docker, with the neutral conversation registry", () => {
   const listed = preset();
   const sample = definition.components.map((component) => component.name).filter((name) => !PROJECT_LOCAL.has(name));
 

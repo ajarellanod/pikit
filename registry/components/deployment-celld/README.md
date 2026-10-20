@@ -33,20 +33,25 @@ spike").
 
   Everything else in `.env` is the app's: the Worker gets it (below, "Secrets").
 
-## Your Telegram bot on your machines
+## Your assistant on your machines
 
 ```sh
-pikit new my-bot --target durable --preset telegram-celld
-cd my-bot
-pikit configure   # the bot's token, who may talk to it, the webhook's secret, the model's key; the bucket and URL
-pikit dev         # one local node (celld dev) on http://127.0.0.1:9876
-pikit up          # deploy to the fleet, wait until /health answers the new deployment, then set the webhook
+pikit new my-agent --target durable --preset celld
+cd my-agent
+pikit configure   # the admin token, model key, fleet bucket and public URL
+pikit dev         # one local node; dashboard at http://127.0.0.1:9876/admin/
+pikit up          # deploy to the fleet and wait for /health
 ```
 
+The dashboard is included and no external channel is selected by default. The first agent is
+Steward (`src/agents/steward/agent.ts`). Add `--with agents-folders` for several code agents.
 `pikit up` needs a fleet: nodes running celld against the bucket, behind HTTPS ("Running a fleet").
-`pikit dev` needs none: one node with a local store in `.celld/dev`, `.env` as the Worker's
-variables. Telegram cannot reach it there; post updates to `http://127.0.0.1:9876/telegram` yourself
-(with the header `X-Telegram-Bot-Api-Secret-Token`), or deploy.
+`pikit dev` needs none: one node with a local store in `.celld/dev`, `.env` as the Worker's variables.
+
+For Telegram, select `--with channel-telegram-webhook` at creation, or install the channel later.
+It asks for the bot's token, allowed users and webhook secret. Telegram cannot reach `celld dev`
+directly; use the deployed public URL, or post test updates to `http://127.0.0.1:9876/telegram`
+with `X-Telegram-Bot-Api-Secret-Token`. Other channels are opt-in in the same way.
 
 ## What it does
 

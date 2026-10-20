@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=../schema/preset.schema.json
+# An assistant on your own machines with celld (self-hosted Durable Objects, SPEC C1):
+#   pikit new my-agent --target durable --preset celld
+#   pikit configure   # the admin token, model key, and fleet bucket and URL
+#   pikit dev         # one local node (celld dev)
+#   pikit up          # deploy to the fleet, then open /admin/ at its public URL
+# The same Apps as cloudflare, with deployment-celld. The dashboard is included;
+# external channels are opt-in (--with channel-telegram-webhook, channel-web, channel-http...).
+title: "An agent on your own machines (celld): a dashboard and self-hosted Durable Objects"
+ui: true
+components:
+  - secrets-workers
+  - actors-do
+  - storage-do
+  - storage-kv-sql
+  - provider-openrouter
+  - runtime-pi
+  - conversations-kv
+  - router-basic
+  - execution-do
+  - tool-read
+  - tool-write
+  - tool-edit
+  - tool-bash
+  - tool-fetch
+  - tool-websearch-brave
+  - extension-pikit-self
+  - deployment-celld
+choose:
+  - kind: channel
+    question: "Additional channels? (optional; the dashboard is included)"
+    multiple: true
+features:
+  - agents-folders
+  - router-rules
+  - [agents-live, router-rules, settings-store]
+  - tool-mcp
+  - health-registry
+  - [admin-proposals, proposals-github, repo-github-app]

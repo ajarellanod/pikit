@@ -7,7 +7,9 @@ SPEC §5. Three pieces:
 - **`admin-auth-token`** (a component): `admin.auth`, who is an operator.
 - **The dashboard** (not a component): a Vite + React + Tailwind v4 + shadcn/ui project copied into
   the project's `src/dashboard/` from [registry/dashboard/files](../registry/dashboard/files). A project
-  has a UI when that folder exists (`pikit new --ui`, `pikit ui on`), and nothing else says so.
+  has a UI when that folder exists, and nothing else says so. `base`, `telegram`, `cloudflare` and
+  `celld` include it by default; `pikit new --ui` adds it for other compositions, and `pikit ui on`
+  adds it later. `base-cloudflare` is storage-only and does not include it.
 
 ## admin-auth-token
 

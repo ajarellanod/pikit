@@ -15,23 +15,36 @@ project carries it in its `vendor/`), and no 0.0.x release promises compatibilit
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh                  # then `pikit new`, guided
-curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable   # a Telegram bot on Cloudflare
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable   # an assistant with a dashboard on Cloudflare
 ```
 
 The installer puts the CLI in `~/.pikit/bin/pikit` (a checkout of the latest release in
 `~/.pikit/pikit`; `PIKIT_REF=main` for the development branch) and runs
-`pikit new`, which asks where the agent runs, where you talk to it (Telegram, HTTP, or both) and
-what it can do (a dashboard, routing rules, MCP tools, web search…), then configures and starts it
+`pikit new`, which asks where the agent runs, its channels, whether you will use one agent or several,
+and its optional features, then configures and starts it. Full presets include a dashboard: on
+Cloudflare and celld no external channel is required
 ([installer/README.md](installer/README.md)). By hand, in a project:
 
 ```sh
-pikit new my-agent --preset telegram         # or http; --target durable --preset telegram-cloudflare
-                                             # --with channel-telegram --with channel-http: both; --with tool-mcp, --ui: features
+pikit new my-agent --preset base             # server, with dashboard and HTTP API
+# Or: pikit new my-agent --target durable --preset cloudflare   # or celld; dashboard, no external channel
+# --with channel-telegram --with channel-http: both on server; --with agents-folders: several code agents
 cd my-agent
 pikit configure                              # secrets and the model login
 pikit dev                                    # run it here; `pikit up` deploys (Docker, a service of this machine, or Cloudflare)
 pikit add <component>...                     # and remove, upgrade, doctor, logs: `pikit --help`
 ```
+
+The first agent is **Steward** (`src/agents/steward/agent.ts`, `steward: true`). With several agents,
+`agents-folders` keeps prompts in `SYSTEM.md` and registers each folder through `pikit agents`.
+
+| Preset | Starts with |
+|---|---|
+| `base` | Server assistant, dashboard and HTTP API; Docker or `--with deployment-local` |
+| `telegram` | `base` with Telegram polling instead of HTTP; dashboard included |
+| `cloudflare` | Full assistant on Cloudflare, dashboard; external channels opt-in |
+| `celld` | The same durable assistant on your celld fleet, dashboard; external channels opt-in |
+| `base-cloudflare` | Worker and Durable Object storage only; no runtime, channel or dashboard |
 
 ## The repository
 

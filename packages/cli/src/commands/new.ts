@@ -6,8 +6,8 @@
  * channel-http`) and adds the features it offers (`--with tool-mcp`): each a component, installed like
  * the preset's own, with the providers it brings (`withOffers`).
  *
- * `--ui` gives it a UI (SPEC §5, `ui.ts`): the dashboard's files in `src/dashboard/` and the components
- * it needs, installed with the preset's: admin-api, and the defaults for `admin.auth` and `settings`
+ * A preset's `ui: true`, or `--ui`, gives it a UI (SPEC 5, `ui.ts`): the dashboard's files in
+ * `src/dashboard/` and the components it needs, installed with the preset's: admin-api, and the defaults for `admin.auth` and `settings`
  * unless what the project gets declares them in every App (`uiComponentsFor`); its own `bun install`
  * runs after the project's. A feature reached only from the dashboard (`NEEDS_DASHBOARD`: self-improvement) brings it too.
  *
@@ -39,7 +39,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { DEFAULT_REGISTRY, PIKIT_ROOT } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
-import { providedByManifests, withOffers } from "../project/offers.ts";
+import { withOffers } from "../project/offers.ts";
 import { starterModelProblem } from "../project/starter-model.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
@@ -53,7 +53,8 @@ import { Undo } from "../project/undo.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
 import * as starter from "./starter.ts";
-import { installDashboardPackages, missingUiComponents, uiNext, writeDashboard } from "./ui.ts";
+import { installDashboardPackages, uiComponentsFor, uiNext, writeDashboard } from "./ui.ts";
+import { installedCommand, runComponentCommand } from "./component-commands.ts";
 
 export interface NewOptions {
   preset?: string;
@@ -69,7 +70,7 @@ export interface NewOptions {
   quiet?: boolean;
   /** Where it runs: `server` (default) or `durable`. */
   target?: string;
-  /** With a UI (SPEC §5): `src/dashboard/`, and the components it needs (`ui.ts`). */
+  /** Add the dashboard when the preset does not already include it: `src/dashboard/` and its components. */
   ui?: boolean;
 }
 
@@ -113,7 +114,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   // (`registry validate` checks that each preset composes, `checkPresets`).
   // A UI is the dashboard's files and what they need, added like the preset's own.
   // A feature reached only from the dashboard (self-improvement's Proposals) brings it, as `--ui` does.
-  const ui = options.ui === true || chosen.some((component) => starter.NEEDS_DASHBOARD.includes(component));
+  const ui = options.ui === true || (options.preset !== undefined && registry.presetUi(options.preset)) || chosen.some((component) => starter.NEEDS_DASHBOARD.includes(component));
   const dashboard = ui ? dashboardFiles(registry) : undefined;
   if (ui && dashboard === undefined) throw new CliError(`the registry ${registry.root} has no dashboard (dashboard/files/)`);
   const forUi = ui ? uiComponentsFor(registry, chosen, targets) : [];
@@ -156,6 +157,9 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     // Its prompt says where people reach it: the channels being installed.
     const channels = components.filter((c) => kindOf(c) === "channel").map((c) => ({ name: c, title: registry.manifest(c).title }));
     write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels, target, starter.starterExtensions(components), components));
+    if (components.includes("agents-folders")) {
+      write(`src/agents/${starter.STARTER_AGENT}/SYSTEM.md`, `${starter.agentPrompt(starter.starterTools(tools, target, components), channels)}\n`);
+    }
     write("src/extensions/agents.ts", starter.AGENTS);
     // The kit's skills for AI agents: how to write a component for this project, and where the kit is.
     for (const skill of starter.skillFiles(PIKIT_ROOT, commit)) {
@@ -203,6 +207,14 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
       await installUiPackages(projectDir, component.ui, true);
     }
 
+    // Agent folders own their generated registry. Make the initial project current, not one that
+    // immediately fails doctor; later edits are regenerated explicitly by the operator.
+    if (components.includes("agents-folders")) {
+      step("pikit agents");
+      const command = installedCommand(projectDir, "agents");
+      if (command === undefined || await runComponentCommand(projectDir, command, []) !== 0) throw new CliError("`pikit agents` failed to generate the initial agent registry");
+    }
+
     step("pikit doctor");
     report = await doctor(projectDir, { quiet: true, componentChecks: false });
     for (const problem of report.problems) log.problem(problem);
@@ -228,17 +240,6 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   const elsewhere = starter.upText(installed);
   log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev${elsewhere === undefined ? "         # run it here" : `         # or \`pikit up\` to ${elsewhere}`}`);
   if (dashboard !== undefined) log.info(`\n${uiNext()}`);
-}
-
-/**
- * What the dashboard adds to a new project of `chosen` on `targets` (`missingUiComponents`): what the
- * chosen components and the providers they bring declare, per App, in their manifests (nothing is
- * installed yet) decides whether a default is needed. These are recorded as the dashboard's: `ui off`
- * removes them, never one the preset chose.
- */
-export function uiComponentsFor(registry: Registry, chosen: readonly string[], targets: readonly string[]): string[] {
-  const { order } = withOffers(registry, chosen, targets);
-  return missingUiComponents(order, targets, providedByManifests(order.map((name) => registry.manifest(name)), targets));
 }
 
 /**

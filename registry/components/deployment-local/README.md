@@ -113,7 +113,8 @@ Read the log with `pikit logs`, or `jq 'select(.level == "error")' .pikit/logs/a
 - **Self-improvement's deployer** is built only for deployment-docker. With proposals-local installed,
   `pikit up` here refuses its Compose file, even though the wizard currently offers the feature.
   The missing local deployer, isolation, rollback and verification are recorded in
-  [Self-improvement without Docker](https://github.com/ajarellanod/pikit/blob/main/features/deployment-local.md#self-improvement-without-docker).
+  [features/deployment-local.md](https://github.com/ajarellanod/pikit/blob/main/features/deployment-local.md),
+  "Self-improvement without Docker".
 - **A unit of the system, with a user of its own** (started at boot without a login, fenced from your
   home): it needs `sudo`. Not built.
 - **A hung process**: like Docker's healthcheck, the watchdog restarts on a 503, not on a process that

@@ -34,7 +34,7 @@ import { registryPath } from "../project/registry-location.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { Undo } from "../project/undo.ts";
 import { APP_LABEL, type AppName, hasWorkerApp } from "../project/apps.ts";
-import { type ProvidedCapabilities, providedByApp } from "../project/offers.ts";
+import { type ProvidedCapabilities, providedByApp, providedByManifests, withOffers } from "../project/offers.ts";
 import { probe } from "../project/run.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { add, installUiPackages } from "./add.ts";
@@ -80,6 +80,15 @@ export function missingUiComponents(present: readonly string[], targets: readonl
         `${component} would provide it in each, a second provider where one is. Provide ${capability} in ${label(lacking)} too, or use ${component} instead of yours, then run it again`,
     );
   });
+}
+
+/**
+ * The dashboard's missing components for a new composition, before anything is installed. Used by
+ * `new` and preset validation so both choose the same defaults, in every App of the target.
+ */
+export function uiComponentsFor(registry: Registry, chosen: readonly string[], targets: readonly string[]): string[] {
+  const { order } = withOffers(registry, chosen, targets);
+  return missingUiComponents(order, targets, providedByManifests(order.map((name) => registry.manifest(name)), targets));
 }
 
 /** Whether `missingUiComponents` needs to know what the project provides: a default is not present. */

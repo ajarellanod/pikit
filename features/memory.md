@@ -180,7 +180,7 @@ pikit add memory-recall --yes
 pikit add memory-summaries --yes    # optional: set its model and agents in pikit.config.ts
 pikit doctor                        # memory: memory-sql · agent.extension: memory → memory-recall
 ```
-Name it in the agent (`src/agents/assistant/agent.ts`): `extensions: ["memory"]`.
+Name it in the agent (`src/agents/steward/agent.ts`): `extensions: ["memory"]`.
 
 Try it with no model account: put the agent on `model: "faux/scripted"` (provider-faux), `pikit
 dev`, and send `call: remember {"fact":"Ana prefers tea"}`, then reset the conversation, then
