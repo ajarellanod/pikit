@@ -454,6 +454,30 @@ export function uiProblems(manifest: Pick<Manifest, "ui">): string[] {
   if (manifest.ui.source === "files") problems.push('ui.source "files" is the component\'s installed files: a UI project is a folder of its own');
   return problems;
 }
+/**
+ * What the schema does not say of a component's deployment fields: only a `deployment-*` component says
+ * what it supports (`deployment`), and never needs anything of a deployment (`requires.deployment`) nor
+ * ships a `compose` file (it would need itself); `services.compose` is never written in
+ * `requires.deployment`: a `compose` file implies it. By kind, never by a component's name.
+ */
+export function deploymentProblems(manifest: Pick<Manifest, "name" | "deployment" | "requires" | "compose">): string[] {
+  const problems: string[] = [];
+  const isDeployment = kindOf(manifest.name) === "deployment";
+  if (manifest.deployment !== undefined && !isDeployment) {
+    problems.push(`"deployment" says what a deployment supports: only a deployment-* component has it`);
+  }
+  if (isDeployment && manifest.requires.deployment !== undefined) {
+    problems.push(`"requires.deployment" is what a component needs of its deployment: a deployment-* component needs nothing of one`);
+  }
+  if (isDeployment && manifest.compose !== undefined) {
+    problems.push(`"compose" is a service beside the app that its deployment runs: a deployment-* component ships its own instead`);
+  }
+  if (manifest.requires.deployment?.includes(COMPOSE_SERVICES) === true) {
+    problems.push(`"requires.deployment" lists "${COMPOSE_SERVICES}", which a "compose" file implies: name the Compose file in "compose" instead`);
+  }
+  return problems;
+}
+
 export type EnvironmentVariable = Static<typeof EnvironmentVariableSchema>;
 export type Half = Static<typeof HalfSchema>;
 
