@@ -8,7 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ComposeRunner, doctor, NOT_A_LOCK } from "./doctor.ts";
+import { type ComposeRunner, doctor, NOT_A_LOCK, NOT_DEPLOYED_IN_DEV } from "./doctor.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -71,4 +71,24 @@ test("with execution-local, a note that an approval is a decision, not a lock; w
   expect(vm).toEqual({ problems: [], notes: [] });
   const missing = Object.assign(new Error("spawn docker ENOENT"), { code: "ENOENT" });
   expect((await doctor(IO, compose(missing).run, project({ ...INSTALLED, "execution-local": {} }))).notes).toContain(NOT_A_LOCK);
+});
+
+test("before pikit dev (no deployer runs): no Docker, no problem, a note saying so; execution-local's note still given", async () => {
+  for (const installed of [INSTALLED, { "proposals-local": { compose: "src/pikit/proposals-local/compose.yaml" } }]) {
+    const { calls, run } = compose({ code: 1, stderr: "open compose.yaml: no such file or directory\n" });
+    expect(await doctor({ ...IO, operation: "dev" }, run, project(installed))).toEqual({ problems: [], notes: [NOT_DEPLOYED_IN_DEV] });
+    expect(calls).toEqual([]);
+  }
+  const { calls, run } = compose({ stdout: "app\n" });
+  expect(await doctor({ ...IO, operation: "dev" }, run, project({ ...INSTALLED, "execution-local": {} }))).toEqual({ problems: [], notes: [NOT_DEPLOYED_IN_DEV, NOT_A_LOCK] });
+  expect(calls).toEqual([]);
+});
+
+test("pikit doctor and the check before pikit up keep checking Compose", async () => {
+  for (const operation of ["doctor", "up"] as const) {
+    const { calls, run } = compose({ stdout: "app\n" });
+    const { problems } = await doctor({ ...IO, operation }, run, project(INSTALLED));
+    expect(calls).toHaveLength(1);
+    expect(problems).toEqual([expect.stringContaining("Compose lists no deployer service")]);
+  }
 });

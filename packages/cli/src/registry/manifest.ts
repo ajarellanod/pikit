@@ -8,8 +8,8 @@
  * component.json names in `$schema` so an editor completes and checks it too.
  *
  * Generated from `setup` (S14), rewritten by `generate`, checked by `validate`: `$schema`,
- * `provides`, `requires.capabilities`, `optional.capabilities`, `halves`, `replay.tools` and
- * `modelProviders`. Everything
+ * `provides`, `requires.capabilities`, `optional.capabilities`, `halves`, `replay.tools`,
+ * `modelProviders` and `extensions`. Everything
  * else is written by hand and `generate` never changes it.
  *
  * `setup` runs with the default config, and with each config in the `examples` of the component's
@@ -321,7 +321,7 @@ export const ManifestSchema = Type.Object(
       Type.String({
         pattern: OWN_COMPOSE_FILE,
         description:
-          "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and `deployment-docker` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. Only for a component whose targets include server.",
+          "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and the deployment that supports `services.compose` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. So it implies the requirement `services.compose`, never written in `requires.deployment`: a composition whose deployment does not support it is refused. Only for a component whose targets include server.",
       }),
     ),
     deployment: Type.Optional(
@@ -510,6 +510,8 @@ export interface Generated {
   exampleTools?: Record<string, string>;
   /** The `model.provider` keys it provides; absent when it provides none with its default config. */
   modelProviders?: string[];
+  /** The `agent.extension` keys it provides; absent when it provides none with its default config. */
+  extensions?: string[];
   /** What each App's half declares; absent unless `apps.worker` names a half. */
   halves?: Record<AppName, Half>;
 }
@@ -549,6 +551,8 @@ export function withGenerated(manifest: Manifest, generated: Generated): Manifes
   else next.replay = { ...manifest.replay, tools: generated.tools };
   if (generated.modelProviders === undefined) delete next.modelProviders;
   else next.modelProviders = generated.modelProviders;
+  if (generated.extensions === undefined) delete next.extensions;
+  else next.extensions = generated.extensions;
   if (generated.halves === undefined) delete next.halves;
   else next.halves = generated.halves;
   return next;

@@ -16,6 +16,12 @@
     "capabilities": []
   },
   "provides": [],
+  "deployment": {
+    "supports": [
+      "services.compose",
+      "proposals.deployer"
+    ]
+  },
   "dependencies": {
     "@pikit/contracts": "0.0.1"
   },

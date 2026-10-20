@@ -30,6 +30,39 @@ export interface PresetSlot {
   options: { name: string; title: string }[];
 }
 
+/** What a preset (or one of its features) grants the starter agent, the steward, by key. */
+export interface PresetGrants {
+  /** `agent.tool` keys (`bash`). */
+  tools: string[];
+  /** `agent.extension` keys (`pikit-self`). */
+  extensions: string[];
+}
+
+/** One feature a preset offers: named by its first component (what `--with` names). */
+export interface PresetFeature {
+  name: string;
+  /** Its first component's `title`, or its name. */
+  title: string;
+  /** Every component it installs, its name first. */
+  components: string[];
+  /** Choosing it brings the dashboard. */
+  ui: boolean;
+  /** What choosing it grants the steward, beside the preset's own grants. */
+  steward: PresetGrants;
+}
+
+/** What a preset (its base's, for an alias) decides for the project `pikit new` makes, beside its components. */
+export interface PresetPolicy {
+  /** The steward's grants, whatever is chosen. */
+  steward: PresetGrants;
+  /** Component → its config entry (plain values), for the components that are chosen. */
+  config: Record<string, Record<string, unknown>>;
+  /** The agent layout: a feature and the command its first component declares. */
+  agents?: { folders: { feature: string; command: string } };
+  /** Every feature of the base, those an alias installs included. */
+  features: PresetFeature[];
+}
+
 export interface Registry {
   /** Absolute path of the registry's root (where `registry.json` is). */
   root: string;
@@ -61,10 +94,13 @@ export interface Registry {
   /**
    * The preset's features (its base's, for an alias), by `title`: what `pikit new` offers to add, but
    * those the preset installs already. A feature is named by its first component, whose `title` is
-   * shown; `components` is every component it installs (a group: `agents-live` with `router-rules`).
+   * shown; `components` is every component it installs (a group: `agents-live` with `router-rules`),
+   * with what choosing it grants the steward and whether it brings the dashboard.
    * With `targets`, only those whose components all run on all of them.
    */
-  features(name: string, targets?: readonly string[]): { name: string; title: string; components: string[] }[];
+  features(name: string, targets?: readonly string[]): PresetFeature[];
+  /** The preset's steward grants, config, agent layout and every feature (its base's, for an alias). */
+  presetPolicy(name: string): PresetPolicy;
   /**
    * Every file a component installs: project-relative target → absolute source. Its README
    * (`README.md` at its root) goes beside its code, as `src/pikit/<name>/README.md`.
@@ -178,10 +214,23 @@ export function openRegistry(path: string): Registry {
     },
     features(name, targets = []) {
       const installed = this.preset(name);
-      return featureGroups(presetBase(root, name).base)
-        .filter(([head]) => head !== undefined && !installed.includes(head))
-        .filter((group) => group.every((c) => targets.every((target) => this.manifest(c).targets.includes(target))))
-        .map((group) => ({ name: group[0] as string, title: this.manifest(group[0] as string).title ?? (group[0] as string), components: group }));
+      return this.presetPolicy(name)
+        .features.filter((feature) => !installed.includes(feature.name))
+        .filter((feature) => feature.components.every((c) => targets.every((target) => this.manifest(c).targets.includes(target))));
+    },
+    presetPolicy(name) {
+      const { base } = presetBase(root, name);
+      // Every component the config names exists: an unknown one fails here, with the registry's list.
+      for (const component of Object.keys(base.config ?? {})) this.manifest(component);
+      return {
+        steward: grants(base.steward),
+        config: structuredClone(base.config ?? {}),
+        ...(base.agents !== undefined && { agents: { folders: { ...base.agents.folders } } }),
+        features: (base.features ?? []).map((feature) => {
+          const head = feature.components[0] as string;
+          return { name: head, title: this.manifest(head).title ?? head, components: [...feature.components], ui: feature.ui === true, steward: grants(feature.steward) };
+        }),
+      };
     },
     files(name) {
       const componentDir = dir(name);
@@ -256,6 +305,25 @@ const RegistryIndexSchema = Type.Object({
 }, { additionalProperties: false });
 const TEXT = "\\S";
 const Title = Type.Optional(Type.String({ pattern: TEXT, description: "What `pikit new` shows if it asks which preset to start from." }));
+const GRANT_KEY = "^[^\\s]+$";
+const GrantsSchema = (what: string) =>
+  Type.Object(
+    {
+      tools: Type.Optional(
+        Type.Array(Type.String({ pattern: GRANT_KEY }), {
+          uniqueItems: true,
+          description: "`agent.tool` keys (`bash`), each provided by a chosen component with its default config (its component.json `replay.tools`).",
+        }),
+      ),
+      extensions: Type.Optional(
+        Type.Array(Type.String({ pattern: GRANT_KEY }), {
+          uniqueItems: true,
+          description: "`agent.extension` keys (`pikit-self`), each provided by a chosen component with its default config (its component.json `extensions`).",
+        }),
+      ),
+    },
+    { additionalProperties: false, description: what },
+  );
 
 const BasePresetSchema = Type.Object(
   {
@@ -277,21 +345,52 @@ const BasePresetSchema = Type.Object(
         { minItems: 1, description: "One question of `pikit new` per entry; `--with <component>` answers it in a script." },
       ),
     ),
+    steward: Type.Optional(
+      GrantsSchema(
+        "What the starter agent, the steward, is granted, by key, whatever is chosen: nothing is granted because a component is installed. `pikit new` checks each key against the chosen components before writing. Inherited by aliases.",
+      ),
+    ),
+    config: Type.Optional(
+      Type.Record(Type.String({ pattern: KEBAB }), Type.Record(Type.String(), Type.Unknown()), {
+        description:
+          "A component's config entry in pikit.config.ts, by its name, plain values only, written when that component is chosen (`router-basic: { defaultAgent: steward }`). Each a component the preset can choose: of `components`, an answer to `choose`, or of a feature. Inherited by aliases.",
+      }),
+    ),
+    agents: Type.Optional(
+      Type.Object(
+        {
+          folders: Type.Object(
+            {
+              feature: Type.String({ pattern: KEBAB, description: "The feature (its first component's name) that keeps agents in folders." }),
+              command: Type.String({ pattern: KEBAB, description: "The command that feature's first component declares (`commands`), which `pikit new` runs once to write the agents' registry." }),
+            },
+            { additionalProperties: false },
+          ),
+        },
+        {
+          additionalProperties: false,
+          description: "The agent layout: `pikit new` asks one agent or several, and with several chooses `folders.feature`, writes the steward's SYSTEM.md and runs `pikit <command>`. Inherited by aliases.",
+        },
+      ),
+    ),
     features: Type.Optional(
       Type.Array(
-        Type.Union([
-          Type.String({ pattern: KEBAB }),
-          Type.Array(Type.String({ pattern: KEBAB }), {
-            minItems: 2,
-            uniqueItems: true,
-            description: "A group: one feature of several components, offered by the first's `title` and named by it (`--with <first>`); choosing it installs them all.",
-          }),
-        ]),
+        Type.Object(
+          {
+            components: Type.Array(Type.String({ pattern: KEBAB }), {
+              minItems: 1,
+              uniqueItems: true,
+              description: "What choosing it installs: offered by the first's `title` and named by it (`--with <first>`).",
+            }),
+            ui: Type.Optional(Type.Boolean({ description: "Choosing it brings the dashboard, as `--ui` does. Default: false." })),
+            steward: Type.Optional(GrantsSchema("What choosing it grants the steward too, shown before it is chosen.")),
+          },
+          { additionalProperties: false },
+        ),
         {
           minItems: 1,
-          uniqueItems: true,
           description:
-            "What `pikit new` offers to add, several at once, each shown by its component.json `title` (with the dashboard, which `--ui` adds); `--with <component>` adds one in a script. Each is a component, or a group of them (a list, named by its first). None in `components`, and of no kind the preset `choose`s.",
+            "What `pikit new` offers to add, several at once, each shown by its first component's component.json `title` (with the dashboard, which `--ui` adds); `--with <first>` adds one in a script. Named by its first component, once each; none in `components`, and of no kind the preset `choose`s.",
         },
       ),
     ),
@@ -320,9 +419,12 @@ const AliasPresetSchema = Type.Object(
  * question. Nothing reads which preset a project came from. YAML 1.2. Either:
  * - a base: `components`, and optionally `choose`, one question per kind whose answers are every
  *   registry component of that kind (the listed one is the default; `multiple`: several of them),
- *   `features`, the components (or groups of them) offered to add, `ui`, the default dashboard, and
- *   `model`, the starter agent's. A multiple choice may have no default; or
- * - an alias: `extends` a base and answers some of its questions with `with`, as `--with` does.
+ *   `features`, each the components it installs (named by its first), what it grants the steward
+ *   and whether it brings the dashboard; `ui`, the default dashboard; `model`, the starter agent's;
+ *   `steward`, what that agent is granted by key; `config`, the chosen components' config values;
+ *   `agents.folders`, the agent layout's feature and command. A multiple choice may have no default; or
+ * - an alias: `extends` a base and answers some of its questions with `with`, as `--with` does; it
+ *   has its base's policy (`ui`, `model`, `steward`, `config`, `agents`, `features`).
  */
 export const PresetSchema = Type.Union([BasePresetSchema, AliasPresetSchema], {
   title: "pikit preset",
@@ -359,17 +461,37 @@ export function readPreset(root: string, name: string): Preset {
       throw new Error(`${at}: \`choose\` kind "${kind}" needs ${optional ? "at most" : "exactly"} one ${kind}-* component in \`components\`, found ${listed.length}`);
     }
   }
-  for (const feature of featureGroups(preset).flat()) {
+  const groups = featureGroups(preset);
+  for (const feature of groups.flat()) {
     // Offered is not installed already; and `--with` of a chosen kind answers the question, not this.
     if (preset.components.includes(feature)) throw new Error(`${at}: \`features\` lists ${feature}, which \`components\` installs already`);
     if (kinds.includes(kindOf(feature))) throw new Error(`${at}: \`features\` lists ${feature}, of the kind "${kindOf(feature)}" \`choose\` asks for`);
   }
+  const names = groups.map((group) => group[0] as string);
+  const twice = names.find((feature, i) => names.indexOf(feature) !== i);
+  if (twice !== undefined) throw new Error(`${at}: \`features\` names ${twice} twice: a feature is named by its first component, once`);
+  const folders = preset.agents?.folders;
+  if (folders !== undefined && !names.includes(folders.feature)) {
+    throw new Error(`${at}: \`agents.folders.feature\` is ${folders.feature}, which is none of its features (${names.join(", ") || "it has none"})`);
+  }
+  // Config is for a component the preset can choose: listed, an answer to a question, or a feature's.
+  const choosable = new Set([...preset.components, ...groups.flat()]);
+  for (const component of Object.keys(preset.config ?? {})) {
+    if (!choosable.has(component) && !kinds.includes(kindOf(component))) {
+      throw new Error(`${at}: \`config\` has ${component}, which the preset never installs (not in \`components\`, a feature, or an answer to \`choose\`)`);
+    }
+  }
   return preset;
 }
 
-/** A preset's features, each as the components it installs, its name first (a single component: a group of one). */
+/** A preset's features, each as the components it installs, its name first. */
 function featureGroups(preset: Pick<Preset, "features">): string[][] {
-  return (preset.features ?? []).map((feature) => (typeof feature === "string" ? [feature] : [...feature]));
+  return (preset.features ?? []).map((feature) => [...feature.components]);
+}
+
+/** Grants as written (each list optional) as two lists. */
+function grants(written: { tools?: string[]; extensions?: string[] } | undefined): PresetGrants {
+  return { tools: [...(written?.tools ?? [])], extensions: [...(written?.extensions ?? [])] };
 }
 
 /** The base preset behind `name`, and the choices an alias makes. One level: a base extends nothing. */

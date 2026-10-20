@@ -15,7 +15,10 @@ import type { Manifest } from "../registry/manifest.ts";
 import { runCli } from "../testing/cli.ts";
 import { checkStarterModel } from "./new.ts";
 import { starterModel } from "./starter.ts";
-import { UI_COMPONENTS, uiComponentsFor } from "./ui.ts";
+import { uiComponentsFor } from "./ui.ts";
+
+/** The repository's dashboard descriptor: what a dashboard brings, providers first. */
+const UI_COMPONENTS: string[] = JSON.parse(readFileSync(join(DEFAULT_REGISTRY, "dashboard", "dashboard.json"), "utf8")).components;
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -138,9 +141,14 @@ test("a default dashboard with no template is refused before any project files a
 
 test("--ui with other providers of admin.auth and settings: decided by what their manifests declare in each App of the target", () => {
   const nothing = { provides: [], requires: [], optional: [] };
+  // A registry root with the repository's dashboard descriptor, and manifests from memory.
+  const root = temp();
+  mkdirSync(join(root, "dashboard", "files"), { recursive: true });
+  writeFileSync(join(root, "dashboard", "files", "README.md"), "fixture\n");
+  writeFileSync(join(root, "dashboard", "dashboard.json"), readFileSync(join(DEFAULT_REGISTRY, "dashboard", "dashboard.json"), "utf8"));
   const fake = (manifests: Partial<Manifest>[]): Registry => {
     const full = manifests.map((m) => ({ version: "0.0.1", description: m.name, targets: ["server", "durable"], requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {}, files: [], ...m }) as Manifest);
-    return { names: () => full.map((m) => m.name), manifest: (name: string) => full.find((m) => m.name === name) as Manifest } as unknown as Registry;
+    return { root, names: () => full.map((m) => m.name), manifest: (name: string) => full.find((m) => m.name === name) as Manifest } as unknown as Registry;
   };
   const registry = fake([
     { name: "admin-auth-sso", provides: ["admin.auth"], apps: { worker: "default" } },

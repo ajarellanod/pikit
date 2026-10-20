@@ -7,7 +7,10 @@ the deployer next to the app (`deployment-docker`) merges, checks and deploys wh
 rolls back when the new version is unhealthy.
 
 - **Provides:** `proposals`.
-- **Requires:** nothing. **Works with:** `admin-proposals` (the dashboard's Proposals and Settings →
+- **Requires:** `proposals.deployer` of the project's deployment, and (from its Compose file)
+  `services.compose`; deployment-docker supports both. With deployment-local the wizard shows
+  Self-improvement unavailable and `pikit new` / `pikit add` refuse it before writing; `--force` does
+  not override this. **Works with:** `admin-proposals` (the dashboard's Proposals and Settings →
   Self-improvement), `deployment-docker` (the deployer: `pikit up` starts it when this component is
   installed), `extension-pikit-self` (it tells the steward how to propose, from `remote()`),
   `execution-gondolin` (the steward's shell in a VM, which reaches the repository only through
@@ -28,10 +31,13 @@ pikit add admin-proposals proposals-local    # or: pikit new --preset base --wit
    waits while the project has uncommitted changes, and says so.
 2. **The proposals repository** is a bare repository in the app's state volume,
    `.pikit/self/project.git`. This component's manifest contributes a Compose override that activates
-   deployment-docker's `deployer` service without detection by component name; `doctor` checks that
-   the combined Compose configuration actually supplies it. The deployer makes the repository from
-   the project's `main` when it starts, and keeps
-   its `main` there. `remote()` answers its path, and `serve`, the same repository over git's smart
+   deployment-docker's `deployer` service without detection by component name; its manifest also
+   requires `proposals.deployer` of the deployment, and the Compose file implies
+   `services.compose`. The CLI checks the composition before hooks; under `pikit doctor` and `pikit
+   up`, the hook checks that the combined Compose configuration actually supplies the deployer. Under
+   `pikit dev`, no deployer runs: the hook says approved proposals are not applied in this mode and
+   runs no Docker. The deployer makes the repository from the project's `main` when it starts, and
+   keeps its `main` there. `remote()` answers its path, and `serve`, the same repository over git's smart
    HTTP (`serve.ts`), for a shell that cannot reach the path.
 3. **The steward proposes** with git in its shell, as on every target: `git clone file://<path>
    project`, `git checkout -b pikit/self/<topic>`, the change, `bun install` and

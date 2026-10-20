@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { checkManifest, kitRangeProblems } from "./checks.ts";
 import { checkSchemaFiles, generateCommand } from "./commands.ts";
-import { COMPONENT_SCHEMA_FILE, ManifestSchema, readManifest, schemaProblems } from "./manifest.ts";
+import { COMPONENT_SCHEMA_FILE, deploymentProblems, type Manifest, ManifestSchema, readManifest, schemaProblems, withGenerated } from "./manifest.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -90,6 +90,65 @@ test("every component of the repository that depends on the contracts or the ada
     if (manifest === undefined) continue;
     expect([name, kitRangeProblems(manifest, { "@pikit/core": "0.0.1", "@pikit/contracts": "0.0.1", "@pikit/pi-adapter": "0.0.1" }).missing]).toEqual([name, []]);
   }
+});
+
+/** The deployment fields of a component named `name`, as `deploymentProblems` reads them. */
+const facts = (name: string, fields: Partial<Pick<Manifest, "deployment" | "compose">> & { needs?: string[] } = {}) => {
+  const { needs, ...rest } = fields;
+  return { name, requires: { pikit: "0.0.1", capabilities: [], ...(needs !== undefined && { deployment: needs }) }, ...rest };
+};
+
+test("deploymentProblems: only a deployment says what it supports, and needs nothing of one; services.compose is implied, never written", () => {
+  // Clean: a deployment that supports, a consumer that needs, a compose file, a component with none of it.
+  expect(deploymentProblems(facts("deployment-acme", { deployment: { supports: ["services.compose", "acme.review-host"] } }))).toEqual([]);
+  expect(deploymentProblems(facts("deployment-bare", { deployment: { supports: [] } }))).toEqual([]);
+  expect(deploymentProblems(facts("deployment-bare"))).toEqual([]);
+  expect(deploymentProblems(facts("proposals-acme", { needs: ["proposals.deployer"], compose: "compose.yaml" }))).toEqual([]);
+  expect(deploymentProblems(facts("tool-bash"))).toEqual([]);
+
+  expect(deploymentProblems(facts("proposals-acme", { deployment: { supports: ["proposals.deployer"] } }))).toEqual([
+    '"deployment" says what a deployment supports: only a deployment-* component has it',
+  ]);
+  // By kind, not by name: a name that merely contains "deployment" is not one.
+  expect(deploymentProblems(facts("tool-deployment", { deployment: { supports: [] } }))).toHaveLength(1);
+  expect(deploymentProblems(facts("deployment-acme", { needs: ["acme.review-host"] }))).toEqual([
+    '"requires.deployment" is what a component needs of its deployment: a deployment-* component needs nothing of one',
+  ]);
+  expect(deploymentProblems(facts("deployment-acme", { compose: "compose.yaml" }))).toEqual([
+    '"compose" is a service beside the app that its deployment runs: a deployment-* component ships its own instead',
+  ]);
+  expect(deploymentProblems(facts("expose-acme", { needs: ["services.compose"], compose: "compose.yaml" }))).toEqual([
+    '"requires.deployment" lists "services.compose", which a "compose" file implies: name the Compose file in "compose" instead',
+  ]);
+  // Every problem at once.
+  expect(deploymentProblems(facts("deployment-acme", { needs: ["services.compose"], compose: "c.yaml", deployment: { supports: [] } }))).toHaveLength(3);
+});
+
+test("the schema checks the deployment fields' shape: requirement names, no duplicates, no unknown field; extensions is a field", () => {
+  const base = toolBash();
+  const requires = base.requires as Record<string, unknown>;
+  expect(schemaProblems(ManifestSchema, { ...base, requires: { ...requires, deployment: ["proposals.deployer", "acme.review-host"] } })).toEqual([]);
+  expect(schemaProblems(ManifestSchema, { ...base, deployment: { supports: ["services.compose", "acme.review-host"] } })).toEqual([]);
+  expect(schemaProblems(ManifestSchema, { ...base, deployment: { supports: [] } })).toEqual([]);
+  expect(schemaProblems(ManifestSchema, { ...base, extensions: ["pikit-self"] })).toEqual([]);
+
+  for (const bad of ["Proposals.Deployer", "proposals..deployer", "proposals.", ".deployer", "1st.thing", "proposals deployer", "deployment-docker/x", ""]) {
+    expect([bad, schemaProblems(ManifestSchema, { ...base, requires: { ...requires, deployment: [bad] } }).length > 0]).toEqual([bad, true]);
+    expect([bad, schemaProblems(ManifestSchema, { ...base, deployment: { supports: [bad] } }).length > 0]).toEqual([bad, true]);
+  }
+  expect(schemaProblems(ManifestSchema, { ...base, requires: { ...requires, deployment: [] } })).not.toEqual([]);
+  expect(schemaProblems(ManifestSchema, { ...base, requires: { ...requires, deployment: ["a.b", "a.b"] } })).not.toEqual([]);
+  expect(schemaProblems(ManifestSchema, { ...base, deployment: { supports: ["a.b", "a.b"] } })).not.toEqual([]);
+  expect(schemaProblems(ManifestSchema, { ...base, deployment: { supports: ["a.b"], provides: ["x"] } })).toEqual(["/deployment/provides: is not a known field"]);
+  expect(schemaProblems(ManifestSchema, { ...base, deployment: {} })).not.toEqual([]);
+  expect(schemaProblems(ManifestSchema, { ...base, extensions: [1] })).not.toEqual([]);
+});
+
+test("generate writes extensions as it writes modelProviders, and takes it out when setup provides none", () => {
+  const manifest = toolBash() as unknown as Manifest;
+  const generated = { provides: manifest.provides, requires: manifest.requires.capabilities, optional: manifest.optional.capabilities };
+  expect(withGenerated(manifest, { ...generated, extensions: ["pikit-self"] }).extensions).toEqual(["pikit-self"]);
+  expect("extensions" in withGenerated({ ...manifest, extensions: ["stale"] }, generated)).toBe(false);
 });
 
 test("a files target that leaves the project, or is one of its own records, is a problem", () => {

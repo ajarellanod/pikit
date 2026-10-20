@@ -14,6 +14,12 @@
  * (on Cloudflare it logs in to the account itself). It prints the `pikit new` command that makes the
  * same project without a terminal.
  *
+ * What it offers after the preset's questions is the plan `new` makes with those answers
+ * (`preset-plan.ts`): "one agent or several" only when the preset declares an agent layout, and every
+ * feature with what it grants the steward; one the answers cannot have (self-improvement on a
+ * deployment that runs no deployer) is shown, not selectable, with why. It never changes an answer
+ * for one: the deployment is the person's.
+ *
  * `--target`, `--preset` and `--with` answer their questions (a `--with` of a feature, or `--ui`, answers
  * "what can it do?"): the installer's `--durable` runs `pikit new --target durable --preset
  * cloudflare`, which asks the name, optional external channels and what it can do. The preset's
@@ -33,10 +39,11 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { NEW_PROJECT_TARGETS, readProjectManifest } from "../project/pikit-json.ts";
+import { type PresetFeaturePlan, type ResolvedPresetPlan, resolvePresetPlan } from "../project/preset-plan.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { dashboardFiles } from "../project/dashboard.ts";
 import { kindOf, TARGETS } from "../registry/manifest.ts";
-import { ask, beginGuided, Cancelled, CliError, choose, chooseSeveral, confirm, intro, log, outro, spinner } from "../ui.ts";
+import { ask, beginGuided, Cancelled, type Choice, CliError, choose, chooseSeveral, confirm, intro, log, outro, spinner } from "../ui.ts";
 import { configure } from "./configure.ts";
 import { deployment, dev } from "./deployment.ts";
 import { checkTarget, newProject, UNFINISHED, validProjectName } from "./new.ts";
@@ -120,8 +127,8 @@ export async function newWizard(parentDir: string, options: WizardOptions = {}):
       target = options.target ?? (await chooseTarget(registry, options.preset));
       const preset = options.preset ?? (await choosePreset(registry, target));
       const answers = await answerSlots(registry, preset, target, options.with ?? []);
-      const agents = await chooseAgents(registry, preset, target, answers);
-      const { features, ui } = await chooseFeatures(registry, preset, target, answers, options.ui);
+      const agents = await chooseAgents(registry, preset, target, answers, options.ui);
+      const { features, ui } = await chooseFeatures(registry, preset, target, [...answers, ...agents], options.ui);
       const choices = [...answers, ...agents, ...features];
       const creating = spinner(`Creating ${name}: its components, then \`bun install\``);
       try {
@@ -231,32 +238,76 @@ async function answerSlots(registry: Registry, preset: string, target: string, g
   return choices;
 }
 
-/** Agent folders are opt-in: one Steward needs no generated catalog; several agents do. */
-async function chooseAgents(registry: Registry, preset: string, target: string, given: readonly string[]): Promise<string[]> {
-  if (given.includes("agents-folders") || !registry.features(preset, [target]).some((feature) => feature.name === "agents-folders")) return [];
-  const count = await choose("Will you use one agent or several?", [
-    { value: "one", label: "One agent", hint: "Steward; edit its agent.ts directly" },
-    { value: "several", label: "Several agents", hint: "Steward first; agents-folders adds prompts and skills beside each agent" },
-  ], "one");
-  return count === "several" ? ["agents-folders"] : [];
+/** The preset resolved for the answers so far (`preset-plan.ts`): the plan `new` makes with them. */
+function planFor(registry: Registry, preset: string, target: string, given: readonly string[], ui: boolean | undefined): ResolvedPresetPlan {
+  return resolvePresetPlan(registry, { preset, targets: [target], choices: given, ...(ui === true && { ui: true }) });
 }
 
 /**
- * Optional features, none checked: the dashboard only when not already included, and features
- * other than agent folders (which have their own question). Explicit feature flags answer it.
+ * Agent folders are opt-in, when the preset has a layout (`agents.folders`): one Steward needs no
+ * generated catalog; several agents do. Its feature, when these answers cannot have it, is shown and
+ * not selectable, with why.
+ */
+async function chooseAgents(registry: Registry, preset: string, target: string, given: readonly string[], ui: boolean | undefined): Promise<string[]> {
+  const plan = planFor(registry, preset, target, given, ui);
+  const folders = plan.agents?.folders;
+  const feature = plan.features.find((f) => f.name === folders?.feature);
+  if (folders === undefined || folders.chosen || feature === undefined) return [];
+  const grants = grantsHint(feature);
+  const count = await choose("Will you use one agent or several?", [
+    { value: "one", label: "One agent", hint: "Steward; edit its agent.ts directly" },
+    {
+      value: "several",
+      label: "Several agents",
+      ...(feature.available
+        ? { hint: `Steward first; each agent's prompt and skills in its folder, \`pikit ${folders.command}\` lists them${grants === undefined ? "" : `; ${grants}`}` }
+        : { hint: unavailableHint(feature), disabled: true }),
+    },
+  ], "one");
+  return count === "several" ? [feature.name] : [];
+}
+
+/**
+ * Optional features, none checked: the dashboard only when not already included, and every feature
+ * but agent folders (which have their own question), each with what it grants the steward. One these
+ * answers cannot have is shown, not selectable, with why: the deployment is never changed for it.
+ * Explicit feature flags answer it.
  */
 async function chooseFeatures(registry: Registry, preset: string, target: string, given: readonly string[], ui: boolean | undefined): Promise<{ features: string[]; ui: boolean }> {
-  const features = registry.features(preset, [target]);
+  const plan = planFor(registry, preset, target, given, ui);
+  const features = plan.features;
   const defaultUi = registry.presetUi(preset);
   if (defaultUi) log.info("Dashboard included: talk to your agent at /admin/; external channels are optional.");
-  if (ui !== undefined || features.some((f) => given.includes(f.name))) return { features: [], ui: defaultUi || ui === true };
-  const options = [
+  const folders = plan.agents?.folders.feature;
+  if (ui !== undefined || features.some((f) => f.name !== folders && given.includes(f.name))) return { features: [], ui: defaultUi || ui === true };
+  const options: Choice<string>[] = [
     ...(defaultUi || dashboardFiles(registry) === undefined ? [] : [{ value: DASHBOARD, label: "Dashboard", hint: "a web UI at /admin/ to follow, steer and stop conversations" }]),
-    ...features.filter((f) => f.name !== "agents-folders").map((f) => option(f.name, f.title)),
+    ...features
+      .filter((f) => f.name !== folders && !given.includes(f.name))
+      .map((f) => {
+        const shown = option(f.name, f.title);
+        if (!f.available) return { value: f.name, label: shown.label, hint: unavailableHint(f), disabled: true };
+        const hint = [shown.hint, grantsHint(f), f.ui && !plan.ui ? "brings the dashboard" : undefined].filter((part) => part !== undefined).join("; ");
+        return { value: f.name, label: shown.label, ...(hint !== "" && { hint }) };
+      }),
   ];
-  if (options.length === 0) return { features: [], ui: defaultUi };
+  if (options.every((o) => o.disabled === true)) {
+    for (const o of options) log.info(`${o.label}: ${o.hint}`);
+    return { features: [], ui: defaultUi };
+  }
   const answer = await chooseSeveral("What can it do? (any, or none: `pikit add` adds one later)", options);
   return { features: features.map((f) => f.name).filter((name) => answer.includes(name)), ui: defaultUi || answer.includes(DASHBOARD) };
+}
+
+/** What choosing a feature grants the steward, said before it is chosen ("gives Steward: bash"). */
+function grantsHint(feature: PresetFeaturePlan): string | undefined {
+  const keys = [...feature.steward.tools, ...feature.steward.extensions];
+  return keys.length === 0 ? undefined : `gives Steward: ${keys.join(", ")}`;
+}
+
+/** Why a feature cannot be chosen with these answers. */
+function unavailableHint(feature: PresetFeaturePlan): string {
+  return `not with these answers: ${feature.unavailable.join("; ")}`;
 }
 
 /** A title is "Name: what it is"; the part after the colon is the option's hint. */

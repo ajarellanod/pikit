@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { type ComponentDefinition, defineComponent } from "@pikit/core";
 import Type, { type TSchema } from "typebox";
 import { checkDrift } from "./commands.ts";
-import { configExamples, describeComponent } from "./describe.ts";
+import { configExamples, describeComponent, mergeGenerated } from "./describe.ts";
 import type { Manifest } from "./manifest.ts";
 
 /** A component like tool-mcp: one agent.tool per tool its config names, none by default. */
@@ -107,4 +107,30 @@ test("the model.provider keys setup provides are generated, so pikit new can che
     'modelProviders drifted from setup: component.json has nothing, setup declares ["alpha","beta"]; run `bun run registry generate`',
   ]);
   expect(checkDrift({ ...manifest, modelProviders: ["alpha", "beta"] }, generated)).toEqual([]);
+});
+
+test("the agent.extension keys setup provides with its default config are generated, so a preset's steward.extensions can be checked", async () => {
+  const extension = defineComponent({
+    name: "extension-pair",
+    config: Type.Object({ extra: Type.Boolean({ default: false }) }, { examples: [{ extra: true }] }) as TSchema,
+    setup(pikit, config: { extra: boolean }) {
+      pikit.provideKeyed("agent.extension" as never, "house-rules", {} as never);
+      pikit.provideKeyed("agent.extension" as never, "pikit-self", {} as never);
+      // Only an example's key: like modelProviders, never written.
+      if (config.extra) pikit.provideKeyed("agent.extension" as never, "extra", {} as never);
+    },
+  });
+  expect(await describeComponent(extension, "server")).toEqual({
+    provides: ["agent.extension"], requires: [], optional: [], extensions: ["house-rules", "pikit-self"],
+  });
+  // None provided: no field at all.
+  const none = await describeComponent(defineComponent({ name: "tool-none", setup() {} }), "server");
+  expect("extensions" in none).toBe(false);
+});
+
+test("a two-App component's extensions are both halves', each once, as its modelProviders are", () => {
+  const half = { provides: ["agent.extension"], requires: [], optional: [] };
+  expect(mergeGenerated([{ ...half, extensions: ["a", "b"] }, { ...half, extensions: ["b", "c"] }])).toEqual({ ...half, extensions: ["a", "b", "c"] });
+  expect(mergeGenerated([{ ...half, extensions: ["a"] }, half]).extensions).toEqual(["a"]);
+  expect("extensions" in mergeGenerated([half, half])).toBe(false);
 });

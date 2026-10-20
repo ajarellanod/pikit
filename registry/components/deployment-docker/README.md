@@ -5,8 +5,10 @@ logs, the commands `pikit up | down | restart | logs | status` delegate to, and 
 deployer, a second service started by the same `pikit up`, which deploys what an operator approves
 and rolls back when unhealthy.
 
-- **Provides:** nothing. It is not an app component and is not listed in `pikit.config.ts`: it runs
-  the app rather than running inside it.
+- **Provides:** nothing in the App. In `component.json`, `deployment.supports` promises
+  `services.compose` (runs components' Compose files) and `proposals.deployer` (the controller of
+  `@pikit/contracts/deployer`). It is not an app component and is not listed in `pikit.config.ts`:
+  it runs the app rather than running inside it.
 - **Requires:** nothing. It runs whatever `pikit.config.ts` composes; for `/health` and `/ready` that
   is a server such as `server-bun` on port 3000.
 - **Target:** `server` (it uses the process's signals and `node:child_process`).
@@ -137,7 +139,8 @@ Directories in `share` are mounted at the same path, read-only unless `writable`
 
 Self-improvement's last step (SPEC §6, `proposals-local`): a proposal an operator approves in the
 dashboard is deployed by a second compose service, `deployer`, next to the app. Nothing to set up and
-no extra command: proposals-local's manifest contributes a Compose override that activates it, so
+no extra command: proposals-local needs `proposals.deployer` of its deployment and contributes a
+Compose override (which also implies `services.compose`) that activates it, so
 `pikit up` builds and starts it and Docker restarts it with the app. Without that override the
 service stays behind its inactive `self-improvement` profile; ordinary projects get no socket
 service. It has the Docker

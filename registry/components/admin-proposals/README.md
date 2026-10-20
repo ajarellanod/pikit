@@ -18,8 +18,9 @@ The steward proposes the same way on both: it pushes the branch to `proposals.re
   `admin-auth-token`; without it, its routes answer nobody). A server (`server-bun`, or the Worker on
   Cloudflare) serves the routes.
 - **View:** `view/`, the dashboard's Proposals page and a page per proposal: installed to
-  `src/dashboard/src/views/admin-proposals/` when the project has a UI. Choosing it in `pikit new`
-  (the Self-improvement feature) gives the project its UI.
+  `src/dashboard/src/views/admin-proposals/` when the project has a UI. The kit's presets say the
+  Self-improvement feature has `ui: true`: choosing it in `pikit new` gives the project its UI, not
+  because the CLI recognizes this component's name. Its API works without the dashboard.
 - **Settings:** `settings/`, the Settings dialog's Self-improvement: each part the provider checks
   (on a server: the proposals repository, the deployer running, the project's checkout; on GitHub: the
   repository readable, the token accepted, a ruleset advised), the last deploy, rollback and failure
@@ -30,7 +31,7 @@ The steward proposes the same way on both: it pushes the branch to `proposals.re
 - **Installs to:** `src/pikit/admin-proposals/`.
 
 ```sh
-pikit add admin-proposals proposals-local    # a server
+pikit add admin-proposals proposals-local    # a server with deployment-docker (proposals-local needs its deployer)
 pikit add admin-proposals proposals-github   # Cloudflare
 ```
 

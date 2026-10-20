@@ -152,8 +152,8 @@ the app:
 - `component.json`'s `hooks` declare the others, each a file exporting a function of the hook's name;
   `pikit add` records them in `pikit.json` by project path, only what is recorded runs, and `registry
   validate` checks each export. `doctor`: its check in `pikit doctor` (so before `pikit dev`); it may
-  reach the network and writes nothing. `beforeDeploy`: the deployment's `up` runs it before it
-  bundles or builds; it may write files of its own directory (through `io.write`, never elsewhere),
+  reach the network and writes nothing, and is told what it checks for (`doctor`, `dev` or `up`).
+  `beforeDeploy`: the deployment's `up` runs it before it bundles or builds; it may write files of its own directory (through `io.write`, never elsewhere),
   which the build then carries, and a problem deploys nothing. `up` runs it instead of the
   component's `doctor`, so it checks at least the same (one check per deploy). `afterDeploy`: `up`
   runs it once the new version answers (C8), with its public URL; on a server, once the containers
@@ -163,6 +163,15 @@ the app:
   the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in
   `pikit.json`, and `deployment-docker` adds every recorded one after its own compose.yaml. Only a
   component whose targets include `server` has one.
+- `component.json`'s `requires.deployment` names what the project's one deployment must support for
+  the component to work (`proposals.deployer`), and a `deployment-*` component's `deployment.supports`
+  what it does (deployment-docker: `services.compose`, `proposals.deployer`); a `compose` file implies
+  `services.compose`. They are names of protocols, never of components, and an open set; absent,
+  nothing is required or supported. One pure check (`project/composition.ts`), over the manifests or
+  `pikit.json`'s records, answers every command that makes, changes or runs a project, before it
+  writes or runs anything: exactly one deployment (several are never a union), and nothing it does not
+  support. An operation is refused only for what it would introduce, so a wrong project can be
+  repaired, and `--force` does not bypass it.
 - `component.json`'s `generated` names the files of its own directory a hook rewrites (tool-mcp's
   `seed.ts`): shipped as a starting point, they are the hooks', never the user's edits, so `pikit
   doctor` does not list them as modified and `pikit remove` deletes them without `--force`.
@@ -419,7 +428,8 @@ captures identity before normalization/routing, so in-place mutation cannot turn
 - **Its data comes from a component, `admin-api`.** The admin API (`/admin/api/*`, typed and
   documented) is a pikit component that `--ui` installs and that also stands without a UI (a script
   or an agent may read it). Auth and settings are chosen by capability: the CLI adds their defaults
-  only when the target's Apps lack `admin.auth` or `settings`, preserves existing providers, and
+  (named by the dashboard's registry, in `dashboard/dashboard.json`) only when the target's Apps
+  lack `admin.auth` or `settings`, preserves existing providers, and
   refuses an unknown or partially satisfied composition rather than installing a conflicting one. It registers its routes through `http.route`, asks `admin.auth` before
   every answer, and serves the dashboard's built files under `GET /admin/*` when there are some. The
   files hold no data and need no credential (a browser's navigation sends no header): the page asks
@@ -578,8 +588,10 @@ its runs, its proposals and their state.
 a repository in the app's volume (`proposals-local`); a deployer next to the app (deployment-docker's
 `deployer` service) merges what the operator approved, checks, rebuilds and restarts; a rollback
 returns to the previous image. The producer of approvals activates the sidecar through its manifest's
-Compose contribution, never detection of its component id. Their explicit file protocol is
-`@pikit/contracts/deployer`, not an App capability: the external process cannot query the graph.
+Compose contribution, never detection of its component id, and requires `proposals.deployer` of its
+deployment (§3.2): with a deployment that does not support it, the CLI refuses the composition.
+Their explicit file protocol is `@pikit/contracts/deployer`, not an App capability: the external
+process cannot query the graph.
 It imports shared types only, with no project dependency loaded in the privileged process. Changes
 to any declared Compose file or its declaration are fenced like the deployment's root files.
 Whether an approval is a lock depends on where the agent's shell runs. With `execution-local` it

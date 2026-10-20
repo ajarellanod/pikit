@@ -7,6 +7,10 @@
  * - no `pikit add`, `remove` or `upgrade` was left unfinished (`operation.ts`): its marker is a problem
  *   until the person has checked the project and deleted it; doctor never deletes it;
  * - `bun.lock` matches `package.json`'s dependencies (`lockfile.ts`), read offline: no `bun install`;
+ * - the composition: what the components need of the deployment (`requires.deployment`, a `compose`
+ *   file) the one deployment supports (`composition.ts`), from `pikit.json`'s records alone, first: no
+ *   registry, no component's code. With a problem there no component's own check runs: it could check
+ *   (with Docker, say) a deployment that is not happening;
  * - the app composes: every required capability has a provider, selections are valid, the config
  *   matches the merged schema (the core's own `create()` decides);
  * - every tool and model provider an agent names statically is an installed key, when a
@@ -20,7 +24,8 @@
  *   code import `@earendil-works/*`;
  * - each installed component's own check, the file its `hooks.doctor` names (`component-doctor.ts`),
  *   once the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
- *   network; a project without one runs none.
+ *   network; a project without one runs none. It is told what it runs for (`operation`): `pikit doctor`,
+ *   or the check before `pikit dev` (no deployment runs) or `pikit up`.
  * Installed files that differ from what was installed are listed as information: they are yours. So
  * is a kit in `vendor/` that is not this CLI's (`staleKit`): behind it, `pikit upgrade` refreshes it;
  * from a checkout this CLI's does not include, updating pikit does.
@@ -36,7 +41,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { redactSecrets, secretLikePaths } from "@pikit/contracts";
 import { hasDefaultExport, isPiImport, scanImports } from "../registry/imports.ts";
-import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from "../project/component-doctor.ts";
+import { type ComponentDoctorResult, type DoctorOperation, doctorHooks, operationFlag, UNLESS_BEFORE_DEPLOY } from "../project/component-doctor.ts";
+import { compositionOf, formatCompositionIssue, planComposition } from "../project/composition.ts";
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
 import { brokenReferences, type KeyProviders, manifestProviders } from "../project/references.ts";
@@ -46,7 +52,7 @@ import type { Manifest } from "../registry/manifest.ts";
 import { servingGaps } from "../project/serving.ts";
 import { checkLockfile } from "../project/lockfile.ts";
 import { incompleteOperation, incompleteOperationMessage } from "../project/operation.ts";
-import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
+import { missingFiles, modifiedFiles, type ProjectManifest, readProjectManifest } from "../project/pikit-json.ts";
 import { log } from "../ui.ts";
 import { confinedPath } from "../project/paths.ts";
 import { DASHBOARD_DIR, dashboardRecord } from "../project/dashboard.ts";
@@ -73,6 +79,8 @@ export interface DoctorOptions {
    * `up` runs right before the build and which checks the same.
    */
   componentChecks?: boolean | "unless-before-deploy";
+  /** What it checks for (default `doctor`): the check before `pikit dev` or `pikit up`, passed to the components' checks. */
+  operation?: DoctorOperation;
 }
 
 export async function doctor(projectDir: string, options: DoctorOptions = {}): Promise<DoctorReport> {
@@ -90,6 +98,8 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
   notes.push(...lockfile.notes);
   const kit = kitNote(projectDir, project.kit?.commit);
   if (kit !== undefined) notes.push(kit);
+  const composition = compositionProblems(project);
+  problems.push(...composition);
 
   const result = await probe(projectDir);
   if (!result.ok) problems.push(`pikit.config.ts does not compose: ${result.error}`);
@@ -112,8 +122,15 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
     if (result.worker !== undefined) warnings.push(...secretsInConfig(result.worker.config, "workerConfig"));
     problems.push(...brokenReferences(result, undefined, registryProviders(projectDir, project.registries)));
     problems.push(...servingGaps(result).map((gap) => gap.message));
-    if (options.componentChecks !== false) {
-      const checked = await componentChecks(projectDir, options.componentChecks === "unless-before-deploy");
+    const unlessBeforeDeploy = options.componentChecks === "unless-before-deploy";
+    if (options.componentChecks === false) {
+      // Not this command's to run.
+    } else if (composition.length > 0) {
+      if (doctorHooks(projectDir, { unlessBeforeDeploy }).length > 0) {
+        notes.push("the components' own checks did not run: the composition has problems (above), and they could check a deployment that is not happening");
+      }
+    } else {
+      const checked = await componentChecks(projectDir, unlessBeforeDeploy, options.operation ?? "doctor");
       problems.push(...checked.problems);
       notes.push(...checked.notes);
     }
@@ -181,10 +198,16 @@ function kitNote(projectDir: string, commit: string | undefined): string | undef
   return `the project's kit (vendor/) is ${commit === undefined ? "another" : `pikit ${commit}`}, not this CLI's (${cli}): \`pikit upgrade\` refreshes it (${stale.join(", ")})`;
 }
 
+/** What is wrong with the composition, from `pikit.json`'s records alone (`planComposition`): a problem each. */
+export function compositionProblems(project: ProjectManifest): string[] {
+  return planComposition(compositionOf(project.components)).issues.map(formatCompositionIssue);
+}
+
 /** What the installed components' own checks find; nothing, and no process, without a check to run. */
-async function componentChecks(projectDir: string, unlessBeforeDeploy: boolean): Promise<{ problems: string[]; notes: string[] }> {
+async function componentChecks(projectDir: string, unlessBeforeDeploy: boolean, operation: DoctorOperation): Promise<{ problems: string[]; notes: string[] }> {
   if (doctorHooks(projectDir, { unlessBeforeDeploy }).length === 0) return { problems: [], notes: [] };
-  const result = await runScript<ComponentDoctorResult>("component-doctor.ts", projectDir, unlessBeforeDeploy ? [UNLESS_BEFORE_DEPLOY] : []);
+  const flags = [operationFlag(operation), ...(unlessBeforeDeploy ? [UNLESS_BEFORE_DEPLOY] : [])];
+  const result = await runScript<ComponentDoctorResult>("component-doctor.ts", projectDir, flags);
   return result.ok ? result : { problems: [`the components' own checks could not run: ${result.error}`], notes: [] };
 }
 

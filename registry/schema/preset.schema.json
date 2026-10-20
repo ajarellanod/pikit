@@ -53,29 +53,125 @@
           "minItems": 1,
           "description": "One question of `pikit new` per entry; `--with <component>` answers it in a script."
         },
+        "steward": {
+          "type": "object",
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[^\\s]+$"
+              },
+              "uniqueItems": true,
+              "description": "`agent.tool` keys (`bash`), each provided by a chosen component with its default config (its component.json `replay.tools`)."
+            },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[^\\s]+$"
+              },
+              "uniqueItems": true,
+              "description": "`agent.extension` keys (`pikit-self`), each provided by a chosen component with its default config (its component.json `extensions`)."
+            }
+          },
+          "additionalProperties": false,
+          "description": "What the starter agent, the steward, is granted, by key, whatever is chosen: nothing is granted because a component is installed. `pikit new` checks each key against the chosen components before writing. Inherited by aliases."
+        },
+        "config": {
+          "type": "object",
+          "patternProperties": {
+            "^[a-z][a-z0-9]*(-[a-z0-9]+)*$": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {}
+              }
+            }
+          },
+          "description": "A component's config entry in pikit.config.ts, by its name, plain values only, written when that component is chosen (`router-basic: { defaultAgent: steward }`). Each a component the preset can choose: of `components`, an answer to `choose`, or of a feature. Inherited by aliases."
+        },
+        "agents": {
+          "type": "object",
+          "required": [
+            "folders"
+          ],
+          "properties": {
+            "folders": {
+              "type": "object",
+              "required": [
+                "feature",
+                "command"
+              ],
+              "properties": {
+                "feature": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+                  "description": "The feature (its first component's name) that keeps agents in folders."
+                },
+                "command": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+                  "description": "The command that feature's first component declares (`commands`), which `pikit new` runs once to write the agents' registry."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "description": "The agent layout: `pikit new` asks one agent or several, and with several chooses `folders.feature`, writes the steward's SYSTEM.md and runs `pikit <command>`. Inherited by aliases."
+        },
         "features": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
-              },
-              {
+            "type": "object",
+            "required": [
+              "components"
+            ],
+            "properties": {
+              "components": {
                 "type": "array",
                 "items": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
                 },
-                "minItems": 2,
+                "minItems": 1,
                 "uniqueItems": true,
-                "description": "A group: one feature of several components, offered by the first's `title` and named by it (`--with <first>`); choosing it installs them all."
+                "description": "What choosing it installs: offered by the first's `title` and named by it (`--with <first>`)."
+              },
+              "ui": {
+                "type": "boolean",
+                "description": "Choosing it brings the dashboard, as `--ui` does. Default: false."
+              },
+              "steward": {
+                "type": "object",
+                "properties": {
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[^\\s]+$"
+                    },
+                    "uniqueItems": true,
+                    "description": "`agent.tool` keys (`bash`), each provided by a chosen component with its default config (its component.json `replay.tools`)."
+                  },
+                  "extensions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[^\\s]+$"
+                    },
+                    "uniqueItems": true,
+                    "description": "`agent.extension` keys (`pikit-self`), each provided by a chosen component with its default config (its component.json `extensions`)."
+                  }
+                },
+                "additionalProperties": false,
+                "description": "What choosing it grants the steward too, shown before it is chosen."
               }
-            ]
+            },
+            "additionalProperties": false
           },
           "minItems": 1,
-          "uniqueItems": true,
-          "description": "What `pikit new` offers to add, several at once, each shown by its component.json `title` (with the dashboard, which `--ui` adds); `--with <component>` adds one in a script. Each is a component, or a group of them (a list, named by its first). None in `components`, and of no kind the preset `choose`s."
+          "description": "What `pikit new` offers to add, several at once, each shown by its first component's component.json `title` (with the dashboard, which `--ui` adds); `--with <first>` adds one in a script. Named by its first component, once each; none in `components`, and of no kind the preset `choose`s."
         },
         "model": {
           "type": "string",

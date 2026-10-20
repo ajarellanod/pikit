@@ -9,7 +9,14 @@
  * A preset's `ui: true`, or `--ui`, gives it a UI (SPEC 5, `ui.ts`): the dashboard's files in
  * `src/dashboard/` and the components it needs, installed with the preset's: admin-api, and the defaults for `admin.auth` and `settings`
  * unless what the project gets declares them in every App (`uiComponentsFor`); its own `bun install`
- * runs after the project's. A feature reached only from the dashboard (`NEEDS_DASHBOARD`: self-improvement) brings it too.
+ * runs after the project's. A feature the preset marks `ui: true` (self-improvement) brings it too.
+ *
+ * What the preset decides beside its components is resolved once, with the wizard (`preset-plan.ts`):
+ * what the starter agent is granted (`steward`, never what happens to be installed), the config it
+ * sets for the components chosen, the agent layout (`agents.folders`: SYSTEM.md, then the command its
+ * feature declares), and whether the deployment does what the components need (`composition.ts`).
+ * Its problems (a feature the deployment cannot run, a grant nothing provides) refuse the project
+ * before its directory is made.
  *
  * On a server the new project is a git repository on `main`, everything committed (`initRepository`):
  * self-improvement's deployer merges approved proposals there. Without git it says so and goes on.
@@ -41,6 +48,7 @@ import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { withOffers } from "../project/offers.ts";
 import { starterModelProblem } from "../project/starter-model.ts";
+import { resolvePresetPlan } from "../project/preset-plan.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { initRepository } from "../project/git.ts";
@@ -108,18 +116,18 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   const registry = openRegistry(options.registry ?? DEFAULT_REGISTRY);
   if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions and adds its features: it needs --preset");
   const chosen = options.preset === undefined ? [] : registry.preset(options.preset, options.with ?? []);
-  // What the chosen components bring (offered providers, `offers.ts`): durable delivery for a chat
-  // channel, and what it needs. A preset lists only what every project of it uses, and names its
-  // storage: an offer needs the registry's only provider, which a second one would take away
-  // (`registry validate` checks that each preset composes, `checkPresets`).
-  // A UI is the dashboard's files and what they need, added like the preset's own.
-  // A feature reached only from the dashboard (self-improvement's Proposals) brings it, as `--ui` does.
-  const ui = options.ui === true || (options.preset !== undefined && registry.presetUi(options.preset)) || chosen.some((component) => starter.NEEDS_DASHBOARD.includes(component));
+  // The preset resolved once (`preset-plan.ts`), as the wizard showed it: what the chosen components
+  // bring (offered providers, `offers.ts`: durable delivery for a chat channel, and what it needs), the
+  // dashboard's components (`--ui`, the preset's `ui`, or a chosen feature's), what the steward is
+  // granted, the config the preset sets and its agent layout; and whether the deployment does what
+  // they need (`composition.ts`). A preset names its storage: an offer needs the registry's only
+  // provider, which a second one would take away (`registry validate` checks each preset, `checkPresets`).
+  const plan = options.preset === undefined ? undefined : resolvePresetPlan(registry, { preset: options.preset, targets, choices: options.with ?? [], ...(options.ui === true && { ui: true }) });
+  const ui = plan?.ui ?? options.ui === true;
   const dashboard = ui ? dashboardFiles(registry) : undefined;
   if (ui && dashboard === undefined) throw new CliError(`the registry ${registry.root} has no dashboard (dashboard/files/)`);
-  const forUi = ui ? uiComponentsFor(registry, chosen, targets) : [];
-  const asked = [...chosen, ...forUi];
-  const { order: components, installedFor } = withOffers(registry, asked, targets);
+  const forUi = plan?.uiComponents ?? (ui ? uiComponentsFor(registry, chosen, targets) : []);
+  const { order: components, installedFor } = withOffers(registry, [...chosen, ...forUi], targets);
   warnUnchosen(registry, chosen, [], targets);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
   try {
@@ -130,7 +138,12 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     if (!(error instanceof CliError) || options.target !== undefined || runsOn === undefined || runsOn === target) throw error;
     throw new CliError(`${error.message}; the preset "${options.preset}" runs on ${runsOn}: pikit new ${dir} --target ${runsOn} --preset ${options.preset}${(options.with ?? []).map((w) => ` --with ${w}`).join("")}`);
   }
-  const tools = components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {}));
+  if (plan !== undefined && plan.problems.length > 0) {
+    throw new CliError(`the preset "${plan.preset}" cannot be made with these answers:\n${plan.problems.map((problem) => `  - ${problem}`).join("\n")}`);
+  }
+  const installedTools = [...new Set(components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {})))];
+  const steward = plan?.steward ?? { tools: [], extensions: [] };
+  const folders = plan?.agents?.folders;
   const model = (options.preset === undefined ? undefined : registry.presetModel(options.preset)) ?? starter.starterModel(target);
   checkStarterModel(registry, components, target, model, options.preset);
 
@@ -152,14 +165,17 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write(".gitattributes", starter.GITATTRIBUTES);
     // Where `pikit` and the kit are, written in as in the skills.
     const commit = kitCommit();
-    write("README.md", starter.withKitLocation(starter.readme(name, components, target, dashboard !== undefined), PIKIT_ROOT, commit));
+    write("README.md", starter.withKitLocation(starter.readme(name, components, target, dashboard !== undefined, folders), PIKIT_ROOT, commit));
     write(CONFIG_FILE, starter.configFile(target));
     // Its prompt says where people reach it: the channels being installed.
     const channels = components.filter((c) => kindOf(c) === "channel").map((c) => ({ name: c, title: registry.manifest(c).title }));
-    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels, target, starter.starterExtensions(components), components));
-    if (components.includes("agents-folders")) {
-      write(`src/agents/${starter.STARTER_AGENT}/SYSTEM.md`, `${starter.agentPrompt(starter.starterTools(tools, target, components), channels)}\n`);
-    }
+    // What the steward is granted is the preset's (and its chosen features'): never what is installed.
+    const layout = folders?.chosen === true ? folders.command : undefined;
+    write(
+      `src/agents/${starter.STARTER_AGENT}/agent.ts`,
+      starter.agent({ model, channels, tools: steward.tools, extensions: steward.extensions, installed: installedTools, folders: layout }),
+    );
+    if (layout !== undefined) write(`src/agents/${starter.STARTER_AGENT}/SYSTEM.md`, `${starter.agentPrompt(steward.tools, channels)}\n`);
     write("src/extensions/agents.ts", starter.AGENTS);
     // The kit's skills for AI agents: how to write a component for this project, and where the kit is.
     for (const skill of starter.skillFiles(PIKIT_ROOT, commit)) {
@@ -190,8 +206,9 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     }
     installed = Object.keys(readProjectManifest(projectDir).components);
     let config = readFileSync(join(projectDir, CONFIG_FILE), "utf8");
-    for (const [component, value] of Object.entries(starter.STARTER_CONFIG)) {
-      if (installed.includes(component)) config = setConfigEntry(config, component, value);
+    // The preset's config, for the components chosen (`plan.config`), as plain values.
+    for (const [component, value] of Object.entries(plan?.config ?? {})) {
+      if (installed.includes(component)) config = setConfigEntry(config, component, starter.configLiteral(value));
     }
     write(CONFIG_FILE, config);
 
@@ -207,12 +224,12 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
       await installUiPackages(projectDir, component.ui, true);
     }
 
-    // Agent folders own their generated registry. Make the initial project current, not one that
-    // immediately fails doctor; later edits are regenerated explicitly by the operator.
-    if (components.includes("agents-folders")) {
-      step("pikit agents");
-      const command = installedCommand(projectDir, "agents");
-      if (command === undefined || await runComponentCommand(projectDir, command, []) !== 0) throw new CliError("`pikit agents` failed to generate the initial agent registry");
+    // Agent folders own their generated registry: the preset's command (`agents.folders.command`, which
+    // its feature declares) writes it once, so the project is current, not one that fails doctor.
+    if (layout !== undefined) {
+      step(`pikit ${layout}`);
+      const command = installedCommand(projectDir, layout);
+      if (command === undefined || (await runComponentCommand(projectDir, command, [])) !== 0) throw new CliError(`\`pikit ${layout}\` failed to generate the initial agent registry`);
     }
 
     step("pikit doctor");

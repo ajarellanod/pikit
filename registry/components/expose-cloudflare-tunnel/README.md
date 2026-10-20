@@ -7,8 +7,10 @@ this machine. The design note is [features/completed/expose.md](https://github.c
 - **Provides:** no capability. It is not an app component (nothing of it runs in the app, so it is not
   in `pikit.config.ts`): it adds the command `pikit expose`, a `cloudflared` service beside the app, and
   a step of `pikit configure` and of `pikit doctor`.
-- **Requires:** `deployment-docker` (its `up` runs the service), a domain on your Cloudflare account,
-  and a Cloudflare API token when you create, change or delete the tunnel.
+- **Requires:** a deployment supporting `services.compose` (implied by its `compose` file;
+  deployment-docker does), a domain on your Cloudflare account, and a Cloudflare API token when you
+  create, change or delete the tunnel. With deployment-local, `pikit new` / `pikit add` refuse it
+  before writing or asking for the token; `--force` does not bypass this.
 - **Target:** `server`. On Cloudflare (`durable`) the Worker is public already.
 - **Installs to:** `src/pikit/expose-cloudflare-tunnel/`.
 - **npm dependencies:** none.
@@ -73,8 +75,9 @@ https://bot.example.com
 
 ## How it runs beside the app
 
-`component.json` declares `"compose": "compose.yaml"`. `pikit add` records it in `pikit.json`, and
-`deployment-docker` adds it after its own compose.yaml for `up`, `down`, `restart`, `logs` and
+`component.json` declares `"compose": "compose.yaml"`, which needs `services.compose` of the
+project's deployment. `pikit add` checks that requirement before writing, records the file in
+`pikit.json`, and `deployment-docker` adds it after its own compose.yaml for `up`, `down`, `restart`, `logs` and
 `status` (`docker compose -f compose.yaml -f src/pikit/expose-cloudflare-tunnel/compose.yaml …`). The
 service (`cloudflare/cloudflared`, pinned) runs `tunnel run` with `TUNNEL_TOKEN` from
 `.env.cloudflared`, and reaches the app on compose's network: no port is published. Before

@@ -1,133 +1,142 @@
-# Composicion modular: plan de una sola ejecucion
+# Component composition: what a project's deployment supports, and presets that own their policy
 
-**Estado:** plan; no implementado.
+**Specified and built** in one change: deployment requirements in the manifests and in `pikit.json`,
+one pure planner every command asks (`packages/cli/src/project/composition.ts`), the creation policy
+in the presets (`project/preset-plan.ts`), and each registry's dashboard descriptor
+(`project/dashboard-manifest.ts`, `registry/dashboard/dashboard.json`).
 
-**Entrega:** una unica ejecucion coordinada con subagentes, un cambio integrado y una unica entrega. No hay fases funcionales, entregas parciales ni aprobaciones entre bloques. Las dependencias tecnicas y la verificacion final siguen existiendo: no se publican piezas incompletas.
+**Needed by:** nothing required. It closes a hole: a project with `deployment-local` and
+`proposals-local` could be created, since both run on `server`, although the first runs neither
+Compose files nor the deployer the second needs. `pikit up` then failed on a Compose file. Now the
+CLI refuses that composition, before it writes anything, and says why.
 
-## Objetivo y limites
+## What it gives
 
-La misma composicion debe recibir el mismo diagnostico desde el wizard, `new`, `add`, `remove`, `upgrade`, `ui`, `doctor` y las comprobaciones previas a arrancar. El wizard presenta alternativas y motivos; no mantiene una segunda implementacion de compatibilidad.
+- **The same answer everywhere.** `pikit new`, the wizard, `add`, `remove`, `upgrade`, `ui`,
+  `doctor`, the checks before `dev` and `up`, and `registry validate` ask one planner about the same
+  set of components and get the same problems. The wizard shows alternatives and reasons; it holds
+  no second copy of the rules.
+- **No decision by a component's name.** What the steward is granted, the config a new project
+  starts with, the agent layout and which features bring the dashboard are the preset's to say; which
+  components a dashboard needs is its registry's. The CLI keeps no list of the kit's components for
+  any of it (`NAMED_FOR`, `NEEDS_DASHBOARD`, `STARTER_EXTENSIONS`, `NOT_NAMED`, `STARTER_CONFIG`,
+  `UI_COMPONENTS` and `UI_DEFAULT_FOR` are gone). A registry with other names works the same.
 
-El caso que debe dejar de ser posible es un proyecto completo con `deployment-local` y `proposals-local`: ambos declaran `server`, pero el primero no ejecuta Compose ni el deployer que el segundo necesita.
+## Deployment requirements
 
-Incluido en esta entrega:
-- Requisitos de despliegue declarativos, inferencia desde `compose` y validacion compartida.
-- Persistencia de esos datos y comprobacion de la composicion candidata antes de modificar archivos.
-- Opciones incompatibles visibles pero no seleccionables en el wizard.
-- Extraccion de las reglas de comportamiento por IDs de componentes en la creacion del proyecto.
-- Politica explicita de permisos del steward en los presets.
-- Descriptor del dashboard de cada registro, en lugar de una lista de componentes en la CLI.
-- Pruebas negativas, un registro externo con nombres arbitrarios y documentacion coherente.
-
-Fuera de esta entrega:
-- Implementar el deployer nativo de launchd/systemd. La nueva validacion debe decir que no existe, no anunciarlo como soportado.
-- Git/HTTP registries, namespaces de componentes, contract packages o presets que mezclen varios registros. Son el trabajo separado de `features/registries-plan.md`.
-- Un motor de plugins, un DSL de condiciones, nuevos hooks arbitrarios de instalacion o un segundo runtime de agentes.
-- Cambios a `@pikit/core`, sus exports, los dos targets o los protocolos de ejecucion de Pi.
-- Modificar `techbot`, sus credenciales, datos, repositorio o servicios.
-- Mezclar los cambios pendientes del installer/PATH o del dashboard/chat que ya existen en el checkout.
-
-## Contrato comun fijado antes de repartir los archivos
-
-### Requisitos de despliegue
-
-Se amplian los manifiestos con esta forma, sin introducir objetos de infraestructura en el App:
+A project has one deployment: its `deployment-*` component (a kind, never a name). Two hand-written
+manifest fields say what it must do besides running the App:
 
 ```jsonc
 // deployment-docker/component.json
-"deployment": {
-  "supports": ["services.compose", "proposals.deployer"]
-}
+"deployment": { "supports": ["services.compose", "proposals.deployer"] }
 
 // proposals-local/component.json
-"requires": {
-  "pikit": "<rango actual>",
-  "contracts": "<rango actual>",
-  "capabilities": [],
-  "deployment": ["proposals.deployer"]
-},
+"requires": { "pikit": "0.0.1", "contracts": "0.0.1", "capabilities": [], "deployment": ["proposals.deployer"] },
 "compose": "compose.yaml"
 ```
 
-Decisiones cerradas:
-- `deployment.supports` solo lo declara un componente de kind `deployment`.
-- `requires.deployment` puede aparecer en cualquier componente. Un despliegue no se satisface a si mismo con un requisito circular.
-- Son conjuntos de nombres de protocolos/prestaciones, no nombres de componentes. Se valida formato, duplicados y estructura; no hay un enum cerrado de prestaciones en la CLI.
-- `services.compose` significa que el despliegue aplica las contribuciones Compose registradas con el protocolo actual. Un campo `compose` implica ese requisito automaticamente. Declararlo tambien a mano es redundante y se rechaza.
-- `proposals.deployer` significa que el despliegue puede activar el controlador del protocolo existente `@pikit/contracts/deployer`. No significa simplemente que hay un ejecutable llamado Docker.
-- Docker declara ambas prestaciones. Local, Cloudflare y celld no declaran prestaciones que no implementan.
-- Un registro externo puede usar una prestacion nueva con un nombre propio sin cambiar la CLI. Un requisito sin proveedor se diagnostica al componer; no se exige que su proveedor viva en ese mismo registro.
-- Los rangos de versiones siguen siendo los existentes `requires.pikit/contracts/adapter`. No se construye otro resolvedor semver para etiquetas de despliegue.
-- Los mismos datos se guardan en cada registro de componente instalado de `pikit.json`. La ausencia significa que el componente no declara prestaciones/requisitos; no se consultan IDs builtin para inventarlos.
-- `upgrade` detecta cambios solo de metadatos, aunque la version textual siga siendo 0.0.1. Se actualizan registro, igualdad y normalizacion conjuntamente.
-- No se agregan aliases, migraciones ni lectores especiales para formatos antiguos de 0.0.x.
+- **`deployment.supports`**, only on a `deployment-*` component: the protocols it implements beside
+  running the App.
+- **`requires.deployment`**, on any other component: what its one deployment must support for it to
+  work. A deployment needs nothing of a deployment (it would need itself).
+- **A `compose` file implies `services.compose`.** Writing it in `requires.deployment` as well is
+  refused as redundant. A deployment ships its own Compose file, never a `compose` contribution.
+- **Names of protocols, never of components**, and an open set: lowercase words joined by `.` or `-`
+  (`DEPLOYMENT_REQUIREMENT` in `registry/manifest.ts`). The CLI knows one by name,
+  `services.compose`, because the `compose` field implies it. A registry may use its own
+  (`acme.review-host`) without changing the CLI; a requirement nothing supports is a problem when it
+  is composed, wherever its provider would live.
+- **What the two kit names mean.** `services.compose`: the deployment runs the Compose files
+  components record, with today's protocol (deployment-docker adds each after its own compose.yaml).
+  `proposals.deployer`: it can activate a controller of `@pikit/contracts/deployer` (decisions in,
+  outcomes out), not merely that Docker is installed.
+- **Only what is real.** deployment-docker supports both. deployment-local, deployment-cloudflare and
+  deployment-celld support neither and declare nothing. proposals-local requires
+  `proposals.deployer` and ships a Compose file; expose-cloudflare-tunnel ships a Compose file.
+  proposals-github requires nothing of its deployment (GitHub and Workers Builds deploy).
+- **Recorded.** `pikit add` keeps both fields in the component's record in `pikit.json`, beside
+  `compose`, so `doctor` and `remove` check a project without its registry. Absent means "declares
+  nothing": no built-in name fills it in.
+- **Kit ranges stay as they are** (`requires.pikit`, `contracts`, `adapter`): requirements carry no
+  version.
+- A declaration proves nothing about the provider. The provider's own checks and the deployer
+  protocol's conformance suite (`createDeployerProtocolConformance`) still do that.
 
-Las declaraciones no prueban por si solas que un proveedor cumple el protocolo. Los checks del proveedor y la suite existente del deployer siguen siendo necesarios. Una fixture extranjera prueba extensibilidad de la CLI, no estabilidad de un nuevo proveedor real.
+`deploymentProblems` (`registry/manifest.ts`) holds the rules the schema cannot state, by kind:
+`deployment` only on a deployment, no `requires.deployment` or `compose` on one, no
+`services.compose` written by hand.
 
-### Planificador puro
-
-Archivo nuevo: `packages/cli/src/project/composition.ts`.
-
-API que todos los autores usaran:
+## The planner
 
 ```ts
-type DeploymentFacts = {
-  name: string;
-  compose?: string;
-  deployment?: { supports: readonly string[] };
-  requires?: { deployment?: readonly string[] };
-};
-
-type CompositionIssue = {
-  code: "deployment_missing" | "deployment_ambiguous" | "deployment_requirement_unmet";
-  component?: string;
-  requirement?: string;
-  deployment?: string;
-  deployments?: readonly string[];
-};
-
-type CompositionPlan = {
-  deployment?: string;
-  issues: readonly CompositionIssue[];
-};
-
 planComposition(components: readonly DeploymentFacts[]): CompositionPlan;
 introducedIssues(before: CompositionPlan, after: CompositionPlan): readonly CompositionIssue[];
 formatCompositionIssue(issue: CompositionIssue): string;
 ```
 
-Comportamiento:
-- Usa `kindOf` para encontrar el despliegue. Se comparte esa seleccion con `deployment-module.ts`; no quedan dos reglas de cardinalidad.
-- Cero despliegues es valido para un proyecto incompleto que no tenga requisitos de despliegue. Si algun componente necesita prestaciones, se devuelve `deployment_missing`; nunca se interpreta como requisito satisfecho.
-- Mas de un despliegue produce `deployment_ambiguous`. No se unen sus prestaciones.
-- Se comprueba cada requisito contra el unico despliegue seleccionado.
-- Las entradas y los diagnosticos se normalizan para que su identidad y orden sean deterministas. Un requisito se identifica por consumidor y protocolo, no por la redaccion del error.
-- No lee archivos, importa componentes, hace peticiones, ejecuta Docker ni arranca Apps.
-- No sustituye la resolucion de capabilities de runtime: reutiliza los checks existentes, que siguen siendo por App y basados en la composicion real.
-- Coste lineal en componentes y requisitos, usando sets. Sin backtracking ni solver general.
+`DeploymentFacts` is what a manifest and an install record have alike: `name`, `compose`,
+`deployment.supports`, `requires.deployment`. A plan is the one deployment, when there is one, and
+its issues:
 
-Politica de operaciones:
-- `new` valida el conjunto completo, incluidas offers, UI, features y eleccion de despliegue, antes de crear el directorio.
-- `add` y `upgrade` validan el borrador completo antes de confirmar y antes de aplicar. `upgrade --dry-run` diagnostica igualmente.
-- `remove` comprueba el conjunto restante y no puede introducir dependencias insatisfechas. Para cambiar un despliegue se retiran antes sus dependientes; no se introduce un comando `swap` en este trabajo.
-- Se permiten operaciones de reparacion sobre un proyecto ya incorrecto cuando no introducen nuevas obligaciones incumplidas. El estado restante sigue apareciendo como incorrecto en doctor; nunca se imprime green por el mero hecho de que la mutacion haya terminado.
-- `--force` conserva su significado actual para archivos/rangos donde ya se permite; no hace ejecutable una composicion nueva imposible.
-- Los consumidores de los registros instalados funcionan sin tener disponible el registro original.
-- El rechazo no modifica fuentes, config, manifest, lockfile, bases ni vendor, y no ejecuta hooks, instalaciones o despliegues. Las confirmaciones no constituyen permiso para saltarse esta validacion.
+| Code | When |
+|---|---|
+| `deployment_ambiguous` | more than one deployment: a project has one, and what each supports is never added together |
+| `deployment_missing` | a component needs something of a deployment and none is installed |
+| `deployment_requirement_unmet` | the one deployment does not support what a component needs (with `via`: `requires`, or `compose` for a Compose file) |
 
-### Contexto de doctor
+- No deployment is fine while nothing needs one (an unfinished project); it is never read as
+  "every requirement met".
+- An issue is identified by its code and fields (consumer, requirement, deployment), never by its
+  wording, and the list is sorted: the same composition always gives the same list.
+- Pure and linear: no file read, no component imported, no Docker, no App started, no solver.
+- It is not the runtime's capability graph. What each App provides and uses is still checked by
+  composing it (`doctor`, offers, the dashboard's providers). The planner covers what the deployment
+  does beside the App.
+- The selection of the one deployment (`deploymentsOf`, by kind) is shared with
+  `deployment-module.ts`: one cardinality rule.
 
-Se amplian `DoctorOptions` y el IO estructural del hook con `operation: "doctor" | "dev" | "up"`. El comando publico `doctor` usa `doctor`; `checkReady` transmite el modo correspondiente a su proceso hijo. No se agrega un flag publico nuevo por esto.
+### What each command does with it
 
-La composicion declarativa se comprueba antes de los hooks. Una composicion local incompatible no debe llegar a ejecutar Docker para descubrirlo.
+| Command | Check |
+|---|---|
+| `pikit new` | the whole candidate (the preset with its answers, the features chosen, the providers offered, the dashboard's components) before the directory is made |
+| the wizard | the plan again after each answer: a feature that would add an issue is shown disabled with the reason; the deployment the person chose is never changed for them |
+| `pikit add` | the whole draft, after offers are resolved, before the confirmation and before any write |
+| `pikit remove` | what remains: it may not introduce an issue (removing the only deployment that supports what another component needs) |
+| `pikit upgrade` | every component asked, as one set, before writing; `--dry-run` reports the same |
+| `pikit ui on` | the dashboard's components added to the project, as `add` does |
+| `pikit doctor` | the installed records, before any component's `doctor` hook |
+| `dev`, `up` | through `doctor`, so an incompatible composition stops before a hook or Docker runs |
+| `registry validate` | every preset's default, each alternative and feature, and their combinations (below) |
 
-En un proyecto Docker valido, `dev` no arranca el sidecar: proposals-local informa que la aplicacion de propuestas no esta activa en ese modo, sin hacer la comprobacion de un despliegue que no esta ocurriendo. Para `doctor/up` conserva sus comprobaciones de Compose. Se mantiene la nota de seguridad de execution-local. No se cambia el gate de aprobacion ni se hace pasar una propuesta por desplegada.
+- **Only what an operation introduces is refused** (`introducedIssues`). A project that is already
+  wrong can still be repaired: removing the incompatible consumer, or one of two deployments, goes
+  through. What remains wrong is still a problem in `doctor`; finishing an operation never prints
+  green on its own.
+- **`--force` does not bypass it.** It keeps its meaning for files and kit ranges; it never makes an
+  impossible composition runnable. A confirmation is not permission either.
+- **A refusal changes nothing**: no source, config, `pikit.json`, `package.json`, lockfile, base or
+  vendored kit, and no hook, install or deploy runs.
+- **Changing deployment** is removing the old one (its dependents first, when it is the only one that
+  supports them) and adding the new one. There is no `swap` command.
 
-## Politica de creacion propiedad del preset
+### Doctor's operation
 
-No se concede una herramienta porque un componente la pida. Los permisos del agente pertenecen al preset elegido y, despues de crearlo, al codigo del proyecto.
+`doctor` hooks and `DoctorOptions` carry `operation`: `"doctor"`, `"dev"` or `"up"`. The public
+`pikit doctor` passes `doctor`; the checks before `pikit dev` and `pikit up` pass theirs to the child
+that runs the hooks. No public flag was added.
 
-Se normaliza `features` a una sola forma de objeto y se actualizan todos los presets y fixtures de esta entrega. No se mantienen las formas antiguas como capa de compatibilidad.
+proposals-local's hook uses it: under `dev` it says that approved proposals are not applied in that
+mode (no deployer runs) and runs no Docker; under `doctor` and `up` it keeps its Compose checks. Its
+note about `execution-local` stays. The approval gate is unchanged, and nothing reports a proposal as
+deployed that was not.
+
+## Presets own the creation policy
+
+A component never grants a tool by asking for one. What the starter agent (the steward) may use
+belongs to the chosen preset, then to the project's code. A preset says it in four fields
+(`registry/schema/preset.schema.json`):
 
 ```yaml
 steward:
@@ -151,137 +160,144 @@ features:
       tools: [bash]
 ```
 
-Semantica:
-- `steward.tools/extensions` son listas explicitas. Los presets durable incluyen bash cuando procede. Un proveedor de herramientas instalado, incluso con un nombre diferente a bash, no obtiene permisos por su mera presencia.
-- Se eliminan `NAMED_FOR`, `STARTER_EXTENSIONS` y `NOT_NAMED` como decisiones internas de la CLI. La union de permisos solo considera el preset y las features efectivamente elegidas.
-- Los permisos adicionales se muestran en el hint/resumen antes de aceptar la feature. En modo no interactivo, elegir el preset/feature mediante los argumentos es la decision explicita.
-- Solo se aplica al steward inicial en `new`; `add`, `upgrade` y `ui on` no reescriben los permisos de agentes existentes.
-- Se validan las claves de herramientas y extensiones contra la descripcion de la composicion candidata, con setup sin start, no solo contra la presencia del nombre generico `agent.tool` en un manifesto. Se reutilizan los helpers de descripcion existentes.
-- `config` expresa valores del proyecto, no codigo ni plantillas ejecutables. Sus entradas corresponden a componentes conocidos del preset/alternativas y solo se aplican a los seleccionados. Sus valores pasan el esquema real del componente. Sustituye el default de router-basic en `STARTER_CONFIG`.
-- `ui: true` en una feature conserva la comodidad actual de creacion, pero deja de depender de `NEEDS_DASHBOARD`. No transforma un componente admin en una dependencia dura de una UI: su API puede seguir usandose sin dashboard.
-- `agents.folders` mantiene la pregunta uno/varios con una feature y un comando declarados por el preset. La CLI no reconoce el ID agents-folders.
-- El layout de archivos de agentes sigue siendo el formato existente del starter. Solo se ejecuta el comando declarado por el proveedor elegido, mediante `installedCommand/runComponentCommand`, despues de instalar y antes de doctor. No hay hooks de creacion arbitrarios.
-- Se valida antes de escribir que la feature de carpetas existe, que su comando esta declarado y que no hay ambiguedad. El README usa ese comando, no una cadena builtin.
-- Pueden permanecer tablas puramente cosmeticas con fallback generico a titulo/nombre. El criterio es que una coincidencia de ID no decida permisos, compatibilidad, defaults o ejecucion de comandos.
+- **`steward.tools` and `steward.extensions`**: explicit keys, the steward's grants. A chosen
+  feature's `steward` adds its own, shown in its hint before it is chosen; in a script, choosing the
+  preset and the feature by flags is the explicit decision. Nothing else grants: a tool provider
+  installed under any name (a shell called something else) is not named by the steward because it is
+  there. Each key must be an `agent.tool` (or `agent.extension`) key that a chosen component provides,
+  read from the candidate's description (setup, never start; `replay.tools` and the generated
+  `extensions` field). Grants apply only to the steward `pikit new` writes: `add`, `upgrade` and
+  `ui on` never rewrite an existing agent.
+- **`config`**: project values (never code), for components of the preset or its alternatives,
+  applied only to those chosen, and checked against the component's own schema. It replaces the
+  CLI's default for router-basic.
+- **`agents.folders`**: the one-or-several-agents question. `feature` names one of the preset's
+  features (by its first component), `command` a command that feature's component declares
+  (`commands`). Several agents chooses that feature; `pikit new` runs that command once, through the
+  installed component's command, after installing and before `doctor`, and its README names it. No
+  creation hook of another kind exists. A feature or command that does not exist, or is ambiguous, is
+  refused before anything is written. The CLI does not know the name agents-folders.
+- **`features`**: every entry is `{ components, ui?, steward? }`, named by its first component
+  (`--with <first>`) and shown by its title. `ui: true` brings the dashboard when the feature is
+  chosen; it makes no component depend on a UI (admin-proposals' API still works without one). The
+  old forms (a name, a list) are gone, with no reader for them (pikit 0.0.x promises no
+  compatibility).
+- Aliases (`extends` + `with`) inherit all of it. A feature not chosen brings no UI, grant, config or
+  command.
 
-La resolucion del preset se implementa una sola vez en el nuevo `project/preset-plan.ts`:
+`resolvePresetPlan(registry, { preset, targets, choices, ui })` resolves a preset once, for the
+wizard (at each answer), `pikit new` (with its final answers) and `registry validate`. It returns the
+components, config, UI and its components, the steward's grants, the agent layout, each feature with
+`available` and the reasons it is not, the composition plan, and every problem that refuses the plan.
+It calls `planComposition`; it holds no deployment rule of its own.
 
-```ts
-resolvePresetPlan(registry, { preset, targets, choices, ui }): Promise<ResolvedPresetPlan>;
-```
+Tables that only decorate (a label, a hint) may stay, with a generic fallback to a component's title
+or name; a name never decides a grant, a compatibility, a default or a command run.
 
-`ResolvedPresetPlan` devuelve `components`, `config`, `ui`, `steward`, `agents`, las features con `available` y `issues`, y el `CompositionPlan`. El wizard lo llama al cambiar elecciones y `new` lo llama con los argumentos definitivos; registry validate usa la misma funcion para sus casos. Este helper coordina la lectura del preset, offers y descriptor; no contiene otra implementacion de las reglas de despliegue, que siempre llama en `planComposition`. La descripcion de setup para validar permisos no ejecuta start.
+## The dashboard descriptor
 
-## Dashboard de cada registro
-
-Archivo nuevo: `registry/dashboard/dashboard.json`. El esquema y su lector viven en `packages/cli/src/project/dashboard-manifest.ts`.
+Each registry with a dashboard (`dashboard/files/`) describes it in `dashboard/dashboard.json`:
 
 ```json
 {
   "components": ["admin-auth-token", "admin-api", "settings-store"],
-  "defaultFor": {
-    "admin-auth-token": "admin.auth",
-    "settings-store": "settings"
-  }
+  "defaultFor": { "admin-auth-token": "admin.auth", "settings-store": "settings" }
 }
 ```
 
-- Sustituye `UI_COMPONENTS` y `UI_DEFAULT_FOR`. Los nombres concretos quedan como politica del dashboard de ese registro.
-- Se reutiliza la comprobacion actual de proveedores por App: un auth/settings alternativo presente en todas las Apps conserva su lugar; una satisfaccion parcial o desconocida no se adivina.
-- El descriptor no permite un default que no provee la capability indicada, componentes ausentes o incompatibles con el target.
-- `new --ui`, features con UI y `ui on` consumen el mismo descriptor y el mismo plan de componentes resultante.
-- `ui off` conserva el seguimiento de ownership actual: no elimina proveedores del usuario ni depende de recuperar el registro para saber que instalo.
-- Esto no agrega composicion entre registros: el dashboard y sus defaults proceden del registro elegido, como hoy.
+- `components`: what a project with this dashboard needs, in the order it is installed. `defaultFor`:
+  the capability each default stands for.
+- A default is installed only when the project's Apps lack its capability. Another provider of it in
+  every App keeps its place; one in some Apps only, or a composition that cannot be described, is
+  refused rather than guessed (the same per-App check as before).
+- `registry validate` refuses a descriptor of the wrong shape, a component the registry does not
+  have, and a default that is not one of `components` or does not provide its capability.
+- `pikit new --ui`, a feature with `ui: true` and `pikit ui on` read the same descriptor and get the
+  same components. `pikit ui off` removes only what the dashboard installed, from `pikit.json`, without
+  the registry.
+- The dashboard and its defaults are those of the registry the project comes from, as before:
+  nothing here composes registries.
 
-## Integracion que no puede faltar
+## Registry validation
 
-| Superficie | Cambio obligatorio |
-|---|---|
-| `registry/manifest.ts` | Campos, validacion estructural, normalizacion y descripcion del protocolo Compose sin hardcodear el proveedor. |
-| `project/pikit-json.ts` | Persistir los datos de composicion; que remove/doctor no necesiten el registro. |
-| `commands/add.ts` | `recordInstall`, planning del conjunto completo y verificacion despues de resolver offers, antes de writes. |
-| `commands/remove.ts` | Validar las obligaciones del conjunto restante y permitir reparar un estado incorrecto sin omitir diagnosticos. |
-| `commands/upgrade.ts` | Preflight de todo lo solicitado, dry-run, deriva de metadatos en sameInstall y aplicacion transaccional. |
-| `commands/new.ts` | Validar antes de mkdir, resolver politica de preset/UI y generar el layout sin IDs de componentes. |
-| `commands/wizard.ts` y `src/ui.ts` | Opciones con motivo de indisponibilidad; reevaluar con las decisiones actuales; no elegir otro despliegue por el usuario. |
-| `project/registry-source.ts` | Esquema canonico de presets, permisos, config, agentes y features; no filtrar solo por target. |
-| `commands/starter.ts` | Recibir permisos, config, layout y comandos resueltos. No decidirlos por nombres de componentes. |
-| `commands/ui.ts` y `project/dashboard.ts` | Descriptor por registro y seleccion por capacidades, sin duplicar el resolver existente. |
-| `commands/doctor.ts`, `commands/deployment.ts`, `project/component-doctor.ts` | Diagnostico previo a hooks y contexto de operacion. No agregar otro campo de error paralelo si basta `problems` del report actual. |
-| `project/deployment-module.ts` | Compartir la seleccion de un solo despliegue con el planificador. |
-| `registry/commands.ts` | Validar metadatos, descriptor, politica y combinaciones de alternativas de despliegue con features; no solo cada opcion por separado. |
-| Componentes | Declarar solo prestaciones reales; doctor de proposals-local coherente con dev/up. Los guards internos de proveedores permanecen como defensa en profundidad sin importar la CLI desde sus fuentes. |
-| Generados | Regenerar schemas e indice con el comando del repo; no editarlos a mano en paralelo. |
+Besides each manifest's `deploymentProblems` and the descriptor, `registry validate` checks each
+preset's policy (grants, config, layout) and its alternatives together, not one at a time:
 
-El rechazo de una feature incompatible no invalida todo un preset que ofrece alternativas. Registry validate comprueba que el preset base es valido, que las opciones anunciadas como disponibles lo son y que las no disponibles tienen un diagnostico. Un `--with` explicito incompatible falla, no desaparece de la seleccion silenciosamente.
+- the base preset with its defaults is valid;
+- every feature the wizard would offer as available is valid with each alternative of the
+  deployment question, and every one shown unavailable has its reason;
+- an incompatible feature does not make a preset that offers alternatives invalid (base offers
+  self-improvement, which deployment-local cannot run);
+- an explicit `--with` that cannot be composed fails; it never silently drops out of the selection.
 
-## Reparto de subagentes en la misma ejecucion
+## Decisions
 
-El coordinador crea un worktree de integracion real fuera de /tmp, con el HEAD capturado al comenzar. Todos los autores trabajan alli con ownership de archivos disjunto y rutas absolutas. Esto separa el encargo de los cambios ajenos que ya hay en el checkout. No se copia ni se carga ningun .env real. Se instala con el lockfile del repositorio.
+- **One deployment, never a union.** Two deployments are an ambiguity of their own, even when
+  together they would support everything.
+- **Requirements are an open set of protocol names**, checked for shape and duplicates only. No
+  closed enum in the CLI, no semver of their own.
+- **Refused before the first write**, in every command, and repairs allowed when they add no issue.
+- **The preset grants, never a component.** Unknown manifest fields cannot grant tools or extensions;
+  the schema refuses them.
+- **Metadata changes are upgrades.** `upgrade` sees a change of `requires.deployment`,
+  `deployment.supports` or `compose` even when the version string did not move, and records it with
+  the rest.
+- **No aliases, migrations or readers for older 0.0.x shapes** of presets or records.
+- **The guards inside providers stay.** deployment-local's `up` still refuses a Compose file: defence
+  in depth, without importing the CLI.
 
-No se deja que ocho agentes editen la misma rama y los mismos archivos sin ownership. Cualquier ajuste en archivos de otro autor se solicita al propietario; no se escribe por fuera de su lista.
+## Tests
 
-| Subagente | Responsabilidad y archivos propios |
-|---|---|
-| A - Contrato y planificador | `registry/manifest.ts`, `project/pikit-json.ts`, nuevos `project/composition.ts` y su test, tests de manifest/pikit-json. Entrega las interfaces exactas fijadas arriba. |
-| B - Transacciones | `commands/add.ts`, `remove.ts`, `upgrade.ts`, sus tests y tests nuevos de mutaciones de composicion. No modifica el esquema compartido. |
-| C - Wizard y creacion | `commands/new.ts`, `starter.ts`, `wizard.ts`, `project/registry-source.ts`, nuevo `project/preset-plan.ts`, `src/ui.ts`; sus tests y E2E del wizard. Consume el descriptor del autor D. |
-| D - Descriptor de dashboard | `commands/ui.ts`, `project/dashboard.ts`, nuevo `project/dashboard-manifest.ts`, `registry/dashboard/dashboard.json`, tests de UI/descriptor. No modifica archivos visuales del dashboard/chat. |
-| E - Doctor y arranque | `commands/doctor.ts`, `commands/deployment.ts`, `project/component-doctor.ts`, `project/deployment-module.ts`, hook y tests doctor de proposals-local y tests correspondientes de CLI. |
-| F - Datos oficiales | Manifiestos afectados y presets YAML canonicos. Las fixtures existentes las adapta el propietario de su archivo de test. No edita schemas o indice generados ni codigo de otros autores. |
-| G - Validacion y adversarial | `registry/commands.ts`, checks de registro necesarios, nuevo helper `testing/composition-registry.ts`, pruebas nuevas de matriz y registro externo bajo rutas nuevas propias. No parchea la implementacion de los otros autores para hacer pasar sus tests. |
-| H - Documentacion | SPEC, docs/components.md, docs/contracts.md, docs/cli.md, docs/dashboard.md, notas de deployment-local/cli-features, referencias de la skill y READMEs afectados. Trabaja en el worktree aislado. Los conflictos con documentacion pendiente del checkout principal se integran preservando ambos trabajos antes de entregar; no se difieren a otra entrega. No modifica fuentes visuales del dashboard/chat. |
+Pure cases for the planner (`composition.test.ts`), and cases through the public commands that check
+effects and their absence:
 
-Las firmas, nombres y reglas de este documento son el contrato de trabajo de todos los autores: ninguno inventa otra API durante la ejecucion. El coordinador resuelve divergencias dentro del mismo encargo, integra los cambios, ejecuta la generacion una sola vez y revisa el diff real. No hay aprobaciones funcionales entre autores.
+1. **The real case.** With deployment-local, self-improvement (proposals-local) is shown unavailable;
+   choosing it by flags fails before any file is made and before any login, and so does adding
+   proposals-local or expose-cloudflare-tunnel to such a project. deployment-docker with
+   self-improvement stays valid.
+2. **An external registry** with other names for hosts and consumers, and a protocol of its own
+   (`acme.review-host`): no built-in enum.
+3. **Two deployments** cannot satisfy a feature by adding what each supports: ambiguity.
+4. **Direct commands** (`new`, `add`, `remove`, `upgrade`) give the wizard's codes. A refusal leaves
+   config, `pikit.json`, `package.json`, lockfile, bases and `vendor/` byte for byte, and runs no hook
+   and no `bun install`.
+5. **Upgrade:** a provider losing a protocol blocks it; changed metadata with the same version is
+   seen; `--dry-run` writes nothing; several components are checked as one set.
+6. **Repairs:** removing an incompatible consumer, or resolving two deployments, goes through, and
+   what remains is still reported. Removing the only supporting deployment is refused.
+7. **Without the registry:** `doctor` and `remove` check from `pikit.json` and the installed files.
+8. **Modes:** an incompatible local project fails before Docker; a valid Docker project under `dev`
+   applies no proposals, starts no sidecar and says so; `doctor` and `up` keep their real checks.
+9. **Grants:** a shell tool of another name is not granted by being installed; unknown manifest
+   fields grant nothing; only the preset and chosen features grant, to the new steward only.
+10. **Agent folders:** a catalogue provider with another name and command keeps the question and
+    writes the files; an undeclared or ambiguous command fails before any write.
+11. **Dashboard:** external names in the descriptor, alternative auth and settings providers, an
+    unknown composition, partial providers, the Worker and the object; `ui off` keeps providers that
+    were there before, and the data.
+12. **Aliases and config:** aliases inherit the policy, router alternatives get only their config, a
+    feature not chosen contributes nothing.
+13. **Sensitivity:** breaking the single selection, the Compose inference or the persistence makes
+    their cases fail; renaming providers and consumers changes no answer.
+14. **Regression:** the kit's presets, two durable Apps, add/remove/upgrade, the installer and the
+    wizard end to end.
 
-Un revisor independiente de solo lectura examina el diff integrado y los resultados de las pruebas; intenta encontrar decisiones por ID, permisos implicitos, checks omitidos y escrituras antes del rechazo. Sus hallazgos se corrigen por el propietario del archivo dentro de esa misma ejecucion. La verificacion final no es una segunda entrega.
+## Not in this change
 
-## Matriz obligatoria de pruebas
+- **A deployer for deployment-local** (launchd or systemd). Self-improvement without Docker is still
+  not built; the CLI now refuses the combination with a reason instead of failing later on a Compose
+  file ([deployment-local.md](deployment-local.md#self-improvement-without-docker)).
+- **Services beside the app without Compose** (`cloudflared` as a unit): `compose` still means
+  "a deployment that supports `services.compose`".
+- Git and HTTP registries, component namespaces, contract packages and presets that mix registries
+  ([registries-plan.md](registries-plan.md)).
+- A plugin engine, a condition language, new kinds of install hooks, or a second agent runtime.
+- Any change to `@pikit/core`, its exports, the two targets or Pi's protocols.
+- A `swap` command for deployments, and a feature menu for `pikit add` without names.
 
-1. **Caso real:** local + proposals-local y local + expose-cloudflare-tunnel se anuncian como no disponibles; seleccionarlos por flags falla antes de crear archivos y antes de OAuth. Docker + propuestas sigue siendo valido.
-2. **Registro externo:** hosts y consumidores con nombres arbitrarios. Incluye una prestacion propia desconocida por el kit, por ejemplo `acme.review-host`, para demostrar que no existe un enum builtin cerrado.
-3. **Proveedor seleccionado:** dos despliegues no pueden satisfacer una feature sumando sus prestaciones; es un error de ambiguedad.
-4. **Operaciones directas:** new, add, remove y upgrade dan los mismos codigos/obligaciones que el wizard. Un rechazo conserva byte a byte config, manifest, package, lockfile, bases y vendor, y no llama hooks ni bun install.
-5. **Upgrade:** un proveedor que pierde una prestacion bloquea el cambio; metadatos modificados sin incremento textual de version se detectan; dry-run no escribe. Una actualizacion de varios componentes se comprueba como conjunto, no contra estados intermedios ficticios.
-6. **Reparacion:** retirar un consumidor incompatible o resolver una duplicidad permite corregir el proyecto; no se ocultan los problemas que permanezcan. Retirar el unico proveedor que necesita otro introduce error y se rechaza.
-7. **Sin registro:** doctor/remove pueden comprobar obligaciones con solo pikit.json y las fuentes instaladas.
-8. **Modos:** un proyecto local incompatible falla antes de Docker; un Docker valido en dev no aplica propuestas ni arranca sidecars y lo comunica. Doctor/up mantienen los checks reales de su operacion.
-9. **Permisos:** una herramienta externa de shell con otro nombre no se concede por instalarla. Un componente no puede conceder tools/extensions mediante campos desconocidos. Solo el preset y las features seleccionadas conceden claves existentes al steward inicial; nunca a agentes existentes durante add/upgrade.
-10. **Carpetas:** un proveedor de catalogo con otro nombre y otro comando conserva la pregunta y genera los archivos. Un comando no declarado o ambiguo falla antes de writes. No se ejecutan comandos ajenos.
-11. **Dashboard:** nombres externos en descriptor, auth/settings alternativos, composicion desconocida, satisfaccion parcial y Worker/object. UI off conserva proveedores preexistentes y los datos.
-12. **Aliases/config:** aliases heredan la politica, alternativas de router reciben solo su config y defaults, una feature no elegida no aporta UI, permisos ni comandos.
-13. **Prueba de sensibilidad:** en copias temporales aisladas, romper seleccion unica, inferencia Compose o persistencia de requisitos debe hacer fallar sus casos especificos. Cambiar solo el nombre de proveedores/consumidores no cambia la compatibilidad.
-14. **Regresion:** presets oficiales, dos Apps durable, add/remove/upgrade, instalador y wizard siguen pasando. No se tocan credenciales reales ni servicios del usuario.
+## Open questions
 
-No basta que las fixtures de los tests se ajusten todas mediante overrides que omitan la garantia. Las pruebas independientes llaman la interfaz publica y comprueban efectos y ausencias de efectos.
-
-## Verificacion y cierre del unico encargo
-
-En el worktree integrado:
-
-```sh
-bun run registry generate
-bun run registry validate
-bun run typecheck
-bun run lint
-perl -e 'alarm 180; exec @ARGV' bun test packages/cli/src/project/composition.test.ts
-perl -e 'alarm 600; exec @ARGV' bun test
-PIKIT_E2E=1 perl -e 'alarm 300; exec @ARGV' bun test packages/cli/src/e2e-wizard.test.ts
-PIKIT_INSTALLER_TEST=1 perl -e 'alarm 180; exec @ARGV' bun test installer/install.test.ts
-perl -e 'alarm 300; exec @ARGV' bun run test:workerd
-git diff --check
-```
-
-Tambien se ejecutan los tests nuevos de transacciones y registro externo por sus rutas definitivas. Los procesos largos usan spawn asincrono; no se introduce el spawnSync que puede colgar Bun 1.4.x. No se carga .env real para hacer pasar fixtures.
-
-Un timeout o una suite incompleta no se informa como exito. Si aparece un fallo ajeno, se contrasta con el mismo baseline limpio y se documenta; no se arregla por accidente otra funcionalidad para conseguir un verde aparente. Los checks que precisan herramientas no disponibles se enumeran como cobertura pendiente, no como pruebas pasadas.
-
-Criterios de aceptacion del conjunto:
-- Ninguna decision de compatibilidad o permiso depende de los IDs builtin afectados.
-- Una composicion invalida se detecta antes de modificar el proyecto.
-- Se preservan los checks de runtime, separacion por App, aprobacion y recuperacion existentes.
-- El caso techbot se reproduce como fixture y recibe un motivo util, no un error de archivo Compose ausente.
-- Metadatos, persistencia, validacion, wizard, comandos directos, schemas, registro y documentacion se entregan juntos.
-- El diff no contiene cambios de core, deployer nativo, proyectos reales, datos o credenciales ni trabajo ajeno.
-
-La entrega final incluye resumen de archivos, decisiones, pruebas ejecutadas y cobertura pendiente. El commit usa paths explicitos y se revisa el staged diff. Publicar en main no se confunde con escribir el plan: solo se hace cuando la orden de ejecucion incluya publicarlo.
+- **Requirements of runtime capabilities.** The planner is about the deployment; a component that
+  needs, say, a shell in the App still relies on `use()` and composing. Nothing has needed both yet.
+- **More protocols.** A second consumer of a deployment protocol (a tunnel as a unit, a native
+  deployer) names its own; the CLI needs no change, only the deployment's honest `supports`.

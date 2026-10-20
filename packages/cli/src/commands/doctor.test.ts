@@ -5,9 +5,10 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_REGISTRY } from "../paths.ts";
 import { OPERATION_MARKER } from "../project/operation.ts";
 import { emptyManifest, hashOf, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { runCli } from "../testing/cli.ts";
@@ -18,7 +19,7 @@ afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true 
 
 /**
  * A project with `checked` (a component whose `doctor.ts` reports the variable CHECKED_PROBLEM, when
- * set, and its config's `fail`) and `deployment-fake` (whose `up` writes `deployed`). `pikit.json`
+ * set, and its config's `fail`) and `deployment-fake` (whose `up` writes `deployed`, `dev` `dev-ran`). `pikit.json`
  * records the check as `pikit add` does, unless `declared` is false.
  */
 function project(check: string | undefined, declared = check !== undefined): string {
@@ -30,7 +31,7 @@ function project(check: string | undefined, declared = check !== undefined): str
     "package.json": '{ "name": "checked", "dependencies": {} }\n',
     "src/pikit/checked/index.ts": 'import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({\n  name: "checked",\n  config: { type: "object", properties: { fail: { type: "string" } } } as never,\n  setup() {},\n});\n',
     "src/pikit/deployment-fake/index.ts":
-      'import { writeFileSync } from "node:fs";\nimport { join } from "node:path";\n\nexport async function up(args: { cwd: string }) {\n  writeFileSync(join(args.cwd, "deployed"), "");\n}\n',
+      'import { writeFileSync } from "node:fs";\nimport { join } from "node:path";\n\nexport async function up(args: { cwd: string }) {\n  writeFileSync(join(args.cwd, "deployed"), "");\n}\n\nexport async function dev(args: { cwd: string }): Promise<number> {\n  writeFileSync(join(args.cwd, "dev-ran"), "");\n  return 0;\n}\n',
     "pikit.config.ts":
       'import { defineApp } from "@pikit/core";\nimport checked from "./src/pikit/checked/index.ts";\n\nexport default defineApp({ components: [checked], config: { checked: { fail: "the config says so" } } });\n',
   };
@@ -237,6 +238,85 @@ test("a generated file (the manifest's `generated`) is never reported modified; 
   const run = await runCli(["doctor"], dir);
   expect(run.out).toContain(`modified: ${edited} (checked)`);
   expect(run.out).not.toContain(`modified: ${seed}`);
+});
+
+/**
+ * `checked` needs `proposals.deployer` of the deployment and ships a Compose file, as pikit.json records
+ * them; `deployment-fake` supports `supports` (nothing, when absent). Names are arbitrary: only the
+ * records and the kind count.
+ */
+function needsDeployment(dir: string, supports?: string[]): void {
+  const manifest = readProjectManifest(dir);
+  const checked = manifest.components.checked as NonNullable<(typeof manifest.components)[string]>;
+  checked.requires = { ...checked.requires, deployment: ["proposals.deployer"] };
+  checked.compose = "src/pikit/checked/compose.yaml";
+  if (supports !== undefined) (manifest.components["deployment-fake"] as NonNullable<(typeof manifest.components)[string]>).deployment = { supports };
+  writeProjectManifest(dir, manifest);
+}
+
+/** A check that records what it ran for (a file `operation-<op>`), and finds nothing. */
+const RECORDS = 'import { writeFileSync } from "node:fs";\n\nexport async function doctor(io: { operation?: string }) {\n  writeFileSync(`operation-${String(io.operation)}`, "");\n  return [];\n}\n';
+
+test("a composition whose deployment lacks what a component needs: doctor, up and dev refuse with why, and no component's check runs", async () => {
+  const dir = project(RECORDS);
+  needsDeployment(dir);
+  const unmet = (requirement: string) => `checked needs its deployment to support "${requirement}"`;
+
+  const run = await runCli(["doctor"], dir);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain(`${unmet("proposals.deployer")}, which deployment-fake does not: use a deployment that supports it, or remove checked`);
+  expect(run.err).toContain(`${unmet("services.compose")} (it ships a Compose file, which only a deployment that runs them can start)`);
+  expect(run.out).toContain("the components' own checks did not run: the composition has problems");
+  expect(run.out).not.toContain("pikit doctor: green");
+
+  for (const command of ["up", "dev"]) {
+    const refused = await runCli([command], dir);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain(unmet("proposals.deployer"));
+    expect(refused.err).toContain("fix what `pikit doctor` reports first");
+  }
+  expect(existsSync(join(dir, "deployed"))).toBe(false);
+  expect(existsSync(join(dir, "dev-ran"))).toBe(false);
+  for (const operation of ["doctor", "dev", "up"]) expect(existsSync(join(dir, `operation-${operation}`))).toBe(false);
+});
+
+test("a component's check is told what it runs for: doctor, the check before dev, or before up", async () => {
+  const dir = project(RECORDS);
+  needsDeployment(dir, ["services.compose", "proposals.deployer"]);
+  expect((await runCli(["doctor"], dir)).code).toBe(0);
+  expect((await runCli(["dev"], dir)).code).toBe(0);
+  expect((await runCli(["up"], dir)).code).toBe(0);
+  for (const operation of ["doctor", "dev", "up"]) expect(existsSync(join(dir, `operation-${operation}`))).toBe(true);
+  expect(existsSync(join(dir, "dev-ran"))).toBe(true);
+  expect(existsSync(join(dir, "deployed"))).toBe(true);
+});
+
+test("proposals-local's check on a valid Docker-shaped project: dev runs no docker and starts; doctor and up still run Compose's check", async () => {
+  const dir = project(readFileSync(join(DEFAULT_REGISTRY, "components/proposals-local/files/src/pikit/proposals-local/doctor.ts"), "utf8"));
+  needsDeployment(dir, ["services.compose", "proposals.deployer"]);
+  // A fake docker on PATH: it logs each call and lists a Compose project without the deployer.
+  const calls = join(dir, "docker-calls");
+  mkdirSync(join(dir, "bin"));
+  writeFileSync(join(dir, "bin", "docker"), `#!/bin/sh\necho "$*" >> "${calls}"\necho app\n`);
+  chmodSync(join(dir, "bin", "docker"), 0o755);
+  const env = { PATH: `${join(dir, "bin")}:${process.env.PATH ?? ""}` };
+
+  const started = await runCli(["dev"], dir, { env });
+  expect(started.err).toBe("");
+  expect(started.code).toBe(0);
+  expect(existsSync(join(dir, "dev-ran"))).toBe(true);
+  expect(existsSync(calls)).toBe(false);
+
+  const checked = await runCli(["doctor"], dir, { env });
+  expect(checked.code).toBe(1);
+  expect(checked.err).toContain("checked: Compose lists no deployer service");
+  expect(readFileSync(calls, "utf8")).toBe("compose -f compose.yaml -f src/pikit/checked/compose.yaml config --services\n");
+
+  const refused = await runCli(["up"], dir, { env });
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("checked: Compose lists no deployer service");
+  expect(existsSync(join(dir, "deployed"))).toBe(false);
+  expect(readFileSync(calls, "utf8").split("\n").filter((line) => line !== "")).toHaveLength(2);
 });
 
 test("a component whose only use is its routes is unused without a server, but not on Cloudflare, where the Worker's host serves them", () => {

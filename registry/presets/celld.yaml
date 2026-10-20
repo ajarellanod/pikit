@@ -30,10 +30,30 @@ choose:
   - kind: channel
     question: "Additional channels? (optional; the dashboard is included)"
     multiple: true
+# What the starter agent, the steward, is granted, by key: only what is written here and in the chosen
+# features below; a component installed grants nothing by being installed. bash included: here commands
+# run in each conversation's sandbox (execution-do), not as a server's user.
+steward:
+  tools: [read, write, edit, bash, fetch, websearch]
+  extensions: [pikit-self]
+# Config values the new project starts with, each applied only when its component is installed:
+# router-basic sends every message to the steward.
+config:
+  router-basic:
+    defaultAgent: steward
+# The wizard's one-or-several-agents question: several agents means the feature agents-folders, whose
+# command `pikit agents` writes src/extensions/agents.ts from the folders in src/agents/.
+agents:
+  folders:
+    feature: agents-folders
+    command: agents
 features:
-  - agents-folders
-  - router-rules
-  - [agents-live, router-rules, settings-store]
-  - tool-mcp
-  - health-registry
-  - [admin-proposals, proposals-github, repo-github-app]
+  - components: [agents-folders]
+  - components: [router-rules]
+  - components: [agents-live, router-rules, settings-store]
+  - components: [tool-mcp]
+  - components: [health-registry]
+  # Self-improvement: proposals as GitHub pull requests, approved in the dashboard (admin-proposals,
+  # reached only there: choosing it brings the dashboard).
+  - components: [admin-proposals, proposals-github, repo-github-app]
+    ui: true

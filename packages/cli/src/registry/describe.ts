@@ -63,6 +63,7 @@ export function mergeGenerated(halves: readonly Generated[]): Generated {
   const tools = merge((h) => h.tools);
   const exampleTools = merge((h) => h.exampleTools);
   const modelProviders = union(halves.map((h) => h.modelProviders ?? []));
+  const extensions = union(halves.map((h) => h.extensions ?? []));
   return {
     provides: union(halves.map((h) => h.provides)),
     requires: union(halves.map((h) => h.requires)),
@@ -70,6 +71,7 @@ export function mergeGenerated(halves: readonly Generated[]): Generated {
     ...(tools !== undefined && { tools }),
     ...(exampleTools !== undefined && { exampleTools }),
     ...(modelProviders.length > 0 && { modelProviders }),
+    ...(extensions.length > 0 && { extensions }),
   };
 }
 
@@ -92,7 +94,7 @@ export function configExamples(component: ComponentDefinition): unknown[] {
 
 /**
  * What `setup` declares with the default config and with each example config: every list in that
- * order, without repeats; `tools` and `modelProviders` only the default config's, the examples' other
+ * order, without repeats; `tools`, `modelProviders` and `extensions` only the default config's, the examples' other
  * tools in `exampleTools`.
  */
 export async function describeComponent(component: ComponentDefinition, target: Target): Promise<Generated> {
@@ -118,6 +120,7 @@ export async function describeComponent(component: ComponentDefinition, target: 
     ...(own.tools !== undefined && { tools: own.tools }),
     ...(Object.keys(exampleTools).length > 0 && { exampleTools }),
     ...(own.modelProviders !== undefined && { modelProviders: own.modelProviders }),
+    ...(own.extensions !== undefined && { extensions: own.extensions }),
   };
 }
 
@@ -141,9 +144,13 @@ export async function describeSetup(component: ComponentDefinition, target: Targ
   const described = description.components.find((c) => c.name === component.name);
   if (described === undefined) throw new Error(`describe() does not list "${component.name}"`);
   // The keys agents name models by (`anthropic/…`), which `pikit new` checks its starter agent against.
-  const modelProviders = Object.entries(description.capabilities["model.provider"]?.keys ?? {})
-    .filter(([, owner]) => owner === component.name)
-    .map(([key]) => key);
+  const ownKeys = (capability: string) =>
+    Object.entries(description.capabilities[capability]?.keys ?? {})
+      .filter(([, owner]) => owner === component.name)
+      .map(([key]) => key);
+  const modelProviders = ownKeys("model.provider");
+  // The extension keys a preset's `steward.extensions` names, which `pikit new` checks before writing.
+  const extensions = ownKeys("agent.extension");
 
   return {
     provides: described.provides,
@@ -151,6 +158,7 @@ export async function describeSetup(component: ComponentDefinition, target: Targ
     optional: described.optional,
     ...(recorded.tools !== undefined && { tools: recorded.tools }),
     ...(modelProviders.length > 0 && { modelProviders }),
+    ...(extensions.length > 0 && { extensions }),
   };
 }
 

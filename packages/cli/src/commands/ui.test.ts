@@ -82,9 +82,14 @@ function registry(files: Record<string, string>): string {
   return root;
 }
 
-/** Replaces the registry's dashboard with `files`. */
+/** The registry's dashboard descriptor: the kit's components and defaults, under their names here. */
+const DESCRIPTOR = { components: ["admin-auth-token", "admin-api", "settings-store"], defaultFor: { "admin-auth-token": "admin.auth", "settings-store": "settings" } };
+
+/** Replaces the registry's dashboard with `files`, and its descriptor. */
 function ship(root: string, files: Record<string, string>): void {
   rmSync(join(root, "dashboard"), { recursive: true, force: true });
+  mkdirSync(join(root, "dashboard"), { recursive: true });
+  writeFileSync(join(root, "dashboard", "dashboard.json"), JSON.stringify(DESCRIPTOR));
   for (const [file, text] of Object.entries(files)) {
     mkdirSync(join(root, "dashboard", "files", file, ".."), { recursive: true });
     writeFileSync(join(root, "dashboard", "files", file), text);

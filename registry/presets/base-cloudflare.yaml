@@ -4,6 +4,7 @@
 # deployment-cloudflare deploys it; `pikit up` checks that the object's App starts there (/health).
 # No dashboard, no channel, no runtime and so no conversation registry yet (conversations-kv creates conversations
 # through the runtime's `agent.conversations`): those arrive as Cloudflare components, added after.
+# No tool, extension or router either: no `steward` grants, `config` or features.
 title: "Cloudflare infrastructure: a Worker and Durable Objects, storage only (no assistant or dashboard)"
 components:
   - storage-do

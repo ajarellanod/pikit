@@ -63,6 +63,14 @@ export function deploymentRequirements(component: DeploymentFacts): { requiremen
   return [...needs].sort(([a], [b]) => a.localeCompare(b)).map(([requirement, via]) => ({ requirement, via }));
 }
 
+/**
+ * The planner's input from install records by name (`pikit.json`'s components): no registry needed,
+ * so `doctor` and `remove` check a project whose registry is gone.
+ */
+export function compositionOf(records: Readonly<Record<string, Omit<DeploymentFacts, "name">>>): DeploymentFacts[] {
+  return Object.entries(records).map(([name, record]) => ({ name, compose: record.compose, deployment: record.deployment, requires: record.requires }));
+}
+
 /** The composition's deployment and its problems. `components`: every component of it, the deployment included. */
 export function planComposition(components: readonly DeploymentFacts[]): CompositionPlan {
   const byName = new Map(components.map((component) => [component.name, component]));

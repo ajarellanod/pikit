@@ -315,7 +315,7 @@
     "compose": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ya?ml$",
-      "description": "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and `deployment-docker` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. Only for a component whose targets include server."
+      "description": "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and the deployment that supports `services.compose` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. So it implies the requirement `services.compose`, never written in `requires.deployment`: a composition whose deployment does not support it is refused. Only for a component whose targets include server."
     },
     "deployment": {
       "type": "object",

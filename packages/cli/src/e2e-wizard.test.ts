@@ -333,6 +333,39 @@ test.skipIf(!E2E)(
   TIMEOUT,
 );
 
+test.skipIf(!E2E)(
+  "a feature the chosen deployment cannot run is shown, not selectable, with why; the deployment is never changed for it",
+  async () => {
+    const selfImprovement = componentLabel("admin-proposals");
+    for (const [deployment, available] of [["deployment-local", false], ["deployment-docker", true]] as const) {
+      const name = `si-${available ? "docker" : "local"}`;
+      const w = wizard();
+      await w.waitFor("Name of your agent");
+      w.type(`${name}\r`);
+      let at = await runOn(w, "server");
+      at = await answer(w, CHANNELS, [componentLabel("channel-http")], at);
+      at = await answer(w, DEPLOYMENTS, [componentLabel(deployment)], at);
+      at = await answer(w, AGENTS, ["One agent"], at);
+      const shown = await menu(w, FEATURES, at);
+      const index = shown.options.findIndex((option) => shows(option.text, selfImprovement));
+      expect(index).toBeGreaterThanOrEqual(0);
+      const line = shown.options[index]?.text ?? "";
+      if (available) expect(line).not.toContain("not with these answers");
+      else expect(line).toContain(`${selfImprovement} (not with these answers: proposals-local needs its deployment to support`);
+      // Going to it and pressing Space checks it only where it is available.
+      await keys(w, DOWN.repeat(index), SPACE);
+      await Bun.sleep(300);
+      const drawn = w.text().slice(shown.end);
+      const lines = drawn.split("\n").filter((each) => each.includes(selfImprovement));
+      expect(lines.at(-1)?.includes("◼")).toBe(available);
+      await keys(w, String.fromCharCode(3));
+      expect(await w.exited).toBe(130);
+      expect(existsSync(join(parent, name))).toBe(false);
+    }
+  },
+  TIMEOUT,
+);
+
 /**
  * Answers the preset, optional channels (none by default), and optional features. The dashboard is
  * included without selecting it. Declines configuration once the project is written. Returns

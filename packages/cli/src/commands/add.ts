@@ -9,7 +9,9 @@
  *      `requires.contracts` and `requires.adapter` (a range it
  *      must state is refused when missing, even with `--force`), and that this CLI's kit is not older
  *      than the project's nor outside what an installed component accepts (`checkKit`); warn for each
- *      required capability nothing provides, by what `pikit.config.ts` composes now (`offers.ts`)
+ *      required capability nothing provides, by what `pikit.config.ts` composes now (`offers.ts`); refuse
+ *      what its deployment could not run, for the whole set with the providers accepted
+ *      (`checkComposition`: a second deployment, a requirement it does not support), `--force` or not
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies
  *      and dev dependencies, environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
@@ -25,7 +27,8 @@
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not);
  *      on Cloudflare, also in the Worker's App when its `component.json`'s `apps.worker` says so (C1)
  *   9. append its variables to `.env.example` (a reinstall replaces its block)
- *  10. record the registry, version, commit, kit ranges, file hashes, hooks, commands and the npm packages it added
+ *  10. record the registry, version, commit, kit ranges, deployment requirements (or what a deployment
+ *      supports), file hashes, hooks, commands and the npm packages it added
  *      in `pikit.json`, and keep each file
  *      as installed, its base, in `pikit-bases/` (`bases.ts`)
  *  11. `pikit doctor`, its notes printed (a provider nothing uses)
@@ -40,7 +43,8 @@ import { join } from "node:path";
 import { hasDefaultExport } from "../registry/imports.ts";
 import { kitRangeProblems } from "../registry/checks.ts";
 import { adapterVersion, contractsVersion, coreVersion } from "../registry/commands.ts";
-import { BOTH_APPS, commandProblems, HOOKS, type Manifest, uiProblems } from "../registry/manifest.ts";
+import { BOTH_APPS, commandProblems, deploymentProblems, HOOKS, type Manifest, uiProblems } from "../registry/manifest.ts";
+import { type CompositionIssue, compositionOf, formatCompositionIssue, introducedIssues, planComposition } from "../project/composition.ts";
 import { APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { BASES_DIR, basePath, unreferencedBases } from "../project/bases.ts";
 import { componentUiFiles, settingsDir, viewDir } from "../project/dashboard.ts";
@@ -129,6 +133,8 @@ export async function add(projectDir: string, names: readonly string[], options:
   // Steps 1–5 for the components and the providers they bring, before anything is written: a refusal
   // (installed, incompatible, a conflict, a config shape, a "no") leaves the project as it was.
   const draft = readDraft(projectDir);
+  // The composition as it is: what this add must not make worse (`checkComposition`).
+  const before = structuredClone(draft.project.components);
   checkKit(projectDir, draft.project, options.force === true);
   const registryName = registryKey(projectDir, draft.project, options.registry);
   const location = draft.project.registries[registryName] as string;
@@ -143,6 +149,9 @@ export async function add(projectDir: string, names: readonly string[], options:
   const composed = await composedProvides(projectDir, named.filter((name) => name in draft.project.components));
   draft.provided = composed;
   const plans = named.map((name) => planInstall(projectDir, draft, registry, registryName, name, options));
+  // What the named components need of the deployment, before anything is asked; again below, with the providers accepted.
+  const command = `pikit add ${named.join(" ")}`;
+  checkComposition(before, draft.project.components, command);
   if (options.quiet !== true) for (const plan of plans) describePlan(plan);
   await confirmPlans(plans, options);
   const offers = composed === undefined ? [] : await acceptedOffers(registry, named, installed, draft.project.targets, composed, options);
@@ -155,6 +164,8 @@ export async function add(projectDir: string, names: readonly string[], options:
     if (options.quiet !== true) describePlan(offered);
     plans.push(offered);
   }
+  // An accepted provider may need something of the deployment too (a `compose` file): the whole set, before any write.
+  if (offers.length > 0) checkComposition(before, draft.project.components, command);
 
   // Steps 6–10 and `bun install`, as one transaction.
   await applyInstall(projectDir, `pikit add ${named.join(" ")}${options.force === true ? " --force" : ""}`, draft, plans, "nothing was added");
@@ -401,6 +412,7 @@ export function planInstall(
   }
   checkCompatible(project.targets, manifest);
   checkCommands(project, manifest);
+  checkDeploymentFields(manifest);
   warnUnprovided(project, manifest, draft.provided);
   if (draft.provided !== undefined) draft.provided = mergeProvided(draft.provided, providedByManifests([manifest], project.targets));
 
@@ -483,6 +495,8 @@ export function recordInstall(
       pikit: manifest.requires.pikit,
       ...(manifest.requires.contracts !== undefined && { contracts: manifest.requires.contracts }),
       ...(manifest.requires.adapter !== undefined && { adapter: manifest.requires.adapter }),
+      // What it needs of the project's deployment: checked from this record, without its registry (`composition.ts`).
+      ...(manifest.requires.deployment !== undefined && { deployment: manifest.requires.deployment }),
     },
     files: hashes,
     dependencies: manifest.dependencies,
@@ -497,6 +511,8 @@ export function recordInstall(
     ...(manifest.commands !== undefined && { commands: projectCommands(name, manifest.commands) }),
     // The services `deployment-docker` runs beside the app, by its project path.
     ...(manifest.compose !== undefined && { compose: `${ownDir(name)}${manifest.compose}` }),
+    // What a deployment supports, which the other components' requirements are checked against.
+    ...(manifest.deployment !== undefined && { deployment: manifest.deployment }),
     // Files a hook rewrites, and its UI project's lockfile: never reported as the user's edits.
     ...((manifest.generated !== undefined || manifest.ui !== undefined) && {
       generated: [...(manifest.generated ?? []).map((file) => `${ownDir(name)}${file}`), ...(manifest.ui === undefined ? [] : uiGenerated(manifest.ui.target))],
@@ -648,6 +664,36 @@ export function checkCommands(project: ProjectManifest, manifest: Manifest): voi
       throw new CliError(`${manifest.name} declares the command "pikit ${command}", which ${owner} already declares: a command has one owner, so only one of them can be installed`);
     }
   }
+}
+
+/** Refuses a component whose deployment fields the schema does not check (`deploymentProblems`): a registry need not be validated. */
+export function checkDeploymentFields(manifest: Manifest): void {
+  const own = deploymentProblems(manifest);
+  if (own.length > 0) throw new CliError(`${manifest.name}'s component.json: ${own.join("; ")}`);
+}
+
+/**
+ * The problems of its deployment (`composition.ts`) the composition `after` has that `before` did not:
+ * what an operation would introduce. Both are `pikit.json`'s records by name, so nothing is read from
+ * a registry. Problems the project has already are not this operation's: a repair stays possible, and
+ * `pikit doctor` keeps reporting them.
+ */
+export function compositionIssues(before: ProjectManifest["components"], after: ProjectManifest["components"]): readonly CompositionIssue[] {
+  return introducedIssues(planComposition(compositionOf(before)), planComposition(compositionOf(after)));
+}
+
+/** What a refusal for `issues` says: `command`, each issue (`formatCompositionIssue`), and that nothing was written. */
+export function compositionRefusal(command: string, issues: readonly CompositionIssue[], hint = ""): string {
+  return `${command} is refused: the project's deployment could not run the result (nothing was written; --force does not change it):\n  ${issues.map(formatCompositionIssue).join("\n  ")}${hint === "" ? "" : `\n${hint}`}`;
+}
+
+/**
+ * Refuses, before any write, an operation (`command`) whose result `after` has a problem of its
+ * deployment `before` did not (`compositionIssues`). `--force` never skips it, nor does a confirmation.
+ */
+export function checkComposition(before: ProjectManifest["components"], after: ProjectManifest["components"], command: string): void {
+  const issues = compositionIssues(before, after);
+  if (issues.length > 0) throw new CliError(compositionRefusal(command, issues));
 }
 
 /** Where a component's own files go; the plan names every file it writes anywhere else. */

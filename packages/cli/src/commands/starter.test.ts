@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
-import { agent, agentPrompt, BUNFIG, gitignore, introduction, NEEDS_DASHBOARD, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterExtensions, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
+import { agent, agentPrompt, BUNFIG, configLiteral, gitignore, introduction, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, tsconfig, upText, withKitLocation } from "./starter.ts";
 
 test("a project is ready for a registry of its own and a dashboard: tsc and bun test leave registry/ and src/dashboard/ out, and its lib has ES2023", () => {
   const config = JSON.parse(tsconfig()) as { compilerOptions: { lib: string[] }; exclude: string[] };
@@ -26,7 +26,7 @@ test("the starter prompt names Steward and says where it is reached", () => {
 });
 
 test("the starter agent's file carries that prompt, quoted for TypeScript", () => {
-  const file = agent([], "faux/echo", [{ name: "channel-telegram" }]);
+  const file = agent({ model: "faux/echo", channels: [{ name: "channel-telegram" }] });
 
   expect(file).toContain(`systemPrompt: "You are Steward, a helpful assistant that people talk to in Telegram chats. Answer briefly and plainly.",`);
   expect(file).toContain(`model: "faux/echo"`);
@@ -34,27 +34,24 @@ test("the starter agent's file carries that prompt, quoted for TypeScript", () =
 });
 
 test("the starter agent is the project's steward, with pikit-self or without it", () => {
-  expect(agent([], "faux/echo")).toContain('  name: "steward",\n  model: "faux/echo",\n  steward: true,\n');
-  expect(agent(["read"], "faux/echo", [], "server", ["pikit-self"])).toContain("  steward: true,\n");
+  expect(agent({ model: "faux/echo" })).toContain('  name: "steward",\n  model: "faux/echo",\n  steward: true,\n');
+  expect(agent({ model: "faux/echo", tools: ["read"], extensions: ["pikit-self"] })).toContain("  steward: true,\n");
 });
 
-test("agent folders keep the prompt in SYSTEM.md only, with the same tools and steward identity", () => {
-  const file = agent(["read", "bash"], "faux/echo", [], "server", ["pikit-self"], ["agents-folders"]);
+test("agent folders keep the prompt in SYSTEM.md only, with the same tools and steward identity, and name the preset's command", () => {
+  const file = agent({ model: "faux/echo", tools: ["read"], extensions: ["pikit-self"], installed: ["read", "bash"], folders: "crew" });
   expect(file).toContain('name: "steward"');
   expect(file).toContain("steward: true");
   expect(file).not.toContain("systemPrompt:");
-  expect(file).toContain("SYSTEM.md");
+  expect(file).toContain("SYSTEM.md; run `pikit crew` after changing it");
   expect(file).toContain('tools: ["read"]');
   expect(agentPrompt(["read"])).toBe("You are Steward, a helpful assistant. Answer briefly and plainly. You work in a workspace directory: use your tools to read, write and edit files there.");
 });
 
-test("the starter agent names pikit-self when extension-pikit-self is installed, and no extension otherwise", () => {
-  expect(starterExtensions(["runtime-pi", "extension-pikit-self", "extension-house-rules"])).toEqual(["pikit-self"]);
-  expect(starterExtensions(["runtime-pi"])).toEqual([]);
-
-  const named = agent(["read"], "faux/echo", [], "server", starterExtensions(["extension-pikit-self"]));
+test("the starter agent names the extensions it is granted, and none otherwise", () => {
+  const named = agent({ model: "faux/echo", tools: ["read"], extensions: ["pikit-self"] });
   expect(named).toContain('  tools: ["read"],\n  extensions: ["pikit-self"],\n});');
-  expect(agent(["read"], "faux/echo")).not.toContain("extensions:");
+  expect(agent({ model: "faux/echo", tools: ["read"] })).not.toContain("extensions:");
 });
 
 test("the kit's skills for AI agents are what pikit new copies, by their path in the project", () => {
@@ -92,27 +89,23 @@ test("the copied skills say where the kit is: this CLI's checkout, and online at
   for (const path of named.filter((p) => !p.includes("<"))) expect(existsSync(join(PIKIT_ROOT, path.replace(/[.]$/, "")))).toBe(true);
 });
 
-test("on a server the starter agent does not name bash, even installed, and says why; on Cloudflare it does", () => {
-  const installed = ["read", "write", "edit", "bash"];
-  const server = agent(installed, "faux/echo", [], "server");
-  expect(server).toContain('tools: ["read","write","edit"],');
-  expect(server).toContain("`bash` is installed but not named here: it runs commands as this server's user");
-  expect(server).toContain("src/pikit/tool-bash/README.md");
-  expect(server).toContain("read, write and edit files there.");
-  expect(server).not.toContain("run commands in it");
+test("the starter agent names only the tools it is granted; one installed and not granted is said, whatever its name", () => {
+  const installed = ["read", "write", "edit", "shell"];
+  const file = agent({ model: "faux/echo", tools: ["read", "write", "edit"], installed });
+  expect(file).toContain('tools: ["read","write","edit"],');
+  expect(file).toContain("`shell` is installed but not named here: the preset does not grant it to the steward. Add it to\n * `tools` to give it.");
+  expect(file).toContain("read, write and edit files there.");
+  expect(file).not.toContain("run commands in it");
 
-  const durable = agent(installed, "faux/echo", [], "durable");
-  expect(durable).toContain('tools: ["read","write","edit","bash"],');
-  expect(durable).toContain("read, write and edit files there, and to run commands in it.");
-  expect(durable).not.toContain("installed but not named");
-  expect(starterTools(["read"], "server")).toEqual(["read"]);
+  const granted = agent({ model: "faux/echo", tools: ["read", "write", "edit", "bash"], installed: ["read", "write", "edit", "bash"] });
+  expect(granted).toContain('tools: ["read","write","edit","bash"],');
+  expect(granted).toContain("read, write and edit files there, and to run commands in it.");
+  expect(granted).not.toContain("installed but not named");
+});
 
-  // Self-improvement on a server needs a shell: with proposals-local the steward names bash.
-  const steward = agent(installed, "faux/echo", [], "server", [], ["tool-bash", "proposals-local", "admin-proposals"]);
-  expect(steward).toContain('tools: ["read","write","edit","bash"],');
-  expect(steward).toContain("and to run commands in it.");
-  expect(steward).not.toContain("installed but not named");
-  expect(NEEDS_DASHBOARD).toContain("admin-proposals");
+test("a preset's config entry is written as a TypeScript literal of plain values", () => {
+  expect(configLiteral({ defaultAgent: "steward" })).toBe('{ defaultAgent: "steward" }');
+  expect(configLiteral({ "a-b": [1, true, null], nested: {} })).toBe('{ "a-b": [1, true, null], nested: {} }');
 });
 
 test("the README says what `pikit up` does by the installed deployment, never by the target", () => {
@@ -140,8 +133,12 @@ test("the README explains the selected agent-editing workflow", () => {
   expect(one).toContain("**Steward**");
   expect(one).toContain("src/agents/steward/agent.ts");
   expect(one).not.toContain("prompt in `src/agents/steward/SYSTEM.md`");
-  const several = readme("a", ["agents-folders"]);
+  expect(one).not.toContain("For several code agents later");
+  const offered = readme("a", [], "server", false, { feature: "catalog-folders", command: "crew", chosen: false });
+  expect(offered).toContain("For several code agents later: `pikit add catalog-folders`, then `pikit crew`.");
+  const several = readme("a", ["catalog-folders"], "server", false, { feature: "catalog-folders", command: "crew", chosen: true });
   expect(several).toContain("src/agents/steward/SYSTEM.md");
+  expect(several).toContain("then run `pikit crew` to regenerate");
   expect(several).toContain("doctor refuses stale output");
 });
 

@@ -6,7 +6,8 @@
  * the registry at hand: the npm (dev) dependencies and environment variables the component declared when
  * it was installed, the ones `add` put in package.json for it (the only ones `remove` may take out),
  * and the kit versions it accepts (`requires`), which `add` checks before it changes the project's
- * kit. Whether a file is modified is not stored: it is computed by comparing its hash,
+ * kit, and what it needs of the project's deployment or supports as one (`requires.deployment`,
+ * `compose`, `deployment`), which the composition planner reads (`composition.ts`). Whether a file is modified is not stored: it is computed by comparing its hash,
  * so it can never go stale. Registries are recorded by what resolves on any machine
  * (`registry-location.ts`).
  *
@@ -89,8 +90,9 @@ export const InstalledComponentSchema = Type.Object(
       Type.Record(Type.String(), Type.Object({ file: Type.String(), description: Type.String() }, { additionalProperties: false })),
     ),
     /**
-     * Its manifest's `compose`, by project path: the Compose file `deployment-docker` adds after
-     * compose.yaml, whose services run beside the app. Absent when it declared none.
+     * Its manifest's `compose`, by project path: the Compose file the deployment that supports
+     * `services.compose` adds after compose.yaml, whose services run beside the app (so it needs that
+     * support, `project/composition.ts`). Absent when it declared none.
      */
     compose: Type.Optional(Type.String()),
     /**

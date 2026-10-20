@@ -5,16 +5,20 @@
 
 ## What it gives
 
-After the project's name, target and preset (when several full bases run there), `pikit new` asks:
+After the project's name, target and preset (when several full bases run there), `pikit new` asks
+from the preset's policy (`steward`, `config`, `agents`, `features`), not from component names
+([component composition](component-composition.md)):
 
 1. **Channels.** Every channel that runs on the target, several at once, the preset's defaults
    checked. `base` starts with HTTP; `telegram` is its alias selecting Telegram polling instead.
    `cloudflare` and `celld` start with no external channel: their dashboard is enough to talk to
    Steward, so Enter accepts none. A single optional channel is still offered, not silently selected.
 2. **One agent or several.** One starts with Steward (`steward`), whose instructions live in
-   `src/agents/steward/agent.ts`. Several selects `agents-folders`: the prompt is in `SYSTEM.md`,
-   and creation runs `pikit agents` once to write `src/extensions/agents.ts`. Adding another agent
-   later is adding a folder and running that command. No other agents are invented at creation.
+   `src/agents/steward/agent.ts`. Several chooses the feature named by `agents.folders` in the
+   preset (the kit's names `agents-folders`): the prompt is in `SYSTEM.md`, and creation runs that
+   feature's declared command (`pikit agents` here) once to write `src/extensions/agents.ts`.
+   Adding another agent later is adding a folder and running that command. No other agents are
+   invented at creation.
 3. **Optional features.** None checked: routing rules (`router-rules`), agents from the dashboard
    (`agents-live`, with routing and settings), MCP tools (`tool-mcp`), health (`health-registry`),
    self-improvement (`admin-proposals` with `proposals-local` on server, or `proposals-github` and
@@ -37,25 +41,34 @@ pikit new my-bot --target durable --preset cloudflare --with channel-telegram-we
 
 ## Preset rules
 
-- A base lists `components`, and may declare `choose`, `features`, `model` and `ui: true`. An alias
-  `extends` a base and selects its answers through `with`; it inherits the model and dashboard.
+- A base lists `components`, and may declare `choose`, `features`, `model`, `ui: true`, `steward`
+  (`tools`, `extensions`), `config` (values for chosen components) and `agents.folders` (feature,
+  command). An alias `extends` a base and selects its answers through `with`; it inherits them all.
+  A provider being installed cannot grant an agent a tool: the preset and the features actually
+  selected grant the new Steward explicitly, and grants must be keys the chosen components provide.
+  Neither `add` nor `upgrade` changes an existing agent.
 - A single-choice kind has exactly one default component. A `multiple: true` kind may have zero or
   one default: zero makes the question optional. Several defaults in a base are refused.
 - Explicit `--with` answers replace all defaults of that kind. On `base`, Telegram alone replaces
   HTTP; both require both flags. With no default, selected components are appended once.
-- Features are components or groups, installed after the base's components. A group is selected by
-  its first component, whose title is shown: `--with agents-live` selects `agents-live`,
-  `router-rules` and `settings-store`. No group member may already be a base component or belong to
-  a kind its `choose` asks for. Shared members are installed once.
+- Every feature is `{ components, ui?, steward? }`, installed after the base's components. A group is
+  selected by its first component, whose title is shown: `--with agents-live` selects `agents-live`,
+  `router-rules` and `settings-store`. `ui: true` brings the dashboard when chosen; `steward` adds
+  grants, shown in the hint before the choice. A feature not chosen brings neither. No group member
+  may already be a base component or belong to a kind its `choose` asks for. Shared members are
+  installed once.
 - `ui: true` installs the dashboard as `--ui` does. The dashboard is source in `src/dashboard/`, not
   a component: its missing `admin-api`, `admin.auth` and `settings` providers are decided per App,
   through the same helper at creation and preset validation. No default duplicates an alternative
   provider. `pikit ui off` can remove what the dashboard installed later.
-- Selecting a dashboard-only feature (`NEEDS_DASHBOARD`, self-improvement) brings it even for a
-  custom preset without `ui: true`. On a server, proposals-local also enables Steward's `bash` so
-  it can run git and tests. Its deployer requires Docker, not deployment-local.
-- The one-or-several question is offered only when the preset offers `agents-folders` and is skipped
-  when `--with agents-folders` already selected it. With a directory argument there are no questions:
+- A feature with `ui: true` (the kit's Self-improvement) brings the dashboard even for a custom
+  preset without one. On a server, the feature's `steward.tools` grants `bash` so Steward can run git
+  and tests. proposals-local needs `proposals.deployer` and, from its Compose file,
+  `services.compose`: deployment-docker supports both, deployment-local neither. With
+  deployment-local chosen, the wizard shows it disabled with the reason. `--with admin-proposals`
+  refuses it before writing; the CLI never changes the deployment to make it work.
+- The one-or-several question is offered only when the preset's `agents.folders.feature` is offered,
+  and is skipped when its feature is already selected by `--with`. With a directory argument there are no questions:
   the component is opt-in through that flag. Folder changes after creation must be regenerated
   explicitly; doctor refuses stale output. Nothing regenerates silently at deploy.
 - `--ui`, or a `--with` naming a feature, answers the optional-features step without showing it.
@@ -64,9 +77,11 @@ pikit new my-bot --target durable --preset cloudflare --with channel-telegram-we
 ## Validation and tests
 
 `registry validate` checks every default composition including its dashboard, every channel and
-feature independently, and all multiple choices and features together on each supported target.
-Missing dashboard source, duplicate providers and incompatible targets fail before a user creates
-an unusable project. `new` refuses invalid choices before writing and marks a failed creation as
+feature with each deployment answer, and their compatible combinations on each supported target.
+An incompatible feature is offered disabled with the reason, not a reason to reject a preset whose
+other choices work. A `--with` selecting it fails before writing. Missing dashboard source or
+descriptor, duplicate providers, invalid grants, layout and config, and incompatible targets fail
+before a user creates an unusable project. `new` refuses invalid choices before writing and marks a failed creation as
 unfinished.
 
 The resolver tests cover optional channels, alias inheritance and deduplication. CLI tests inspect

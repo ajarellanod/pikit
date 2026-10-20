@@ -43,6 +43,11 @@
  *
  * `add --force` stays what it was: a reinstall that overwrites the user's edits.
  *
+ * The new versions are checked together against the project's deployment (`checkComposition`, as
+ * `add` does): one that would leave a component needing what the deployment does not support is
+ * refused, `--force` or not, and `--dry-run` says so. A change of what a manifest says of the
+ * deployment is an upgrade even under the same version.
+ *
  * Every refusal and every merge happens before the first write. The writes, the kit refresh and
  * `bun install` are undone together when one fails (`undo.ts`). `pikit doctor` runs at the end,
  * unless a file has conflicts: the app does not compose until they are resolved.
@@ -68,7 +73,9 @@ import {
   applyInstall,
   checkCommands,
   checkCompatible,
+  checkComposition,
   checkConflicts,
+  checkDeploymentFields,
   checkKit,
   checkUiProject,
   componentFiles,
@@ -145,6 +152,8 @@ async function upgradeComponents(projectDir: string, names: readonly string[], o
   assertNoIncompleteOperation(projectDir);
   const force = options.force === true;
   const draft = readDraft(projectDir);
+  // The composition as it is: the upgraded set, all together, must not make it worse (`checkComposition`).
+  const before = structuredClone(draft.project.components);
   const installed = Object.keys(draft.project.components);
   const unknown = names.filter((name) => !(name in draft.project.components));
   if (unknown.length > 0) throw new CliError(`not installed: ${unknown.join(", ")} (pikit.json has ${installed.join(", ") || "nothing"})`);
@@ -188,6 +197,9 @@ async function upgradeComponents(projectDir: string, names: readonly string[], o
   if (composed !== undefined) draft.provided = mergeProvided(composed, providedByManifests(plans.map((plan) => plan.manifest), draft.project.targets));
   for (const plan of plans) warnUnprovided(draft.project, plan.manifest, draft.provided);
   for (const plan of plans) describeUpgrade(plan);
+  // Every new version together, never one at a time: `--dry-run` says so too, and nothing is written.
+  const command = `pikit upgrade${names.length > 0 ? ` ${names.join(" ")}` : ""}${force ? " --force" : ""}`;
+  checkComposition(before, draft.project.components, command);
 
   if (options.dryRun === true) {
     for (const plan of plans) {
@@ -212,8 +224,9 @@ async function upgradeComponents(projectDir: string, names: readonly string[], o
       all.push(offered);
     }
   }
+  // An accepted provider may need something of the deployment too (a `compose` file).
+  if (all.length > plans.length) checkComposition(before, draft.project.components, command);
 
-  const command = `pikit upgrade${names.length > 0 ? ` ${names.join(" ")}` : ""}${force ? " --force" : ""}`;
   const refreshed = await applyInstall(projectDir, command, draft, all, "nothing was upgraded");
   if (refreshed.length > 0) log.ok(`the kit is this CLI's${kit?.to === undefined ? "" : ` (${kit.to})`}`);
   for (const plan of plans) log.ok(`${plan.name} upgraded: ${plan.previous.version} → ${plan.manifest.version}`);
@@ -278,6 +291,7 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
 
   checkCompatible(project.targets, manifest, force);
   checkCommands(project, manifest);
+  checkDeploymentFields(manifest);
   checkUiProject(projectDir, project, manifest, force);
   if (Bun.semver.order(manifest.version, previous.version) < 0) {
     const what = `${name}'s registry has ${manifest.version}, older than the installed ${previous.version}`;
@@ -363,6 +377,7 @@ function sameInstall(installed: InstalledComponent, next: InstalledComponent): b
       c.hooks ?? {},
       c.commands ?? {},
       c.compose ?? "",
+      c.deployment ?? {},
       c.generated ?? [],
       c.apps ?? {},
     ]);

@@ -52,9 +52,11 @@ anyone who needs the container's isolation, self-improvement's deployer, or serv
   publishes `127.0.0.1:3000` only.
 - **The environment** is `.env` only (`bun --env-file=.env`), plus `PATH` and `HOME` captured at `up`
   and the absolute path of the Bun that ran `up`. No secret in the unit or the plist.
-- **Doctor gives notes only** (supervisor reachable, linger, a path a unit cannot hold, macOS's protected
-  folders, Compose components, `.env`'s mode): `pikit dev` must never be blocked by what only `up` needs,
-  and `up` refuses on its own.
+- **Its own doctor hook gives notes only** (supervisor reachable, linger, a path a unit cannot hold,
+  macOS's protected folders, Compose components, `.env`'s mode): `pikit dev` must never be blocked by
+  what only `up` needs. Before the hook runs, the CLI checks the composition: a component needing
+  `services.compose` or `proposals.deployer` is a problem with deployment-local, on `dev` and `up`
+  alike. `up` keeps its guard against Compose files.
 - **Isolation is given up**, and said: the app runs as you, and with `execution-local` the agent's shell
   is yours. `pikit up` says so when `tool-bash` is installed; `execution-gondolin` fences the commands.
 
@@ -82,9 +84,13 @@ HTTP messages answered, loopback binding, recovery after `kill -9`, restart, red
 
 ## Self-improvement without Docker
 Not built. Today `proposals-local` activates deployment-docker's deployer through its Compose file,
-and its doctor checks Compose. deployment-local refuses that file. The wizard still offers the
-self-improvement feature group with deployment-local, so this unsupported combination can be created
-but cannot be started with `pikit up`.
+and its doctor checks Compose. deployment-local runs neither Compose services nor the deployer.
+`proposals-local` declares `requires.deployment: ["proposals.deployer"]`; its `compose` file implies
+`services.compose`. deployment-local supports neither. The wizard shows the self-improvement feature
+disabled with the reason when deployment-local is selected; `--with admin-proposals` and `pikit add`
+refuse it before writing, as `doctor` does before any component hook or Docker runs. With Docker,
+`pikit dev` does not run a deployer: proposals-local's hook says proposals are not applied there and
+runs no Docker. The local deployer itself remains missing.
 
 The missing work is not just another supervisor template:
 1. **An independent deployer service**, under systemd or launchd, that survives an app restart and
@@ -116,9 +122,10 @@ The missing work is not just another supervisor template:
    specify which state-changing proposals are reversible and how an irreversible or failed rollback
    is reported before enabling automatic deployment.
 7. **Integration without Compose.** Let `proposals-local` work with the local supervisor as well as
-   Docker, including its activation and doctor checks; do not just ignore its Compose file. Make the
-   wizard reject or stop offering unsupported feature/deployment combinations. Any shared service
-   registration must be justified by these real producers and consumers, not a speculative framework.
+   Docker, including its activation and doctor checks; do not just ignore its Compose file. The CLI
+   now refuses unsupported combinations (the wizard explains why); this does not build the missing
+   service. Any shared service registration must be justified by these real producers and consumers,
+   not a speculative framework.
 
 Before shipping: run the existing deployer protocol conformance cases with the local deployer, then
 exercise approval, moved heads, protected paths, conflicts, dirty checkouts, failed checks/builds,
@@ -133,8 +140,8 @@ verification, not a guarantee of today's `pikit up`.
 - **System mode:** a system unit or LaunchDaemon with a user of its own, started at boot without a
   login. Real isolation from your home, but `sudo` and the project's files owned for that user.
 - **Services beside the app:** `cloudflared` (expose-cloudflare-tunnel) as a second unit. Today `compose`
-  means "run by deployment-docker"; a provider-neutral way to declare them waits for a second component
-  that needs one (contract rule 1).
+  needs a deployment supporting `services.compose` (deployment-docker does); a provider-neutral way
+  to declare a native service waits for a second component that needs one (contract rule 1).
 - **Hangs:** systemd's `WatchdogSec` with `sd_notify` (Bun has no unix datagram sockets).
 - **Shared code:** the entrypoint, the logger and the deploy-hook runners now exist in two or three
   copies (deployment-docker, deployment-cloudflare's hooks, this). A kit package for the server process
