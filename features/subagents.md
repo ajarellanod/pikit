@@ -107,6 +107,17 @@ A `delegate` call already puts its child's conversation id in its details (`api.
 pi-durable's example does for a UI to attach to it.
 
 ## Open questions
+- Asking the delegating agent: a delegated agent missing something (which branch?) should ask the
+  agent that gave it the task, which knows, rather than guess or ask the person. Built, as a
+  convention with no protocol: `tool-delegate` ends every task with an instruction to answer
+  `QUESTION: ...` instead of guessing, flags such an answer in a waited-for call's result, and its
+  description tells the delegating agent to answer by delegating again with everything the task had
+  plus the answer (a new task starts with nothing). A background task's question arrives in its report
+  as written (the runtime's `resultPrompt` adds no hint). Open: a real `ask_parent`, the child asking
+  while its task runs and getting the answer in the same task. A parent that waits (`wait: true`) is
+  inside its tool call and cannot take a message from its child until the call ends: it would
+  deadlock, so `ask_parent` needs the parent's waiting call to take questions, or only background
+  tasks.
 - A helper of the same agent, with its context: pi-durable forks a conversation
   (`forkConversation`); a `fork: true` on the delegation would make the child the parent's own agent
   from the parent's transcript.

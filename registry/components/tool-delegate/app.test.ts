@@ -1,8 +1,10 @@
 /**
  * tool-delegate in a real App: runtime-pi runs the agents on a SQLite file and the model is the scripted
  * faux provider (`faux/scripted`: `call: <tool> <json>` calls a tool, and so does a tool result that
- * says one; `hold` calls the `hold` tool; anything else is answered `answer: <message>`). `assistant` names `delegate` and hands tasks to
- * `helper`, which runs in a child conversation of the assistant's.
+ * says one; `hold` calls the `hold` tool; anything else is answered `answer: <message>`). `assistant`
+ * names `delegate` and hands tasks to `helper`, which runs in a child conversation of the assistant's.
+ * The scripted rules match a message whole, so the model reads a delegated task without the framing
+ * the tool adds (`unframed`); the test of the framing reads it as sent (`unframed.test-support.ts`).
  *
  * A repository test, not copied with the component: a component's files never import another's (SPEC
  * P4), so this one lives beside `files/`.
@@ -14,11 +16,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type AgentDefinition, type AgentRuntime, type AgentTool, CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
+import { fauxAssistantMessage, fauxProvider, type FauxResponseFactory } from "@pikit/pi-adapter/providers/faux";
 import { holdTool, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
-import toolDelegate from "./files/src/pikit/tool-delegate/index.ts";
+import toolDelegate, { ASK_BACK, framedTask } from "./files/src/pikit/tool-delegate/index.ts";
+import { unframed } from "./unframed.test-support.ts";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -26,6 +30,7 @@ afterEach(async () => {
 });
 
 type Result = AppEvents["agent.settled"] | AppEvents["agent.failed"];
+type Provider = ReturnType<typeof scriptedProvider>;
 
 /** The helper's `hold`: blocks until released (or its run stops), and records the requests its run took and its conversation's key. */
 function hold() {
@@ -56,13 +61,13 @@ const agents = (helperTools: AgentDefinition["tools"] = []) => [
 ];
 
 /** An App over the database in `dir`; a second one over the same `dir` is the next worker. */
-async function start(dir: string, list: AgentDefinition[], delegateConfig: Record<string, unknown> = {}) {
+async function start(dir: string, list: AgentDefinition[], delegateConfig: Record<string, unknown> = {}, providers: Provider[] = []) {
   const results: Result[] = [];
   let reached: { runtime: AgentRuntime; create: () => Promise<string> } | undefined;
   const components = [
     sqliteStorage(join(dir, "pikit.db")),
     defineComponent({ name: "agents-test", setup: (pikit) => list.forEach((agent) => pikit.provideKeyed("agent.definition", agent.name, agent)) }),
-    defineComponent({ name: "provider-test", setup: (pikit) => pikit.provideKeyed("model.provider", "faux", scriptedProvider()) }),
+    defineComponent({ name: "provider-test", setup: (pikit) => [unframed(scriptedProvider()), ...providers].forEach((provider) => pikit.provideKeyed("model.provider", provider.id, provider)) }),
     toolDelegate,
     runtimePi,
     defineComponent({
@@ -248,6 +253,50 @@ test("with maxDepth 1, a delegated task's own delegate call is refused, and its 
   // The helper's own call was refused; it answered anyway, and its answer is the assistant's tool result.
   expect(result.kind).toBe("completed");
   expect(toolResults(result)[0]).toStartWith('The agent "helper" answered:');
+});
+
+/**
+ * The developer's model (`dev/scripted`): it records each task it reads, as sent; without a `branch: <name>`
+ * in it, it asks back which branch, as the framing tells it to; with one, it fixes the bug there.
+ */
+function developerModel(tasks: string[]): Provider {
+  const faux = fauxProvider({ provider: "dev", models: [{ id: "scripted" }] });
+  const answer: FauxResponseFactory = (context) => {
+    faux.appendResponses([answer]);
+    const newest = [...context.messages].reverse().find((message) => message.role === "user");
+    const text = newest === undefined ? "" : typeof newest.content === "string" ? newest.content : newest.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+    tasks.push(text);
+    const branch = /branch: (\S+)/.exec(text)?.[1];
+    return fauxAssistantMessage(branch === undefined ? "QUESTION: which branch?" : `Fixed the login bug on ${branch}.`);
+  };
+  faux.setResponses([answer]);
+  return faux.provider;
+}
+
+test("a delegated agent missing something asks back with QUESTION:; the call's result says so, and delegating again with the answer gets the work done", async () => {
+  const tasks: string[] = [];
+  const list = [defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate"] }), defineAgent({ name: "developer", model: "dev/scripted" })];
+  const s = await start(directory(), list, { agents: [{ name: "developer", description: "Fixes bugs." }] }, [developerModel(tasks)]);
+
+  const conversation = await s.ask("test:11", delegateTo("developer", "Fix the login bug."));
+  const asked = await s.result("test:11:1");
+  expect(asked.kind).toBe("completed");
+  expect(toolResults(asked)).toEqual([
+    'The agent "developer" needs more information, and did not do the task:\n\nwhich branch?\n\n[To go on, answer it by delegating to it again, with everything the previous task had plus the answer: a new task starts with nothing. If you do not know the answer either, ask the person.]',
+  ]);
+
+  // The assistant answers by delegating again: the previous task, plus the answer.
+  const done = await s.say(conversation, delegateTo("developer", "Fix the login bug. The branch: fix/login"), "test:11:2");
+  expect(toolResults(done)).toEqual(['The agent "developer" answered:\n\nFixed the login bug on fix/login.']);
+  // Each task reached the developer framed: the task, then how to ask back.
+  expect(tasks).toEqual([framedTask("Fix the login bug."), framedTask("Fix the login bug. The branch: fix/login")]);
+  expect(tasks[0]).toEndWith(ASK_BACK);
+
+  // Not waited for, the question arrives as the task's report, as the developer wrote it (the description tells the model what it means).
+  await s.ask("test:12", `call: delegate ${JSON.stringify({ agent: "developer", task: "Fix the login bug.", wait: false })}`);
+  const reported = await s.resultWhere((r) => r.requestId.startsWith("delegate-result:"));
+  expect(reported.text).toContain('[The agent "developer" finished the task you delegated to it.');
+  expect(reported.text).toContain("QUESTION: which branch?");
 });
 
 /** `developer` takes tasks only from `orchestrator`; `support` and `orchestrator` delegate, and `orchestrator` takes them from anyone. */

@@ -80,6 +80,30 @@ take tasks only from the agents you trust with them. Name them in its `from`:
   process (agent sandboxes' Limits); give the agent a fine-grained token as well. `from` decides who
   may hand it work, not what its tools do once it has some.
 
+### When the agent needs more
+
+The main agent hands "fix the login bug" to `developer`, which does not know which branch. It should
+not guess, and the person it could ask with `askUser` may not know either: the agent that delegated
+does. So, by convention (no new tool, no protocol), the delegated agent asks back:
+
+- **Every task ends with one instruction** (`framedTask`, the only place it is added): `[If
+  something you need to do this task is missing and you cannot find it yourself, do not guess: stop,
+  and answer with a line starting with QUESTION: that says exactly what you need. The agent that gave
+  you the task will answer by giving you a new task.]` The prefix is `QUESTION_PREFIX`.
+- **The delegating agent answers by delegating again**, with everything the previous task had plus
+  the answer: a new task starts with nothing, not even the question it asked. The tool's description
+  says so.
+- **Waited for**, an answer that starts with `QUESTION:` is flagged in the call's result: `The agent
+  "developer" needs more information, and did not do the task: which branch? [To go on, answer it by
+  delegating to it again, ...]`. Any other answer reads as before.
+- **Not waited for**, the question arrives as the task's report, as the agent wrote it (the
+  runtime's `[The agent "developer" finished the task ...]`): only the description tells the model
+  what it means.
+
+A real way to ask the delegating agent while the task runs (`ask_parent`) is not built: a parent
+waiting with `wait: true` is inside its tool call and cannot take a message from its child
+([features/subagents.md](https://github.com/ajarellanod/pikit/blob/main/features/subagents.md)).
+
 For the tasks not waited for, name the tools the agent needs (`tools: ["delegate", "delegate_tasks",
 "delegate_steer", "delegate_cancel"]`); `extension-house-rules` can allow them per sender:
 
@@ -161,7 +185,8 @@ Each sees only the tasks its own conversation started: another's id is an unknow
 - `tool-delegate.test.ts` (copied into your project): what `setup` declares, a start refused for an
   unknown agent (in `agents` or a `from`), the description, the task each call asks for (agent, key
   with its chain, channel, task, sender) and how (`run` or `start`), the outcomes as the model reads
-  them, depth and waiting rules, `from` (an allowed caller, a refused one with nothing started both
+  them, the task framed to ask back and a `QUESTION:` answer flagged (any other unchanged), depth and
+  waiting rules, `from` (an allowed caller, a refused one with nothing started both
   ways, laundering through an allowed agent refused, a chain wholly in it allowed, untrusted chains
   refused for a restricted agent and not for another, the order of the checks), config that is
   refused, and what `delegate_tasks` (a task's steps with its id, a running one's latest in the
@@ -171,9 +196,12 @@ Each sees only the tasks its own conversation started: another's id is an unknow
   file and the scripted faux model: a task waited for, a task answered later, one that reports after a
   restart, the depth limit, a task listed, steered and cancelled (reported once) by its own
   conversation, while another conversation neither sees nor stops it, a task's tool calls read with
-  `delegate_tasks({ id })` while it runs and after (another conversation reads none), and `from`: allowed directly and
+  `delegate_tasks({ id })` while it runs and after (another conversation reads none), a developer
+  that asks back which branch (flagged; delegating again with the branch gets it done; its tasks
+  arrived framed), and `from`: allowed directly and
   two levels deep (the keys carry the chain), refused directly and through an allowed agent (the
-  restricted agent never runs).
+  restricted agent never runs). The scripted rules match a message whole, so the agents on it read a
+  task without its framing (`unframed.test-support.ts`, also used by the workerd and acceptance tests).
 - `tests/workerd/test/tool-delegate.workerd.ts`: in a real Durable Object, driven by its alarm, both
   ways, a task listed and cancelled, its steps read while it runs and after, the child's key with its chain, and a `from` refusal.
 - The runtime's side (`packages/pi-adapter/src/delegation.test.ts`): the child as the other agent, a

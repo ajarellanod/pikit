@@ -46,6 +46,10 @@ line names its area.
   in the child's key, now `delegate:<depth>:<chain>:<task id>` (was `delegate:<depth>:<task id>`),
   checked against the runtime's origin; an untrusted chain reaches no agent with `from`. Breaking:
   delegated conversations of the old format reach no restricted agent, with no migration.
+- tool-delegate: a delegated agent missing something asks back instead of guessing, by convention:
+  its task ends with an instruction to answer `QUESTION: ...`; a waited-for answer that is one is
+  flagged in the call's result, and the description says to answer by delegating again with
+  everything the task had plus the answer.
 - admin-api: `/admin/api/delivery/pending` and `/receipts` give each piece the conversation it
   answers (`conversationId`, from its answer key).
 - outbound-durable: with `health` installed, reports `degraded` while an answer is stuck for over a

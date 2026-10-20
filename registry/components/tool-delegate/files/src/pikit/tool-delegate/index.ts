@@ -29,6 +29,11 @@
  *   asked (its run's parts) goes with this call's result (`withParts`) when it waits, and with the
  *   task's report when it does not; either way with the answer of this conversation's run, which its
  *   channel delivers. The answer comes back here as a message: hand it on with a new delegation.
+ * - **A delegated agent asks back instead of guessing**, by convention: its task comes with one
+ *   instruction (`framedTask`): when something it needs is missing, it answers with a line starting
+ *   `QUESTION:` (`QUESTION_PREFIX`). The delegating agent answers by delegating again with everything
+ *   the task had plus the answer (a new task starts with nothing): the description says so, and a
+ *   waited-for answer that is a question is flagged as one in the call's result.
  * - **Replay is `safe`**: a call made again after a crash finds the child it created and the input it
  *   submitted (pi-durable's ownership and request ids), and only waits again.
  * - **The tasks it did not wait for** have an id (`wait: false` returns it), and three tools of their
@@ -137,11 +142,32 @@ function refusal(agent: DelegateConfig["agents"][number], callers: string[] | un
   return `the agent "${agent.name}" takes tasks only from ${from.join(", ")}; ${who} may not delegate to it: do it yourself, or delegate to another agent`;
 }
 
+/** How a delegated agent's answer starts when something it needs is missing: a question to the agent that delegated. */
+export const QUESTION_PREFIX = "QUESTION:";
+
+/** What a delegated agent reads after its task: ask back, never guess. */
+export const ASK_BACK = `[If something you need to do this task is missing and you cannot find it yourself, do not guess: stop, and answer with a line starting with ${QUESTION_PREFIX} that says exactly what you need. The agent that gave you the task will answer by giving you a new task.]`;
+
+/** The message a delegated agent receives: its task, then how to ask back. Every delegation is framed here. */
+export function framedTask(task: string): string {
+  return `${task}\n\n${ASK_BACK}`;
+}
+
+/** The question in a delegated agent's answer, without its prefix, or `undefined` when the answer is not one. */
+export function questionOf(answer: string): string | undefined {
+  const trimmed = answer.trimStart();
+  return trimmed.startsWith(QUESTION_PREFIX) ? trimmed.slice(QUESTION_PREFIX.length).trim() : undefined;
+}
+
+/** How the delegating agent answers a question: a new task, with everything. */
+const ANSWER_BY_DELEGATING = "answer it by delegating to it again, with everything the previous task had plus the answer: a new task starts with nothing";
+
 /** The tool's description: what it does, and the agents it hands work to. */
 export function delegateDescription(config: DelegateConfig): string {
   return [
     "Hands a task to another agent of this project and gets its answer. Each call is a new conversation of that agent, which starts with nothing but the task: write everything it needs in it.",
     "By default the call waits for the agent's answer. With wait: false it returns at once, with the task's id, and the answer arrives later in this conversation, as a message: use it for long tasks, and carry on meanwhile.",
+    `An answer starting with ${QUESTION_PREFIX} (waited for or arriving later) means the agent needs that information and did not do the task: ${ANSWER_BY_DELEGATING}. If you do not know the answer either, ask the person.`,
     "The agents:",
     ...config.agents.map((agent) => `- ${agent.name}: ${agent.description}${agent.from === undefined ? "" : ` (only from: ${agent.from.join(", ")})`}`),
   ].join("\n");
@@ -182,7 +208,7 @@ export function createDelegateTool(config: DelegateConfig): ToolRegistration {
         agent: args.agent,
         key: `${DELEGATE_KEY_PREFIX}${depth}:${chain}:${String(api.taskId)}`,
         channel: DELEGATE_CHANNEL,
-        task: args.task,
+        task: framedTask(args.task),
         sender: { channel: DELEGATE_CHANNEL, id: parent.agent },
       };
       // Only a conversation a person started gets answers later: a delegated task waits for its own.
@@ -192,7 +218,12 @@ export function createDelegateTool(config: DelegateConfig): ToolRegistration {
       }
       const outcome = await delegation.run(api, task, context);
       if (outcome.kind === "completed") {
-        const answered = { output: [{ type: "text" as const, text: `The agent "${args.agent}" answered:\n\n${outcome.text === "" ? "(nothing)" : outcome.text}${partsNote(outcome.parts)}` }] };
+        const question = questionOf(outcome.text);
+        const text =
+          question === undefined
+            ? `The agent "${args.agent}" answered:\n\n${outcome.text === "" ? "(nothing)" : outcome.text}`
+            : `The agent "${args.agent}" needs more information, and did not do the task:\n\n${question === "" ? "(it did not say what)" : question}\n\n[To go on, ${ANSWER_BY_DELEGATING}. If you do not know the answer either, ask the person.]`;
+        const answered = { output: [{ type: "text" as const, text: `${text}${partsNote(outcome.parts)}` }] };
         // What the child asked the person (a question) goes with this run's answer.
         return outcome.parts === undefined || outcome.parts.length === 0 ? answered : withParts(answered, outcome.parts);
       }
