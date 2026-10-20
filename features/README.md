@@ -50,6 +50,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
 | [channel-google-chat](channel-google-chat.md) | | Google Chat: threads, "Thinking…" edited into the answer, cards, attachments, questions (`askUser`). Built on both targets and tested against a fake Google (a server first, conformance, workerd); moves to `completed/` once checked live with a real app | No |
 | [agent-folders](agent-folders.md) | | Each agent a folder (`agent.ts`, `SYSTEM.md`, per-channel texts, skills) and the skills catalog as folders: the component `agents-folders`, `pikit agents` writes the one file the App lists | No |
+| [agent-sandboxes](agent-sandboxes.md) | | A machine per agent (packages, hosts, secrets, memory, CPUs) and a sandbox per conversation and agent: execution-gondolin's profiles, also behind execution-remote and execution-serve; specified | No |
 | [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |
 | [channel-context](channel-context.md) | | A directory, a prompt and tools per channel, from `ConversationRef.channel` (built); `prepare` already does prompt and tools | No |
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |

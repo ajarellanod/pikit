@@ -15,7 +15,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `actors-do`: RPC to `idFromName(key)` (`scope` `"one"`) |
 | `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `actors-do`: rows over the object's one alarm, in slices |
 | `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-workers`: the Worker's `env` |
-| `execution` | `execution-local`: the machine's files and shell; or `execution-gondolin`: a Linux micro-VM per conversation (QEMU), its files on the host | `execution-do`: files in the object's SQL, a simulated shell; or `execution-remote`: a real shell in a sandbox of a host running `execution-serve` (a server, e.g. with execution-gondolin) |
+| `execution` | `execution-local`: the machine's files and shell; or `execution-gondolin`: a Linux micro-VM per conversation and agent (QEMU), its files on the host | `execution-do`: files in the object's SQL, a simulated shell; or `execution-remote`: a real shell in a sandbox of a host running `execution-serve` (a server, e.g. with execution-gondolin) |
 | Telegram | `channel-telegram` (long polling) | `channel-telegram-webhook` (two halves) |
 | HTTP API channel | `channel-http` | `channel-http` (two halves: routes in the Worker, the wait in the object) |
 | Model logins | `credentials-file` (OAuth or keys) | `credentials-do` (OAuth or keys, in one object; a login made on your machine, uploaded by `pikit configure --login`), or API keys as Worker secrets |

@@ -36,7 +36,9 @@ What pi-durable does not know is pikit's agents. The runtime adds that layer
 `@pikit/pi-adapter/tools`):
 - **The child is another of the project's agents**: created as pi-durable's example creates it, then
   applied as every conversation is (`AgentConfigs.apply`: the definition's model, prompt, tools,
-  extensions and skills; its key and agent recorded, so a reopened Harness builds it again).
+  extensions and skills; its key and agent recorded, so a reopened Harness builds it again). With
+  `execution-gondolin` or `execution-remote` it works in a sandbox of its own, its agent's machine,
+  not its parent's; a child of the same agent shares its parent's ([agent sandboxes](agent-sandboxes.md)).
 - **Its message has a sender**, the delegating agent (`{ channel: "delegate", id }`, an
   `InputEntry`), which its tools and hooks read (`RUN_REQUESTS`).
 - **It knows whom it works for**: its record holds its origin (`ConversationRef.origin`), the

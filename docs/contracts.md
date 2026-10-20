@@ -694,10 +694,11 @@ All three are pi-durable's `ExecutionEnv` (files and a shell), in `@pikit/pi-ada
 Providers: execution-local (server: the machine's filesystem and shell), execution-do (Cloudflare:
 files in the object's SQL, a simulated shell with `git`, `curl`, `node` as host commands, C7),
 workspace-local (server: one directory per agent, or per channel of each agent from `ConversationRef.channel`,
-inside `execution`), execution-gondolin (server: all three, a Linux micro-VM per conversation keyed by
-`ConversationRef.conversationId`, its files on the host), execution-remote (both targets: all three in a
-sandbox of a host running execution-serve, over HTTP; a sandbox per Durable Object, or per conversation
-key on a server; its own protocol, `protocol.ts`, copied identically in both). Suites:
+inside `execution`), execution-gondolin (server: all three, a Linux micro-VM per conversation and agent
+keyed by `ConversationRef.conversationId` and `ConversationRef.agent`, a machine profile per agent, its
+files on the host), execution-remote (both targets: all three in a sandbox of a host running
+execution-serve, over HTTP; a sandbox per Durable Object and agent, or per conversation key and agent
+on a server, the agent sent as `Pikit-Agent`; its own protocol, `protocol.ts`, copied identically in both). Suites:
 `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`),
 `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`), and for a shell with `git`,
 `createWorkspaceGitConformance` (`@pikit/pi-adapter/execution/testing`): the steward's steps

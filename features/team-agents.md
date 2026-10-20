@@ -23,6 +23,7 @@ a project installs, and agents that name what they may use.
 | Skills shared by several agents | built: the project's catalog (`agent.skill`) from `src/skills/`, each agent names its skills, live agents and overrides too | [skills catalog](completed/skills-catalog.md), [agent folders](agent-folders.md) |
 | Tools per agent | built: an agent has the tools it names (`tool-*`, `tool-mcp`) | — |
 | Roles: command and path rules | `extension-house-rules` (tools by name, by sender) | [policy-tools](policy-tools.md) |
+| A machine per agent: packages, CLIs, hosts, secrets | specified: execution-gondolin's machine profiles per agent, a sandbox per conversation and agent, also behind execution-remote and execution-serve (server, celld, Cloudflare); being built | [agent sandboxes](agent-sandboxes.md) |
 | A workspace per chat space, with context copied in | `workspace-local`, a directory per agent; `ConversationRef.channel` built | [channel context](channel-context.md), [agent folders](agent-folders.md) |
 | Channels: Google Chat, an HTTP API, Telegram, a task tracker (comments in, comments out) | channel-http, channel-telegram (polling and webhook); Google Chat specified, next | [channel-google-chat](channel-google-chat.md); a task tracker has no note |
 | Routes: which agent answers where | router-basic, router-rules (Routing in the dashboard) | — |

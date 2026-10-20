@@ -80,6 +80,10 @@ Each sees only the tasks its own conversation started: another's id is an unknow
   runtime's to record, so the child's memory, scheduled prompts and approvals are that person's
   (`originOf`). A call made again after a crash (replay `safe`) finds the child it created and the
   input it submitted, and only waits again.
+- **The child works on its own agent's machine**: with `execution-gondolin` or `execution-remote`, a
+  child of another agent gets a sandbox of its own (its agent's packages, hosts and secrets), never
+  its parent's; what it made comes back in its answer or through git. A child of the same agent
+  shares its parent's ([agent sandboxes](https://github.com/ajarellanod/pikit/blob/main/features/agent-sandboxes.md)).
 - **What the child asks the person reaches them**: a completed task's outcome carries its run's parts
   (a `question` its `askUser` or `request_approval` asked). Waited for, the `delegate` call's result
   carries them (`withParts`); not waited for, the task's report does (`AgentRequest.parts`). Either
