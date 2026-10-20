@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { defineApp, defineComponent, type Handle, silentLogger } from "@pikit/core";
 import { type ApproveRequest, type Proposals, ProposalsError } from "@pikit/contracts";
 import type { Decision, DeployerState } from "@pikit/contracts/deployer";
-import { createProposalsConformance } from "@pikit/contracts/testing";
+import { createProposalsConformance, createProposalsServeConformance, type ProposalsFixture } from "@pikit/contracts/testing";
 import git from "isomorphic-git";
 import proposalsLocal, { HEARTBEAT_MS } from "./index.ts";
 import { commitOnto, makeRepository } from "./repository.test-support.ts";
@@ -29,7 +29,8 @@ const temporary = () => {
 };
 const OPERATOR = { id: "ops" };
 
-for (const c of createProposalsConformance(async () => {
+/** A connected proposals repository (the conformance suites' fixture). */
+async function fixture(): Promise<ProposalsFixture> {
   const directory = temporary();
   const gitdir = join(directory, "project.git");
   const main = await makeRepository(gitdir);
@@ -51,8 +52,17 @@ for (const c of createProposalsConformance(async () => {
       await commitOnto(gitdir, `refs/heads/${branch}`, main, { "other.txt": "other\n" }, "Not a proposal");
     },
   };
-})) {
+}
+
+for (const c of createProposalsConformance(fixture)) {
   test(`proposals-local ${c.group}: ${c.name}`, () => c.run());
+}
+
+// The remote over git's smart HTTP (`serve.ts`): the machine's git answers it.
+const hasGit = Bun.which("git") !== null;
+if (!hasGit) test.skip("proposals-local proposals serve: skipped, git is not installed on this machine (serve runs the real git)", () => {});
+for (const c of hasGit ? createProposalsServeConformance(fixture) : []) {
+  test(`proposals-local ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
 
 async function started(directory: string, now = Date.parse("2026-10-01T10:00:00Z")) {
@@ -130,7 +140,7 @@ test("a proposal: its title and description from the head commit, its files agai
   ]);
   expect(detail.files[0]?.patch).toBe("@@ -1,2 +1,2 @@\n hello\n-world\n+there");
   expect(detail.files[1]?.patch).toBeUndefined();
-  expect(await proposals.remote(ctx)).toEqual({ kind: "path", path: gitdir, mainBranch: "main", branchPrefix: "pikit/self/" });
+  expect(await proposals.remote(ctx)).toEqual({ kind: "path", path: gitdir, mainBranch: "main", branchPrefix: "pikit/self/", serve: expect.any(Function) });
   // main moves on: the proposal is behind it, said in plain words.
   await commitOnto(gitdir, "refs/heads/main", main, { "NEWS.md": "news\n" }, "Main moves on", 1_790_000_300);
   expect(await proposals.get("tools/calendar", ctx)).toMatchObject({ mergeable: null, mergeDetail: "behind main: the deployer merges it in" });
@@ -219,3 +229,50 @@ test("reject keeps the head under refs/pikit/rejected/, deletes the branch, and 
   expect((await proposals.list(ctx)).proposals.map((proposal) => [proposal.id, proposal.state, proposal.title])).toEqual([["risky", "open", "Safer"]]);
   await app.stop();
 });
+
+test.skipIf(!hasGit)("a real git client over serve: clones, pushes a proposal, and is told why a push to main is refused, main unmoved", async () => {
+  const directory = temporary();
+  const gitdir = join(directory, "project.git");
+  const main = await makeRepository(gitdir);
+  writeFileSync(join(directory, "deployer.json"), JSON.stringify({ heartbeatAt: new Date().toISOString() }));
+  const { app, proposals, ctx } = await started(directory, Date.now());
+  const remote = await proposals.remote(ctx);
+  if (remote?.kind !== "path") throw new Error("a path remote");
+  // As a VM's requests reach it: over HTTP, to whatever host, answered by serve alone.
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (request) => remote.serve(request) });
+  const work = join(directory, "..", "work");
+  // Async: the server answers in this same process (a synchronous spawn would wait on itself).
+  const git = async (...args: string[]) => {
+    const child = Bun.spawn(["git", "-c", "user.name=pikit agent", "-c", "user.email=agent@pikit.invalid", "-c", "commit.gpgsign=false", ...args], {
+      cwd: join(directory, ".."),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { PATH: process.env.PATH ?? "", HOME: directory, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0" },
+    });
+    const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    return { code, output: `${out}${err}` };
+  };
+  try {
+    expect((await git("clone", `http://127.0.0.1:${server.port}/project.git`, work)).code).toBe(0);
+    writeFileSync(join(work, "hello.txt"), "hello\n");
+    expect((await git("-C", work, "checkout", "-b", "pikit/self/hello")).code).toBe(0);
+    expect((await git("-C", work, "add", "-A")).code).toBe(0);
+    expect((await git("-C", work, "commit", "-m", "Say hello")).code).toBe(0);
+    expect((await git("-C", work, "push", "origin", "pikit/self/hello")).code).toBe(0);
+    expect((await proposals.list(ctx)).proposals.map((each) => each.id)).toContain("hello");
+
+    const refused = await git("-C", work, "push", "origin", "HEAD:main");
+    expect(refused.code).not.toBe(0);
+    expect(refused.output).toContain("pushing to main is refused");
+    const deleted = await git("-C", work, "push", "origin", ":pikit/self/hello");
+    expect(deleted.code).not.toBe(0);
+    expect(deleted.output).toContain("deleting refs/heads/pikit/self/hello is refused");
+    expect(await git_resolve(gitdir, "refs/heads/main")).toBe(main);
+    expect(await git_resolve(gitdir, "refs/heads/pikit/self/hello")).toBeString();
+  } finally {
+    server.stop(true);
+    await app.stop();
+  }
+}, 60_000);
+
+const git_resolve = (gitdir: string, ref: string) => git.resolveRef({ fs, gitdir, ref });

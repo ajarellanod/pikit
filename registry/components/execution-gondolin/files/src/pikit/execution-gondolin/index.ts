@@ -19,6 +19,13 @@
  *   A secret (`secrets`) is read through the `secrets` capability at each boot and command; the guest
  *   holds a placeholder in `$NAME`, which the host replaces in requests to that secret's hosts only
  *   (SPEC C7). No value is logged.
+ * - with `proposals` installed (proposals-local: self-improvement on a server), reaches the proposals
+ *   repository with `git`, at `file://<its path>` as the steward is told, rewritten in the guest to a
+ *   host that exists only there and that this process answers with the repository's `serve`: the
+ *   guest can clone and push branches under the prefix, never the main branch, and holds neither the
+ *   repository nor the operator's decisions. `git` is then added to the image (`packages`).
+ * - starts from Gondolin's image, or, with `packages`, from a checkpoint of it with those Alpine
+ *   packages, made once and kept in `<root>/.execution-gondolin-image/` (`gondolin.ts`).
  *
  * The sandboxes of conversations are held in a bounded cache (`cache.ts`): an idle one is dropped and
  * rebuilt at its next `resolve`, its files untouched.
@@ -33,13 +40,13 @@ import { realpathSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type { ConversationRef } from "@pikit/contracts";
-import { defineComponent } from "@pikit/core";
+import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import Type from "typebox";
 import { SandboxCache } from "./cache.ts";
 import { createSandboxEnv, type Sandbox, TMP, WORKSPACE } from "./env.ts";
 import { gondolinLauncher } from "./gondolin.ts";
-import type { GuestLauncher, GuestSpec } from "./guest.ts";
+import type { GuestLauncher, GuestProposals, GuestSpec } from "./guest.ts";
 import { Mounts } from "./paths.ts";
 import { Pool, type PoolLog, Slot } from "./pool.ts";
 
@@ -72,6 +79,11 @@ const Config = Type.Object({
   /** Each VM's memory (QEMU's syntax: `512M`, `2G`) and CPUs. */
   memory: Type.String({ pattern: "^[0-9]+[MG]$", default: "1G" }),
   cpus: Type.Integer({ minimum: 1, default: 2 }),
+  /**
+   * Alpine packages added to the guest's image (`python3-dev`, `make`): once, by a VM that reaches only
+   * the Alpine mirror, then kept as a checkpoint every VM starts from. `git` comes with `proposals`.
+   */
+  packages: Type.Array(Type.String({ pattern: "^[a-z0-9][a-z0-9+._-]*$" }), { default: [] }),
 });
 
 /**
@@ -80,8 +92,11 @@ const Config = Type.Object({
  */
 const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-/** The one directory under `root` this component deletes (at start): its temporary area, named so nothing else is. */
+/** The directory under `root` this component empties at start: its temporary area, named so nothing else is. */
 export const TMP_DIR = ".execution-gondolin-tmp";
+
+/** Where the image with `packages` is kept, under `root`: made when needed, its stale checkpoints removed then. */
+export const IMAGE_DIR = ".execution-gondolin-image";
 
 /** Idle conversation sandboxes kept built; more are dropped, least recently resolved first (`cache.ts`). */
 export const KEEP_SANDBOXES = 64;
@@ -109,9 +124,20 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
     config: Config,
     setup(pikit, config) {
       const secrets = pikit.useOptional("secrets");
+      const proposals = pikit.useOptional("proposals");
       const root = resolve(config.root);
       const allowedHosts = [...new Set([...config.allowedHosts, ...config.secrets.flatMap((secret) => secret.hosts)])];
       let log: PoolLog = { info: () => {}, warn: () => {} };
+      let background: AppContext | undefined;
+      /** The proposals repository when it is a path on this machine (proposals-local), read at each use. */
+      const guestProposals: GuestProposals = {
+        async remote() {
+          const provider = proposals.get();
+          if (provider === undefined || background === undefined) return undefined;
+          const remote = await provider.remote(background);
+          return remote?.kind === "path" ? { path: remote.path, serve: remote.serve } : undefined;
+        },
+      };
 
       const pool = new Pool({
         launcher,
@@ -144,6 +170,10 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
             }),
             memory: config.memory,
             cpus: config.cpus,
+            // The steward's git, with proposals here.
+            packages: [...new Set([...(proposals.get() === undefined ? [] : ["git"]), ...config.packages])],
+            imageDir: join(root, IMAGE_DIR),
+            ...(proposals.get() !== undefined && { proposals: guestProposals }),
           };
         };
         return {
@@ -157,6 +187,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           pool,
           slot: new Slot(name, spec),
           running: new Set(),
+          changed: new Set(),
         };
       }
 
@@ -196,6 +227,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
       return {
         async start(ctx) {
           log = ctx.logger;
+          background = ctx.derive(() => BACKGROUND_CONTEXT);
           if (holdsWorkingDirectory(root)) {
             throw new Error(`execution-gondolin: root ${JSON.stringify(config.root)} is the working directory, holds it, or is /: give the sandboxes a directory of their own (the default is .pikit/gondolin)`);
           }

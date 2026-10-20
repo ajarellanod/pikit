@@ -8,7 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ComposeRunner, doctor } from "./doctor.ts";
+import { type ComposeRunner, doctor, NOT_A_LOCK } from "./doctor.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -62,4 +62,13 @@ test("without Docker here: a note, no problem; another failure to start is the c
   const missing = Object.assign(new Error("spawn docker ENOENT"), { code: "ENOENT" });
   expect(await doctor(IO, compose(missing).run, project(INSTALLED))).toEqual({ problems: [], notes: [expect.stringContaining("Docker is not installed here")] });
   await expect(doctor(IO, compose(new Error("EACCES")).run, project(INSTALLED))).rejects.toThrow("EACCES");
+});
+
+test("with execution-local, a note that an approval is a decision, not a lock; with execution-gondolin, none", async () => {
+  const local = await doctor(IO, compose({ stdout: "app\ndeployer\n" }).run, project({ ...INSTALLED, "execution-local": {} }));
+  expect(local).toEqual({ problems: [], notes: [NOT_A_LOCK] });
+  const vm = await doctor(IO, compose({ stdout: "app\ndeployer\n" }).run, project({ ...INSTALLED, "execution-gondolin": {} }));
+  expect(vm).toEqual({ problems: [], notes: [] });
+  const missing = Object.assign(new Error("spawn docker ENOENT"), { code: "ENOENT" });
+  expect((await doctor(IO, compose(missing).run, project({ ...INSTALLED, "execution-local": {} }))).notes).toContain(NOT_A_LOCK);
 });

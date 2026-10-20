@@ -45,7 +45,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-remote, execution-serve, repo-github-app, repo-github-token, tool-websearch-brave, execution-gondolin?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
-| `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
+| `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, execution-gondolin?, extension-pikit-self? | `createProposalsConformance`, `createProposalsServeConformance` (a `path` remote's `serve`) |
 | `health` | single | health-registry | channel-telegram?, outbound-durable?, provider-failover?, server-bun? | `createHealthConformance` |
 | `email.send` | single | email-resend, email-ses | channel-web? | `createEmailSenderConformance` |
 | `model.complete` | single | runtime-pi | memory-summaries, admin-api?, channel-web? | `createModelCompleteConformance` |
@@ -703,7 +703,9 @@ key on a server; its own protocol, `protocol.ts`, copied identically in both). S
 `createWorkspaceGitConformance` (`@pikit/pi-adapter/execution/testing`): the steward's steps
 (`clone`, `checkout -b`, `status`, `diff`, `add`, `commit -m`, `log`, `push origin <branch>`) through
 the shell against a remote, with real git's meaning, and given the remote's credential, that it
-appears nowhere the agent can read (every durable provider's rule, SPEC C7).
+appears nowhere the agent can read (every durable provider's rule, SPEC C7). Run by execution-local
+(real git, a bare repository), execution-do (its own git, a fake GitHub) and execution-gondolin (real
+git in real VMs, against proposals-local through `serve`).
 
 ## Platform
 
@@ -789,7 +791,7 @@ interface Proposals {
   get(id, ctx): Promise<ProposalDetail>;   // description, files with patches, checks, deploy
   approve(id, { head, override?, operator }, ctx): Promise<ApproveOutcome>;
   reject(id, { comment?, operator }, ctx): Promise<RejectOutcome>;
-  remote(ctx): Promise<ProposalsRemote | undefined>; // a path, or an https URL with authorization() for trusted code
+  remote(ctx): Promise<ProposalsRemote | undefined>; // a path with serve(), or an https URL with authorization(), for trusted code
 }
 ```
 
@@ -807,13 +809,26 @@ interface Proposals {
   live names one), `draft`, `mergeDetail` (why it does or does not merge), `previewUrl`.
 - An https remote's `authorization()` is read when git needs it, and rejects, saying why, when the
   credential cannot be had now; trusted code sends it to that remote alone.
+- A `path` remote is a repository on this machine: plain git reaches it as `file://<path>` (the
+  steward's steps say so), with no fence for a shell on the same machine. Its `serve(request)` is the
+  same repository over git's smart HTTP, for a shell that cannot reach the path: only the three smart
+  endpoints under any URL (`404` otherwise), clone and fetch of every branch, and a push only when each
+  of its commands creates or updates a branch under `branchPrefix`. The main branch, another ref or a
+  deletion refuses the whole push before anything is written, as git's error (band 3 when the client
+  asked for a side band, else `ERR`), so git prints why; `503` before the repository is ready; never
+  throws. Only trusted code calls it (execution-gondolin answers its VMs' requests with it, in the
+  host); nothing exposes it on a network. Suite: `createProposalsServeConformance`, whose requests
+  are built without a git client (pkt-lines, an empty pack): the advertisements, a push that creates
+  and updates proposals, and refusals (main, outside the prefix, a tag, another ref, the bare prefix,
+  a deletion, an allowed branch beside main, an unreadable push) that leave every ref as it was.
 - Providers, interchangeable: proposals-local (server: branches of a bare repository in the state
   volume, approvals for deployment-docker's deployer, which merges, checks, deploys and rolls back)
   and proposals-github (Cloudflare: pull requests opened for pushed branches, merged through GitHub's
   API, GitHub through `repo.github`). Users: admin-proposals (the dashboard's routes, view and section),
   extension-pikit-self (`remote()`, for the steward's steps), execution-do (`remote()`: the only
-  remote its `git` pushes to, under its `branchPrefix`). Suite: `createProposalsConformance`
-  (both providers).
+  remote its `git` pushes to, under its `branchPrefix`), execution-gondolin (a `path` remote's
+  `serve`, answering its guests' git at a host only they have). Suite: `createProposalsConformance`
+  (both providers); `createProposalsServeConformance` (proposals-local, where git is installed).
 
 ### External deployer protocol ([deployer.ts](../packages/contracts/src/deployer.ts))
 

@@ -7,6 +7,22 @@
 /** A secret the guest may use: `$name` holds a placeholder, which the host replaces in requests to `hosts` only. */
 export type GuestSecret = { name: string; hosts: readonly string[]; value: string };
 
+/**
+ * Where the guest reaches the proposals repository: a host that exists only in the guest's network, its
+ * requests answered by the host process itself (`GuestProposals.serve`), never sent anywhere.
+ */
+export const PROPOSALS_HOST = "proposals.pikit.internal";
+export const PROPOSALS_URL = `http://${PROPOSALS_HOST}/project.git`;
+
+/**
+ * The proposals repository (`proposals.remote()`, a `path` remote), read when it is used: at boot, for
+ * the guest's git (`file://<path>` is `PROPOSALS_URL` there), and at each request to `PROPOSALS_HOST`.
+ * `undefined` while there is none (not set up yet, or not a repository on this machine).
+ */
+export interface GuestProposals {
+  remote(): Promise<{ path: string; serve(request: Request): Promise<Response> } | undefined>;
+}
+
 export interface GuestSpec {
   /** The VM's label in `gondolin list` (no secret, no host path). */
   label: string;
@@ -19,6 +35,14 @@ export interface GuestSpec {
   /** QEMU memory size (`"1G"`) and CPU count. */
   memory: string;
   cpus: number;
+  /**
+   * Alpine packages added to Gondolin's image: once, with the Alpine mirror the only host that boot
+   * reaches, then kept as a checkpoint in `imageDir` that every VM starts from. None: the image as is.
+   */
+  packages: readonly string[];
+  imageDir: string;
+  /** The proposals repository, when `proposals` is installed. */
+  proposals?: GuestProposals;
 }
 
 export interface GuestCommand {
@@ -45,6 +69,13 @@ export interface GuestRun {
 
 export interface Guest {
   run(command: GuestCommand): GuestRun;
+  /**
+   * Makes the guest see what the host changed in `directories` (guest paths) since it last looked:
+   * Gondolin's mount caches entries and attributes (about a second, in the guest) and directory listings
+   * (five seconds and more, in the host), and only the guest's own changes clear them. Best effort,
+   * never throws.
+   */
+  sync(directories: readonly string[]): Promise<void>;
   /**
    * The secrets' current values, read at each use: a changed value replaces the one sent from then on
    * (requests that carry the old one are refused); one no longer set is removed until the next boot.

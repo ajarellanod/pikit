@@ -15,9 +15,9 @@
  *
  * `git` in a command is the machine's own (deployment-docker's image installs it): for
  * self-improvement the steward clones the project from the proposals repository on this server
- * (`proposals-local`) and pushes its branches there with plain git. No fence and no token: on a
- * server the operator's approval in the dashboard is the decision, and the deployer checks what it
- * deploys (proposals-local's README).
+ * (`proposals-local`, `file://<path>`) and pushes its branches there with plain git. No fence and no
+ * token: with this component the operator's approval in the dashboard is a decision, not a lock, and
+ * the deployer checks what it deploys (proposals-local's README); execution-gondolin makes it a lock.
  *
  * NOT A SANDBOX. Commands run as the server's OS user and can read and change whatever that user
  * can, outside the working directory too: other projects, `~/.ssh`, this app's credentials file.

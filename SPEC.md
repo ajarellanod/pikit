@@ -580,8 +580,12 @@ Compose contribution, never detection of its component id. Their explicit file p
 `@pikit/contracts/deployer`, not an App capability: the external process cannot query the graph.
 It imports shared types only, with no project dependency loaded in the privileged process. Changes
 to any declared Compose file or its declaration are fenced like the deployment's root files.
-There an approval is the operator's decision, not a lock: the agent's shell runs in the app's
-container (`features/sandboxed-execution.md` for a lock).
+Whether an approval is a lock depends on where the agent's shell runs. With `execution-local` it
+runs in the app's container and could write an approval itself: the approval is the operator's
+decision, not a lock (proposals-local's doctor says so). With `execution-gondolin` it runs in a VM
+that holds neither the repository nor the decisions: it reaches the repository only through
+`proposals.remote().serve` (git's smart HTTP, answered in the host), which takes pushes of branches
+under the prefix and nothing else, so only the operator approves.
 
 **On Cloudflare** (checked against Cloudflare's documentation, August 2026):
 - **The workspace** is `execution-do`: each conversation's Durable Object, on the Free plan, with a

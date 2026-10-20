@@ -6,7 +6,9 @@ on the host, no network but the hosts you allow, and secrets the guest never see
 
 - **Provides:** `workspace` (a sandbox per conversation), and `execution` and `execution.shell` (one
   more sandbox, `default`, for a tool called outside a conversation). All are pi-durable's `ExecutionEnv`.
-- **Uses if present:** `secrets` (required once `secrets` is configured: start refuses without it).
+- **Uses if present:** `secrets` (required once `secrets` is configured: start refuses without it),
+  `proposals` (self-improvement on a server, proposals-local: the steward's `git` reaches the
+  proposals repository, and nothing else of it; "Proposals" below).
 - **Target:** `server`: QEMU processes beside the app.
 - **Installs to:** `src/pikit/execution-gondolin/`.
 - **npm dependencies:** `@earendil-works/gondolin` (0.13.0, Apache-2.0; Earendil Works' sandbox, not
@@ -58,8 +60,9 @@ mount (`RealFSProvider`) over the host directory, so the files outlive the VM, a
 conversation is the host's alone
 ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)).
 `<root>/.execution-gondolin-tmp` is emptied at start (no VM and no tool refers to an earlier
-process's): the only directory this component deletes. Start refuses a `root` that is the working
-directory, one of its ancestors, or `/`.
+process's), and `<root>/.execution-gondolin-image/` holds the image with `packages` (below), whose
+stale checkpoints are removed when a new one is made: the only things this component deletes. Start
+refuses a `root` that is the working directory, one of its ancestors, or `/`.
 
 The process keeps the sandboxes of at most 64 idle conversations built (and every one with a VM or a
 command running); an idle one past that is dropped, least recently resolved first, and rebuilt at its
@@ -69,6 +72,13 @@ next `resolve`, its files untouched.
   directories directly, with Pi's own `NodeExecutionEnv` underneath: a conversation that never runs a
   command never boots a VM. Paths are the guest's (`cwd` is `/workspace`, results say
   `/workspace/...`), so the file tools and the shell agree; errors never show host paths.
+- **What the file tools change, the next command sees.** Gondolin's mount caches what the guest saw:
+  entries and attributes for about a second in the guest, and directory listings in the host for five
+  seconds (longer while the guest keeps listing), cleared only by the guest's own changes. So each
+  directory a file method changed (the path, and its directories up to the mount) is synced before the
+  sandbox's next command: a directory made and removed in it clears Gondolin's listing, and the guest
+  kernel drops its cached entries (a few milliseconds, only after a change). Without it, `git add -A`
+  right after the `write` tool could miss the new file, or commit an old size of an edited one.
 - **Confined.** A file tool reaches `/workspace` and `/tmp/pikit` only. A path, or a symbolic link the
   guest made, that leads elsewhere is refused (`permission_denied`): links are resolved as the guest
   resolves them (an absolute target is a guest path), so `ln -s / root` or a guessed host path gives
@@ -77,6 +87,13 @@ next `resolve`, its files untouched.
 - **A VM per sandbox, only while it is used.** It boots at the first command (about a second once the
   image is cached), serves the next ones, and is closed after `idleSeconds` with no command running.
   What a command wrote outside `/workspace` and `/tmp/pikit` (`apk add`, `/root`) goes with it.
+- **The image.** Gondolin's (Alpine with bash, curl, wget, python3 and node), or, with `packages`, a
+  checkpoint of it with those Alpine packages added: made at the first boot that needs it (a VM whose
+  only reachable host is `dl-cdn.alpinelinux.org` runs `apk add`, a few seconds), kept in
+  `<root>/.execution-gondolin-image/` by the image's build id and the packages, and every VM starts
+  from it (copy-on-write: nothing a VM writes reaches it). `git` is added whenever `proposals` is
+  installed. If `apk add` fails (no route to the mirror), the command answers `shell_unavailable`
+  saying why, and the next one tries again; the image's root disk has about 80 MB free once git is in.
 - **Bounded.** At most `maxVms` VMs run at once. A new one closes the VM idle the longest; when all
   are running commands, the command waits up to `queueSeconds`, then fails with `spawn_error`, saying
   all `maxVms` were busy. A VM that fails to boot is not kept (the command answers
@@ -111,6 +128,21 @@ next `resolve`, its files untouched.
   next boot (a warning names it); one unset later is removed from the running VM. No value is logged:
   messages name secrets, never their values.
 
+## Proposals (self-improvement on a server)
+
+With `proposals` installed (proposals-local), the steward proposes from a VM as from any shell:
+`git clone file://<the repository's path> project`, a branch `pikit/self/<topic>`, `git push`. The path
+is not in the VM: the guest's `/etc/gitconfig` rewrites that URL to `http://proposals.pikit.internal/project.git`,
+a host that exists only in the guest's network, and this component answers its requests in the host,
+with the repository's `serve` (proposals-local's `serve.ts`): they never leave the machine, and need no
+entry in `allowedHosts`. The guest can clone and fetch, and push branches under the prefix; a push to
+main, another ref or a deletion is refused (`remote: pushing to main is refused: …`). The repository
+and the operator's decisions (`.pikit/self/`) are not mounted, so the approval in the dashboard is the
+operator's alone: a lock (proposals-local's README, "Security"). The same gitconfig gives git an
+identity (`pikit agent <agent@pikit.invalid>`) and takes the workspace's files (the host user's) as
+the guest's own. A VM that booted before the repository existed (before the deployer's first run) gets
+the rewrite at its next boot.
+
 ## Config
 
 ```ts
@@ -123,6 +155,7 @@ next `resolve`, its files untouched.
   secrets: [],               // [{ name: "GITHUB_TOKEN", hosts: ["api.github.com"] }]; values in `secrets` (.env)
   memory: "1G",              // default: each VM's memory (QEMU syntax: "512M", "2G")
   cpus: 2,                   // default: each VM's CPUs
+  packages: [],              // Alpine packages added to the image, once (git comes with `proposals`)
 }
 ```
 
@@ -172,11 +205,14 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   way). The guest has no host path to aim at but those it guesses.
 - **The guest is root in its VM**, and Gondolin's network allows only HTTP(S): SSH, raw TCP and UDP do
   not work.
-- **The guest image is Gondolin's default** (Alpine with bash, curl, wget, python3 and node; no
-  `git`). `apk add` needs the Alpine mirrors in `allowedHosts`, and is lost when the VM closes; `git`
-  over HTTPS would need its host there too (and a token in `secrets`). So the steward's git flow
-  (`createWorkspaceGitConformance`) is not run here. A custom image is Gondolin's
-  (`GONDOLIN_DEFAULT_IMAGE`, `gondolin build`), not configured here.
+- **The image with `packages` is made over the network**: its first boot needs
+  `dl-cdn.alpinelinux.org` (that VM reaches nothing else). A machine without it boots no VM while
+  `packages` (or `proposals`) asks for one: set `packages: []` and leave `proposals` out, or use a
+  custom image of Gondolin's (`GONDOLIN_DEFAULT_IMAGE`, `gondolin build`), not configured here.
+- **The sync after the file tools' changes** covers the guest's next command, not one already running:
+  a command running while the `write` tool changes a file may see the old one.
+- **Proposals over `serve` are bounded**: a request (a push's pack) at most 64 MB, and Gondolin keeps
+  a response (a clone) in memory, at most 64 MB.
 - **A crash leaves QEMU running**: after a `kill -9` of the server, its QEMU processes may outlive it
   (stop closes them; a container restart ends them all).
 - **Disk**: a conversation's files stay after its VM closes, until you remove them (or
@@ -201,6 +237,9 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   its message; a failed boot not kept; a cancelled boot;
 - network and secrets wiring: none by default, `allowedHosts` plus the secrets' hosts, values read at
   boot and at each command, an unset secret left out with a warning, no value in any log;
+- packages (none by default, `git` first with `proposals`, names refused when not Alpine's), the
+  proposals wiring (a `path` remote read at each use), the guest's gitconfig, and the proposals host
+  answered by `serve` alone; the sync of what the file tools changed, before the next command, once;
 - start refuses without QEMU or without `secrets`, warns without KVM; doctor's check.
 
 `gondolin.test.ts` runs over real VMs where QEMU is installed (skipped, saying so, elsewhere): the
@@ -208,6 +247,12 @@ whole `execution` conformance suite with a real shell (pi-durable's cases too: a
 timeouts, symbolic links), a conversation's shell seeing none of another's files nor the host's, the
 network closed (403), a secret's placeholder in the guest, a timeout killing what the command started,
 and an idle VM closed while its files stay for the next one.
+
+`proposals.test.ts` (a repository test, not copied: it composes proposals-local) runs over real VMs
+too: `createWorkspaceGitConformance`, the steward's git flow against proposals-local's repository
+through `serve`, with git in the image; and the lock: a push to main or a deletion refused, main
+unmoved, the repository and the decisions out of the guest's reach, and the pushed branch a proposal
+the operator approves.
 
 `component.json` is generated from `setup` by `pikit registry generate`; the test "what setup
 declares" pins it.

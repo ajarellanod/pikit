@@ -70,6 +70,8 @@ export interface Sandbox {
   slot: Slot;
   /** Commands running now, killed by `cleanup`. */
   running: Set<GuestRun>;
+  /** Guest directories the file methods changed on the host since the last command (`Guest.sync`). */
+  changed: Set<string>;
 }
 
 const abortedFile = (path?: string) => err<never, FileError>(new FileError("aborted", "aborted", path));
@@ -139,6 +141,33 @@ class GondolinExecutionEnv implements ExecutionEnv {
     return result.ok ? result : err(this.guestError(result.error));
   }
 
+  /**
+   * Notes that the file methods changed `guest` (a guest path) on the host, where `host` is: it, its
+   * directories up to its mount, and the same for where it is on the host (a link followed), are
+   * synced before the next command (`Guest.sync`), so the guest's commands see the change.
+   */
+  private changed(guest: string, host?: string): void {
+    const paths = [guest, ...(host === undefined ? [] : [this.sandbox.mounts.toGuest(host)])];
+    for (const path of paths) {
+      if (path === undefined) continue;
+      for (let dir = path; dir !== "/" && dir !== "."; dir = posix.dirname(dir)) {
+        this.sandbox.changed.add(dir);
+        if (dir === WORKSPACE || dir === TMP) break;
+      }
+    }
+  }
+
+  /** `onHost` for a method that changes files: what it changed is noted (`changed`), done or not. */
+  private async changing<T>(path: string, follow: boolean, context: Context, work: (host: string, guest: string) => Promise<Result<T, FileError>>): Promise<Result<T, FileError>> {
+    return await this.onHost(path, follow, context, async (host, guest) => {
+      try {
+        return await work(host, guest);
+      } finally {
+        this.changed(guest, host);
+      }
+    });
+  }
+
   /** `work` on the host path of `path` (links followed as the guest follows them; the last one only with `follow`). */
   private async onHost<T>(
     path: string,
@@ -201,15 +230,15 @@ class GondolinExecutionEnv implements ExecutionEnv {
   }
 
   writeFile(path: string, content: string | Uint8Array, context: Context): Promise<Result<void, FileError>> {
-    return this.onHost(path, true, context, (host) => this.host.writeFile(host, content, context));
+    return this.changing(path, true, context, (host) => this.host.writeFile(host, content, context));
   }
 
   appendFile(path: string, content: string | Uint8Array, context: Context): Promise<Result<void, FileError>> {
-    return this.onHost(path, true, context, (host) => this.host.appendFile(host, content, context));
+    return this.changing(path, true, context, (host) => this.host.appendFile(host, content, context));
   }
 
   truncateFile(path: string, size: number, context: Context): Promise<Result<void, FileError>> {
-    return this.onHost(path, true, context, (host) => this.host.truncateFile(host, size, context));
+    return this.changing(path, true, context, (host) => this.host.truncateFile(host, size, context));
   }
 
   flushFile(path: string, context: Context): Promise<Result<void, FileError>> {
@@ -218,8 +247,8 @@ class GondolinExecutionEnv implements ExecutionEnv {
 
   renameFile(sourcePath: string, destinationPath: string, context: Context): Promise<Result<void, FileError>> {
     // Both ends as themselves: renaming a link moves the link.
-    return this.onHost(sourcePath, false, context, (source) =>
-      this.onHost(destinationPath, false, context, (destination) => this.host.renameFile(source, destination, context)),
+    return this.changing(sourcePath, false, context, (source) =>
+      this.changing(destinationPath, false, context, (destination) => this.host.renameFile(source, destination, context)),
     );
   }
 
@@ -275,12 +304,12 @@ class GondolinExecutionEnv implements ExecutionEnv {
   }
 
   createDir(path: string, options: { recursive?: boolean } | undefined, context: Context): Promise<Result<void, FileError>> {
-    return this.onHost(path, true, context, (host) => this.host.createDir(host, options, context));
+    return this.changing(path, true, context, (host) => this.host.createDir(host, options, context));
   }
 
   remove(path: string, options: { recursive?: boolean; force?: boolean } | undefined, context: Context): Promise<Result<void, FileError>> {
     // The last part as itself: removing a link removes the link, never what it points to.
-    return this.onHost(path, false, context, (host) => this.host.remove(host, options, context));
+    return this.changing(path, false, context, (host) => this.host.remove(host, options, context));
   }
 
   async createTempDir(prefix: string | undefined, context: Context): Promise<Result<string, FileError>> {
@@ -289,7 +318,9 @@ class GondolinExecutionEnv implements ExecutionEnv {
     if (name.includes("/")) return err(new FileError("invalid", "A temporary name has no /", TMP));
     try {
       await mkdir(this.sandbox.tmp, { recursive: true });
-      return ok(`${TMP}/${basename(await mkdtemp(join(this.sandbox.tmp, name)))}`);
+      const made = `${TMP}/${basename(await mkdtemp(join(this.sandbox.tmp, name)))}`;
+      this.changed(made);
+      return ok(made);
     } catch (error) {
       return err(new FileError("unknown", this.sandbox.mounts.hideHost(error instanceof Error ? error.message : String(error)), TMP));
     }
@@ -309,6 +340,7 @@ class GondolinExecutionEnv implements ExecutionEnv {
       await mkdir(this.sandbox.tmp, { recursive: true });
       const host = join(this.sandbox.tmp, name);
       await writeFile(host, "", { flag: "wx" });
+      this.changed(`${TMP}/${name}`);
       return ok({ host, guest: `${TMP}/${name}` });
     } catch (error) {
       return err(new FileError("unknown", this.sandbox.mounts.hideHost(error instanceof Error ? error.message : String(error)), TMP));
@@ -335,6 +367,10 @@ class GondolinExecutionEnv implements ExecutionEnv {
     try {
       const { pool, slot } = this.sandbox;
       return await pool.use(slot, signal, async (guest) => {
+        // What the file methods changed since the last command, seen by this one.
+        const changed = [...this.sandbox.changed];
+        this.sandbox.changed.clear();
+        await guest.sync(changed);
         const { result, vmFailed } = await this.run(guest.run(guestCommand), options, context);
         if (vmFailed) await pool.discard(slot, guest);
         return result;

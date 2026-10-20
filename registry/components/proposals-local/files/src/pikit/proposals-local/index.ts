@@ -2,8 +2,11 @@
  * proposals-local: `proposals` on a server (SPEC §6), with nothing to set up. The project is a git
  * repository; its proposals are branches `pikit/self/<topic>` of a bare repository in the app's state
  * volume (`.pikit/self/project.git`), whose `main` deployment-docker's deployer keeps at the project's
- * main branch. The steward clones it with plain git (`remote`), commits on a branch under the prefix,
- * runs the tests, and pushes the branch back: that is the proposal.
+ * main branch. The steward clones it with plain git (`remote`: `file://<path>`), commits on a branch
+ * under the prefix, runs the tests, and pushes the branch back: that is the proposal. A shell that
+ * cannot reach the path (execution-gondolin's VMs) reaches the same repository over git's smart HTTP,
+ * which `remote().serve` answers in the host (`serve.ts`): a push there only creates or updates
+ * branches under the prefix, never main.
  *
  * - **Read** with isomorphic-git: each branch's head commit (its subject the title, its body the
  *   description), the files changed since it left `main` (their merge base), with bounded patches.
@@ -17,11 +20,12 @@
  * - **Reject** records the rejection (with the comment), keeps the head under
  *   `refs/pikit/rejected/<topic>` and deletes the branch.
  *
- * **Not a lock.** The agent's shell runs in the app's container, as the same user: it can write these
- * files and that repository, so it could forge an approval. The approval is the operator's decision,
- * not a wall; the deployer trusts nothing else of the app's, and always runs the checks, waits for
- * `/health` and rolls back. A wall needs the agent's commands elsewhere
- * (features/sandboxed-execution.md).
+ * **A lock only with the agent's shell elsewhere.** With execution-local the agent's shell runs in the
+ * app's container, as the same user: it can write these files and that repository, so it could forge
+ * an approval; the approval is the operator's decision, not a wall. With execution-gondolin its shell
+ * is in a VM that holds neither: it reaches the repository only through `serve`, so only the operator
+ * approves (the doctor check says which one the project has). Either way the deployer trusts nothing
+ * else of the app's, and always runs the checks, waits for `/health` and rolls back.
  *
  * **The deployer runs because of this component**: its Compose file (`compose.yaml` here, which
  * `pikit add` records and deployment-docker adds after the project's) turns on compose.yaml's
@@ -52,6 +56,7 @@ import { DECISIONS_FILE, type Decision, type DeployerCheck, DEPLOYER_STATE_FILE,
 import { structuredPatch } from "diff";
 import git, { TREE } from "isomorphic-git";
 import Type from "typebox";
+import { createServe } from "./serve.ts";
 
 const NAME = "proposals-local";
 
@@ -141,8 +146,9 @@ export default defineComponent({
       return head;
     };
     const branchOf = (id: string) => `${prefix}${id}`;
-    const validId = (id: string) => /^[A-Za-z0-9][A-Za-z0-9._/-]{0,100}$/.test(id) && !id.includes("..") && !id.endsWith("/");
+    const validId = (id: string) => /^[A-Za-z0-9][A-Za-z0-9._/-]{0,100}$/.test(id) && !id.includes("..") && !id.endsWith("/") && !id.includes("//") && !id.endsWith(".lock");
     const headOf = async (id: string) => (validId(id) ? git.resolveRef({ fs, gitdir, ref: `refs/heads/${branchOf(id)}` }).catch(() => undefined) : undefined);
+    const serve = createServe({ gitdir, branchPrefix: prefix, mainBranch: main, validId, ready: async () => (await mainHead()) !== undefined });
     const branches = async () => (await git.listBranches({ fs, gitdir }).catch(() => [] as string[])).filter((branch) => branch.startsWith(prefix) && validId(branch.slice(prefix.length)));
 
     /** The commits from `head` back to `base` (excluded), newest first; at most 50. */
@@ -372,7 +378,7 @@ export default defineComponent({
 
       async remote() {
         if ((await mainHead()) === undefined) return undefined;
-        return { kind: "path", path: gitdir, mainBranch: main, branchPrefix: prefix };
+        return { kind: "path", path: gitdir, mainBranch: main, branchPrefix: prefix, serve };
       },
     };
     pikit.provide("proposals", proposals);

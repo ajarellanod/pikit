@@ -9,7 +9,10 @@ rolls back when the new version is unhealthy.
 - **Provides:** `proposals`.
 - **Requires:** nothing. **Works with:** `admin-proposals` (the dashboard's Proposals and Settings →
   Self-improvement), `deployment-docker` (the deployer: `pikit up` starts it when this component is
-  installed), `extension-pikit-self` (it tells the steward how to propose, from `remote()`).
+  installed), `extension-pikit-self` (it tells the steward how to propose, from `remote()`),
+  `execution-gondolin` (the steward's shell in a VM, which reaches the repository only through
+  `serve`: then an approval is a lock).
+- **Machine:** git, for `serve` (deployment-docker's image has it).
 - **Target:** `server`.
 - **Installs to:** `src/pikit/proposals-local/`, including its Compose override and doctor hook.
 - **npm dependencies:** `isomorphic-git` 1.42.3, `diff` 8.0.4, `typebox`.
@@ -28,9 +31,10 @@ pikit add admin-proposals proposals-local    # or: pikit new --preset http --wit
    deployment-docker's `deployer` service without detection by component name; `doctor` checks that
    the combined Compose configuration actually supplies it. The deployer makes the repository from
    the project's `main` when it starts, and keeps
-   its `main` there. `remote()` answers its path.
-3. **The steward proposes** with plain git in its shell (the image has git), as on every target:
-   `git clone <remote> project`, `git checkout -b pikit/self/<topic>`, the change, `bun install` and
+   its `main` there. `remote()` answers its path, and `serve`, the same repository over git's smart
+   HTTP (`serve.ts`), for a shell that cannot reach the path.
+3. **The steward proposes** with git in its shell, as on every target: `git clone file://<path>
+   project`, `git checkout -b pikit/self/<topic>`, the change, `bun install` and
    `bun test`, `git commit -m "<title>" -m "<description>"`, `git push origin pikit/self/<topic>`.
    The pushed branch is the proposal: its head commit's first line is the title, the rest the
    description.
@@ -54,11 +58,22 @@ A proposal's id is its topic. Approval requires the exact head the operator read
 or changed head is `moved`, including with `override`, and writes no decision;
 acting on one decided already is `not_open`.
 
-## Security: an approval is a decision, not a lock
+## Security: a lock only with the agent's shell in a VM
 
-On a server the agent's shell runs in the app's container, as the same user as the app. It can write
-the proposals repository and `decisions.json` directly, so it could push any branch or forge an
-approval; there is no fence in git and no token to keep. What holds:
+**With `execution-gondolin`, an approval is a lock.** The agent's shell runs in a VM that holds
+neither the repository nor `decisions.json`. Its git reaches the repository at a host that exists only
+in the guest's network (its `file://<path>` is rewritten there), whose requests the app answers
+in-process with `remote().serve` (`serve.ts`): clone and fetch, and pushes that only create or update
+branches under the prefix. A push to main, to another ref, or a deletion is refused whole before git
+sees it (`remote: pushing to main is refused: …`). Nothing is exposed on a network: no route, no port,
+no token. `serve` runs the server's git (`git http-backend`) with an environment of its own (no
+variable of the server's, no user or system config, no hooks), `receive.denyDeletes` and
+`receive.fsckObjects` on, a request at most 64 MB, two minutes at most.
+
+**With `execution-local`, an approval is a decision, not a lock.** The agent's shell runs in the
+app's container, as the same user as the app. It can write the proposals repository and
+`decisions.json` directly, so it could push any branch or forge an approval; there is no fence in git
+and no token to keep. This component's doctor check notes it. What holds, either way:
 - the deployer trusts nothing of the app's but "this head of this branch was approved": it fetches the
   head itself, refuses a change of the deployment's own files (compose.yaml, the Dockerfile,
   `.dockerignore`, `src/pikit/deployment-docker/`, any declared component Compose file or the set
@@ -66,8 +81,8 @@ approval; there is no fence in git and no token to keep. What holds:
   the socket or secrets, and always checks, waits for `/health` and rolls back;
 - give `bash` only to the steward, and ask it for changes only through doors only you reach.
 
-A real lock needs the agent's commands to run elsewhere, as another user or in another container
-([features/sandboxed-execution.md](https://github.com/ajarellanod/pikit/blob/main/features/sandboxed-execution.md)).
+To make it a lock: `pikit add execution-gondolin --yes`, then `pikit remove execution-local --force`
+(its README: QEMU on the server, KVM in the container).
 
 ## Status
 
@@ -93,8 +108,12 @@ isomorphic-git (`repository.test-support.ts`, no git binary needed), then: the t
 from the head commit, the files against `main` (added, modified, removed, binary) with their patches;
 an approval written for the deployer, and the deployer's outcome read back as the state, the deploy and
 the checks; the deployer's heartbeat in the status; a rejection kept under `refs/pikit/rejected/` and a
-new push on the topic open again. `doctor.test.ts` checks Compose's argv and failures with a fake
-runner. The repository also runs `createDeployerProtocolConformance` against this real provider and
+new push on the topic open again. Where git is installed: `createProposalsServeConformance` on
+`serve` (pushes taken and refused, built without a git client), and a real git client over it
+(clone, push a proposal, told why a push to main or a deletion is refused). `doctor.test.ts` checks
+Compose's argv and failures with a fake runner, and the note with `execution-local`.
+`execution-gondolin/proposals.test.ts` (a repository test) runs the steward's git flow in real VMs
+against this component, and the lock. The repository also runs `createDeployerProtocolConformance` against this real provider and
 the real deployer with git and a fake Docker runner: exact decisions, rejection comments, moved
 heads, and outcomes/checks read back. No real image is built by these tests.
 

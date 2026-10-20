@@ -10,7 +10,11 @@ sandboxing.
 Gondolin micro-VM (QEMU) per conversation, `/workspace` a VFS mount over a host directory, the file
 tools served from the host, network denied but for allowed hosts, secrets as placeholders the host
 replaces (C7). It passes `createDurableExecutionConformance` with a real shell and
-`createWorkspaceConformance`; its README has the decisions and limits.
+`createWorkspaceConformance`, and, with proposals-local, `createWorkspaceGitConformance`: with
+`proposals` installed the guest has `git` and reaches the proposals repository only through its
+`serve`, so on a server an approval is a lock (features/self-improvement.md). What the file tools
+change on the host, the next command sees (Gondolin's mount caches are synced first). Its README has
+the decisions and limits.
 `execution-remote` and `execution-serve` built (`registry/components/`): a real shell
 for a server or a Durable Object, in a sandbox of a host; their protocol is execution-remote's own
 (`protocol.ts`, copied in both). The sandboxes themselves are a `workspace` provider's on the host
@@ -18,7 +22,7 @@ for a server or a Durable Object, in a sandbox of a host; their protocol is exec
 
 **Needed by:** self-improvement requires `execution-cloudflare-sandbox` (SPEC §6): that one is
 required work, specified there, not here. On the server, SPEC §6's rule that the workspace's network
-is closed except for the hosts it needs may require `execution-docker` (open below).
+is closed except for the hosts it needs is met by `execution-gondolin` (decided below).
 
 ## What it gives
 Commands and file tools that run somewhere other than the pikit process: a container, a VM, a
@@ -47,8 +51,10 @@ example for one terminal (`docs/containerization.md`, `examples/extensions/sandb
 only where each agent's commands run across a service.
 
 ## Open questions
-- Does self-improvement on the server need `execution-docker`, or is a local checkout with a closed
-  network achievable otherwise?
+- ~~Does self-improvement on the server need `execution-docker`, or is a local checkout with a closed
+  network achievable otherwise?~~ Decided: neither. `execution-gondolin`'s VM, its network closed,
+  clones and pushes through the proposals repository's `serve`, answered in the host at a host name
+  only the guest has; the checkout is in the conversation's workspace.
 - ~~The remote executor protocol: check Chord's host links (`ipcLink`, `webSocketLink`) before defining one
   (`pi-protocol` and `pi-client` were removed in Pi 1.2.0).~~ Decided: Chord 1.2's links are held,
   bidirectional frame channels (IPC, a WebSocket) with no `ExecutionEnv` contract over them; a

@@ -32,6 +32,13 @@ export class FakeGuest implements Guest {
     return this.hanging.size;
   }
 
+  /** Each `sync`'s directories, sorted. */
+  readonly syncs: string[][] = [];
+
+  async sync(directories: readonly string[]): Promise<void> {
+    if (directories.length > 0) this.syncs.push([...directories].sort());
+  }
+
   refreshSecrets(values: Readonly<Record<string, string | undefined>>): void {
     this.refreshes.push({ ...values });
   }

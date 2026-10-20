@@ -226,11 +226,27 @@ export interface ProposalsStatus {
  */
 export type ProposalsRemote =
   | {
-      /** A repository on this machine, which plain git reaches by its path: no credential. */
+      /**
+       * A repository on this machine, which plain git reaches by its path (`file://<path>`): no
+       * credential, and no fence for a shell that shares the machine (execution-local).
+       */
       kind: "path";
       path: string;
       mainBranch: string;
       branchPrefix: string;
+      /**
+       * The same repository over git's smart HTTP, for a shell that cannot reach the path (a VM:
+       * execution-gondolin answers its guest's requests with it, in the host). Only trusted code
+       * calls it; nothing exposes it on a network. Any URL whose path ends in `/info/refs`,
+       * `/git-upload-pack` or `/git-receive-pack` (anything else is `404`):
+       * - clone and fetch read every branch;
+       * - a push only creates or updates branches under `branchPrefix`. One that names `mainBranch`,
+       *   any other ref, or deletes a branch is refused whole, before anything is written, as git's
+       *   error (the side band's error band when the client asked for one, else an `ERR` line), so
+       *   git prints why.
+       * `503` while the repository is not ready. Never throws. Suite: `createProposalsServeConformance`.
+       */
+      serve(request: Request): Promise<Response>;
     }
   | {
       kind: "https";

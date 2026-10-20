@@ -29,6 +29,23 @@ line names its area.
   answers (`conversationId`, from its answer key).
 - outbound-durable: with `health` installed, reports `degraded` while an answer is stuck for over a
   minute or one was given up within the hour, `up` otherwise; never blocks or throws.
+- Self-improvement on a server is a lock with the agent's shell in a VM. proposals-local's
+  `remote()` gives `serve`, the proposals repository over git's smart HTTP: clone, fetch, and pushes
+  that only create or update `pikit/self/*` branches (main, other refs and deletions refused before
+  git sees them, git printing why). execution-gondolin, with `proposals` installed, answers its
+  guests' git at a host only they have with it, and adds `git` to the image; the repository and the
+  decisions are never in the VM. Its doctor check notes when `execution-local` makes an approval a
+  decision, not a lock.
+- execution-gondolin: `packages`, Alpine packages added to the image once (a checkpoint every VM
+  starts from); what the file tools change on the host, the sandbox's next command sees (Gondolin's
+  mount caches are synced first: before, `git add -A` right after `write` could miss a new file or
+  commit an edited one's old size).
+- extension-pikit-self: a server's proposals are cloned as `file://<path>`.
+
+### Contracts
+
+- `ProposalsRemote`'s `path` variant has `serve(request)`, with its suite
+  `createProposalsServeConformance`.
 
 ## 0.0.1 (2026-10-19)
 

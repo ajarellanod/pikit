@@ -170,7 +170,8 @@ export function proposingText(remote: ProposalsRemote | undefined | "none"): str
   if (remote === undefined) {
     return `${title}\nProposals are not set up yet: tell the operator to finish it in the dashboard's Settings → Self-improvement, and until then what to change, file by file.`;
   }
-  const from = remote.kind === "path" ? remote.path : remote.url;
+  // A path as git's file:// URL: plain git takes it on this machine, and a VM's git is pointed at the same repository by it.
+  const from = remote.kind === "path" ? `file://${remote.path}` : remote.url;
   const branch = `${remote.branchPrefix}<topic>`;
   return [
     title,

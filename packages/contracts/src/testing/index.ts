@@ -71,6 +71,7 @@ export { createModelCompleteConformance } from "./model-complete.ts";
 
 export type { ProposalsFixture } from "./proposals.ts";
 export { createProposalsConformance } from "./proposals.ts";
+export { createProposalsServeConformance } from "./proposals-serve.ts";
 
 export type { DeployerProtocolFixture } from "./deployer.ts";
 export { createDeployerProtocolConformance } from "./deployer.ts";

@@ -6,6 +6,9 @@
  * not apply its `!reset`. It runs `docker compose … config --services`, which starts nothing.
  * Without Docker here (a laptop running `pikit dev`), a note: nothing to check.
  *
+ * And a note while the agent's shell runs on this server (`execution-local`): an approval is then the
+ * operator's decision, not a lock (README, "Security"); `execution-gondolin` makes it one.
+ *
  * `component.json` declares it (`"hooks": { "doctor": "doctor.ts" }`); the CLI calls `doctor(io)` in the
  * project's directory, in its own process, never in the app.
  */
@@ -35,30 +38,40 @@ const spawnCompose: ComposeRunner = (command, cwd) =>
     child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
   });
 
-/** `-f compose.yaml -f <file>…`: compose.yaml, then the Compose files pikit.json lists, as deployment-docker adds them. */
-function composeArgs(cwd: string): string[] {
+/** pikit.json's installed components; none without it. */
+function installed(cwd: string): Record<string, { compose?: unknown }> {
   const path = join(cwd, "pikit.json");
-  const components = existsSync(path) ? ((JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, { compose?: unknown }> }).components ?? {}) : {};
-  const files = Object.values(components).flatMap((installed) => (typeof installed?.compose === "string" ? [installed.compose] : []));
+  return existsSync(path) ? ((JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, { compose?: unknown }> }).components ?? {}) : {};
+}
+
+/** `-f compose.yaml -f <file>…`: compose.yaml, then the Compose files pikit.json lists, as deployment-docker adds them. */
+function composeArgs(components: Record<string, { compose?: unknown }>): string[] {
+  const files = Object.values(components).flatMap((one) => (typeof one?.compose === "string" ? [one.compose] : []));
   return ["compose.yaml", ...files].flatMap((file) => ["-f", file]);
 }
 
+/** The note while the agent's shell runs on this server. */
+export const NOT_A_LOCK =
+  "the agent's shell runs on this server (execution-local): it could write an approval itself, so an approval is your decision, not a lock. With execution-gondolin its shell is in a VM that reaches the proposals only to push branches (pikit add execution-gondolin, then pikit remove execution-local --force)";
+
 export async function doctor(_io: DoctorIO, run: ComposeRunner = spawnCompose, cwd = process.cwd()): Promise<{ problems: string[]; notes: string[] }> {
-  const command = ["docker", "compose", ...composeArgs(cwd), "config", "--services"];
+  const components = installed(cwd);
+  const lock = "execution-local" in components ? [NOT_A_LOCK] : [];
+  const command = ["docker", "compose", ...composeArgs(components), "config", "--services"];
   let result: Awaited<ReturnType<ComposeRunner>>;
   try {
     result = await run(command, cwd);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { problems: [], notes: ["Docker is not installed here, so whether Compose runs the deployer was not checked: `pikit up` runs this check where Docker is"] };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { problems: [], notes: ["Docker is not installed here, so whether Compose runs the deployer was not checked: `pikit up` runs this check where Docker is", ...lock] };
     throw error;
   }
   const said = result.stderr.trim().split("\n").at(-1) ?? "";
-  if (result.code !== 0) return { problems: [`\`${command.join(" ")}\` exited with code ${result.code}${said === "" ? "" : `: ${said}`}`], notes: [] };
+  if (result.code !== 0) return { problems: [`\`${command.join(" ")}\` exited with code ${result.code}${said === "" ? "" : `: ${said}`}`], notes: lock };
   if (!result.stdout.split("\n").some((line) => line.trim() === "deployer")) {
     return {
       problems: [`Compose lists no deployer service (\`${command.join(" ")}\`): nothing would deploy what you approve. It needs deployment-docker's compose.yaml, this component's Compose file in pikit.json (\`pikit add proposals-local\` records it), and a Compose that applies its \`!reset\``],
-      notes: [],
+      notes: lock,
     };
   }
-  return { problems: [], notes: [] };
+  return { problems: [], notes: lock };
 }

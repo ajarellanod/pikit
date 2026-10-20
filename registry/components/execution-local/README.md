@@ -43,9 +43,10 @@ in a checkout under `root` (`.pikit/workspace`, which survives restarts and new 
 There is no fence and no token in this git, on purpose: the shell runs as the app's user and can write
 that repository's files anyway, so a fenced git would protect nothing. On a server an approval is the
 operator's decision, not a lock, and the deployer (deployment-docker) checks, waits for `/health` and
-rolls back whatever it deploys (proposals-local's README). A real lock needs the commands to run as
-another user or in another container ([features/sandboxed-execution.md](https://github.com/ajarellanod/pikit/blob/main/features/sandboxed-execution.md)). On Cloudflare, execution-do's
-own git keeps its fences and the GitHub token away from the agent.
+rolls back whatever it deploys (proposals-local's README; its doctor check notes it). For a lock, use
+`execution-gondolin` instead: its VMs reach the repository only through proposals-local's `serve`,
+which takes pushes of `pikit/self/*` branches and nothing else. On Cloudflare, execution-do's own git
+keeps its fences and the GitHub token away from the agent.
 
 ## It is not a sandbox
 

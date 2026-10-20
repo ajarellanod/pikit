@@ -51,12 +51,14 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
 - **Dev.** `pikit dev` runs `main.ts` with `bun --watch` and `.env` loaded.
 - **Self-improvement** (`proposals-local`): the project is a git repository (`pikit new` makes it
   one); proposals are branches `pikit/self/<topic>` of a bare repository in the volume
-  (`.pikit/self/project.git`), which the steward clones into `.pikit/workspace` and pushes to with
-  the image's plain git. An approval in the dashboard is recorded there; the deployer, a second
+  (`.pikit/self/project.git`), which the steward clones (`file://<path>`) into its workspace and
+  pushes to with git. An approval in the dashboard is recorded there; the deployer, a second
   compose service `pikit up` starts with the app (profile `self-improvement`, the only one with the
   Docker socket), merges it into `main`, runs the checks in containers without the socket, rebuilds
   and restarts `app`, waits for `/health`, and rolls back on any failure (deployment-docker's
-  README). The approval is the operator's decision, not a lock: the agent's shell could forge one.
+  README). With `execution-local` the approval is the operator's decision, not a lock: the agent's
+  shell could forge one. With `execution-gondolin` it is a lock: the shell is in a VM that reaches
+  the repository only through `serve` (pushes of `pikit/self/*` branches) and never the decisions.
 
 ## durable (Cloudflare)
 

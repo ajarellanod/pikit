@@ -146,12 +146,12 @@ test("only the steward may name it: the App does not start with another agent th
 const proposalsAt = (remote: () => ProposalsRemote | undefined): Proposals => ({ remote: async () => remote() }) as unknown as Proposals;
 
 test("how it proposes: the same steps from proposals' remote on every target, the path on a server, the repository's URL on Cloudflare", async () => {
-  const local = await sectionOf([assistant], "server", proposalsAt(() => ({ kind: "path", path: "/app/.pikit/self/project.git", mainBranch: "main", branchPrefix: "pikit/self/" })));
+  const local = await sectionOf([assistant], "server", proposalsAt(() => ({ kind: "path", path: "/app/.pikit/self/project.git", mainBranch: "main", branchPrefix: "pikit/self/", serve: async () => new Response(null, { status: 404 }) })));
   expect(local.text).toContain(
     [
       "## How you propose a change here",
-      "With git in your shell, from /app/.pikit/self/project.git, never pushing main:",
-      "1. `git clone /app/.pikit/self/project.git project`: a fresh clone for each change, so it starts from the latest main.",
+      "With git in your shell, from file:///app/.pikit/self/project.git, never pushing main:",
+      "1. `git clone file:///app/.pikit/self/project.git project`: a fresh clone for each change, so it starts from the latest main.",
       "2. `cd project && git checkout -b pikit/self/<topic>`, a short topic (`calendar-tool`).",
     ].join("\n"),
   );

@@ -20,7 +20,9 @@ import { createWorkspaceConformance } from "@pikit/pi-adapter/testing";
 import { doctor } from "./doctor.ts";
 import { FakeLauncher } from "./fake-guest.test-support.ts";
 import { SandboxCache } from "./cache.ts";
-import { createExecutionGondolin, holdsWorkingDirectory, KEEP_SANDBOXES, TMP_DIR } from "./index.ts";
+import { gitConfig, proposalsHook } from "./gondolin.ts";
+import { PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
+import { createExecutionGondolin, holdsWorkingDirectory, IMAGE_DIR, KEEP_SANDBOXES, TMP_DIR } from "./index.ts";
 import { qemuBinary, qemuProblem } from "./qemu.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -138,7 +140,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   const app = await defineApp({ components: [createExecutionGondolin(new FakeLauncher())], logger: silentLogger }).create();
 
   expect(app.describe().components).toEqual([
-    { name: "execution-gondolin", provides: ["execution", "execution.shell", "workspace"], requires: [], optional: ["secrets"] },
+    { name: "execution-gondolin", provides: ["execution", "execution.shell", "workspace"], requires: [], optional: ["secrets", "proposals"] },
   ]);
 });
 
@@ -281,6 +283,8 @@ test("the VM boots at the first command, once, with the conversation's directori
     secrets: [],
     memory: "512M",
     cpus: 1,
+    packages: [],
+    imageDir: join(s.root, IMAGE_DIR),
   });
   expect(guest?.commands).toEqual([
     { command: "echo", cwd: "/workspace/sub", env: { A: "1" }, inheritEnv: true },
@@ -590,4 +594,87 @@ test("start refuses a root that is the working directory, holds it, or is /", as
   expect(holdsWorkingDirectory("/srv", "/srv/app")).toBe(true);
   expect(holdsWorkingDirectory("/srv/app/.pikit/gondolin", "/srv/app")).toBe(false);
   expect(holdsWorkingDirectory("/srv/ap", "/srv/app")).toBe(false);
+});
+
+/** A `proposals` whose remote is `remote()`'s, read at each call; nothing else is asked. */
+function proposalsOf(remote: () => unknown): ComponentDefinition {
+  return defineComponent({ name: "proposals-test", setup: (pikit) => pikit.provide("proposals", { remote: async () => remote() } as never) });
+}
+
+test("packages: none by default; with proposals, git comes first, then the configured ones, each once; the image is kept under root", async () => {
+  const plain = await started({ packages: ["make"] });
+  await run(await plain.env("1"), "true");
+  expect(plain.launcher.guests[0]?.spec).toMatchObject({ packages: ["make"], imageDir: join(plain.root, IMAGE_DIR) });
+  expect(plain.launcher.guests[0]?.spec.proposals).toBeUndefined();
+  await plain.app.stop();
+
+  const s = await started({ packages: ["make", "git"] }, { providers: [proposalsOf(() => undefined)] });
+  await run(await s.env("1"), "true");
+  await run(s.execution, "true");
+  for (const guest of s.launcher.guests) expect(guest.spec.packages).toEqual(["git", "make"]);
+  expect(s.launcher.guests.map((guest) => guest.spec.proposals !== undefined)).toEqual([true, true]);
+  await s.app.stop();
+});
+
+test("packages are Alpine names: anything that could be read as an option or a command is refused at start", async () => {
+  for (const name of ["--allow-untrusted", "git; rm -rf /", "Git", ""]) {
+    await expect(started({ packages: [name] })).rejects.toThrow();
+  }
+});
+
+test("the guest's proposals: a path remote is read at each use; anything else, or none, is none", async () => {
+  const serve = async () => new Response("served");
+  let remote: unknown;
+  const s = await started({}, { providers: [proposalsOf(() => remote)] });
+  await run(await s.env("1"), "true");
+  const proposals = s.launcher.guests[0]?.spec.proposals;
+  expect(await proposals?.remote()).toBeUndefined();
+  remote = { kind: "path", path: "/srv/self/project.git", mainBranch: "main", branchPrefix: "pikit/self/", serve };
+  expect(await proposals?.remote()).toEqual({ path: "/srv/self/project.git", serve });
+  remote = { kind: "https", url: "https://github.com/acme/app.git", mainBranch: "main", branchPrefix: "pikit/self/", authorization: async () => undefined };
+  expect(await proposals?.remote()).toBeUndefined();
+  await s.app.stop();
+});
+
+test("the guest's git config: an identity, the workspace as its own, and the repository's file:// URL rewritten to the host only the guest has", () => {
+  expect(gitConfig(undefined)).toBe("[user]\n\tname = pikit agent\n\temail = agent@pikit.invalid\n[safe]\n\tdirectory = *\n");
+  expect(gitConfig('/app/.pikit/self/pro"ject.git')).toEndWith(`[url "${PROPOSALS_URL}"]\n\tinsteadOf = "file:///app/.pikit/self/pro\\"ject.git"\n`);
+  expect(PROPOSALS_URL).toBe(`http://${PROPOSALS_HOST}/project.git`);
+});
+
+test("the guest's requests to the proposals host are answered in the host by serve; others are Gondolin's to judge; none yet is 503", async () => {
+  const seen: string[] = [];
+  let remote: { path: string; serve(request: Request): Promise<Response> } | undefined;
+  const hook = proposalsHook({ remote: async () => remote });
+  expect((await hook(new Request(`${PROPOSALS_URL}/info/refs?service=git-upload-pack`)))?.status).toBe(503);
+  remote = { path: "/srv/self/project.git", serve: async (request) => (seen.push(request.url), new Response("from serve")) };
+  expect(await (await hook(new Request(`${PROPOSALS_URL}/info/refs?service=git-upload-pack`)))?.text()).toBe("from serve");
+  expect(await hook(new Request("https://example.com/project.git/info/refs"))).toBeUndefined();
+  expect(await hook(new Request(`https://${PROPOSALS_HOST}.example.com/x`))).toBeUndefined();
+  expect(seen).toEqual([`${PROPOSALS_URL}/info/refs?service=git-upload-pack`]);
+});
+
+test("what the file tools change on the host, the next command sees: its directories up to the mount are synced first, once", async () => {
+  const s = await started();
+  const env = await s.env("1");
+  await run(env, "true");
+  const guest = s.launcher.guests[0];
+  expect(guest?.syncs).toEqual([]);
+
+  expect((await env.writeFile("project/src/new.ts", "new\n", ctx)).ok).toBe(true);
+  expect((await env.createDir("project/docs", { recursive: true }, ctx)).ok).toBe(true);
+  expect((await env.renameFile("project/src/new.ts", "project/docs/new.ts", ctx)).ok).toBe(true);
+  // A refused change (outside the sandbox) notes nothing.
+  expect((await env.writeFile("/etc/passwd", "x", ctx)).ok).toBe(false);
+  await run(env, "git add -A");
+  expect(guest?.syncs).toEqual([["/workspace", "/workspace/project", "/workspace/project/docs", "/workspace/project/docs/new.ts", "/workspace/project/src", "/workspace/project/src/new.ts"]]);
+
+  // Nothing changed since: nothing to sync. Reading changes nothing.
+  await env.readTextFile("project/docs/new.ts", ctx);
+  await run(env, "git status");
+  expect(guest?.syncs).toHaveLength(1);
+  expect((await env.remove("project/docs", { recursive: true }, ctx)).ok).toBe(true);
+  await run(env, "ls");
+  expect(guest?.syncs[1]).toEqual(["/workspace", "/workspace/project", "/workspace/project/docs"]);
+  await s.app.stop();
 });

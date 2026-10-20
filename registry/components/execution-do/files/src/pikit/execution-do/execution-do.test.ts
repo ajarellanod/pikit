@@ -361,7 +361,7 @@ test("git push follows the proposals' own prefix, and refuses a remote that is a
   expect((await run(env, "git checkout -b bot/x && git push origin bot/x", "app")).exitCode).toBe(0);
   await app.stop();
 
-  const local = remoteOnly(async () => ({ kind: "path", path: "/srv/proposals.git", mainBranch: "main", branchPrefix: "pikit/self/" }));
+  const local = remoteOnly(async () => ({ kind: "path", path: "/srv/proposals.git", mainBranch: "main", branchPrefix: "pikit/self/", serve: async () => new Response(null, { status: 404 }) }));
   const onPath = await started({ proposals: local });
   expect((await run(onPath.env, "git clone https://github.com/acme/app")).output).toContain("pushes only over HTTPS");
   await onPath.app.stop();

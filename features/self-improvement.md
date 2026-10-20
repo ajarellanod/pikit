@@ -95,11 +95,17 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      imports types only and never project packages at runtime. Contributed Compose paths and changes
      to their declarations are part of the deployment fence too.
      After a deploy the project's `main` (as its owner) and the proposals repository's follow.
-   - **On a server an approval is a decision, not a lock.** The agent's shell runs in the app's
-     container: it can write the proposals repository and `decisions.json`, so it could forge an
-     approval. The deployer trusts the app for nothing but "this head was approved", and always checks,
-     waits for `/health` and rolls back. A real lock needs the agent's commands elsewhere
-     (features/sandboxed-execution.md). Chosen for less friction on servers.
+   - **On a server, a lock with the agent's shell in a VM.** With `execution-local` the agent's shell
+     runs in the app's container: it can write the proposals repository and `decisions.json`, so it
+     could forge an approval; the approval is the operator's decision, not a lock (proposals-local's
+     doctor notes it). With `execution-gondolin` (**built**) the shell is in a VM that holds neither:
+     the steward's `git clone file://<path>` is rewritten in the guest to a host only the guest has,
+     whose requests the app answers in-process with `proposals.remote().serve` (git's smart HTTP over
+     the repository, `createProposalsServeConformance`): clone, fetch, and pushes that only create or
+     update `pikit/self/*` branches; main, other refs and deletions are refused before git sees them.
+     `git` is added to the VM's image when `proposals` is installed (once, a checkpoint). Nothing is
+     exposed on a network: no route, no port, no token. Either way the deployer trusts the app for
+     nothing but "this head was approved", and always checks, waits for `/health` and rolls back.
 
 **GitHub on Cloudflare: a GitHub App, one credential. Built:** `repo-github-app` and the `repo.github`
 contract (the connected repository, a short-lived token for it). Workers Builds exposes no GitHub
@@ -183,9 +189,14 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
   inspecting its own container, `docker build` builds the merge from its clone (compose.yaml's build
   options beyond `build: .` are not read), and a rootless Docker needs the socket's path changed in
   compose.yaml. `pikit doctor` is not among its checks (the CLI is not in the project).
-- A real lock on a server: the agent's commands as another user or in another container
-  (features/sandboxed-execution.md); then the proposals repository and the approvals can be out of
-  its reach.
+- A lock on a server: decided and built, the agent's shell in execution-gondolin's VM, the
+  repository reached only through `serve` (above). Checked end to end over real VMs
+  (`registry/components/execution-gondolin/proposals.test.ts`): the steward's git flow, a push to
+  main or a deletion refused, the repository and the decisions out of the guest's reach. Not the
+  default: it needs QEMU (and KVM to be fast) on the server, which deployment-docker's image leaves
+  to the operator (execution-gondolin's README, "Docker"). Tools that run in the app's process
+  (`tool-fetch`, MCP) never reach the repository or the decisions either: neither is served on a
+  network.
 - Preview on the server: none for now (the diff and the deployer's checks only).
 - Levels of autonomy (a prompt change merged without approval): later, as a policy component (SPEC
   §6); never for code.
