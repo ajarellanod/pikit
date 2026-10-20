@@ -1,37 +1,8 @@
----
-name: pikit-component
-description: Write a pikit component (a channel, a tool, a store, a router stage, a model provider, an admin route, a deployment, or a feature's own new kind) for a pikit project or registry. Use when the user asks to add behaviour to their pikit assistant, build a feature from a design note in features/, or make a component that others can `pikit add`.
----
-
 # Write a pikit component
 
-pikit is a kit for Pi: the kernel (`@pikit/core`) composes components, the contracts
-(`@pikit/contracts`) are the words they share, and Pi (through `@pikit/pi-adapter`, the only door to
-Pi) runs the agents. Everything else is a component: source copied into the project, which the user
-owns. A component that follows the steps below composes, survives crashes and evictions, and can be
-shared. Agent behaviour (prompt sections, hooks on requests and tool calls) is a component too, of a
-special shape: read `.agents/skills/pikit-extension/SKILL.md` for it.
-
-**Where the kit is.** `{{PIKIT_ROOT}}` is the pikit repository (the kit) this project was made with,
-on this machine; online, {{PIKIT_URL}}. Its design notes are in `features/`, its decisions (the
-K, C and P names READMEs cite) in `SPEC.md`, its components in `registry/components/`. (`pikit new`
-writes both when it copies this skill into a project; in the pikit repository itself, they are its
-root.)
-
-## 0. Know the project before you write
-
-```sh
-pikit doctor                    # the components in start order, who provides what, what is missing
-pikit registry capabilities     # every capability: what it is for, its stability, who provides it
-```
-
-Read `pikit.config.ts` (everything that runs is listed there) and `pikit.json` (what was installed,
-and the target: `server` is a long-lived process, `durable` an actor per conversation on Cloudflare).
-Installed components are in `src/pikit/<name>/`, each with a README and its tests; the project's own
-are in `src/extensions/`. If the feature has a design note (`{{PIKIT_ROOT}}/features/<feature>.md`),
-read it first: it names the contract, what must be guaranteed and the tests that prove it
-(`{{PIKIT_ROOT}}/features/memory.md` is a complete worked example, built as `memory-sql`,
-`memory-recall` and `memory-summaries`).
+Read `../SKILL.md` first: what pikit is, where the kit is (`{{PIKIT_ROOT}}`, {{PIKIT_URL}}), and step 0,
+knowing the project. Agent behaviour (prompt sections, hooks on requests and tool calls) is a
+component of a special shape: `extension.md`, after this.
 
 ## 1. Pick the contract
 
@@ -43,7 +14,7 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | Something the model calls | `agent.tool` (`defineTool` from `@pikit/pi-adapter/tools`) |
 | A slash command the operator runs (`/deploy staging` in the dashboard's "/") | `agent.command` under its name (below: "A slash command") |
 | A text from one of the App's models, once (a title, a label) | `model.complete` (runtime-pi's): `complete({ model, system?, prompt, maxTokens? }, ctx)` |
-| Text in every request, a check on tool calls, per-conversation state | `agent.extension` (skill `pikit-extension`) |
+| Text in every request, a check on tool calls, per-conversation state | `agent.extension` (`extension.md`) |
 | Durable data | `storage.sql` (tables prefixed with your name, `-` as `_`) or `storage.kv` (a namespace named after you); `registry validate` checks both |
 | Routing a message to an agent | a stage of the `route.resolve` pipeline |
 | An HTTP endpoint | `http.route` (`"POST /v1/x"`, `"GET /items/:id"`, a prefix `"GET /admin/*"`) |

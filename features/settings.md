@@ -34,7 +34,7 @@ it changes through a commit (by a person, or the steward's proposal). A setting 
 changes live, read when used. A component says which of its values are settings; a setting's default
 may come from its config.
 
-**A section is installed with its component**, as a view is (`pikit-view`):
+**A section is installed with its component**, as a view is (the `pikit` skill, `references/view.md`):
 
 - the component has a `settings/` folder (`"settings": "settings"` in `component.json`);
 - `pikit add` copies it to `src/dashboard/src/settings/<component>/` when the project has a UI

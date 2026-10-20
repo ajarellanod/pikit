@@ -33,7 +33,7 @@ Object per conversation). These pages describe what exists at this commit, read 
 - [../features/](../features/README.md): one design note per feature, built (`completed/`) or not.
   Settings, proposals, the CLI features step and self-improvement are design notes only.
 - [../features/building-components.md](../features/building-components.md) and
-  [../.agents/skills/](../.agents/skills/pikit-component/SKILL.md): how to build a component, a view or
+  [../.agents/skills/pikit/](../.agents/skills/pikit/SKILL.md): how to build a component, a view or
   an agent extension.
 - [chord-decision.md](chord-decision.md): when pikit moves its kernel to Chord: the gates, how to
   check each, every validation's result.

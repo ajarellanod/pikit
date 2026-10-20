@@ -50,21 +50,27 @@ test("the starter agent names pikit-self when extension-pikit-self is installed,
 test("the kit's skills for AI agents are what pikit new copies, by their path in the project", () => {
   const skills = skillFiles();
 
-  for (const name of ["pikit-component", "pikit-extension"]) {
-    expect(skills.map((skill) => skill.path)).toContain(`${SKILLS_DIR}/${name}/SKILL.md`);
-    expect(skills.find((skill) => skill.path.endsWith(`${name}/SKILL.md`))?.text).toStartWith(`---\nname: ${name}\n`);
-  }
+  expect(skills.map((skill) => skill.path)).toEqual([
+    `${SKILLS_DIR}/pikit/SKILL.md`,
+    `${SKILLS_DIR}/pikit/references/component.md`,
+    `${SKILLS_DIR}/pikit/references/extension.md`,
+    `${SKILLS_DIR}/pikit/references/view.md`,
+  ]);
+  const skill = skills[0]?.text ?? "";
+  expect(skill).toStartWith("---\nname: pikit\n");
+  // SKILL.md names each of its references, and each is there.
+  for (const reference of ["component", "extension", "view"]) expect(skill).toContain(`references/${reference}.md`);
   expect(skillFiles("/nonexistent")).toEqual([]);
 });
 
 test("the copied skills say where the kit is: this CLI's checkout, and online at the project's kit commit", () => {
-  const source = readFileSync(join(PIKIT_ROOT, SKILLS_DIR, "pikit-component", "SKILL.md"), "utf8");
+  const source = readFileSync(join(PIKIT_ROOT, SKILLS_DIR, "pikit", "SKILL.md"), "utf8");
   expect(source).toContain("{{PIKIT_ROOT}}/features/memory.md");
   expect(source).toContain("{{PIKIT_URL}}");
 
   const skills = skillFiles(PIKIT_ROOT, "abc1234-dirty");
   for (const skill of skills) expect(skill.text).not.toContain("{{PIKIT_");
-  const component = skills.find((skill) => skill.path.endsWith("pikit-component/SKILL.md"))?.text ?? "";
+  const component = skills.find((skill) => skill.path.endsWith("pikit/SKILL.md"))?.text ?? "";
   expect(component).toContain(`\`${PIKIT_ROOT}/features/memory.md\``);
   // Pinned at the commit the vendored kit was packed from; uncommitted changes have no URL.
   expect(component).toContain(`${KIT_REPOSITORY}/tree/abc1234.`);

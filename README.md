@@ -49,7 +49,7 @@ pikit add <component>...                     # and remove, upgrade, doctor, logs
 | `installer/` | `install.sh` and its tests |
 | `features/` | a design note per feature, built (`completed/`) or not; kit follow-ups |
 | `docs/` | upstream proposals to Pi (`docs/upstream/`), architecture audits |
-| `.agents/skills/` | skills for AI agents (`pikit-component`, `pikit-view`, `pikit-extension`), copied into every project |
+| `.agents/skills/` | the skill for AI agents, `pikit` (a component, an agent extension, a dashboard view: one reference each), copied into every project |
 
 ## Read next
 
@@ -59,8 +59,7 @@ pikit add <component>...                     # and remove, upgrade, doctor, logs
 - [SPEC.md](SPEC.md): what must hold (the kernel, contracts, targets, the CLI).
 - [features/README.md](features/README.md): every feature, one note each, and how they are built.
 - [features/building-components.md](features/building-components.md): how a component is made.
-- [.agents/skills/pikit-component/SKILL.md](.agents/skills/pikit-component/SKILL.md): the same, as
-  steps for an AI agent.
+- [.agents/skills/pikit/SKILL.md](.agents/skills/pikit/SKILL.md): the same, as steps for an AI agent.
 - [CHANGELOG.md](CHANGELOG.md): the current state, by area. [AGENTS.md](AGENTS.md): lessons for agents
   working on this repository.
 

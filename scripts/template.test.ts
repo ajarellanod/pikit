@@ -182,13 +182,16 @@ test("adjust: a project pikit made becomes the template, with one place for its 
   // The skills name the kit's checkout on this machine; the template's name it online, at its commit.
   const kitRoot = "/home/someone/.pikit/pikit";
   writeFileSync(join(project, "pikit.json"), JSON.stringify({ version: 1, kit: { commit: "abc123-dirty" } }));
-  mkdirSync(join(project, ".agents", "skills", "pikit-component"), { recursive: true });
-  writeFileSync(join(project, ".agents", "skills", "pikit-component", "SKILL.md"), `\`${kitRoot}\` is the kit; read \`${kitRoot}/features/memory.md\`.\n`);
+  mkdirSync(join(project, ".agents", "skills", "pikit", "references"), { recursive: true });
+  writeFileSync(join(project, ".agents", "skills", "pikit", "SKILL.md"), `\`${kitRoot}\` is the kit; read \`${kitRoot}/features/memory.md\`.\n`);
+  writeFileSync(join(project, ".agents", "skills", "pikit", "references", "component.md"), `See \`${kitRoot}/SPEC.md\`.\n`);
   adjust(project, KEY, TEMPLATE, kitRoot);
-  expect(listFiles(project)).toEqual([".agents/skills/pikit-component/SKILL.md", ".dev.vars.example", ".gitignore", "README.md", "package.json", "pikit.json", "wrangler.jsonc"]);
+  expect(listFiles(project)).toEqual([".agents/skills/pikit/SKILL.md", ".agents/skills/pikit/references/component.md", ".dev.vars.example", ".gitignore", "README.md", "package.json", "pikit.json", "wrangler.jsonc"]);
   expect(readFileSync(join(project, "README.md"), "utf8")).toBe(templateReadme(KEY, TEMPLATE));
   const online = "https://github.com/ajarellanod/pikit/tree/abc123";
-  expect(readFileSync(join(project, ".agents", "skills", "pikit-component", "SKILL.md"), "utf8")).toBe(`\`${online}\` is the kit; read \`${online}/features/memory.md\`.\n`);
+  expect(readFileSync(join(project, ".agents", "skills", "pikit", "SKILL.md"), "utf8")).toBe(`\`${online}\` is the kit; read \`${online}/features/memory.md\`.\n`);
+  // Every file of the skill, its references too.
+  expect(readFileSync(join(project, ".agents", "skills", "pikit", "references", "component.md"), "utf8")).toBe(`See \`${online}/SPEC.md\`.\n`);
 });
 
 test("mirror: the output holds exactly the template's files, keeps .git and node_modules, and a second run writes nothing", () => {

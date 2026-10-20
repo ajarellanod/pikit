@@ -11,7 +11,7 @@ Rules by agent role over what its tools may do: which commands and paths, allowe
 place for the whole project.
 
 ## How it fits pikit
-- `policy-tools` is an agent extension (`agent.extension`, skill `pikit-extension`), named by the
+- `policy-tools` is an agent extension (`agent.extension`, skill `pikit`, `references/extension.md`), named by the
   agents it governs: a `hook(ToolTask, { beforeTool })` sees every call before it runs and returns
   `{ block: reason }` (the model reads the reason) or `{ arguments }` (rewritten), and a section can
   tell the model the rules up front. `extension-house-rules` is the reference: a section from config

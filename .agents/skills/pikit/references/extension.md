@@ -1,16 +1,11 @@
----
-name: pikit-extension
-description: Add agent behaviour to a pikit assistant as an agent extension (`agent.extension`): system prompt sections, hooks on model requests, tool calls and compaction, tool wrappers, documents and tools, selected by the agents that name it. Use when the user wants the agent to know something in every request (rules, a persona, memories), to check or rewrite tool calls or model requests, or to keep per-conversation state, and when building a feature whose design note says "extension".
----
-
 # Write an agent extension
 
 What an agent does besides its model, prompt and tools is a Pi extension (pi-durable's
 `defineExtension`), provided by a component under the keyed capability `agent.extension` and run
-only by the agents that name it. Read `.agents/skills/pikit-component/SKILL.md` first: an extension
-component is a component, with the same rules (synchronous `setup`, resources in `start`, config holds
-values, tests ship with it). `{{PIKIT_ROOT}}` below is the pikit repository (the kit) on this machine
-({{PIKIT_URL}} online), as that skill says.
+only by the agents that name it. Read `component.md` first: an extension component is a component,
+with the same rules (synchronous `setup`, resources in `start`, config holds values, tests ship with
+it). `{{PIKIT_ROOT}}` below is the pikit repository (the kit) on this machine ({{PIKIT_URL}} online),
+as `../SKILL.md` says.
 
 **Reference:** `extension-house-rules` (a section from config, a `beforeTool` hook): `pikit add
 extension-house-rules --yes` to read it in `src/pikit/extension-house-rules/`, its README "How this
@@ -22,7 +17,7 @@ state across a restart).
 
 | You want | Write |
 |---|---|
-| One more thing the model can call | a tool component (`pikit-component`, reference `tool-fetch`) |
+| One more thing the model can call | a tool component (`component.md`, reference `tool-fetch`) |
 | Switch model, prompt, tools or extensions with the conversation's state (a mode, a phase) | the agent's `prepare(state)` in `src/agents/<agent>/agent.ts`: pure and synchronous. The definition owns the conversation's agent (SPEC §6): the runtime rebuilds it from `prepare` at each admission and state update, so nothing else changes it live |
 | Text in every request (rules, a persona, recalled memories), possibly read from a store | an extension's **section** |
 | Instructions for a kind of task, loaded only when one matches | a skill: a `SKILL.md`, `defineSkill(text)` in the agent's `skills`; the runtime lists them and gives the `skill` tool |
@@ -114,7 +109,7 @@ defineExtension({
 
 ```ts
 export default defineComponent({
-  name: "extension-my-thing",            // kind `extension-`; or your feature's own kind, declared (pikit-component)
+  name: "extension-my-thing",            // kind `extension-`; or your feature's own kind, declared (component.md)
   config: Config,
   setup(pikit, config) {
     pikit.provideKeyed("agent.extension", "my-thing", createMyThing(config));

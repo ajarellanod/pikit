@@ -10,7 +10,7 @@ keeps failing, a lost connection); the dashboard shows it, and server-bun's `GET
   `storage.kv` (the restart backoff, below: without it the grace never grows).
 - **View:** `view/`, the dashboard's Health page (SPEC §5): installed to
   `src/dashboard/src/views/health-registry/` when the project has a UI. It is the reference for a
-  component with a view (the `pikit-view` skill).
+  component with a view (the `pikit` skill, `references/view.md`).
 - **Targets:** `server` and `durable`: plain code. On Cloudflare each object's App has its own.
 - **Installs to:** `src/pikit/health-registry/`.
 

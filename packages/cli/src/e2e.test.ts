@@ -93,9 +93,8 @@ test.skipIf(!E2E)(
     expect((await git("status", "--porcelain")).out).toBe("");
     expect((await git("log", "--format=%s")).out.trim()).toBe("pikit new my-agent");
     // The skills for the user's AI agent come with every project, saying where the kit is.
-    for (const skill of ["pikit-component", "pikit-extension"]) {
-      const text = readFileSync(join(project, ".agents", "skills", skill, "SKILL.md"), "utf8");
-      expect(text).toContain(`name: ${skill}`);
+    for (const file of ["SKILL.md", "references/component.md"]) {
+      const text = readFileSync(join(project, ".agents", "skills", "pikit", file), "utf8");
       expect(text).toContain(`${PIKIT_ROOT}/features/memory.md`);
       expect(text).not.toContain("{{PIKIT_");
     }

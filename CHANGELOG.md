@@ -5,6 +5,14 @@ line names its area.
 
 ## Unreleased
 
+### Skills for AI agents (`.agents/skills/`)
+
+- One skill, `pikit`, instead of `pikit-component`, `pikit-extension` and `pikit-view`: a short
+  `SKILL.md` (what pikit is, where the kit is, knowing the project, which reference a change needs)
+  and `references/component.md`, `extension.md` and `view.md`, read when the change needs them.
+  `pikit new` copies the folder; extension-pikit-self's guide points the steward at it. A project made
+  before copies it by hand and removes the three old folders.
+
 ### Dashboard (`registry/dashboard/`)
 
 - A conversation's header shows who it is with as an info button (the icon alone, square like the

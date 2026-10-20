@@ -26,7 +26,7 @@ Three pieces, each a component or a file of the kit, each removable (P3):
    bundled with the component (`pikit-self.md`, imported as text): what pikit is, how the agent is
    put together, how each part is changed, and where to read more, linked online at the project's
    `kit.commit` (the kit's `docs/`, and the skills a project already ships,
-   `.agents/skills/pikit-component`, `pikit-view`, `pikit-extension`, read on demand with its file
+   `.agents/skills/pikit` and its references, read on demand with its file
    tools), so the docs, the coding agents' skills and the steward's self-knowledge stay one text and
    the section stays a map. Every preset that runs an agent installs it, and the starter agent names
    it.

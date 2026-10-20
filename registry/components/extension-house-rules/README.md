@@ -4,7 +4,7 @@ House rules for the agents that name them: the rules you write in config become 
 section, the tools you list are refused before they run, whatever the model asks, and the tools you
 keep for some senders are refused in a run that answers anyone else. It is also
 **the reference agent extension**: copy it to add behaviour to your agents (the skill
-`.agents/skills/pikit-extension/SKILL.md` walks through it).
+`pikit`, `.agents/skills/pikit/references/extension.md`, walks through it).
 
 - **Provides:** `agent.extension`, under the key `house-rules`.
 - **Requires:** nothing (it reads who a run answers from its context, `RUN_REQUESTS`).

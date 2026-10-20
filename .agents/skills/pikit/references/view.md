@@ -1,8 +1,3 @@
----
-name: pikit-view
-description: Add a view to a pikit project's dashboard (src/dashboard/, a shadcn/ui project), with the admin API routes it reads, for the project alone or as part of a component others can `pikit add`. Also a section of its Settings dialog, for values an operator changes live. Use when the user wants to see, operate or set something of their pikit assistant in the dashboard.
----
-
 # Add a view to the dashboard
 
 The dashboard (SPEC §5) is a project's choice: `src/dashboard/` exists when the project has a UI

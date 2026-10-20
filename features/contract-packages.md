@@ -144,8 +144,8 @@ The others move to packages of their own. The first candidates are `proposals`, 
    consumers (`proposals-*`, `admin-proposals`, `extension-pikit-self`, `github-*`, `execution-do`,
    `agents-live`, `runtime-pi`).
 5. **Docs.** Update [docs/contracts.md](../docs/contracts.md) ("A registry's own contracts"),
-   [memory](memory.md), [building components](building-components.md) and the `pikit-component`
-   skill.
+   [memory](memory.md), [building components](building-components.md) and the `pikit` skill
+   (`references/component.md`).
 6. **Then [open registries](open-registries.md)** (Git registries) need no contract work of their
    own.
 

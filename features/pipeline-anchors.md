@@ -24,7 +24,7 @@ what an answer looks like as it leaves, and an agent's state read or changed fro
   - `agent.prepare`, a pipeline after the agent's `prepare` that patched its `TurnConfig` (context
     injection, tools taken away by policy). An agent extension does both, per agent and per request:
     a section injects context, a `beforeTool` hook refuses a call, `beforeRequest` changes one
-    request ([building components](building-components.md), skill `pikit-extension`, reference
+    request ([building components](building-components.md), skill `pikit`, `references/extension.md`, reference
     `extension-house-rules`). The agent's own `prepare(state)` stays for switching model, prompt,
     tools or extensions with its state.
   - `conversation.resolve` (`{ decision, conversation? }`), planned by the former SPEC §5 (M1) to

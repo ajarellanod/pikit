@@ -49,7 +49,7 @@ The kernel needs no change in any phase below. Everything goes through a few pla
 Each phase ships on its own, in a worktree (`../pikit-<branch>`), committed by explicit paths. It
 follows the contract rules of `AGENTS.md`: SPEC first, negative cases in the tests (and a mutation
 that shows each new case catches a broken implementation), the catalogue, `docs/contracts.md`,
-`docs/components.md`, `docs/cli.md`, the `pikit-component` skill and every affected README in the
+`docs/components.md`, `docs/cli.md`, the `pikit` skill (`references/component.md`) and every affected README in the
 same change, then `bun run registry generate` and `validate`, `bun run typecheck`, `bun run lint`,
 the bounded `bun test` and, where a durable component changes, `bun run test:workerd`. pikit is
 0.0.x: no compatibility with the previous shape (no aliases, no readers of old `pikit.json` fields).
@@ -143,7 +143,7 @@ The decided option B of [contract packages](contract-packages.md):
 - The CLI's component ids become fields: `STARTER_CONFIG["router-basic"]` the preset's `config`,
   `NEEDS_DASHBOARD` a manifest field, `DEPLOYMENT_TEXT` the deployment's `title`.
 - A guide, "Your own distribution" (a registry, presets, contract packages, a dashboard), with an
-  `acme` fixture registry, and the `pikit-component` skill updated.
+  `acme` fixture registry, and the `pikit` skill (`references/component.md`) updated.
 - [Multi-tenant isolation](multi-tenant-isolation.md) records the recommendation for many clients:
   a fleet, one project per client made from a distribution's preset (real isolation, the actor model
   as it is), not tenants inside one App.

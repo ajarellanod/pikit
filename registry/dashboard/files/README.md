@@ -216,7 +216,7 @@ anything else: no internals, no other origin.
 More primitives: `bunx shadcn@latest add dialog` (from this folder). pikit's own pieces and views are
 shadcn items too: `bunx shadcn@latest add @pikit/<item>` (`components.json` names the registry; its
 list is `registry/ui/r/registry.json` in the pikit repository). A component with a view installs it
-here itself (`pikit add`). The skill `pikit-view` (`.agents/skills/`) teaches an AI agent all of this.
+here itself (`pikit add`). The skill `pikit` (`.agents/skills/pikit/`, `references/view.md`) teaches an AI agent all of this.
 
 ## Add a settings section
 
@@ -253,7 +253,7 @@ installs it alone.
 ## Add a command
 
 A slash command is not the dashboard's: a component registers it, and the "/" lists it. In a
-component of yours (skill `pikit-component`, "A slash command"):
+component of yours (skill `pikit`, `references/component.md`, "A slash command"):
 
 ```ts
 pikit.provideKeyed("agent.command", "deploy", {

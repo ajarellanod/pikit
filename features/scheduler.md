@@ -68,7 +68,7 @@ pi-durable's sleep covers that (a sleeping task leaves the conversation free, li
 - **A reset between two deliveries of one tick**: the runtime deduplicates per conversation, so a tick
   delivered again after `/new` moved the key would be admitted again, in the new conversation. Only a
   crash between admitting and moving on, followed by a reset before the restart, reaches it.
-- Previous-run context injection: an agent extension (`agent.extension`, skill `pikit-extension`)
+- Previous-run context injection: an agent extension (`agent.extension`, skill `pikit`, `references/extension.md`)
   that `scheduler-routines` provides and the routine's agent names, whose section renders the
   routine's last answer from its own `storage.sql` table (written when the answer is read from the
   `answers` feed). What remains open is whether that context belongs in the system prompt (a section,

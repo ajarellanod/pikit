@@ -177,7 +177,7 @@ A view reads only the admin API, through `src/lib/api.ts` (`api`, `post`, `useAp
 send the session and pause while the tab is hidden or the operator is away). New data means a new
 route, in the component that owns the data, asking `admin.auth` first.
 
-How to add one: [.agents/skills/pikit-view/SKILL.md](../.agents/skills/pikit-view/SKILL.md), and the
+How to add one: [.agents/skills/pikit/references/view.md](../.agents/skills/pikit/references/view.md), and the
 dashboard's own guide, [registry/dashboard/files/README.md](../registry/dashboard/files/README.md).
 Prefer a new view over editing a base one: `pikit upgrade` merges the kit's changes into base files.
 

@@ -64,7 +64,7 @@ unsafe, needs a shell, reaches the network).
    - a **channel** calls `admitInbound` for each message and `startAnswerDelivery` in its `start`
      (`@pikit/contracts`): answers from the `answers` feed with a cursor of its own, one lane per
      conversation, retries and idempotency keys, on both runtime models;
-   - **agent behaviour** is an `agent.extension` (skill `pikit-extension`, reference
+   - **agent behaviour** is an `agent.extension` (skill `pikit`, `references/extension.md`, reference
      `extension-house-rules`): its per-conversation state is a document committed with the
      transcript, and a tool with an effect is `replay: "unsafe"` or idempotent by its call id;
    - **state shared across conversations** (a person's memory, a team's settings) has one owner, an
@@ -85,9 +85,9 @@ unsafe, needs a shell, reaches the network).
    `pikit add` installs into `src/dashboard/` when the project has a UI (SPEC §5).
 
 ## What is missing (to make this the easy path)
-- **More skills for AI agents** (`.agents/skills/`). `pikit-component` (the steps above),
-  `pikit-extension` (agent behaviour) and `pikit-view` (a dashboard view and the routes it reads)
-  ship with every project; a focused "write a channel" comes when the next channel shows what the
+- **More for AI agents** (`.agents/skills/`). The skill `pikit`, with its references `component.md`
+  (the steps above), `extension.md` (agent behaviour) and `view.md` (a dashboard view and the routes
+  it reads), ships with every project; a focused "write a channel" comes when the next channel shows what the
   general skill leaves out.
 - **A helper to run an extension in a Harness turn** without runtime-pi (as `runToolCalls` does for a
   tool): today a component's own tests check its extension's parts, and the real App test is the
@@ -158,6 +158,8 @@ The skills for AI agents live in the kit repository, `.agents/skills/<skill>/SKI
 `pikit new` copies them into every project's `.agents/skills/` (`skillFiles` in
 `packages/cli/src/commands/starter.ts`). Not a component: a skill provides no capability and runs
 nothing, and every project needs it from the first minute. A project made by an older CLI copies a
-newer skill by hand. There are three: `pikit-component` (the steps above, executable by an agent),
-`pikit-extension` (agent behaviour as an `agent.extension`) and `pikit-view` (a view of the
-dashboard, SPEC §5, and its admin API routes; a component ships one as its `view` folder).
+newer skill by hand. There is one, `pikit`: a short `SKILL.md` (what pikit is, where the kit is,
+knowing the project, which reference a change needs) and three references it loads when needed,
+`references/component.md` (the steps above, executable by an agent), `extension.md` (agent behaviour
+as an `agent.extension`) and `view.md` (a view of the dashboard, SPEC §5, and its admin API routes;
+a component ships one as its `view` folder).

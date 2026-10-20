@@ -65,7 +65,7 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   `src/dashboard/` (`registry/dashboard/`) and `pikit new --ui` / `pikit ui on|off` on a server, with
   the conversations, one live, steer, abort and reset, cost and the composition. Next:
   2. Landed too: pikit's UI pieces and views as shadcn items (`@pikit`), components with a view
-     through `pikit add`, the `pikit-view` skill, and the Health (`health-registry`) and Delivery views.
+     through `pikit add`, the view reference of the `pikit` skill, and the Health (`health-registry`) and Delivery views.
   3. Landed too: Cloudflare, a conversation's object read, acted on and followed (polled) from the
      Worker by `actor.mailbox.call`, and [the index](cloudflare-conversation-index.md), an actor, to
      list them all; the dashboard's files bundled as a module on every host.
@@ -79,8 +79,8 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   view, a feature from its design note); a conformance suite for every contract (the execution
   environment and the tool shape still lack one in `@pikit/contracts`); each ⭐ feature note as a
   build guide (contract, Pi pieces, guarantees, tests); Git registries to share what users build.
-- **Where it stands:** two skills, `pikit-component` and `pikit-extension` (`.agents/skills/`), are
-  written and `pikit new` copies them into every project; `extension-house-rules` is the reference
+- **Where it stands:** one skill, `pikit` (`.agents/skills/pikit/`, with references for a component,
+  an extension and a view), is written and `pikit new` copies it into every project; `extension-house-rules` is the reference
   agent extension; [memory](memory.md) is the first ⭐ note written as a build guide; the contracts
   still without a suite are listed in [building components](building-components.md).
 - **When:** the other skills with what they teach (adding a view with the dashboard).

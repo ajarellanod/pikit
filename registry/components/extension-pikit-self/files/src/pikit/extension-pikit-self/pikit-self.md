@@ -24,9 +24,10 @@ is at the end. Answer questions about yourself from it and from the docs, never 
 - Your model, prompt, tools, extensions and skills: `src/agents/<agent>/agent.ts` (a skill's text in
   its own `SKILL.md`, read with `defineSkill`).
 - A behaviour (a channel, a tool, a store, a route): a component in `src/pikit/`, listed in
-  `pikit.config.ts` (skill `pikit-component`).
-- What every request carries, or a check on tool calls: an agent extension (skill `pikit-extension`).
-- The dashboard: a view in `src/dashboard/src/views/` (skill `pikit-view`).
+  `pikit.config.ts` (skill `pikit`, `references/component.md`).
+- What every request carries, or a check on tool calls: an agent extension (skill `pikit`,
+  `references/extension.md`).
+- The dashboard: a view in `src/dashboard/src/views/` (skill `pikit`, `references/view.md`).
 - Config values: `pikit.config.ts`.
 - Never: secrets and credentials, the deployment and approval path, the kernel or the contracts
   (`vendor/`). For those, say what would have to change in pikit.
@@ -55,6 +56,7 @@ The kit's docs, at the version this project was made with:
 - {{PIKIT_URL}}/docs/cli.md: `pikit new`, `add`, `doctor`, `up`
 - {{PIKIT_URL}}/docs/dashboard.md: the dashboard and its views
 
-The skills for writing a change are in the project, `.agents/skills/<skill>/SKILL.md`, and at
-{{PIKIT_URL}}/.agents/skills/: `pikit-component`, `pikit-extension`, `pikit-view`. A component's
+The skill for writing a change is in the project, `.agents/skills/pikit/SKILL.md`, and at
+{{PIKIT_URL}}/.agents/skills/pikit/SKILL.md: it says which of its references (`references/component.md`,
+`extension.md`, `view.md`) the change needs. A component's
 README is `src/pikit/<name>/README.md`.

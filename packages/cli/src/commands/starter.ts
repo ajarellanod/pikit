@@ -10,8 +10,8 @@
  *   from it): `tsc` and `bun test` leave that folder out from the start, since the installed copy in
  *   `src/pikit/` is the one checked (two copies of one contract file that differ fail `tsc`, TS2717,
  *   and every test would run twice);
- * - the kit's skills for AI agents, `.agents/skills/` (`skillFiles`): how to write a component and an
- *   agent extension, with where the kit is (this CLI's checkout, and online at the project's
+ * - the kit's skill for AI agents, `.agents/skills/pikit/` (`skillFiles`, every file of the folder): how
+ *   to write a component, an agent extension or a dashboard view, with where the kit is (this CLI's checkout, and online at the project's
  *   `kit.commit`) written in, since they cite its design notes and SPEC.
  *   They are the kit's, not a component's: no capability, nothing that runs, and every project gets
  *   them; a newer CLI's `pikit new` brings newer ones (an existing project copies them by hand).
@@ -415,7 +415,7 @@ read, edit and remove.
 | \`src/pikit/<component>/\` | installed components, each with its README and its tests |
 | \`registry/\` | if you make one: your own components, to \`pikit add <name> --registry registry\` (\`tsc\` and \`bun test\` skip it and check the installed copy) |${ui ? "\n| \`src/dashboard/\` | the dashboard: a shadcn/ui project of its own (its README says how to run it and add a view), served at \`/admin/\` by \`admin-api\` |" : ""}
 | \`pikit.json\` | what \`pikit add\` installed: registry, version, commit, and each file's hash |
-| \`.agents/skills/\` | skills for your AI agent: how to write a component (\`pikit-component\`) and an agent extension (\`pikit-extension\`) for this project |
+| \`.agents/skills/\` | the skill for your AI agent, \`pikit\`: how to write a component, an agent extension or a dashboard view for this project |
 | \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\` and \`@pikit/pi-adapter\`, until they are on npm |
 | \`.env\` | secrets, written by \`pikit configure\` (mode 0600, never committed) |
 | \`.pikit/\` | state: the database (conversations, the registry), model credentials, the workspace |

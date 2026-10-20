@@ -5,7 +5,7 @@ A component is a folder of a registry, `registry/components/<name>/`, copied int
 removable (P3), and upgradable with a three-way merge (P6).
 
 How to build one is in [features/building-components.md](../features/building-components.md) and, as
-steps for an agent, [.agents/skills/pikit-component/SKILL.md](../.agents/skills/pikit-component/SKILL.md).
+steps for an agent, [.agents/skills/pikit/references/component.md](../.agents/skills/pikit/references/component.md).
 This page says what a component is made of and how the CLI handles it.
 
 ## The folder
