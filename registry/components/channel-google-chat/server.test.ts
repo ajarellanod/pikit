@@ -11,7 +11,7 @@
  * - The `conversations` setting (the config's, no `settings`): a whole chat is one conversation, and
  *   each answer still goes to its message's thread.
  * - An image reaches the model's request; a PDF the conversation's workspace.
- * - `askUser`: the question drawn as a card, clicked, the answer admitted, a new run answers it.
+ * - `ask_user`: the question drawn as a card, clicked, the answer admitted, a new run answers it.
  * - A restart in the middle of an answer's send: the next process delivers it (outbound-durable), with
  *   no new run.
  * - A token refused is 401, and nothing is admitted.
@@ -246,7 +246,7 @@ test("an image reaches the model's request; a PDF is written to the conversation
   expect(saved.some((path) => path.endsWith(join("attachments", "P1", "report.pdf")))).toBe(true);
 }, 30_000);
 
-test("askUser: the question drawn as a card in the thread; a click admits the answer once and a new run answers it", async () => {
+test("ask_user: the question drawn as a card in the thread; a click admits the answer once and a new run answers it", async () => {
   const s = await setup();
   const thread = `${DM}/threads/Q1`;
   const question = { title: "Deploy now?", fields: [{ kind: "confirm", name: "go", label: "Deploy", required: true }] };

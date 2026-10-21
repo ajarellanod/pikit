@@ -2,8 +2,8 @@
   "$schema": "../../schema/component.schema.json",
   "name": "tool-ask-user",
   "version": "0.0.1",
-  "title": "Questions: your agent asks you, with buttons or a form where the chat draws them (the askUser tool)",
-  "description": "The `askUser` tool, for the agents that name it: one question (yes or no, a choice, several, text, a date) that ends the run, drawn as buttons or a form by a channel that can (Google Chat) and sent as text by any other; the answer comes back as a message.",
+  "title": "Questions: your agent asks you, with buttons or a form where the chat draws them (the ask_user tool)",
+  "description": "The `ask_user` tool, for the agents that name it: one question (yes or no, a choice, several, text, a date) that ends the run, drawn as buttons or a form by a channel that can (Google Chat) and sent as text by any other; the answer comes back as a message.",
   "targets": [
     "server",
     "durable"
@@ -22,7 +22,7 @@
   ],
   "replay": {
     "tools": {
-      "askUser": "safe"
+      "ask_user": "safe"
     }
   },
   "dependencies": {

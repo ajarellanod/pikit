@@ -1,6 +1,6 @@
 # tool-schedule
 
-The `schedule`, `listSchedules` and `cancelSchedule` tools, for the agents that name them: the agent
+The `schedule`, `schedule_list` and `schedule_cancel` tools, for the agents that name them: the agent
 schedules a prompt that comes back to its own conversation once at a time or on a cron schedule ("remind
 me at 9", "every weekday at 8, summarize…"), lists them and cancels them. Each tick is a message from
 the scheduler (scheduler-admit), and the agent's answer goes to the chat.
@@ -10,7 +10,7 @@ conversation's origin (`originOf(CONVERSATION)`), since a task's own key has no 
 could enter. That chat's agent answers the prompt, not the delegated one (the model is told so); the
 tree's conversations list and cancel those jobs, and share `maxPerConversation`.
 
-- **Provides:** `agent.tool`, under `schedule`, `listSchedules` and `cancelSchedule` (replay `safe`).
+- **Provides:** `agent.tool`, under `schedule`, `schedule_list` and `schedule_cancel` (replay `safe`).
 - **Uses:** `scheduler` (scheduler-sql).
 - **Targets:** `server`, as scheduler-sql.
 - **Installs to:** `src/pikit/tool-schedule/` (`index.ts`, `contract.ts`, `tool-schedule.test.ts`).
@@ -22,7 +22,7 @@ pikit add tool-schedule
 Name the tools in the agents that schedule (`src/agents/<agent>/agent.ts`):
 
 ```ts
-defineAgent({ name: "assistant", model: "…", tools: ["schedule", "listSchedules", "cancelSchedule"] })
+defineAgent({ name: "assistant", model: "…", tools: ["schedule", "schedule_list", "schedule_cancel"] })
 ```
 
 and, optionally, bound them in `pikit.config.ts`:

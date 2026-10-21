@@ -3,7 +3,7 @@
 **Public appeal:** — (OpenClaw has it; it is not what draws the public)
 
 **Specified:** yes: this note, the final version, built in one change: the component, the tool
-`askUser`, and the contract changes they bring (images in, parts out, the answer
+`ask_user`, and the contract changes they bring (images in, parts out, the answer
 while it is written). Keys and idempotency were decided in the former SPEC §5.
 
 **Status:** built (`registry/components/channel-google-chat`, `registry/components/tool-ask-user`)
@@ -43,7 +43,7 @@ a contract, added here with its first producer and its first consumer.
 | Photos read by the model | images downloaded, bounded, passed on | **`InboundMessage.images`** |
 | Text files read; other files left in the workspace for the agent's tools | the channel, before dispatch (`beforeDispatch`) | none |
 | A quoted message as the reply's context | the channel reads it (`spaces.messages.get`) and quotes it in the text | none |
-| Questions: confirm and select cards, dialogs with forms | the tool `askUser`, a `question` part, drawn by the transport | **parts, `draws`, `AgentResult.parts`** |
+| Questions: confirm and select cards, dialogs with forms | the tool `ask_user`, a `question` part, drawn by the transport | **parts, `draws`, `AgentResult.parts`** |
 | A question's answer back to the agent | a click or a form, admitted as a message whose text says it | none (`InboundMessage.replyTo` waits for a reader: below) |
 
 Out of this feature, with why:
@@ -254,7 +254,7 @@ read (`spaces.messages.get`, `chat.bot`) and put before its text as a quote, bou
 app cannot read is named as unread.
 
 **Questions.**
-- The tool `askUser` (component `tool-ask-user`, both targets, `replay: "safe"`) asks one question:
+- The tool `ask_user` (component `tool-ask-user`, both targets, `replay: "safe"`) asks one question:
   a title, a description, and fields (`confirm`, `select`, `multiselect`, `text`, `date`, each
   named, with options where they apply). The model is told the outcome only (the person answers with
   a form or in their own words, later, as a new message), never how a channel draws it. It never
@@ -420,7 +420,7 @@ over to the objects' through a mailbox in memory), the module tests, and
 - Attachments: images reach `AgentRequest.images`, text files the text, other files the workspace;
   every bound; a Drive file named.
 - Questions: drawn as a card or a dialog; folded to text by a transport that does not draw; a click
-  admitted once, its answer in its text; a second click told it is answered; the run ended by `askUser`.
+  admitted once, its answer in its text; a second click told it is answered; the run ended by `ask_user`.
 - The contract changes: each with a test in its package; a case of the channel suite that a broken
   provider fails (mutate it, see it fail, restore): a drawn question reaches Google as its card
   (`drawnParts`, `ReceivedPiece.drawn`), which a transport dropping `piece.parts` fails; the
@@ -441,7 +441,7 @@ form; an answer of several pieces; a Drive file refused.
 ## Pi first
 Nothing in Pi: channels are pikit's (SPEC P1). The images are Pi's `ImageContent`, as
 `AgentRequest.images` already are. The answer as it is written is pi-durable's live state, which
-runtime-pi re-emits; pikit builds no streaming of model calls. `askUser` is a pi-durable tool; its
+runtime-pi re-emits; pikit builds no streaming of model calls. `ask_user` is a pi-durable tool; its
 question needs no task engine, since no run waits for it.
 
 ## Open questions

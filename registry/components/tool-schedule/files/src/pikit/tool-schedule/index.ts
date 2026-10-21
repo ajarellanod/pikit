@@ -1,6 +1,6 @@
 /**
  * tool-schedule: the agent schedules prompts in its own conversation, lists them and cancels them
- * (`schedule`, `listSchedules`, `cancelSchedule`), through `scheduler`. Each tick comes back to the
+ * (`schedule`, `schedule_list`, `schedule_cancel`), through `scheduler`. Each tick comes back to the
  * conversation as a message, and its answer to the chat (scheduler-admit).
  *
  * - **Its own conversation only.** A job's key is the key of the run's conversation's origin
@@ -26,8 +26,8 @@ import type { ScheduledJobState, Scheduler, ScheduleWhen } from "./contract.ts";
 /** The prefix of every job id it makes: its own, never another component's. */
 export const JOB_PREFIX = "tool-schedule:";
 export const SCHEDULE_TOOL = "schedule";
-export const LIST_TOOL = "listSchedules";
-export const CANCEL_TOOL = "cancelSchedule";
+export const LIST_TOOL = "schedule_list";
+export const CANCEL_TOOL = "schedule_cancel";
 
 const Config = Type.Object({
   /** How many scheduled prompts one conversation may have at once. */
@@ -103,7 +103,7 @@ export function createScheduleTools(scheduler: () => Scheduler, within: (context
 
   const cancel = defineTool({
     name: CANCEL_TOOL,
-    description: "Cancels a prompt scheduled in this conversation, by its id (listSchedules shows them).",
+    description: "Cancels a prompt scheduled in this conversation, by its id (schedule_list shows them).",
     parameters: Type.Object({ id: Type.String({ minLength: 1, description: "The scheduled prompt's id." }) }),
     replay: "safe",
     async execute(args, _api, context) {

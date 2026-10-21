@@ -11,7 +11,7 @@ on a server.
 **Needed by:** nothing required directly. Self-improvement needs a human's approval of every
 self-change (SPEC §6); whether that approval is this component or the git host's review is open
 below. The dashboard answers approvals only when this exists (SPEC §5).
-[Google Chat](channel-google-chat.md) brings its first part: the tool `askUser`, which ends its run
+[Google Chat](channel-google-chat.md) brings its first part: the tool `ask_user`, which ends its run
 with a `question` part instead of waiting (declared in `@pikit/contracts`' `question.ts`, the
 shared vocabulary below), drawn as cards and dialogs, its answer a new message that says it in its text. What stays here: Pi's extensions' questions (pi-durable has no UI API yet) and
 decisions that wait days.
@@ -32,7 +32,7 @@ approval is recorded by code, never by the model reading "approved". Three compo
   decided once by a `Sender` matching the proposer's `approvers` (`<channel>:<id>`, `<channel>:*`; an instance `telegram:ops` is its own channel),
   `forbidden` otherwise; expired when read past `expiresAt`; claimed at most once, from the
   conversation that asked, by one claimant (the same claimant again gets it back).
-- **The ask** is a `question` part (`approval:<id>`, one `confirm` field), like `askUser`'s: the run
+- **The ask** is a `question` part (`approval:<id>`, one `confirm` field), like `ask_user`'s: the run
   ends with it, and the answer is a message in `answerText`'s words. Google Chat's buttons write it;
   elsewhere the fallback says the two lines to send. The stage reads it before the model and decides
   as the channel authenticated the sender; who may decide is the store's check.
@@ -61,7 +61,7 @@ this spend?") goes to a person where they can answer it, with buttons, a select,
 and the work resumes with the answer, a minute or days later, across restarts and deploys. Three kinds
 of asker, one mechanism:
 
-- **`askUser`**, a tool: the agent asks what it needs to go on.
+- **`ask_user`**, a tool: the agent asks what it needs to go on.
 - **Pi's extensions** asking their user (`ctx.ui.select` / `confirm` / `input`, Pi's
   `permission-gate`), answered from the chat, unmodified.
 - **Decisions** with a lifecycle: proposed → approved/rejected → executed → verified, with reminders,
@@ -84,8 +84,8 @@ of asker, one mechanism:
   the kit's delivery. A question carries a `fallback` text; a channel draws what it can (`draws`,
   [rich content](rich-content.md)) and sends the rest as text, and a text answer comes back as an
   ordinary message.
-- **The askers are components on it**: a tool `askUser`, the adapter's `ui` for Pi's extensions, and
-  decision components with their policy. Absent, nothing waits for a person: there is no `askUser`,
+- **The askers are components on it**: a tool `ask_user`, the adapter's `ui` for Pi's extensions, and
+  decision components with their policy. Absent, nothing waits for a person: there is no `ask_user`,
   extensions keep a no-op UI (`hasUI: false`), and `permission-gate` blocks.
 
 ## How it fits pikit
@@ -110,7 +110,7 @@ questions across conversations. `pi-durable` 1.0 ships these tasks, and the kit 
 
 Pi's `ctx.ui.select` / `confirm` / `input` / `notify` are how an extension asks, and Pi's own RPC mode
 already answers them from a client (`docs/rpc-extension-ui.md` of `pi-coding-agent`): pikit answers
-that API from a chat and adds no question API of its own for extensions (`askUser` is the agent's, a
+that API from a chat and adds no question API of its own for extensions (`ask_user` is the agent's, a
 tool). The dashboard (SPEC §5) is another place to answer: RPC's dialog records
 (`extension_ui_request` / `extension_ui_response`) are the shape to follow for its card, as for a
 chat. Running unmodified Pi coding-agent extensions was dropped with the move to pi-durable: whether
@@ -162,7 +162,7 @@ superseded by the decisions above:
 
 **Questions from extensions, in the chat.** `[planned]` (tier B), with the first `interaction-*`
 component. Pi's `ctx.ui.select` / `confirm` / `input` / `notify` are how an extension asks its user
-something. pikit answers them in the conversation's chat rather than inventing an `askUser` of its
+something. pikit answers them in the conversation's chat rather than inventing an `ask_user` of its
 own, so an unmodified extension that asks (Pi's `permission-gate`) works from Telegram:
 
 ```ts

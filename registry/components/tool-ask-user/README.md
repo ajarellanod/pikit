@@ -1,16 +1,16 @@
 # tool-ask-user
 
-The `askUser` tool, for the agents that name it: the agent asks the person it talks to one question,
+The `ask_user` tool, for the agents that name it: the agent asks the person it talks to one question,
 with fields to answer, and its turn ends there. Where the chat can draw it (Google Chat), the
 question is buttons or a form; anywhere else it is text, answered in a reply.
 
-- **Provides:** `agent.tool`, under the key `askUser`.
+- **Provides:** `agent.tool`, under the key `ask_user`.
 - **Requires:** nothing.
 - **Targets:** `server` and `durable`: it imports nothing platform-specific.
 - **Installs to:** `src/pikit/tool-ask-user/` (`index.ts` the component and the tool, `tool-ask-user.test.ts`).
 
 ```ts
-defineAgent({ name: "assistant", model: "openrouter/z-ai/glm-5.3-flash", tools: ["askUser"] })
+defineAgent({ name: "assistant", model: "openrouter/z-ai/glm-5.3-flash", tools: ["ask_user"] })
 ```
 
 ## What it does
@@ -66,7 +66,7 @@ is answered once.
 - **A channel that draws questions** for buttons and forms: `channel-google-chat`. With any other
   channel (Telegram, HTTP, the dashboard) the question is its fallback text, and the person answers
   in a reply, which the model reads as any message.
-- **An agent that names it** (`tools: ["askUser"]`), told in its instructions when to ask rather than
+- **An agent that names it** (`tools: ["ask_user"]`), told in its instructions when to ask rather than
   guess. Since the run ends at the question, ask last: what the model writes after the call is never
   said.
 

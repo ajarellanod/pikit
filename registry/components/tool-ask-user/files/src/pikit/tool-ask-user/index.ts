@@ -1,5 +1,5 @@
 /**
- * tool-ask-user: the agent tool `askUser`, for the agents that name it (`tools: ["askUser"]`). It asks
+ * tool-ask-user: the agent tool `ask_user`, for the agents that name it (`tools: ["ask_user"]`). It asks
  * the person the agent talks to one question (a title, a description, fields: `confirm`, `select`,
  * `multiselect`, `text`, `date`) and ends the run (features/channel-google-chat.md "Questions").
  *
@@ -27,7 +27,7 @@ import { defineTool, type ToolRegistration, withParts } from "@pikit/pi-adapter/
 import Type, { type Static } from "typebox";
 
 /** The name agents give it, and its key under `agent.tool`. */
-export const ASK_USER_TOOL = "askUser";
+export const ASK_USER_TOOL = "ask_user";
 
 const Option = Type.Object({
   value: Type.String({ minLength: 1, description: "What the answer carries." }),
@@ -74,7 +74,7 @@ export function questionOf(args: AskUserArgs, id: string): Question {
   return { id, title: args.title, ...(args.description !== undefined && args.description.trim() !== "" && { description: args.description }), fields };
 }
 
-/** The `askUser` tool. */
+/** The `ask_user` tool. */
 export function createAskUserTool(): ToolRegistration {
   return defineTool({
     name: ASK_USER_TOOL,

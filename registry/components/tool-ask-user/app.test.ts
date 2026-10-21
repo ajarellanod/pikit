@@ -1,7 +1,7 @@
 /**
  * tool-ask-user in a real App: runtime-pi runs the agent on a SQLite file and the model is the scripted
  * faux provider (`faux/scripted`: `call: <tool> <json>` calls a tool, anything else is answered
- * `answer: <message>`). The run that calls `askUser` ends with the question in `AgentResult.parts`, and
+ * `answer: <message>`). The run that calls `ask_user` ends with the question in `AgentResult.parts`, and
  * the answer, sent later as a message, starts a new run that reads it.
  *
  * A repository test, not copied with the component: a component's files never import another's (SPEC
@@ -72,7 +72,7 @@ async function start() {
   };
 }
 
-test("askUser ends the run with the question in AgentResult.parts; the answer, a later message, starts a run that reads it", async () => {
+test("ask_user ends the run with the question in AgentResult.parts; the answer, a later message, starts a run that reads it", async () => {
   const s = await start();
   const conversation = await s.conversation("test:1");
   const question = { title: "Which environment?", fields: [{ kind: "select", name: "env", label: "Environment", required: true, options: [{ value: "prod", label: "Production" }, { value: "staging", label: "Staging" }] }] };

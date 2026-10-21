@@ -107,7 +107,7 @@ function hold(replay: "safe" | "unsafe" = "unsafe") {
 /** A question for the person, as a tool of the helper's asks it. */
 const QUESTION = { type: "question", fallback: "Pay acme 10? Answer yes or no." } as unknown as MessagePart;
 
-/** The helper's `ask`: ends its run with `QUESTION` as a part, as askUser and request_approval do. */
+/** The helper's `ask`: ends its run with `QUESTION` as a part, as ask_user and request_approval do. */
 const ask = defineTool({
   name: "ask",
   description: "Asks the person",

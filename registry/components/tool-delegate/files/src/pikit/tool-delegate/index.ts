@@ -25,7 +25,7 @@
  *   sender is the delegating agent (`{ channel: "delegate", id }`), which its tools and hooks read
  *   (`RUN_REQUESTS`). Its origin (`ConversationRef.origin`: the conversation the person talks in) is
  *   the runtime's to set.
- * - **What the child asks the person reaches them**: a question its `askUser` or `request_approval`
+ * - **What the child asks the person reaches them**: a question its `ask_user` or `request_approval`
  *   asked (its run's parts) goes with this call's result (`withParts`) when it waits, and with the
  *   task's report when it does not; either way with the answer of this conversation's run, which its
  *   channel delivers. The answer comes back here as a message: hand it on with a new delegation.

@@ -34,7 +34,7 @@ a project installs, and agents that name what they may use.
 | Who may hand work to an agent (one with a token of its own) | `tool-delegate`: an agent's `from`, checked against every agent of the delegation chain, kept in keys only it makes and checked against the runtime's origin (no laundering through another agent) | [subagents](subagents.md), [agent sandboxes](agent-sandboxes.md) |
 | An orchestrator: assign, list, follow, steer and cancel other agents' tasks, read their transcripts | `tool-delegate`: `delegate` (`wait: false` returns an id), `delegate_tasks`, `delegate_steer`, `delegate_cancel`, on `AgentDelegation`'s `list`, `progress`, `steer`, `cancel`, each conversation its own tasks; a child's progress (its last steps: text, tool calls and how they went) is read with `delegate_tasks({ id })`; its whole transcript is open | [subagents](subagents.md) |
 | An agent writes to another chat | specified, not built: `tool-notify`, a configured destination by name, enqueued on `outbound.queue` by the destination's actor through the mailbox, send-only | [tool-notify](tool-notify.md) |
-| Questions to the user (`askUser`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) (`askUser`) |
+| Questions to the user (`ask_user`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) (`ask_user`) |
 | Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate (SPEC §6); approvals of exact tool calls by named approvers, in the chat or the dashboard, each run once (approvals-sql, extension-approvals, admin-approvals; server); not from a delegated agent yet (open in approvals); no rules, veto window or reminders | [approvals](approvals.md) |
 | Missions: a goal ledger with checkpoints, mirrored in a task tracker | none | no note yet |
 | Memory: summaries, search, rules, preferences | `memory-sql`, `memory-recall` (facts, `recall` by `LIKE`), `memory-summaries` (a summary per quiet conversation); per person (a conversation key), no spaces or shared rules | [memory](memory.md) |
@@ -79,7 +79,7 @@ contracts:
   kit's code. With [channel-google-chat](channel-google-chat.md).
 - **`approvals`** (questions now and decisions in days, one contract): what is asked is shared by who
   asks, who draws it and who waits for the answer, three components that must not know each other.
-  Questions (`askUser`, the `question` part) come with channel-google-chat; decisions
+  Questions (`ask_user`, the `question` part) come with channel-google-chat; decisions
   that wait days stay approvals'.
 - **`AgentDelegation`** (`@pikit/pi-adapter`, built): `list`, `progress` (a task's last steps),
   `steer` and `cancel` of a conversation's background tasks, for an orchestrator, on pi-durable's own records, in the parent's

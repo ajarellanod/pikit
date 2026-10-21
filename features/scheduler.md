@@ -20,7 +20,7 @@ written in `pikit.config.ts`, reviewed and versioned with the project.
 |---|---|---|
 | `scheduler-sql` | declares and provides `scheduler`; uses `storage.sql`, `wakeups` | the jobs (a table), one wakeup at the earliest tick, cron by `croner` 10.0.1; the suite `createSchedulerConformance` (`conformance.ts`) |
 | `scheduler-admit` | uses `scheduler`, `agent.runtime`, `conversations.registry` | the tick handler: each tick a message in the job's conversation, through `admitInbound` |
-| `tool-schedule` | `agent.tool` (`schedule`, `listSchedules`, `cancelSchedule`); uses `scheduler` | the agent schedules, lists and cancels prompts of its own conversation |
+| `tool-schedule` | `agent.tool` (`schedule`, `schedule_list`, `schedule_cancel`); uses `scheduler` | the agent schedules, lists and cancels prompts of its own conversation |
 | `scheduler-routines` | uses `scheduler` | routines from its config, made the scheduler's jobs at each start |
 
 Why four: a tool cannot use `agent.runtime` (the runtime uses every tool: a start-order cycle), so the

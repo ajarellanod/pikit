@@ -3,12 +3,12 @@
  * that can (Google Chat's cards and dialogs) and sent as its `fallback` text by any other.
  *
  * Shared vocabulary, so it is declared here and not by a component: the one that asks (the tool
- * `askUser`, `tool-ask-user`) and the ones that draw it and admit its answer (channels) must not know
+ * `ask_user`, `tool-ask-user`) and the ones that draw it and admit its answer (channels) must not know
  * each other (features/approvals.md: "what is asked is shared vocabulary, in @pikit/contracts"). The
  * core (`@pikit/core`) still declares no kind of part; a kind only one component and its own drawer
  * use is that component's to declare.
  *
- * - **A question** has an id (`<conversation id>:<request id>:<tool call id>` for `askUser`), a
+ * - **A question** has an id (`<conversation id>:<request id>:<tool call id>` for `ask_user`), a
  *   title, an optional description and its fields, each named, with a label: `confirm` (yes or no),
  *   `select` (one of its options), `multiselect` (any of them), `text` and `date` (`YYYY-MM-DD`).
  * - **Its answer comes back as an ordinary message** whose text says it in words (`answerText`): what
@@ -52,7 +52,7 @@ export const QUESTION_FIELD_KINDS = ["confirm", "select", "multiselect", "text",
 
 /** A question, without its part's `type` and `fallback`. */
 export interface Question {
-  /** Unique where it is asked: `askUser`'s is `<conversation id>:<request id>:<tool call id>`. */
+  /** Unique where it is asked: `ask_user`'s is `<conversation id>:<request id>:<tool call id>`. */
   id: string;
   title: string;
   description?: string;
@@ -79,7 +79,7 @@ export type QuestionAnswer = Record<string, QuestionValue | undefined>;
 /**
  * A field's name, as a pattern's source (JSON Schema's `pattern`, a `RegExp`): a letter, then letters,
  * digits, `_` or `-`. The one definition: `questionProblem` checks it, and an asker's schema (the
- * tool `askUser`'s parameters) states it.
+ * tool `ask_user`'s parameters) states it.
  */
 export const QUESTION_FIELD_NAME = "^[A-Za-z][A-Za-z0-9_-]*$";
 const FIELD_NAME = new RegExp(QUESTION_FIELD_NAME);

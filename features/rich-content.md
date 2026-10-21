@@ -6,7 +6,7 @@ OpenClaw and Hermes both handle media in chats.
 **Specified:** partly (the shape was decided in the former SPEC §5, "Rich content", kept below
 verbatim; the code is not built)
 
-**Needed by:** nothing required. [Approvals](approvals.md) (`askUser`, Pi extensions' questions,
+**Needed by:** nothing required. [Approvals](approvals.md) (`ask_user`, Pi extensions' questions,
 decisions) draw their questions as parts.
 
 ## What it gives

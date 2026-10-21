@@ -252,7 +252,7 @@ lost) and `cancel(api, id)` (aborts the child; reported to the parent as stopped
 ended, it changes nothing and returns the status). Foreground delegations are the call's, not
 listed. Every child conversation is recorded with its origin (`ConversationRef.origin`: the parent's
 origin, or the parent), written by the delegation alone. A completed task's outcome carries the
-parts of the child's run that answered it (`DelegatedOutcome.parts`: a question its `askUser` or
+parts of the child's run that answered it (`DelegatedOutcome.parts`: a question its `ask_user` or
 `request_approval` asked): tool-delegate gives them with its result (`withParts`) when it waits, and a
 background task's report brings them to the parent (`AgentRequest.parts`, with `partsNote` in its
 prompt), so they reach the person with the answer of the parent's run that takes it, once. `list`
@@ -469,7 +469,7 @@ is its text, the same whether a button was clicked or the fallback answered in a
 drawn and who may answer are the channel's: channel-google-chat draws one `confirm` or `select` field
 as buttons and anything else as a dialog's form, and takes the first answer of anyone it admits in the
 question's conversation, once, and none once that conversation was reset. Producer: tool-ask-user
-(`askUser`), whose model is told the outcome only (a form or its own words, later, as a new message),
+(`ask_user`), whose model is told the outcome only (a form or its own words, later, as a new message),
 never how a channel draws it. Tests: `question.test.ts`, tool-ask-user's and channel-google-chat's.
 
 ### `startAnswerDelivery` ([delivery.ts](../packages/contracts/src/delivery.ts))

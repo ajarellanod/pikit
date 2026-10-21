@@ -6,7 +6,7 @@
  * 1. **`request_approval`** (`{ tool, args, title, reason }`, for a tool in config only) proposes the
  *    action `{ type: "tool:<name>", payload: args }`, idempotent by `<conversation>:<call>` (so
  *    `replay: "safe"`), and ends the run with a `question` part (`approval:<id>`, one `confirm` field),
- *    as `askUser` does. A channel draws it or sends its fallback. It is asked for the conversation's
+ *    as `ask_user` does. A channel draws it or sends its fallback. It is asked for the conversation's
  *    origin (`originOf(CONVERSATION)`, its `requestedBy.conversation`): the one a person talks in, also
  *    when a delegated agent asks (its question reaches that chat with the delegating agent's answer,
  *    and admin-approvals tells that conversation an operator's decision).

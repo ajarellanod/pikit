@@ -28,7 +28,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 
 | Feature | ⭐ | One line | Needed by required work? |
 |---|---|---|---|
-| [approvals](approvals.md) | ⭐ | Questions a person answers from the chat, now or days later (`askUser`, Pi extensions' questions, decisions), bound to the message that asks; approvals of exact tool calls built (approvals-sql, extension-approvals, admin-approvals, server) | Open: self-improvement's approval (SPEC §6) may use it |
+| [approvals](approvals.md) | ⭐ | Questions a person answers from the chat, now or days later (`ask_user`, Pi extensions' questions, decisions), bound to the message that asks; approvals of exact tool calls built (approvals-sql, extension-approvals, admin-approvals, server) | Open: self-improvement's approval (SPEC §6) may use it |
 | [browser](browser.md) | ⭐ | A tool to read and act on web pages | No |
 | [channel-discord](channel-discord.md) | ⭐ | A Discord bot, in DMs, channels and threads | No |
 | [channel-email](channel-email.md) | ⭐ | An address for the agent; replies in the thread | No |
@@ -48,7 +48,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [streaming-replies](streaming-replies.md) | ⭐ | A preview message edited as the answer is written | No |
 | [subagents](subagents.md) | ⭐ | Delegation to helpers (Pi's) and to other agents (pikit's) | No |
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
-| [channel-google-chat](channel-google-chat.md) | | Google Chat: threads, "Thinking…" edited into the answer, cards, attachments, questions (`askUser`). Built on both targets and tested against a fake Google (a server first, conformance, workerd); moves to `completed/` once checked live with a real app | No |
+| [channel-google-chat](channel-google-chat.md) | | Google Chat: threads, "Thinking…" edited into the answer, cards, attachments, questions (`ask_user`). Built on both targets and tested against a fake Google (a server first, conformance, workerd); moves to `completed/` once checked live with a real app | No |
 | [agent-folders](agent-folders.md) | | Each agent a folder (`agent.ts`, `SYSTEM.md`, per-channel texts, skills) and the skills catalog as folders: the component `agents-folders`, `pikit agents` writes the one file the App lists | No |
 | [agent-sandboxes](agent-sandboxes.md) | | A machine per agent (packages, hosts, secrets, memory, CPUs) and a sandbox per conversation and agent: execution-gondolin's profiles, also behind execution-remote and execution-serve; specified | No |
 | [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |

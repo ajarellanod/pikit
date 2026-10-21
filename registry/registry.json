@@ -530,7 +530,7 @@
     },
     "tool-ask-user": {
       "version": "0.0.1",
-      "description": "The `askUser` tool, for the agents that name it: one question (yes or no, a choice, several, text, a date) that ends the run, drawn as buttons or a form by a channel that can (Google Chat) and sent as text by any other; the answer comes back as a message.",
+      "description": "The `ask_user` tool, for the agents that name it: one question (yes or no, a choice, several, text, a date) that ends the run, drawn as buttons or a form by a channel that can (Google Chat) and sent as text by any other; the answer comes back as a message.",
       "targets": [
         "server",
         "durable"
@@ -593,7 +593,7 @@
     },
     "tool-schedule": {
       "version": "0.0.1",
-      "description": "The `schedule`, `listSchedules` and `cancelSchedule` tools, for the agents that name them: a prompt that comes back to the agent's own conversation once at a time or on a cron schedule, listed and cancelled only there.",
+      "description": "The `schedule`, `schedule_list` and `schedule_cancel` tools, for the agents that name them: a prompt that comes back to the agent's own conversation once at a time or on a cron schedule, listed and cancelled only there.",
       "targets": [
         "server"
       ],

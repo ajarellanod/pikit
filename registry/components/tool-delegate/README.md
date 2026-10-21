@@ -83,7 +83,7 @@ take tasks only from the agents you trust with them. Name them in its `from`:
 ### When the agent needs more
 
 The main agent hands "fix the login bug" to `developer`, which does not know which branch. It should
-not guess, and the person it could ask with `askUser` may not know either: the agent that delegated
+not guess, and the person it could ask with `ask_user` may not know either: the agent that delegated
 does. So, by convention (no new tool, no protocol), the delegated agent asks back:
 
 - **Every task ends with one instruction** (`framedTask`, the only place it is added): `[If
@@ -165,7 +165,7 @@ Each sees only the tasks its own conversation started: another's id is an unknow
   An agent with a machine of its own (a token) takes tasks only from the agents in its `from`, so no
   other agent with `delegate` can drive it, directly or through another agent ([features/agent-sandboxes.md](https://github.com/ajarellanod/pikit/blob/main/features/agent-sandboxes.md)).
 - **What the child asks the person reaches them**: a completed task's outcome carries its run's parts
-  (a `question` its `askUser` or `request_approval` asked). Waited for, the `delegate` call's result
+  (a `question` its `ask_user` or `request_approval` asked). Waited for, the `delegate` call's result
   carries them (`withParts`); not waited for, the task's report does (`AgentRequest.parts`). Either
   way they go with the answer of this conversation's run, which its channel delivers, and the model
   reads them as shown to the person (`partsNote`), so it does not ask again. The answer comes back

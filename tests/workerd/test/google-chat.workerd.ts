@@ -7,7 +7,7 @@
  * `actor.inbox`, scope `"one"`, and `wakeups`), runtime-pi on the scripted model, conversations-kv,
  * router-basic, tool-ask-user and execution-do. The object admits, creates "Thinking…" and edits it
  * into the answer (answer delivery sending directly, its runs in the object's alarms), draws
- * `askUser`'s question as a card, whose click the Worker asks the object to answer
+ * `ask_user`'s question as a card, whose click the Worker asks the object to answer
  * (`actor.mailbox.call`), and writes a message's file that is not an image (a PDF) to its workspace:
  * execution-do's files, in the conversation's object's own SQLite.
  *
@@ -211,7 +211,7 @@ async function workerApp(secrets: Record<string, string>) {
   };
 }
 
-it("the Worker verifies and hands each event to its conversation's object, which admits, writes Thinking… into the answer, draws askUser's question, whose click it answers, and writes a message's PDF to its workspace (execution-do)", async () => {
+it("the Worker verifies and hands each event to its conversation's object, which admits, writes Thinking… into the answer, draws ask_user's question, whose click it answers, and writes a message's PDF to its workspace (execution-do)", async () => {
   const google = await fakeGoogle();
   globalThis.fetch = google.fetch;
   const secrets = {
@@ -252,7 +252,7 @@ it("the Worker verifies and hands each event to its conversation's object, which
     expect(google.calls.find((call) => call.method === "POST" && (call.body as Message).text === THINKING)?.path).toBe(`${DM}/messages`);
     expect(google.calls.filter((call) => call.method === "PATCH" && call.path === answer?.name).map((call) => (call.body as Message).text)).toContain("answer: hello");
 
-    // askUser: the run ends with the question, drawn as a card in its thread.
+    // ask_user: the run ends with the question, drawn as a card in its thread.
     const question = { title: "Deploy now?", fields: [{ kind: "confirm", name: "go", label: "Deploy", required: true }] };
     await worker.post(messageEvent("M2", "Q1", `call: ${ASK_USER_TOOL} ${JSON.stringify(question)}`), await google.bearer());
     const card = await vi.waitFor(

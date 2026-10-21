@@ -44,7 +44,7 @@
  *   memory, where an approval or a scheduled prompt belongs: `originOf`). Nothing else sets it.
  * - **The child's parts** reach the person: a completed task's outcome carries the parts of the child's
  *   run that answered it (its messages' and tools' parts, as a run's result has them: a `question` its
- *   `askUser` or `request_approval` asked), so `run`'s caller can give them with its tool result
+ *   `ask_user` or `request_approval` asked), so `run`'s caller can give them with its tool result
  *   (`withParts`), and a background task's report brings them to the parent's run that takes it
  *   (`AgentRequest.parts`), whose answer the parent's channel delivers. The report's request id makes a
  *   rerun of the report a duplicate: they reach the parent's answers once.

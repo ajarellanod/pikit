@@ -19,7 +19,7 @@ import { databaseFile, openWorker, scriptedAgent } from "./test-support.ts";
 const part = (type: string, fallback: string, fields: Record<string, unknown> = {}): MessagePart => ({ type, fallback, ...fields }) as unknown as MessagePart;
 const CARD = part("test-card", "A card: pick yes or no", { options: ["yes", "no"] });
 
-/** The tool `card`: gives `CARD` to its run's answer, and ends the run when `terminate` (as `askUser` does). */
+/** The tool `card`: gives `CARD` to its run's answer, and ends the run when `terminate` (as `ask_user` does). */
 function cardTool(terminate = false): DurableTool {
   return defineTool({
     name: "card",

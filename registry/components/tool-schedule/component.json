@@ -2,8 +2,8 @@
   "$schema": "../../schema/component.schema.json",
   "name": "tool-schedule",
   "version": "0.0.1",
-  "title": "Scheduling: your agent schedules prompts in its own conversation (schedule, listSchedules, cancelSchedule)",
-  "description": "The `schedule`, `listSchedules` and `cancelSchedule` tools, for the agents that name them: a prompt that comes back to the agent's own conversation once at a time or on a cron schedule, listed and cancelled only there.",
+  "title": "Scheduling: your agent schedules prompts in its own conversation (schedule, schedule_list, schedule_cancel)",
+  "description": "The `schedule`, `schedule_list` and `schedule_cancel` tools, for the agents that name them: a prompt that comes back to the agent's own conversation once at a time or on a cron schedule, listed and cancelled only there.",
   "targets": [
     "server"
   ],
@@ -24,8 +24,8 @@
   "replay": {
     "tools": {
       "schedule": "safe",
-      "listSchedules": "safe",
-      "cancelSchedule": "safe"
+      "schedule_list": "safe",
+      "schedule_cancel": "safe"
     }
   },
   "dependencies": {

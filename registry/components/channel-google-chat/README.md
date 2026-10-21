@@ -5,7 +5,7 @@ Talk to your agents in Google Chat: spaces, group chats and DMs, through a Chat 
 Every answer goes to its message's thread; each thread is a conversation by default, or a whole chat
 is one (a setting). "Thinking…" is written into the answer as the model writes it; tables and code
 are drawn as cards, images as image cards; photos and files are read; a quoted message is the
-reply's context; the agent's questions (`askUser`, [tool-ask-user](../tool-ask-user/README.md)) are
+reply's context; the agent's questions (`ask_user`, [tool-ask-user](../tool-ask-user/README.md)) are
 asked with buttons and forms.
 
 - **Provides:** `http.route`: `POST /google-chat` (and `POST /google-chat/<name>` per named app), the
@@ -62,9 +62,9 @@ Then what makes it whole:
 pikit add tool-ask-user workspace-local expose-cloudflare-tunnel
 ```
 
-- `tool-ask-user` gives the agent `askUser`, whose questions this channel draws as cards. An agent
-  asks only when it names the tool: add `"askUser"` to its `tools` in
-  `src/agents/steward/agent.ts` (`tools: ["read", "write", "edit", "fetch", "websearch", "askUser"]`).
+- `tool-ask-user` gives the agent `ask_user`, whose questions this channel draws as cards. An agent
+  asks only when it names the tool: add `"ask_user"` to its `tools` in
+  `src/agents/steward/agent.ts` (`tools: ["read", "write", "edit", "fetch", "websearch", "ask_user"]`).
 - `workspace-local` gives `workspace`: the agent's own directory in each space or thread (its chat,
   kept through `/new`), where a PDF or an archive sent in the chat is written for the agent's tools.
 - `expose-cloudflare-tunnel` gives `pikit expose`: the public HTTPS URL Google calls.

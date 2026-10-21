@@ -49,7 +49,7 @@ What pi-durable does not know is pikit's agents. The runtime adds that layer
   read it with `originOf`: memory-recall's person, tool-schedule's key, extension-approvals'
   conversation are the chat's, not the task's. `agent.submissions` and `agent.observe` do not carry it.
 - **What it asks the person reaches them**: a completed task's outcome carries the parts of the
-  child's run that answered it (a question of `askUser` or `request_approval`). The `delegate` call
+  child's run that answered it (a question of `ask_user` or `request_approval`). The `delegate` call
   that waits gives them with its result (`withParts`); a background report brings them to the parent
   (`AgentRequest.parts`, kept with the message and given with the answer of the parent's run that
   takes it, before its tools' parts, once). The parent's agent reads them as shown (`partsNote`).
