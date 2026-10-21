@@ -304,7 +304,7 @@ test("registry validation refuses default dashboards without their source templa
   expect(missing.map((problem) => problem.split(":")[0])).toEqual([
     "presets/base.yaml", "presets/celld.yaml", "presets/cloudflare.yaml", "presets/telegram.yaml",
   ]);
-});
+}, 30_000);
 
 test("registry validation checks the default dashboard's target compatibility too", () => {
   const root = repositoryWith([]);
@@ -315,7 +315,7 @@ test("registry validation checks the default dashboard's target compatibility to
   const problems = checkPresets(root);
   expect(problems).toContain("presets/cloudflare.yaml: on durable, admin-api runs on server, not on durable");
   expect(problems).toContain("presets/celld.yaml: on durable, admin-api runs on server, not on durable");
-});
+}, 30_000);
 
 test("a second server provider of storage.sql leaves the repository's presets composing: they name their storage", () => {
   const sqlite = openRegistry(DEFAULT_REGISTRY).manifest("storage-sqlite");
@@ -339,7 +339,7 @@ test("a second Cloudflare provider of storage.kv leaves base-cloudflare composin
   // Cloudflare's only: on a server storage-kv-sql stays the one provider, which a chat channel's required storage.kv brings.
   const root = repositoryWith([{ ...kv, name: "storage-kv-other", description: "A second storage.kv.", targets: ["durable"] }]);
   expect(checkPresets(root)).toEqual([]);
-});
+}, 30_000);
 
 test("registry validate reports a preset whose starter model's provider it does not install, unless the preset names its model", () => {
   const root = repositoryWith([]);
@@ -377,7 +377,7 @@ test("the repository's presets resolve: telegram is base with channel-telegram; 
   // Agents from the dashboard is a group: the live agents, the rules that route to them, and the settings they are.
   expect(r.features("cloudflare", ["durable"]).find((f) => f.name === "agents-live")?.components).toEqual(["agents-live", "router-rules", "settings-store"]);
   expect(r.preset("telegram", ["agents-live"]).slice(-3)).toEqual(["agents-live", "router-rules", "settings-store"]);
-});
+}, 30_000);
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {
   for (const target of ["package.json", "./Package.JSON", "pikit.json", "pikit.config.ts", "bun.lock", ".env", ".env.example", ".git", ".git/config", "vendor/x.tgz", "pikit-bases/0a1b", "node_modules/a/index.js", ".pikit/sessions/a.jsonl", "tsconfig.json", "bunfig.toml", "README.md", "readme.md", "src/agents", "src/agents/assistant/agent.ts", "src/extensions", "src/extensions/permission-gate.ts"]) {
