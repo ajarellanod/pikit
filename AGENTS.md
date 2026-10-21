@@ -69,6 +69,10 @@ or a registry's own contract:
 9. Update exports, the capability catalogue (`packages/cli/src/registry/capabilities.ts`),
    `docs/contracts.md`, SPEC and every affected README in the same change, then `bun run registry
    generate` and `validate`; report what the tests do not cover.
+10. Agent tool names are lowercase snake_case (`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`): a family shares its
+    prefix (`delegate_tasks`, `schedule_list`), a lone tool reads verb_noun (`ask_user`). Never
+    camelCase (`askUser` and `listSchedules` had to be renamed). `registry validate` refuses any
+    other (tool-mcp's server-given names are exempt).
 
 # Downloaded references
 
