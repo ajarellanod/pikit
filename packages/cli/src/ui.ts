@@ -49,13 +49,19 @@ export async function ask(message: string, options: AskOptions = {}): Promise<st
 export interface Choice<T extends string> {
   value: T;
   label: string;
-  /** Shown next to the option while it is selected. */
+  /** Shown next to the option while it is selected; always, for a disabled one (why it is). */
   hint?: string;
+  /** Shown, but not selectable: say why in `hint`. */
+  disabled?: boolean;
+}
+
+function clackOption<T extends string>(c: Choice<T>): { value: T; label: string; hint?: string; disabled?: boolean } {
+  return { value: c.value, label: c.label, ...(c.hint !== undefined && { hint: c.hint }), ...(c.disabled === true && { disabled: true }) };
 }
 
 /** One of `choices`, picked with the arrow keys and Enter. */
 export async function choose<T extends string>(message: string, choices: Choice<T>[], initialValue?: T): Promise<T> {
-  const options = choices.map((c) => ({ value: c.value, label: c.label, ...(c.hint !== undefined && { hint: c.hint }) }));
+  const options = choices.map(clackOption);
   return answered(await clack.select<T>({ message, options: options as Parameters<typeof clack.select<T>>[0]["options"], ...(initialValue !== undefined && { initialValue }) }));
 }
 
@@ -64,7 +70,7 @@ export async function choose<T extends string>(message: string, choices: Choice<
  * under the list). `initialValues` start checked; `required`, at least one must be.
  */
 export async function chooseSeveral<T extends string>(message: string, choices: Choice<T>[], initialValues: T[] = [], required = false): Promise<T[]> {
-  const options = choices.map((c) => ({ value: c.value, label: c.label, ...(c.hint !== undefined && { hint: c.hint }) }));
+  const options = choices.map(clackOption);
   return answered(await clack.multiselect<T>({ message, options: options as Parameters<typeof clack.multiselect<T>>[0]["options"], initialValues, required }));
 }
 

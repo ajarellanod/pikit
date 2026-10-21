@@ -37,12 +37,16 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
   const conversations = useConversations();
   const menu = useConversationMenu();
   const newChat = useNewChat();
-  const source = useMemo(() => chatSource(chatId, client, config.target), [chatId, config.target]);
+  const { openTab, reload: reloadList } = conversations;
+  // Once a message is in, the sidebar reads the list again: this conversation is the latest now.
+  const source = useMemo(() => {
+    const chat = chatSource(chatId, client, config.target);
+    return { ...chat, send: (message: Parameters<typeof chat.send>[0]) => chat.send(message).finally(reloadList) };
+  }, [chatId, config.target, reloadList]);
   const summary = useGet<ChatConversation>(conversationPath(chatId));
   const conversation = summary.data?.id === chatId ? summary.data : undefined;
   usePageTitle(config.name, conversation === undefined ? undefined : titleOf(conversation));
 
-  const { openTab, reload: reloadList } = conversations;
   const { reload: reloadSummary } = summary;
   useEffect(() => {
     if (conversation !== undefined) openTab(conversation);

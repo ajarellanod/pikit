@@ -8,12 +8,15 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSyn
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Target } from "@pikit/core";
+import type { TSchema } from "typebox";
+import Value from "typebox/value";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
 import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp } from "../project/apps.ts";
 import { DEPLOYMENT_EXPORTS } from "../project/deployment-module.ts";
 import { withOffers } from "../project/offers.ts";
 import { dashboardFiles } from "../project/dashboard.ts";
-import { uiComponentsFor } from "../commands/ui.ts";
+import { DASHBOARD_MANIFEST, dashboardManifestProblems } from "../project/dashboard-manifest.ts";
+import { type ResolvedPresetPlan, resolvePresetPlan } from "../project/preset-plan.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, type Registry, readPreset } from "../project/registry-source.ts";
 import { starterModel, starterModelProblem } from "../project/starter-model.ts";
 import { capabilityEntry, type RegistryCatalogue, registryCatalogue } from "./capabilities.ts";
@@ -33,17 +36,19 @@ import {
   checkStorageNames,
   checkView,
 } from "./checks.ts";
-import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
+import { describeComponent, describeSetup, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
   BOTH_APPS,
   buildIndex,
   COMPONENT_SCHEMA_FILE,
   COMPONENT_SCHEMA_REF,
+  deploymentProblems,
   formatIndex,
   formatManifest,
   formatSchema,
   type Generated,
   HOOKS,
+  kindOf,
   type Manifest,
   ManifestSchema,
   manifestPath,
@@ -203,7 +208,7 @@ function checkComposeFile(componentDir: string, name: string, manifest: Manifest
  * from one of them (`Status`, `restar`), which the CLI would never call.
  */
 async function checkDeploymentExports(componentDir: string, name: string): Promise<string[]> {
-  if (!name.startsWith("deployment-")) return [];
+  if (kindOf(name) !== "deployment") return [];
   let module: Record<string, unknown>;
   try {
     module = (await import(pathToFileURL(entryOf(componentDir, name)).href)) as Record<string, unknown>;
@@ -351,6 +356,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     (await checkHooks(dir, name, manifest)).forEach(report);
     (await checkCommandFiles(dir, name, manifest)).forEach(report);
     checkComposeFile(dir, name, manifest).forEach(report);
+    deploymentProblems(manifest).forEach(report);
     (await checkDeploymentExports(dir, name)).forEach(report);
     checkGeneratedFiles(dir, name, manifest).forEach(report);
   }
@@ -371,8 +377,15 @@ export async function validate(root: string, options: { coreVersion?: string; co
   else if (readFileSync(indexPath, "utf8") !== expected) {
     problems.push(`registry.json does not match the components' manifests: run \`${regenerate}\``);
   } else {
-    // Presets resolve through registry.json, so only once it is right.
-    problems.push(...checkPresets(root, catalogue));
+    // Presets and the dashboard's descriptor resolve through registry.json, so only once it is right.
+    const presets = presetProblems(root, catalogue);
+    problems.push(...presets.problems, ...(await checkPresetConfigs(root, presets.configs)));
+    try {
+      // Each line names dashboard/dashboard.json itself.
+      problems.push(...dashboardManifestProblems(openRegistry(root)));
+    } catch (error) {
+      problems.push(`${DASHBOARD_MANIFEST}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   problems.push(...checkSchemaFiles(root));
   return { written: [], problems };
@@ -404,26 +417,42 @@ export function generateCommand(root: string): string {
  * that base lets it choose; and every answer to a question, and every feature, resolves too and has a
  * `title` to show.
  *
- * And composes, as `pikit new` would make it: on each target all its components run on (one at
- * least), with what they bring (`withOffers`), and each answer and each feature on each of those
- * targets it runs on (what `pikit new` offers there); and with everything it offers there at once,
- * every answer of a `multiple` question (Telegram and HTTP) and every feature. An offer needs the
+ * And composes, as `pikit new` would make it (`resolvePresetPlan`, the plan `pikit new` and the
+ * wizard make, with its own problems: deployment, grants, layout, config): on each target all its
+ * components run on (one at least), with what they bring (offers, the dashboard), and each answer on
+ * each of those targets it runs on (what `pikit new` offers there). Each feature the plan offers, as
+ * it is and with each answer: one it says is available composes when chosen, one it says is not says
+ * why (an alternative it cannot be chosen with is not an error, choosing it anyway is
+ * `pikit new`'s to refuse). And with everything it offers there at once, every answer of a
+ * `multiple` question (Telegram and HTTP) and every feature available with them. An offer needs the
  * registry's only provider, so a preset that leaned on one breaks when a second provider lands: this
  * says so before a project is written.
  */
 export function checkPresets(root: string, catalogue: RegistryCatalogue = registryCatalogue(readManifests(root)).catalogue): string[] {
+  return presetProblems(root, catalogue).problems;
+}
+
+/** A preset's `config` entry for one of its components, as a plan applies it on a target. */
+interface PresetConfig {
+  preset: string;
+  target: string;
+  component: string;
+  value: Record<string, unknown>;
+}
+
+/** `checkPresets`, and every config entry the plans it checked apply, for `checkPresetConfigs`. */
+function presetProblems(root: string, catalogue: RegistryCatalogue): { problems: string[]; configs: PresetConfig[] } {
   const dir = join(root, "presets");
-  if (!existsSync(dir)) return [];
+  if (!existsSync(dir)) return { problems: [], configs: [] };
   const registry = openRegistry(root);
   const problems = new Set<string>();
+  const configs = new Map<string, PresetConfig>();
   for (const name of readdirSync(dir).filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -".yaml".length)).sort()) {
     const report = (message: string) => problems.add(`presets/${name}.yaml: ${message}`);
     try {
       const isAlias = readPreset(root, name).extends !== undefined;
       const components = registry.preset(name);
-      const ui = registry.presetUi(name);
-      if (ui && dashboardFiles(registry) === undefined) report("installs the dashboard, but the registry has no dashboard (dashboard/files/)");
-      const composition = (chosen: string[], target: string) => ui ? [...chosen, ...uiComponentsFor(registry, chosen, [target])] : chosen;
+      if (registry.presetUi(name) && dashboardFiles(registry) === undefined) report("installs the dashboard, but the registry has no dashboard (dashboard/files/)");
       for (const component of components) registry.manifest(component);
       if (new Set(components).size !== components.length) report("lists a component twice");
       const targets = TARGETS.filter((target) => components.every((c) => registry.manifest(c).targets.includes(target)));
@@ -432,13 +461,44 @@ export function checkPresets(root: string, catalogue: RegistryCatalogue = regist
         report(`no target runs all its components (${TARGETS.map((t) => `not on ${t}: ${not(t).join(", ")}`).join("; ")})`);
       }
       for (const target of targets) {
-        compositionProblems(registry, composition(components, target), target, catalogue).forEach((p) => report(`on ${target}, ${p}`));
+        const plan = (choices: readonly string[]) => resolvePresetPlan(registry, { preset: name, targets: [target], choices });
+        const at = (choices: readonly string[]) => (choices.length > 0 ? `with ${choices.join(" and ")}, on ${target}` : `on ${target}`);
+        // What is wrong with a plan, reported but what its parent plan (`known`) has already said.
+        const check = (resolved: ResolvedPresetPlan, choices: readonly string[], known: ReadonlySet<string>): Set<string> => {
+          const found = new Set([...resolved.problems, ...compositionProblems(registry, resolved.components, target, catalogue)]);
+          for (const problem of found) if (!known.has(problem)) report(`${at(choices)}, ${problem}`);
+          for (const [component, value] of Object.entries(resolved.config)) {
+            configs.set(JSON.stringify([name, target, component, value]), { preset: name, target, component, value });
+          }
+          return found;
+        };
+        const base = plan([]);
+        const baseFound = check(base, [], new Set());
         // The starter agent `pikit new` writes must name a model provider the preset installs.
         const model = registry.presetModel(name) ?? starterModel(target);
         const problem = starterModelProblem(registry, components, target, model, name);
         if (problem !== undefined) report(`on ${target}, ${problem}`);
+        // An alias asks its base's questions and offers its features: they are checked once, with the base.
+        if (isAlias) continue;
+        const slots = registry.slots(name, [target]);
+        const answered: { choices: string[]; resolved: ResolvedPresetPlan; found: Set<string> }[] = [{ choices: [], resolved: base, found: baseFound }];
+        for (const slot of slots) {
+          for (const option of slot.options.filter((o) => !slot.defaults.includes(o.name))) {
+            const resolved = plan([option.name]);
+            answered.push({ choices: [option.name], resolved, found: check(resolved, [option.name], baseFound) });
+          }
+        }
+        for (const { choices, resolved, found } of answered) {
+          for (const feature of resolved.features) {
+            if (feature.available) check(plan([...choices, feature.name]), [...choices, feature.name], found);
+            else if (feature.unavailable.length === 0) report(`${at(choices)}, offers ${feature.name} as unavailable without saying why`);
+          }
+        }
+        const several = slots.flatMap((slot) => (slot.multiple ? slot.options.map((o) => o.name) : []));
+        const withSeveral = several.length > 0 ? plan(several) : base;
+        const everything = [...several, ...withSeveral.features.filter((f) => f.available).map((f) => f.name)];
+        if (everything.length > 1) check(plan(everything), everything, baseFound);
       }
-      // An alias asks its base's questions: they are checked once, with the base.
       for (const slot of isAlias ? [] : registry.slots(name)) {
         for (const option of slot.options) {
           registry.preset(name, [option.name]);
@@ -451,20 +511,40 @@ export function checkPresets(root: string, catalogue: RegistryCatalogue = regist
         if (registry.manifest(feature.name).title === undefined) report(`offers ${feature.name}, but its component.json has no title to show`);
         if (!targets.some((target) => registry.manifest(feature.name).targets.includes(target))) report(`offers ${feature.name}, which runs on none of its targets`);
       }
-      for (const target of isAlias ? [] : targets) {
-        const composes = (choices: string[]) =>
-          compositionProblems(registry, composition(registry.preset(name, choices), target), target, catalogue).forEach((p) => report(`with ${choices.join(" and ")}, on ${target}, ${p}`));
-        const slots = registry.slots(name, [target]);
-        const features = registry.features(name, [target]).map((f) => f.name);
-        for (const slot of slots) {
-          for (const option of slot.options.filter((o) => !slot.defaults.includes(o.name))) composes([option.name]);
-        }
-        for (const feature of features) composes([feature]);
-        const everything = [...slots.flatMap((slot) => (slot.multiple ? slot.options.map((o) => o.name) : [])), ...features];
-        if (everything.length > 1) composes(everything);
-      }
     } catch (error) {
       report(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return { problems: [...problems], configs: [...configs.values()] };
+}
+
+/**
+ * Each `config` entry a preset's plans apply is a config of its component, as the app would take it:
+ * the component's own config schema (with its defaults) accepts it, and its setup runs with it on the
+ * target the plan was for (described, never started).
+ */
+async function checkPresetConfigs(root: string, configs: readonly PresetConfig[]): Promise<string[]> {
+  if (configs.length === 0) return [];
+  const registry = openRegistry(root);
+  const problems = new Set<string>();
+  for (const { preset, target, component, value } of configs) {
+    const report = (message: string) => problems.add(`presets/${preset}.yaml: config.${component} ${message}`);
+    try {
+      const definition = await loadComponent(entryOf(registry.dir(component), component));
+      const schema = definition?.config as TSchema | undefined;
+      if (definition === undefined || schema === undefined) {
+        report(`sets a config for ${component}, which takes none`);
+        continue;
+      }
+      const config = Value.Default(schema, Value.Clone(value));
+      const wrong = schemaProblems(schema, config);
+      if (wrong.length > 0) {
+        report(`is not a config of ${component}: ${wrong.join("; ")}`);
+        continue;
+      }
+      await describeSetup(definition, target as Target, config);
+    } catch (error) {
+      report(`does not compose on ${target}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   return [...problems];
@@ -532,6 +612,7 @@ export function checkDrift(manifest: Manifest, generated: Generated, regenerate 
     ["optional.capabilities", manifest.optional?.capabilities, expected.optional.capabilities],
     ["replay", manifest.replay, expected.replay],
     ["modelProviders", manifest.modelProviders, expected.modelProviders],
+    ["extensions", manifest.extensions, expected.extensions],
     ["halves", manifest.halves, expected.halves],
   ];
   for (const [field, actual, derived] of fields) {

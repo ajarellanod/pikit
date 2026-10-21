@@ -94,7 +94,12 @@ test("multiple choices without a default allow none, one or several; aliases and
   expect(r.preset("b", ["channel-a"])).toEqual(r.preset("base", ["channel-a"]));
 });
 
-const SEVERAL = "components: [secrets-env, channel-a, server-bun]\nchoose:\n  - kind: channel\n    multiple: true\nfeatures: [tool-x, router-y]\n";
+/** `features` as YAML: each a group of components, named by its first. */
+const features = (...groups: string[][]) => `features: [${groups.map((group) => `{ components: [${group.join(", ")}] }`).join(", ")}]\n`;
+const SEVERAL_HEAD = "components: [secrets-env, channel-a, server-bun]\nchoose:\n  - kind: channel\n    multiple: true\n";
+const SEVERAL = SEVERAL_HEAD + features(["tool-x"], ["router-y"]);
+/** A feature as `features()` returns it, granting nothing and bringing no dashboard. */
+const plain = (name: string, title: string, components = [name]) => ({ name, title, components, ui: false, steward: { tools: [], extensions: [] } });
 const FEATURES = { ...COMPONENTS, "tool-x": "X: a tool", "router-y": "Y: rules", "tool-edge": { title: "Edge", targets: ["durable" as const] } };
 
 test("a multiple question takes several answers, all of them in place of the preset's own", () => {
@@ -109,12 +114,8 @@ test("a multiple question takes several answers, all of them in place of the pre
 });
 
 test("a preset's features are offered by title, and --with adds them after its components", () => {
-  const r = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[tool-x, router-y, tool-edge]"), b: "extends: base\nwith: [tool-x]\n" }));
-  expect(r.features("base")).toEqual([
-    { name: "tool-x", title: "X: a tool", components: ["tool-x"] },
-    { name: "router-y", title: "Y: rules", components: ["router-y"] },
-    { name: "tool-edge", title: "Edge", components: ["tool-edge"] },
-  ]);
+  const r = openRegistry(registry(FEATURES, { base: SEVERAL_HEAD + features(["tool-x"], ["router-y"], ["tool-edge"]), b: "extends: base\nwith: [tool-x]\n" }));
+  expect(r.features("base")).toEqual([plain("tool-x", "X: a tool"), plain("router-y", "Y: rules"), plain("tool-edge", "Edge")]);
   expect(r.features("base", ["server"]).map((f) => f.name)).toEqual(["tool-x", "router-y"]);
   expect(r.preset("base", ["router-y", "channel-b", "tool-x"])).toEqual(["secrets-env", "channel-b", "server-bun", "router-y", "tool-x"]);
   // An alias that adds one: installed by the preset, so no longer offered.
@@ -123,19 +124,39 @@ test("a preset's features are offered by title, and --with adds them after its c
 });
 
 test("a feature may be a group of components: offered by its first's title, and --with of it adds them all, once", () => {
-  const r = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[router-y, [tool-x, router-y]]") }));
-  expect(r.features("base")).toEqual([
-    { name: "router-y", title: "Y: rules", components: ["router-y"] },
-    { name: "tool-x", title: "X: a tool", components: ["tool-x", "router-y"] },
-  ]);
+  const r = openRegistry(registry(FEATURES, { base: SEVERAL_HEAD + features(["router-y"], ["tool-x", "router-y"]) }));
+  expect(r.features("base")).toEqual([plain("router-y", "Y: rules"), plain("tool-x", "X: a tool", ["tool-x", "router-y"])]);
   expect(r.preset("base", ["tool-x"])).toEqual(["secrets-env", "channel-a", "server-bun", "tool-x", "router-y"]);
   expect(r.preset("base", ["router-y", "tool-x"])).toEqual(["secrets-env", "channel-a", "server-bun", "router-y", "tool-x"]);
   // A group is named by its first only.
-  const grouped = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[[tool-x, router-y]]") }));
+  const grouped = openRegistry(registry(FEATURES, { base: SEVERAL_HEAD + features(["tool-x", "router-y"]) }));
   expect(() => grouped.preset("base", ["router-y"])).toThrow("does not offer router-y");
   // A group's components are checked as a feature's: none installed already.
-  const installed = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[[tool-x, server-bun]]") }));
+  const installed = openRegistry(registry(FEATURES, { base: SEVERAL_HEAD + features(["tool-x", "server-bun"]) }));
   expect(() => installed.preset("base")).toThrow("`features` lists server-bun, which `components` installs already");
+});
+
+test("a preset's policy: steward grants, config, agent layout and each feature's grants and dashboard, inherited by its aliases", () => {
+  const yaml = [
+    "components: [secrets-env, channel-a, server-bun]",
+    "choose: [{ kind: channel, multiple: true }]",
+    "steward: { tools: [read] }",
+    "config:\n  channel-b: { greeting: hi, retries: [1, 2] }\n  router-y: { defaultAgent: steward }",
+    "agents: { folders: { feature: router-y, command: crew } }",
+    "features:\n  - components: [router-y]\n  - components: [tool-x, router-y]\n    ui: true\n    steward: { tools: [shell] }",
+  ].join("\n");
+  const r = openRegistry(registry(FEATURES, { base: `${yaml}\n`, b: "extends: base\nwith: [tool-x]\n" }));
+  const policy = r.presetPolicy("base");
+  expect(policy.steward).toEqual({ tools: ["read"], extensions: [] });
+  expect(policy.config).toEqual({ "channel-b": { greeting: "hi", retries: [1, 2] }, "router-y": { defaultAgent: "steward" } });
+  expect(policy.agents).toEqual({ folders: { feature: "router-y", command: "crew" } });
+  expect(policy.features).toEqual([plain("router-y", "Y: rules"), { ...plain("tool-x", "X: a tool", ["tool-x", "router-y"]), ui: true, steward: { tools: ["shell"], extensions: [] } }]);
+  // An alias has its base's policy; what it installs (tool-x's group, router-y with it) is no longer offered.
+  expect(r.presetPolicy("b")).toEqual(policy);
+  expect(r.features("b").map((f) => f.name)).toEqual([]);
+  // Config for a component the registry does not have: refused when read.
+  const ghost = openRegistry(registry(FEATURES, { base: "components: [secrets-env, channel-a]\nchoose: [{ kind: channel }]\nconfig: { channel-z: { a: 1 } }\n" }));
+  expect(() => ghost.presetPolicy("base")).toThrow('no component "channel-z"');
 });
 
 test("choices the preset does not ask for or offer are refused, with what to do instead", () => {
@@ -154,9 +175,15 @@ test("malformed presets are refused when read", () => {
     "an alias with components": "extends: base\nwith: [channel-b]\ncomponents: [secrets-env]\n",
     "an alias that chooses nothing": "extends: base\n",
     "with but no extends": "components: [channel-a]\nwith: [channel-b]\n",
-    "a feature installed already": "components: [secrets-env]\nfeatures: [secrets-env]\n",
-    "a feature of a chosen kind": "components: [channel-a]\nchoose:\n  - kind: channel\nfeatures: [channel-b]\n",
-    "a feature twice": "components: [secrets-env]\nfeatures: [tool-x, tool-x]\n",
+    "a feature installed already": `components: [secrets-env]\n${features(["secrets-env"])}`,
+    "a feature of a chosen kind": `components: [channel-a]\nchoose:\n  - kind: channel\n${features(["channel-b"])}`,
+    "a feature twice": `components: [secrets-env]\n${features(["tool-x"], ["tool-x", "router-y"])}`,
+    "a feature in the old string form": "components: [secrets-env]\nfeatures: [tool-x]\n",
+    "a feature in the old group form": "components: [secrets-env]\nfeatures: [[tool-x, router-y]]\n",
+    "an unknown grant field": "components: [secrets-env]\nsteward: { tools: [read], hooks: [x] }\n",
+    "a folders layout whose feature is none of its features": `components: [secrets-env]\nagents: { folders: { feature: tool-y, command: agents } }\n${features(["tool-x"])}`,
+    "config for a component it never installs": "components: [secrets-env]\nconfig: { router-y: { a: 1 } }\n",
+    "an alias with its own steward": "extends: base\nwith: [channel-b]\nsteward: { tools: [bash] }\n",
   };
   for (const [what, yaml] of Object.entries(cases)) {
     const r = openRegistry(registry(FEATURES, { base: BASE, bad: yaml }));
@@ -195,7 +222,7 @@ test("registry validate reports unknown components, duplicates and answers with 
   const problems = checkPresets(root);
   expect(problems).toContain('presets/base.yaml: channel-c answers "Where?" but its component.json has no title to show');
   expect(problems).toContain("presets/twice.yaml: lists a component twice");
-  const offered = checkPresets(registry({ ...COMPONENTS, "tool-bare": undefined, "tool-edge": { title: "Edge", targets: ["durable"] } }, { base: "components: [secrets-env]\nfeatures: [tool-bare, tool-edge]\n" }));
+  const offered = checkPresets(registry({ ...COMPONENTS, "tool-bare": undefined, "tool-edge": { title: "Edge", targets: ["durable"] } }, { base: `components: [secrets-env]\n${features(["tool-bare"], ["tool-edge"])}` }));
   expect(offered).toEqual(["presets/base.yaml: offers tool-bare, but its component.json has no title to show", "presets/base.yaml: offers tool-edge, which runs on none of its targets"]);
   expect(problems.some((p) => p.startsWith('presets/ghost.yaml: the registry') && p.includes('no component "nope-x"'))).toBe(true);
 });
@@ -237,9 +264,13 @@ test("registry validate reports a preset whose answers and features compose alon
       "channel-b": { title: "B", provides: ["secrets"] },
       "tool-x": { title: "X", provides: ["secrets"] },
     },
-    { several: "components: [channel-a]\nchoose:\n  - kind: channel\n    multiple: true\nfeatures: [tool-x]\n" },
+    { several: `components: [channel-a]\nchoose:\n  - kind: channel\n    multiple: true\n${features(["tool-x"])}` },
   );
-  expect(checkPresets(root)).toEqual(['presets/several.yaml: with channel-a and channel-b and tool-x, on server, "secrets" takes one provider, and channel-b and tool-x each provide it']);
+  // Each answer with each feature, and everything at once.
+  expect(checkPresets(root)).toEqual([
+    'presets/several.yaml: with channel-b and tool-x, on server, "secrets" takes one provider, and channel-b and tool-x each provide it',
+    'presets/several.yaml: with channel-a and channel-b and tool-x, on server, "secrets" takes one provider, and channel-b and tool-x each provide it',
+  ]);
 });
 
 /** The repository's registry, component.json files only, plus `extra` components: enough to check presets. */
@@ -260,6 +291,7 @@ function repositoryWith(extra: Manifest[]): string {
   // These copies validate the manifests, not a real UI build; dashboard defaults need a template.
   mkdirSync(join(root, "dashboard", "files"), { recursive: true });
   writeFileSync(join(root, "dashboard", "files", "README.md"), "Dashboard fixture\n");
+  copyFileSync(join(DEFAULT_REGISTRY, "dashboard", "dashboard.json"), join(root, "dashboard", "dashboard.json"));
   mkdirSync(join(root, "presets"));
   for (const file of readdirSync(join(DEFAULT_REGISTRY, "presets"))) copyFileSync(join(DEFAULT_REGISTRY, "presets", file), join(root, "presets", file));
   return root;

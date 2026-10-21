@@ -75,7 +75,7 @@ preset (`{{PIKIT_ROOT}}/features/building-components.md`, "How big a component i
 | Actor messages, calls and streams | `mailbox-local` (what `send` / `call` / `stream` promise) | `actor.inbox`'s `handle`, `answer` and `answerStream` in `start` |
 | Admin route / auth | `admin-auth-token` | `admin.auth`, a secret read at start, constant-time compare |
 | Model provider | `provider-openrouter`, `provider-openai-compatible`, `provider-faux` | a pi-ai provider as `model.provider` by its id, `modelProviders`, the key's variable first in `environment` |
-| Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2) |
+| Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2); `deployment.supports` for what it runs beside the App |
 | Not an app component: a command and a service beside the app | `expose-cloudflare-tunnel` | `commands`, `compose` (a Compose file `deployment-docker` runs), a `doctor` step, a fake of a platform's API |
 | A feature of your own kind | `memory-sql` (`{{PIKIT_ROOT}}/features/memory.md`) | `declares`, a contract file and its suite, an actor per owner with `call` |
 
@@ -156,6 +156,42 @@ operators (a Vite app, not a dashboard view) is a UI project: `"ui": { "source":
 `src/pikit/<component>/<name>-files.ts`, shipped empty and listed in `generated`, which the component
 serves; every deploy builds it (channel-web's `chat/` is the reference). See `docs/components.md`, Hooks, Commands, Services beside the app and
 A UI project.
+
+### Say what the deployment must support
+
+`targets` says which runtime model the component runs on (`server` or `durable`), not what the
+project's deployment does beside the App. For the latter, add `requires.deployment` by hand to
+`component.json`:
+
+```jsonc
+// proposals-local: the controller that applies an approved proposal
+"requires": { "pikit": "0.0.1", "contracts": "0.0.1", "capabilities": [], "deployment": ["proposals.deployer"] },
+"compose": "compose.yaml"
+```
+
+The kit's names are `proposals.deployer` (a controller of `@pikit/contracts/deployer`, not merely a
+Docker executable) and `services.compose` (the deployment runs the Compose files components
+record). **Do not write `services.compose` in `requires.deployment`:** `"compose"` implies it.
+For another protocol name, use lowercase words joined by `.` or `-` (`acme.review-host`): the CLI
+has no closed enum. A deployment is the only component that may declare `deployment.supports`, the
+protocols it really implements:
+
+```jsonc
+// deployment-docker
+"deployment": { "supports": ["services.compose", "proposals.deployer"] }
+```
+
+A deployment has no `requires.deployment` and no `compose` (it ships its own Compose file). The CLI
+checks one deployment, never the union of two, before writing (`new`, `add`, `remove`, `upgrade`, `ui`)
+and before hooks (`doctor`, `dev`, `up`); `--force` does not bypass it. A project with no deployment
+works while nothing needs one. The CLI records these fields in `pikit.json`, so doctor works without
+the registry. The provider's own checks and the contract suite must still show that it does what
+`supports` promises. See `{{PIKIT_ROOT}}/docs/components.md`, "What it needs of its deployment".
+
+An agent's tool and extension grants do **not** come from its components: the preset's `steward`
+and its chosen features own the initial steward's grants. The component's generated `replay.tools`
+and `extensions` let `pikit new` check that those keys actually exist; it runs no component's
+`start` to check them. A component cannot grant a tool on install.
 
 A component only the project needs can be a single file in `src/extensions/` listed in
 `pikit.config.ts`, like `src/extensions/agents.ts`; make it a registry component when it should be

@@ -8,8 +8,8 @@
  * component.json names in `$schema` so an editor completes and checks it too.
  *
  * Generated from `setup` (S14), rewritten by `generate`, checked by `validate`: `$schema`,
- * `provides`, `requires.capabilities`, `optional.capabilities`, `halves`, `replay.tools` and
- * `modelProviders`. Everything
+ * `provides`, `requires.capabilities`, `optional.capabilities`, `halves`, `replay.tools`,
+ * `modelProviders` and `extensions`. Everything
  * else is written by hand and `generate` never changes it.
  *
  * `setup` runs with the default config, and with each config in the `examples` of the component's
@@ -27,6 +27,16 @@ import Value from "typebox/value";
  * conversation (a Durable Object, on Cloudflare). Providers are `deployment-*` components.
  */
 export const TARGETS = ["server", "durable"] as const;
+
+/**
+ * A name of what a deployment supports (`deployment.supports`) and a component needs of it
+ * (`requires.deployment`): lowercase words joined by `.` or `-` (`proposals.deployer`,
+ * `acme.review-host`). An open set: a registry may name its own, and the CLI knows none but this one.
+ */
+export const DEPLOYMENT_REQUIREMENT = "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$";
+
+/** What a `compose` file needs of the deployment: that it runs the Compose files components record. */
+export const COMPOSE_SERVICES = "services.compose";
 
 /**
  * The kit's component kinds: the prefix of every component's name. A kind is a naming decision, so
@@ -184,9 +194,17 @@ export const ManifestSchema = Type.Object(
               "The @pikit/pi-adapter versions it works with (a semver range); declared when `dependencies` lists @pikit/pi-adapter. Checked and recorded by `pikit add` as `contracts` is.",
           }),
         ),
+        deployment: Type.Optional(
+          Type.Array(Type.String({ pattern: DEPLOYMENT_REQUIREMENT }), {
+            minItems: 1,
+            uniqueItems: true,
+            description:
+              "Written by hand: what the project's one deployment (its `deployment-*` component) must support for this component to work (`proposals.deployer`): names of protocols, never of components, matched against that deployment's `deployment.supports`. A `compose` file implies `services.compose` and is never written here. Never on a deployment itself. `pikit new`, `add`, `remove`, `upgrade` and `doctor` refuse a composition whose deployment does not support it (`project/composition.ts`).",
+          }),
+        ),
         capabilities: Type.Array(Type.String(), { description: "Generated from setup's use() calls." }),
       },
-      { additionalProperties: false, description: "A component depends on capabilities, never on components." },
+      { additionalProperties: false, description: "A component depends on capabilities, never on components; on its deployment, by what it supports (`deployment`)." },
     ),
     optional: Type.Object(
       { capabilities: Type.Array(Type.String(), { description: "Generated from setup's useOptional() and useKeyed() calls." }) },
@@ -303,8 +321,23 @@ export const ManifestSchema = Type.Object(
       Type.String({
         pattern: OWN_COMPOSE_FILE,
         description:
-          "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and `deployment-docker` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. Only for a component whose targets include server.",
+          "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and the deployment that supports `services.compose` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. So it implies the requirement `services.compose`, never written in `requires.deployment`: a composition whose deployment does not support it is refused. Only for a component whose targets include server.",
       }),
+    ),
+    deployment: Type.Optional(
+      Type.Object(
+        {
+          supports: Type.Array(Type.String({ pattern: DEPLOYMENT_REQUIREMENT }), {
+            uniqueItems: true,
+            description:
+              "The protocols this deployment implements beside running the app (`services.compose`: it runs the Compose files components record; `proposals.deployer`: it runs a deployer of @pikit/contracts/deployer). What a component's `requires.deployment` (and `compose`) is matched against. Only what it really does: a name here is a promise the deployment's own checks keep.",
+          }),
+        },
+        {
+          additionalProperties: false,
+          description: "Written by hand, only on a `deployment-*` component: what it supports for the components that need it (`requires.deployment`).",
+        },
+      ),
     ),
     generated: Type.Optional(
       Type.Array(Type.String({ pattern: OWN_FILE }), {
@@ -363,6 +396,12 @@ export const ManifestSchema = Type.Object(
           "Generated: the `model.provider` keys setup provides, with the default config (`anthropic`: agents name its models `anthropic/<modelId>`). `pikit new` checks the starter agent's model against them before it writes anything.",
       }),
     ),
+    extensions: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          "Generated: the `agent.extension` keys setup provides, with the default config (`pikit-self`). A preset's `steward.extensions` is checked against them before `pikit new` writes anything.",
+      }),
+    ),
     dependencies: Type.Record(Type.String(), Type.String({ minLength: 1 }), {
       description: "Exactly the npm packages its shipped files import (its tests aside), pinned (package → version).",
     }),
@@ -415,6 +454,30 @@ export function uiProblems(manifest: Pick<Manifest, "ui">): string[] {
   if (manifest.ui.source === "files") problems.push('ui.source "files" is the component\'s installed files: a UI project is a folder of its own');
   return problems;
 }
+/**
+ * What the schema does not say of a component's deployment fields: only a `deployment-*` component says
+ * what it supports (`deployment`), and never needs anything of a deployment (`requires.deployment`) nor
+ * ships a `compose` file (it would need itself); `services.compose` is never written in
+ * `requires.deployment`: a `compose` file implies it. By kind, never by a component's name.
+ */
+export function deploymentProblems(manifest: Pick<Manifest, "name" | "deployment" | "requires" | "compose">): string[] {
+  const problems: string[] = [];
+  const isDeployment = kindOf(manifest.name) === "deployment";
+  if (manifest.deployment !== undefined && !isDeployment) {
+    problems.push(`"deployment" says what a deployment supports: only a deployment-* component has it`);
+  }
+  if (isDeployment && manifest.requires.deployment !== undefined) {
+    problems.push(`"requires.deployment" is what a component needs of its deployment: a deployment-* component needs nothing of one`);
+  }
+  if (isDeployment && manifest.compose !== undefined) {
+    problems.push(`"compose" is a service beside the app that its deployment runs: a deployment-* component ships its own instead`);
+  }
+  if (manifest.requires.deployment?.includes(COMPOSE_SERVICES) === true) {
+    problems.push(`"requires.deployment" lists "${COMPOSE_SERVICES}", which a "compose" file implies: name the Compose file in "compose" instead`);
+  }
+  return problems;
+}
+
 export type EnvironmentVariable = Static<typeof EnvironmentVariableSchema>;
 export type Half = Static<typeof HalfSchema>;
 
@@ -447,6 +510,8 @@ export interface Generated {
   exampleTools?: Record<string, string>;
   /** The `model.provider` keys it provides; absent when it provides none with its default config. */
   modelProviders?: string[];
+  /** The `agent.extension` keys it provides; absent when it provides none with its default config. */
+  extensions?: string[];
   /** What each App's half declares; absent unless `apps.worker` names a half. */
   halves?: Record<AppName, Half>;
 }
@@ -486,6 +551,8 @@ export function withGenerated(manifest: Manifest, generated: Generated): Manifes
   else next.replay = { ...manifest.replay, tools: generated.tools };
   if (generated.modelProviders === undefined) delete next.modelProviders;
   else next.modelProviders = generated.modelProviders;
+  if (generated.extensions === undefined) delete next.extensions;
+  else next.extensions = generated.extensions;
   if (generated.halves === undefined) delete next.halves;
   else next.halves = generated.halves;
   return next;

@@ -50,7 +50,8 @@ test("pikit registry validate runs the repository's registry checks", async () =
   const run = await runCli(["registry", "validate"], temp());
   expect(run.out).toContain("registry validate: ok");
   expect(run.code).toBe(0);
-});
+  // Every preset's plan, with each answer and feature: seconds, not Bun's 5-second default.
+}, 60_000);
 
 test("pikit registry capabilities prints what each capability is and who provides and uses it", async () => {
   const run = await runCli(["registry", "capabilities"], temp());
@@ -270,7 +271,14 @@ for (const [preset, target, deployment] of [
     const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
     expect(config).toContain("    adminApi,");
     expect(config).not.toContain("src/pikit/channel-telegram");
-    expect(readFileSync(join(project, "src", "agents", "steward", "agent.ts"), "utf8")).toContain('name: "steward"');
+    const agent = readFileSync(join(project, "src", "agents", "steward", "agent.ts"), "utf8");
+    expect(agent).toContain('name: "steward"');
+    // The preset's grants, not what is installed: base installs tool-bash and does not grant it.
+    if (preset === "base") {
+      expect(agent).toContain('tools: ["read","write","edit","fetch","websearch"],\n  extensions: ["pikit-self"],');
+      expect(agent).toContain("`bash` is installed but not named here: the preset does not grant it to the steward.");
+    }
+    expect(config).toContain('"router-basic": { defaultAgent: "steward" },');
     if (target === "durable") expect(config).toContain("    adminApiWorker,");
   }, 60_000);
 }

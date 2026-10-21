@@ -1,10 +1,11 @@
 # yaml-language-server: $schema=../schema/preset.schema.json
 # A server assistant with a dashboard and HTTP API, in Docker or as this machine's service:
 # `pikit new my-agent --preset base` (`--with deployment-local` needs no Docker).
-# A preset is only the list of `pikit add` calls, in order. Nothing branches on which preset a
-# project came from. Its composition is samples/http's, plus the deployment and the log lines, with
-# the neutral conversation registry (conversations-kv over storage-kv-sql, SPEC C5) where the sample
-# keeps conversations-file, the registry's other provider, so both stay run end to end.
+# A preset is only the list of `pikit add` calls, in order, and what the new project's starter agent
+# (the steward) is granted. Nothing branches on which preset a project came from. Its composition is
+# samples/http's, plus the deployment and the log lines, with the neutral conversation registry
+# (conversations-kv over storage-kv-sql, SPEC C5) where the sample keeps conversations-file, the
+# registry's other provider, so both stay run end to end.
 # The agents (src/agents/, src/extensions/agents.ts) belong to the project, not to the registry.
 # `title` is what `pikit new` shows if it asks which preset to start from (only with several bases).
 title: "An agent on a server: a dashboard and HTTP API, in Docker or this machine's service"
@@ -26,14 +27,14 @@ components:
   - tool-read
   - tool-write
   - tool-edit
-  # Installed, but the starter agent does not name it on a server: a shell runs as the server's user
-  # (its README). Add "bash" to an agent's `tools` to give it one.
+  # Installed, but `steward` below does not grant it: on a server a shell runs as the server's user,
+  # outside the workspace too (its README). Add "bash" to an agent's `tools` to give it one.
   - tool-bash
-  # The web, as on Cloudflare: the starter agent names both. Brave's key is optional: without it, a
+  # The web, as on Cloudflare: the steward is granted both. Brave's key is optional: without it, a
   # search fails saying so.
   - tool-fetch
   - tool-websearch-brave
-  # The agent knows what it is made of and how each part is changed: the starter agent names it
+  # The agent knows what it is made of and how each part is changed: the steward is granted it
   # (`extensions: ["pikit-self"]`).
   - extension-pikit-self
   - runtime-pi
@@ -57,24 +58,45 @@ choose:
     question: "Where do you want to talk to your agent?"
     multiple: true
   # deployment-docker (a container) or deployment-local (a systemd or launchd service of this machine,
-  # no Docker): every server deployment answers, Docker the default.
+  # no Docker): every server deployment answers, Docker the default. One that does not support what a
+  # feature needs of it (self-improvement's deployer) leaves that feature unavailable, saying why.
   - kind: deployment
     question: "How should it run on this machine?"
-# What `pikit new` offers to add, several at once; the dashboard is already included. Each by its `title`,
-# `--with <component>` in a script. Each brings what it needs, as `pikit add` would. tool-fetch and
-# tool-websearch-brave are installed above already.
+# What the starter agent, the steward, is granted, by key: only what is written here and in the chosen
+# features below; a component installed grants nothing by being installed. Not bash (see tool-bash).
+steward:
+  tools: [read, write, edit, fetch, websearch]
+  extensions: [pikit-self]
+# Config values the new project starts with, each applied only when its component is installed:
+# router-basic sends every message to the steward.
+config:
+  router-basic:
+    defaultAgent: steward
+# The wizard's one-or-several-agents question: several agents means the feature agents-folders, whose
+# command `pikit agents` writes src/extensions/agents.ts from the folders in src/agents/.
+agents:
+  folders:
+    feature: agents-folders
+    command: agents
+# What `pikit new` offers to add, several at once; the dashboard is already included. Each by its first
+# component's `title`, `--with <component>` in a script. Each brings what it needs, as `pikit add` would.
+# tool-fetch and tool-websearch-brave are installed above already.
 features:
-  # The wizard's one-or-several-agents question; also available as --with agents-folders.
-  - agents-folders
-  - router-rules
+  # Also available as --with agents-folders; the question above chooses it too.
+  - components: [agents-folders]
+  - components: [router-rules]
   # A group: agents made and edited in the dashboard, and the routing rules that send a channel, chat or
   # person to one (both live, as settings), offered as agents-live's title. settings-store comes with the
   # dashboard; listed so the group composes without one (`pikit ui on` adds the rest later).
-  - [agents-live, router-rules, settings-store]
-  - tool-mcp
-  - health-registry
+  - components: [agents-live, router-rules, settings-store]
+  - components: [tool-mcp]
+  - components: [health-registry]
   # Self-improvement, a group: the agent proposes changes to itself as branches of a repository on
-  # this server (proposals-local), and you approve them in the dashboard (admin-proposals, which brings
-  # the dashboard); the deployer next to the app (deployment-docker) merges, checks and deploys them.
-  # The starter agent then names bash: it runs git and the tests there.
-  - [admin-proposals, proposals-local]
+  # this server (proposals-local), and you approve them in the dashboard (admin-proposals, reached only
+  # there: choosing it brings the dashboard); the deployer next to the app merges, checks and deploys
+  # them, so it needs a deployment that supports `proposals.deployer` (deployment-docker).
+  # The steward is then granted bash: it runs git and the tests there.
+  - components: [admin-proposals, proposals-local]
+    ui: true
+    steward:
+      tools: [bash]

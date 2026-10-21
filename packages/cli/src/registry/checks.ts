@@ -8,7 +8,7 @@ import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { capabilityEntry, KIT_CATALOGUE, type RegistryCatalogue } from "./capabilities.ts";
 import { isPiImport, isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports, stripComments } from "./imports.ts";
-import { commandProblems, type Manifest, ManifestSchema, schemaProblems, uiModule, uiProblems } from "./manifest.ts";
+import { commandProblems, kindOf, type Manifest, ManifestSchema, schemaProblems, uiModule, uiProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 import { confinedPath } from "../project/paths.ts";
 
@@ -31,7 +31,7 @@ const forTests = (file: string): boolean => TEST.test(file) || TEST_SUPPORT.test
  */
 const forMachine = (file: string, name: string, commands: ReadonlySet<string>): boolean =>
   commands.has(file) ||
-  (name.startsWith("deployment-") && (file === `src/pikit/${name}/commands.ts` || (file.startsWith(`src/pikit/${name}/`) && file.endsWith(".mjs")))) ||
+  (kindOf(name) === "deployment" && (file === `src/pikit/${name}/commands.ts` || (file.startsWith(`src/pikit/${name}/`) && file.endsWith(".mjs")))) ||
   file === `src/pikit/${name}/configure.ts`;
 
 /** Packages that are the kit itself: `requires.pikit` covers them, so `dependencies` does not. */

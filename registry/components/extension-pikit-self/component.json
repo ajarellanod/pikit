@@ -22,6 +22,9 @@
   "provides": [
     "agent.extension"
   ],
+  "extensions": [
+    "pikit-self"
+  ],
   "dependencies": {
     "@pikit/contracts": "0.0.1",
     "@pikit/pi-adapter": "0.0.1"

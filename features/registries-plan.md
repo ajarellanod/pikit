@@ -33,10 +33,17 @@ What stops another registry being an equal:
 4. **One registry per preset.** `pikit new --registry X` makes X the project's only `default`
    (`commands/new.ts`); a preset cannot mix the kit's components with its own, and offers look only
    in the registry an operation reads (`catalogueOf`, `project/offers.ts`).
-5. **The dashboard is the default registry's.** Its base (`dashboard/files`), `UI_COMPONENTS`
-   (`commands/ui.ts`) and the `@pikit` shadcn namespace in `components.json` are fixed.
-6. **Component ids in the CLI.** `STARTER_CONFIG["router-basic"]`, `NEEDS_DASHBOARD`,
-   `DEPLOYMENT_TEXT` (`commands/starter.ts`, `commands/wizard.ts`).
+5. **The dashboard is the registry's, its namespace the kit's.** Which components a dashboard needs,
+   and the capability each default stands for, are its registry's data now
+   (`dashboard/dashboard.json`, [component composition](component-composition.md)), read from the
+   registry a project comes from. What stays fixed is the `@pikit` shadcn namespace in the
+   dashboard's `components.json`.
+6. **Component ids in the CLI: only labels left.** The rules are gone: the steward's grants, the
+   starting config, the agent layout and which features bring the dashboard are the preset's
+   (`steward`, `config`, `agents`, `features[].ui`), and what a deployment supports is its manifest's
+   ([component composition](component-composition.md)). `DEPLOYMENT_TEXT` (`commands/starter.ts`,
+   `commands/wizard.ts`) remains: the wording of the next steps per deployment, with a generic
+   fallback for any other.
 7. **Local folders only.** No Git or HTTP registries, no `pikit registry add|list|remove`.
 
 The kernel needs no change in any phase below. Everything goes through a few places of the CLI:
@@ -137,11 +144,12 @@ The decided option B of [contract packages](contract-packages.md):
 
 ## Phase 6: distributions (M)
 
-- `registry.json` may declare its `dashboard` (the base files and the UI components `pikit ui on`
-  adds) and its shadcn namespace and URL, written into the dashboard's `components.json`. The fixed
-  `UI_COMPONENTS` and `@pikit` go; without a declaration, the `pikit` registry's are used.
-- The CLI's component ids become fields: `STARTER_CONFIG["router-basic"]` the preset's `config`,
-  `NEEDS_DASHBOARD` a manifest field, `DEPLOYMENT_TEXT` the deployment's `title`.
+- A registry's dashboard already says its components (`dashboard/dashboard.json`); it may also
+  declare its shadcn namespace and URL, written into the dashboard's `components.json`. The fixed
+  `@pikit` goes; without a declaration, the `pikit` registry's is used. With several registries, the
+  dashboard and its descriptor are those of one registry the project names.
+- The last component ids of the CLI, `DEPLOYMENT_TEXT`, become the deployment's own text (its
+  `title`, or a field of its manifest). The others are already fields of the preset.
 - A guide, "Your own distribution" (a registry, presets, contract packages, a dashboard), with an
   `acme` fixture registry, and the `pikit` skill (`references/component.md`) updated.
 - [Multi-tenant isolation](multi-tenant-isolation.md) records the recommendation for many clients:

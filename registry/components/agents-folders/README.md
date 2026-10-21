@@ -8,6 +8,9 @@ Design note: [features/agent-folders.md](https://github.com/ajarellanod/pikit/bl
 - **Provides:** nothing at run time. It writes `src/extensions/agents.ts`, your project's component,
   which provides `agent.definition` (one per folder) and `agent.skill` (the catalog).
 - **Adds:** the command `pikit agents` (`generate.ts`) and a step of `pikit doctor` (`doctor.ts`).
+  The kit's presets name this feature and its declared command in `agents.folders`: `pikit new` asks
+  one or several agents and runs it once only if that feature was chosen. The CLI does not recognize
+  this component's name; another preset can name another feature and command.
 - **Targets:** `server` and `durable`. The command and the check run on your machine, in the project;
   what they write is the same on both targets.
 - **Installs to:** `src/pikit/agents-folders/`.

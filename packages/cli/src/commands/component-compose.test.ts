@@ -54,8 +54,23 @@ function project(): string {
 
 const record = (dir: string) => JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8")).components["expose-side"];
 
-test("pikit add records the Compose file by project path; pikit upgrade takes the new one, pikit remove drops it", async () => {
+/**
+ * A project whose deployment runs Compose files (`services.compose`): a Compose file needs one
+ * (`project/composition.ts`). Only its install record: nothing here deploys.
+ */
+function projectWithComposeHost(): string {
   const dir = project();
+  const manifest = emptyManifest();
+  manifest.components["deployment-host"] = {
+    registry: "default", version: "0.1.0", requires: { pikit: "0.0.1" }, files: {}, dependencies: {}, addedDependencies: [], environment: [],
+    deployment: { supports: ["services.compose"] },
+  };
+  writeProjectManifest(dir, manifest);
+  return dir;
+}
+
+test("pikit add records the Compose file by project path; pikit upgrade takes the new one, pikit remove drops it", async () => {
+  const dir = projectWithComposeHost();
   const from = temp();
   publish(from, "0.1.0", { "compose.yaml": SERVICE }, { compose: "compose.yaml" });
   const add = await runCli(["add", "expose-side", "--registry", from, "--yes"], dir);
@@ -66,7 +81,7 @@ test("pikit add records the Compose file by project path; pikit upgrade takes th
   expect(readFileSync(join(dir, "pikit.config.ts"), "utf8")).not.toContain("expose-side");
 
   publish(from, "0.2.0", { "sidecar.yml": SERVICE }, { compose: "sidecar.yml" });
-  expect((await runCli(["upgrade", "--yes"], dir)).code).toBe(0);
+  expect((await runCli(["upgrade", "expose-side", "--yes"], dir)).code).toBe(0);
   expect(record(dir).compose).toBe("src/pikit/expose-side/sidecar.yml");
 
   expect((await runCli(["remove", "expose-side"], dir)).code).toBe(0);

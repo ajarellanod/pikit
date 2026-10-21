@@ -3,6 +3,7 @@
 # An alias: base with channel-telegram instead of channel-http, and the same default dashboard:
 # `pikit new my-agent --preset base --with channel-telegram`. server-bun serves the dashboard,
 # /health and /ready, which the container's healthcheck and `pikit status` use.
+# It inherits base's steward grants, config, agent layout and features.
 title: "Telegram: chat with your agent from the Telegram app"
 extends: base
 with:

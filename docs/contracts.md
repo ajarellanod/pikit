@@ -849,8 +849,12 @@ their optional comment and are never deployed. Both readers treat unreadable/unp
 empty; these types do not add runtime validation or an isolation boundary.
 
 The privileged deployer imports types only and still runs without project packages. Manifest
-`compose` contributions activate it; command code never checks the proposals provider's id. Its
-guard rejects changes to declared Compose paths or their ordered list, including the merged result,
+`compose` contributions activate it; command code never checks the proposals provider's id.
+proposals-local declares `requires.deployment: ["proposals.deployer"]`, and its `compose` file implies
+`services.compose`; the CLI refuses it unless the project's one deployment supports both, before
+running hooks or Docker (SPEC §3.2). This is a CLI composition check, not an App capability or proof
+that a deployer implements the protocol. The deployer's guard rejects changes to declared Compose
+paths or their ordered list, including the merged result,
 before checks/build/restart. It does not recursively fence files referenced by arbitrary custom
 Compose `include`, `extends` or `env_file`; shipped overrides use none of these.
 

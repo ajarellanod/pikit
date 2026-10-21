@@ -16,6 +16,10 @@
  * checked here, because `up` runs that hook right before the build and it checks the same (so each
  * MCP server, say, is reached once per deploy, not twice).
  *
+ * And `--operation=<op>`: what the check is run for (`DoctorIO.operation`): `pikit doctor`, or the
+ * check before `pikit dev` (which runs no deployment) or `pikit up` (which runs it). A check of what
+ * the deployment does (proposals-local's Compose service) is then not made for a `dev` that runs none.
+ *
  * It runs in the project's own process tree like every other project code (`run.ts`). A problem must
  * never hold a secret's value; the result goes to a file, never to stdout.
  */
@@ -30,6 +34,24 @@ export type ComponentDoctorResult = { ok: true; problems: string[]; notes: strin
 /** The flag `pikit up` passes: skip the checks of components that have a `beforeDeploy` hook. */
 export const UNLESS_BEFORE_DEPLOY = "--unless-before-deploy";
 
+/** What the checks run for: `pikit doctor`, or the check before `pikit dev` or `pikit up`. */
+export type DoctorOperation = "doctor" | "dev" | "up";
+
+const OPERATIONS: readonly DoctorOperation[] = ["doctor", "dev", "up"];
+
+/** The flag naming the operation (`--operation=dev`). */
+export function operationFlag(operation: DoctorOperation): string {
+  return `--operation=${operation}`;
+}
+
+/** The operation `flags` name; `doctor` without the flag. */
+export function operationOf(flags: readonly string[]): DoctorOperation {
+  const value = flags.find((flag) => flag.startsWith("--operation="))?.slice("--operation=".length) ?? "doctor";
+  const operation = OPERATIONS.find((known) => known === value);
+  if (operation === undefined) throw new Error(`unknown operation "${value}": one of ${OPERATIONS.join(", ")}`);
+  return operation;
+}
+
 /** What a component's `doctor(io)` receives. Components declare the same shape; nothing is imported. */
 export interface DoctorIO {
   /** The component's config in `pikit.config.ts`: the default export's, else the Worker's. */
@@ -40,6 +62,12 @@ export interface DoctorIO {
    * server. For a component whose halves must be configured alike (channel-google-chat).
    */
   workerConfig?: Readonly<Record<string, unknown>>;
+  /**
+   * What the check runs for: `pikit doctor`, or the check before `pikit dev` (the app runs here, no
+   * deployment does) or `pikit up` (the deployment runs). A check of what the deployment does is for
+   * `doctor` and `up`.
+   */
+  operation: DoctorOperation;
   /** A variable of the environment or `.env` (the environment wins), or `undefined`. */
   get(name: string): string | undefined;
 }
@@ -64,7 +92,7 @@ export function doctorHooks(projectDir: string, options: { unlessBeforeDeploy?: 
 
 type Definition = { config?: Record<string, unknown> } | undefined;
 
-async function run(projectDir: string, unlessBeforeDeploy: boolean): Promise<{ problems: string[]; notes: string[] }> {
+async function run(projectDir: string, unlessBeforeDeploy: boolean, operation: DoctorOperation): Promise<{ problems: string[]; notes: string[] }> {
   const module = (await import(pathToFileURL(join(projectDir, "pikit.config.ts")).href)) as { default?: Definition; worker?: Definition };
   const problems: string[] = [];
   const notes: string[] = [];
@@ -74,6 +102,7 @@ async function run(projectDir: string, unlessBeforeDeploy: boolean): Promise<{ p
     const io: DoctorIO = {
       config: typeof config === "object" && config !== null ? (config as Record<string, unknown>) : {},
       ...(module.worker !== undefined && { workerConfig: typeof half === "object" && half !== null ? (half as Record<string, unknown>) : {} }),
+      operation,
       // `runScript` passes the project's environment: `.env` under the process's own.
       get: (variable) => process.env[variable] || undefined,
     };
@@ -102,7 +131,7 @@ if (import.meta.main) {
   const [projectDir = ".", output = "", ...flags] = process.argv.slice(2);
   let result: ComponentDoctorResult;
   try {
-    result = { ok: true, ...(await run(projectDir, flags.includes(UNLESS_BEFORE_DEPLOY))) };
+    result = { ok: true, ...(await run(projectDir, flags.includes(UNLESS_BEFORE_DEPLOY), operationOf(flags))) };
   } catch (error) {
     result = { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

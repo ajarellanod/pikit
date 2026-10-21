@@ -87,8 +87,9 @@ the dashboard applies to the next run of every conversation.
   `GET /admin/api/settings`, `GET` and `PUT /admin/api/settings/:component`, behind `admin.auth`.
 - **The CLI**: `component.json`'s `settings` (a folder) is copied to `src/dashboard/src/settings/<name>/`
   as a view is (add, `ui on`, upgrade, remove, `ui off`), checked by `registry validate`, built by
-  `scripts/dashboard-build.ts`, published as `@pikit/<name>-settings`. `UI_COMPONENTS` (what `pikit ui
-  on` and `pikit new --ui` install) now has settings-store.
+  `scripts/dashboard-build.ts`, published as `@pikit/<name>-settings`. The dashboard's descriptor
+  (`registry/dashboard/dashboard.json`: what `pikit ui on` and `pikit new --ui` install) lists
+  settings-store, the default for `settings`.
 - **The dashboard**: the Settings dialog (`components/pikit/settings-dialog.tsx`), General (theme,
   sounds), `defineSettings` and `useSettings` (`lib/settings.ts`), the rows and controls and
   `SchemaSettings` (`components/pikit/settings.tsx`). Opened from the sidebar's foot menu.
@@ -122,8 +123,9 @@ the dashboard applies to the next run of every conversation.
   change through an object's own routes (settings-store's `set`) forgets its cache. A Durable
   Object's start (inside `blockConcurrencyWhile`) never calls the settings object: runtime-pi reads
   there at its first admission or wakeup.
-- **settings-store comes with the dashboard** (`UI_COMPONENTS`), not as an offer: the dialog is the
-  dashboard's and router-basic's section needs it; it requires nothing admin-api does not. A project
+- **settings-store comes with the dashboard** (its descriptor, `dashboard/dashboard.json`, the default
+  for `settings`), not as an offer: the dialog is the dashboard's and router-basic's section needs it;
+  another provider of `settings` in every App takes its place; it requires nothing admin-api does not. A project
   without a UI has no settings and behaves as before.
 - **The section, not the store, decides what is shown**: a declared component without a section in
   `src/settings/` shows nothing (runtime-pi's settings are edited in router-basic's Agent section).

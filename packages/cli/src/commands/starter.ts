@@ -16,13 +16,16 @@
  *   They are the kit's, not a component's: no capability, nothing that runs, and every project gets
  *   them; a newer CLI's `pikit new` brings newer ones (an existing project copies them by hand).
  *
- * A few lines depend on what gets installed, and only on that: `router-basic` sends every message to
- * `steward`, which names the installed tools and the starter's extensions (`STARTER_EXTENSIONS`).
+ * A few lines depend on what `pikit new` resolved from the preset (`project/preset-plan.ts`), and only
+ * on that: the tools and extensions `steward` is granted (a tool installed and not granted is said in
+ * its comment), the channels it is reached through, and whether its agents are kept in folders (the
+ * preset's `agents.folders`, with the command that writes their registry). Nothing here decides by a
+ * component's name; the tables keyed by one (`CHANNEL_REACH`, `DEPLOYMENT_TEXT`) only word things, with
+ * a fallback for any other.
  *
  * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
  * two Apps (SPEC C1), the agent's model is one whose provider runs there (`STARTER_MODEL`, unless the
- * preset declares its `model`), and `.gitignore` and the README say so. On a server the agent does
- * not name `bash`, even installed (`NOT_NAMED`), unless self-improvement needs it (`NAMED_FOR`). What `pikit up` does is the installed deployment's
+ * preset declares its `model`), and `.gitignore` and the README say so. What `pikit up` does is the installed deployment's
  * (`upText`), never guessed from the target. The README says where `pikit` and the kit are
  * (`withKitLocation`). What a component needs in
  * `package.json` (deployment-cloudflare's `wrangler`) its `component.json` declares, and `pikit add`
@@ -35,6 +38,7 @@ import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
 import { DASHBOARD_DIR } from "../project/dashboard.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
 import { starterModel } from "../project/starter-model.ts";
+import { kindOf } from "../registry/manifest.ts";
 
 // The starter model lives with the check `registry validate` shares.
 export { STARTER_MODEL, starterModel } from "../project/starter-model.ts";
@@ -43,11 +47,6 @@ export const STARTER_AGENT = "steward";
 
 /** How `pikit.config.ts` lists a component when the starter wires it differently from its default export. */
 export const STARTER_WIRING: Record<string, Omit<ComponentEntry, "name">> = {};
-
-/** The starter's config values, written for the components that are installed. */
-export const STARTER_CONFIG: Record<string, string> = {
-  "router-basic": `{ defaultAgent: "${STARTER_AGENT}" }`,
-};
 
 /** Where the skills for AI agents are, in the kit and in a project (the `.agents/skills/` convention). */
 export const SKILLS_DIR = ".agents/skills";
@@ -237,6 +236,16 @@ export const CHANNEL_REACH: Readonly<Record<string, string>> = {
   "channel-telegram-webhook": "that people talk to in Telegram chats",
 };
 
+/** A preset's agent layout, as `pikit new` resolved it (`ResolvedPresetPlan.agents.folders`). */
+export interface StarterFolders {
+  /** The feature that keeps agents in folders (`pikit add` it). */
+  feature: string;
+  /** The command its component declares, which writes `src/extensions/agents.ts` from the folders. */
+  command: string;
+  /** Whether the project keeps its agents in folders from the start. */
+  chosen: boolean;
+}
+
 /** A channel being installed: its name and its `component.json` title. */
 export interface StarterChannel {
   name: string;
@@ -251,53 +260,7 @@ export function introduction(channels: readonly StarterChannel[]): string {
   return reach.length === 0 ? "You are Steward, a helpful assistant." : `You are Steward, a helpful assistant ${reach.join(", and ")}.`;
 }
 
-/**
- * The installed tools a target's starter agent does not name, and why: on a server, `bash` runs
- * commands as the server's user, outside the workspace too (tool-bash's README), so an agent gets it
- * only when you add it. On Cloudflare commands run in each conversation's sandbox (execution-do).
- */
-export const NOT_NAMED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  server: { bash: "it runs commands as this server's user, outside the workspace too (src/pikit/tool-bash/README.md)" },
-};
-
-/**
- * The agent extensions the starter agent names, by the component that provides each: only when it is
- * installed. `pikit-self` tells the agent what it is made of and how each part is changed (SPEC §6).
- */
-export const STARTER_EXTENSIONS: Readonly<Record<string, string>> = {
-  "extension-pikit-self": "pikit-self",
-};
-
-/** The extensions the starter agent names, of those `components` provide (`STARTER_EXTENSIONS`). */
-export function starterExtensions(components: readonly string[]): string[] {
-  return components.flatMap((component) => (STARTER_EXTENSIONS[component] === undefined ? [] : [STARTER_EXTENSIONS[component]]));
-}
-
-/**
- * Tools the starter agent names on a target although `NOT_NAMED` there, because an installed component
- * needs them: self-improvement on a server (`proposals-local`) needs a shell, where the steward runs
- * git and the tests of what it proposes.
- */
-export const NAMED_FOR: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
-  server: { "proposals-local": ["bash"] },
-};
-
-/**
- * Features reached only from the dashboard: choosing one gives the project its UI, as `--ui` does
- * (the Proposals view, and Settings → Self-improvement).
- */
-export const NEEDS_DASHBOARD: readonly string[] = ["admin-proposals"];
-
-/**
- * The installed `tools` the starter agent names on `target`: all of them but those `NOT_NAMED` there,
- * unless one of `components` needs it (`NAMED_FOR`).
- */
-export function starterTools(tools: readonly string[], target = "server", components: readonly string[] = []): string[] {
-  const needed = new Set(components.flatMap((component) => NAMED_FOR[target]?.[component] ?? []));
-  return tools.filter((tool) => needed.has(tool) || !(tool in (NOT_NAMED[target] ?? {})));
-}
-
-/** The starter prompt, shared by agent.ts and SYSTEM.md when the project uses agent folders. */
+/** The starter prompt, shared by agent.ts and SYSTEM.md when the project keeps its agents in folders. */
 export function agentPrompt(tools: readonly string[], channels: readonly StarterChannel[] = []): string {
   const commands = tools.includes("bash") ? ", and to run commands in it" : "";
   return [
@@ -306,24 +269,31 @@ export function agentPrompt(tools: readonly string[], channels: readonly Starter
   ].join(" ");
 }
 
+/** What the starter agent's file says: all of it resolved by `pikit new` (`preset-plan.ts`), nothing decided here. */
+export interface StarterAgent {
+  /** `<provider>/<modelId>`. Default: the starter's for a server. */
+  model?: string;
+  /** Where it is reached: the channels being installed. */
+  channels?: readonly StarterChannel[];
+  /** The tools the preset grants it, by key. */
+  tools?: readonly string[];
+  /** The agent extensions the preset grants it, by key. */
+  extensions?: readonly string[];
+  /** Every tool the installed components provide: those not granted are named in its comment. */
+  installed?: readonly string[];
+  /** The agent folders' command (`pikit <it>` writes the registry), when the project keeps its agents in folders: the prompt is then in SYSTEM.md. */
+  folders?: string | undefined;
+}
+
 /**
- * The starter agent's file. It names `starterTools(installed, target, components)`; one installed and
- * not named is said in its comment, with why. It names `extensions` (`starterExtensions`) when there
- * are some. It is the steward (SPEC §6), so it may name `pikit-self`.
+ * The starter agent's file. It names the granted tools and extensions; a tool installed and not
+ * granted is said in its comment. It is the steward (SPEC §6), so it may name `pikit-self`.
  */
-export function agent(
-  installed: string[],
-  model = starterModel(),
-  channels: readonly StarterChannel[] = [],
-  target = "server",
-  extensions: readonly string[] = [],
-  components: readonly string[] = [],
-): string {
-  const tools = starterTools(installed, target, components);
-  const folders = components.includes("agents-folders");
-  const unnamed = installed
+export function agent(options: StarterAgent = {}): string {
+  const { model = starterModel(), channels = [], tools = [], extensions = [], installed = [], folders } = options;
+  const ungranted = installed
     .filter((tool) => !tools.includes(tool))
-    .map((tool) => `\n *\n * \`${tool}\` is installed but not named here: ${NOT_NAMED[target]?.[tool]}. Add it to \`tools\` for an\n * agent that needs it.`)
+    .map((tool) => `\n *\n * \`${tool}\` is installed but not named here: the preset does not grant it to the steward. Add it to\n * \`tools\` to give it.`)
     .join("");
   return `import { defineAgent } from "@pikit/contracts";
 
@@ -331,17 +301,31 @@ export function agent(
  * Your agent. Pi runs the loop; this file says who the agent is. It names the installed tools it may
  * use (\`tool-*\` components) and the agent extensions it runs with (\`extension-*\`); installing either
  * gives it to no agent that does not name it. Change the model, the prompt, the tools and the
- * extensions here.${folders ? " The system prompt is in SYSTEM.md; run `pikit agents` after changing it." : ""} \`defineAgent({ state, prepare })\` changes them per run. It is the project's
+ * extensions here.${folders !== undefined ? ` The system prompt is in SYSTEM.md; run \`pikit ${folders}\` after changing it.` : ""} \`defineAgent({ state, prepare })\` changes them per run. It is the project's
  * steward (\`steward: true\`, one per project): the agent that may know itself (\`pikit-self\`) and that
- * its operators ask to change the project.${unnamed}
+ * its operators ask to change the project.${ungranted}
  */
 export default defineAgent({
   name: "${STARTER_AGENT}",
   model: "${model}",
-  steward: true,${folders ? "" : `\n  systemPrompt: ${JSON.stringify(agentPrompt(tools, channels))},`}
+  steward: true,${folders !== undefined ? "" : `\n  systemPrompt: ${JSON.stringify(agentPrompt(tools, channels))},`}
   tools: ${JSON.stringify(tools)},${extensions.length > 0 ? `\n  extensions: ${JSON.stringify(extensions)},` : ""}
 });
 `;
+}
+
+/**
+ * A config value as `pikit.config.ts` writes it: a preset's `config` entry (plain values) as a
+ * TypeScript literal, keys unquoted where they can be (`{ defaultAgent: "steward" }`).
+ */
+export function configLiteral(value: unknown): string {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(configLiteral).join(", ")}]`;
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).map(([key, each]) => `${/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key)}: ${configLiteral(each)}`);
+    return entries.length === 0 ? "{}" : `{ ${entries.join(", ")} }`;
+  }
+  throw new Error(`a preset's config holds plain values, not ${typeof value}`);
 }
 
 export const AGENTS = `/**
@@ -373,7 +357,7 @@ export const DEPLOYMENT_TEXT: Readonly<Record<string, { up: string; then: string
 
 /** The installed deployment (`deployment-*`), which `pikit up` delegates to; undefined without one. */
 export function deploymentOf(components: readonly string[]): string | undefined {
-  return components.find((component) => component.startsWith("deployment-"));
+  return components.find((component) => kindOf(component) === "deployment");
 }
 
 /** What `pikit up` does in a project with `components` ("run it in Docker"); undefined without a deployment. */
@@ -385,9 +369,10 @@ export function upText(components: readonly string[]): string | undefined {
 
 /**
  * The project's README. `{{PIKIT_ROOT}}` and `{{PIKIT_URL}}` say where `pikit` and the kit are:
- * `pikit new` writes them in (`withKitLocation`), as in the skills.
+ * `pikit new` writes them in (`withKitLocation`), as in the skills. `folders`: the preset's agent layout
+ * (its feature, the command that writes the agents' registry, whether it was chosen), when it has one.
  */
-export function readme(name: string, components: string[], target = "server", ui = false): string {
+export function readme(name: string, components: string[], target = "server", ui = false, folders?: StarterFolders): string {
   const deployment = deploymentOf(components);
   const up =
     deployment === undefined
@@ -442,14 +427,14 @@ bun test                   # the installed components' own tests, and yours
 \`\`\`
 
 The installed files are yours: edit them. \`pikit doctor\` lists the ones you changed.
-${components.includes("agents-folders") ? `
+${folders?.chosen === true ? `
 Your first agent is **Steward** (\`steward\`). Edit its model and tools in
 \`src/agents/steward/agent.ts\`, and its prompt in \`src/agents/steward/SYSTEM.md\`.
-Add another agent as \`src/agents/<name>/agent.ts\`, then run \`pikit agents\` to regenerate
+Add another agent as \`src/agents/<name>/agent.ts\`, then run \`pikit ${folders.command}\` to regenerate
 \`src/extensions/agents.ts\`. Commit both the folders and that generated file; doctor refuses stale output.
 ` : `
 Your first agent is **Steward** (\`steward\`). Edit \`src/agents/steward/agent.ts\` to change its
-model, prompt and tools. For several code agents later: \`pikit add agents-folders\`, then \`pikit agents\`.
+model, prompt and tools.${folders === undefined ? "" : ` For several code agents later: \`pikit add ${folders.feature}\`, then \`pikit ${folders.command}\`.`}
 `}
 ## Where pikit is
 

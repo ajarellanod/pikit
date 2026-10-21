@@ -17,7 +17,7 @@ import { afterAll, expect, test } from "bun:test";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UI_COMPONENTS } from "../packages/cli/src/commands/ui.ts";
+import { uiComponentsFor } from "../packages/cli/src/commands/ui.ts";
 import { DEFAULT_REGISTRY } from "../packages/cli/src/paths.ts";
 import { setConfigEntry } from "../packages/cli/src/project/config-file.ts";
 import { withOffers } from "../packages/cli/src/project/offers.ts";
@@ -98,7 +98,8 @@ test("the Telegram template opts into its channel and asks for every secret the 
   expect(TEMPLATE.preset).toBe("cloudflare");
   expect(registry.preset(TEMPLATE.preset)).not.toContain("channel-telegram-webhook");
   expect(TEMPLATE.with).toContain("channel-telegram-webhook");
-  const components = [...registry.preset(TEMPLATE.preset, TEMPLATE.with), ...(TEMPLATE.ui ? UI_COMPONENTS : [])];
+  const chosen = registry.preset(TEMPLATE.preset, TEMPLATE.with);
+  const components = [...chosen, ...(TEMPLATE.ui ? uiComponentsFor(registry, chosen, [TEMPLATE.target]) : [])];
   expect(components).toContain("channel-telegram-webhook");
   // Self-improvement comes in, dormant, with repo-github-app: GitHub is connected from the dashboard, no token is in the form.
   expect(components).toContain("admin-proposals");

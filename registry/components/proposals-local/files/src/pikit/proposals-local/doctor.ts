@@ -4,7 +4,11 @@
  * in its order), lists a `deployer` service. Without it nothing deploys an approval: no deployment's
  * compose.yaml with the service, this component's Compose file not recorded, or a Compose that does
  * not apply its `!reset`. It runs `docker compose … config --services`, which starts nothing.
- * Without Docker here (a laptop running `pikit dev`), a note: nothing to check.
+ * Without Docker here, a note: nothing to check.
+ *
+ * Before `pikit dev` (`operation: "dev"`) it runs no Docker and finds nothing wrong: `dev` runs the app
+ * here and no deployment, so no deployer runs and an approval is applied only by the deployment
+ * `pikit up` starts. A note says so; the approval gate is the same.
  *
  * And a note while the agent's shell runs on this server (`execution-local`): an approval is then the
  * operator's decision, not a lock (README, "Security"); `execution-gondolin` makes it one.
@@ -20,6 +24,8 @@ import { join } from "node:path";
 /** What the CLI gives the check (`component-doctor.ts`). */
 export interface DoctorIO {
   config: Readonly<Record<string, unknown>>;
+  /** What the check runs for: `pikit doctor` (when absent), or the check before `pikit dev` or `pikit up`. */
+  operation?: "doctor" | "dev" | "up";
   get(name: string): string | undefined;
 }
 
@@ -54,9 +60,14 @@ function composeArgs(components: Record<string, { compose?: unknown }>): string[
 export const NOT_A_LOCK =
   "the agent's shell runs on this server (execution-local): it could write an approval itself, so an approval is your decision, not a lock. With execution-gondolin its shell is in a VM that reaches the proposals only to push branches (pikit add execution-gondolin, then pikit remove execution-local --force)";
 
-export async function doctor(_io: DoctorIO, run: ComposeRunner = spawnCompose, cwd = process.cwd()): Promise<{ problems: string[]; notes: string[] }> {
+/** The note before `pikit dev`, which runs no deployer. */
+export const NOT_DEPLOYED_IN_DEV =
+  "`pikit dev` runs no deployer: what you approve is applied only by the deployment `pikit up` starts, so whether Compose runs the deployer is checked by `pikit up` and `pikit doctor`";
+
+export async function doctor(io: DoctorIO, run: ComposeRunner = spawnCompose, cwd = process.cwd()): Promise<{ problems: string[]; notes: string[] }> {
   const components = installed(cwd);
   const lock = "execution-local" in components ? [NOT_A_LOCK] : [];
+  if (io.operation === "dev") return { problems: [], notes: [NOT_DEPLOYED_IN_DEV, ...lock] };
   const command = ["docker", "compose", ...composeArgs(components), "config", "--services"];
   let result: Awaited<ReturnType<ComposeRunner>>;
   try {

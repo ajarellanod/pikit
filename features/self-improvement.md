@@ -173,10 +173,13 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 4. The server with `deployment-docker` (**built**): `pikit new` makes the project a git repository
    (`main`, everything committed; without git it says so and goes on). In `pikit new`, the http preset's
    feature "Self-improvement" (`--with admin-proposals`: the group `[admin-proposals, proposals-local]`)
-   brings the dashboard (`NEEDS_DASHBOARD`) and makes the starter agent name `bash` (`NAMED_FOR`):
-   the steward needs a shell for git and the tests. With Docker, `pikit up` then starts the deployer.
-   The deployer for `deployment-local` is **not built**: it refuses proposals-local's Compose file even
-   though the wizard offers the feature. The missing work and its verification belong in
+   brings the dashboard and grants the starter agent `bash`, both said by the preset's feature
+   (`ui: true`, `steward.tools`; features/component-composition.md): the steward needs a shell for git
+   and the tests. With Docker, `pikit up` then starts the deployer. proposals-local needs its deployment
+   to support `proposals.deployer` (and, for its Compose file, `services.compose`), which only
+   deployment-docker does: with `deployment-local` the wizard shows the feature unavailable, saying why,
+   and `new`, `add` and `doctor` refuse the combination. The deployer for `deployment-local` is
+   **not built**. The missing work and its verification belong in
    [Self-improvement without Docker](deployment-local.md#self-improvement-without-docker), not a second
    copy of the plan here.
 

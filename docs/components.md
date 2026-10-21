@@ -62,6 +62,7 @@ target (K1).
 | `targets` | hand | `server`, `durable` or both. Importing `node:*` or `bun:*` needs exactly `["server"]` |
 | `requires.pikit` | hand | the `@pikit/core` range it accepts |
 | `requires.contracts`, `requires.adapter` | hand | the `@pikit/contracts` / `@pikit/pi-adapter` ranges, when `dependencies` lists them |
+| `requires.deployment` | hand | what the project's one deployment must support for it to work (`proposals.deployer`): protocol names, never component names; never on a deployment (below) |
 | `requires.capabilities` | generated | its `use()` calls |
 | `optional.capabilities` | generated | its `useOptional()` and `useKeyed()` calls |
 | `provides` | generated | its `provide()` and `provideKeyed()` names (default config and every `examples` config) |
@@ -70,12 +71,14 @@ target (K1).
 | `halves` | generated | when `apps.worker` names a half: what each App's half provides, requires and uses |
 | `hooks` | hand | `doctor`, `beforeDeploy`, `afterDeploy`: each a file of `src/pikit/<name>/` exporting a function of that name (below) |
 | `commands` | hand | `pikit <name>` commands it adds: name (kebab-case, never the CLI's own) → `{ file, description }`, the file of `src/pikit/<name>/` exporting `command` (below) |
-| `compose` | hand | a Compose file of `src/pikit/<name>/` whose services run beside the app on a server: `deployment-docker` adds it after its compose.yaml (below); `deployment-local` refuses it |
+| `compose` | hand | a Compose file of `src/pikit/<name>/` whose services run beside the app on a server: it implies `requires.deployment` `services.compose`; `deployment-docker` adds it after its compose.yaml (below) |
+| `deployment` | hand | only on a `deployment-*` component: `{ "supports": [...] }`, the protocols it implements for the components that need them (below) |
 | `generated` | hand | files of `src/pikit/<name>/` a hook or build rewrites |
 | `view` | hand | a folder holding its dashboard view |
 | `ui` | hand | `{ "source": "<folder>", "target": "src/<name>" }`: a UI project of its own (below) |
 | `replay.tools` | generated | each `agent.tool` it provides with the default config → `safe` or `unsafe` |
 | `modelProviders` | generated | the `model.provider` keys it provides with the default config |
+| `extensions` | generated | the `agent.extension` keys it provides with the default config (a preset's `steward.extensions` is checked against them) |
 | `dependencies` | hand | exactly the npm packages its shipped files import, pinned |
 | `devDependencies` | hand | packages only its tests import, and tools it runs (`wrangler`), pinned |
 | `files` | hand | `{ source, target }` pairs; only `files/src` → `src` may map a directory |
@@ -92,7 +95,7 @@ hook gets a plain `io` (its config from `pikit.config.ts`, `get(name)` reading t
 
 | Hook | Called by | `io` | Notes |
 |---|---|---|---|
-| `doctor` | `pikit doctor` (so `pikit dev`), once the App composes | `config`, `workerConfig` (`<name>-worker` in the Worker's App, on Cloudflare only), `get` | may reach the network, writes nothing; may also return notes |
+| `doctor` | `pikit doctor` (so `pikit dev` and `pikit up`), once the App composes and the deployment supports what the components need | `config`, `workerConfig` (`<name>-worker` in the Worker's App, on Cloudflare only), `get`, `operation` (`doctor`, `dev` or `up`: what it checks for) | may reach the network, writes nothing; may also return notes |
 | `beforeDeploy` | the deployment's `up`, before it builds or bundles | `config`, `get`, `write`, `say` | `write(file, text)` writes only files of its own directory; a problem deploys nothing. `up` runs it instead of `doctor` |
 | `afterDeploy` | the deployment's `up`, once the new version answers (C8); on Docker once the containers are healthy, with `PIKIT_PUBLIC_URL` (none without it) | `url`, `config`, `get`, `say` | a problem fails `up` but the version stays deployed |
 
@@ -101,6 +104,8 @@ listed in `generated`); `channel-telegram-webhook` has `afterDeploy` (sets the T
 `expose-cloudflare-tunnel` has `doctor` (no Cloudflare API token in `.env`);
 `deployment-celld` has `doctor` (`commands.ts`: celld and esbuild installed, the config derived from `wrangler.jsonc`, the bucket);
 `deployment-local` has `doctor` (`commands.ts`, notes only: the supervisor reachable, linger, the project's path, Compose components);
+`proposals-local` has `doctor` (the Compose configuration supplies the deployer; under `dev`, where no
+deployer runs, it only says proposals are not applied, and runs no Docker);
 `channel-google-chat` has `doctor` (on Cloudflare, its Worker half's config and the default export's
 agree on what both read);
 `admin-api` lists `dashboard-files.ts` in `generated` (written by the dashboard's build, not a hook).
@@ -172,7 +177,38 @@ and `deployment-docker` adds every recorded one after its own compose.yaml, in `
 for `up`, `down`, `restart`, `logs` and `status` (`docker compose -f compose.yaml -f <it>…`; not for
 `exec`'s one-off container). Its paths are relative to the project's directory. Only a component whose
 targets include `server` has one (`registry validate`). `expose-cloudflare-tunnel`'s runs `cloudflared`.
-`deployment-local` runs no Compose file: its `up` refuses a project with one, and its `doctor` says so.
+A `compose` file needs a deployment that supports `services.compose` (deployment-docker), checked
+with the rest of the deployment's requirements (below). `deployment-local` runs no Compose file: the
+CLI refuses such a composition first, and its own `up` still refuses a project with one.
+
+### What it needs of its deployment
+
+A project has one deployment, its `deployment-*` component. What it does besides running the App is
+a set of protocol names, `deployment.supports`; what a component needs of it, `requires.deployment`
+([features/component-composition.md](../features/component-composition.md)):
+
+```jsonc
+// deployment-docker
+"deployment": { "supports": ["services.compose", "proposals.deployer"] }
+// proposals-local
+"requires": { "pikit": "0.0.1", "contracts": "0.0.1", "capabilities": [], "deployment": ["proposals.deployer"] },
+"compose": "compose.yaml"
+```
+
+- Names are lowercase words joined by `.` or `-`, an open set: a registry may use its own. The kit's:
+  `services.compose` (it runs the Compose files components record; a `compose` file implies it, so it
+  is never written in `requires.deployment`) and `proposals.deployer` (it runs a controller of
+  `@pikit/contracts/deployer`). deployment-docker supports both; deployment-local,
+  deployment-cloudflare and deployment-celld neither.
+- Only a `deployment-*` component has `deployment`, and it has no `requires.deployment` and no
+  `compose` (`registry validate`, by kind).
+- `pikit add` records both in `pikit.json`. One pure check (`planComposition`,
+  [composition.ts](../packages/cli/src/project/composition.ts)) answers `new`, the wizard, `add`,
+  `remove`, `upgrade`, `ui`, `doctor` (so `dev` and `up`) and `registry validate`: exactly one
+  deployment (several are a problem, and never a union of what each supports: each is checked
+  alone), and nothing it does not support. An operation is refused, before it writes, only for a need
+  it would leave unmet that was met before; `--force` does not bypass it.
+- A declaration is a promise the deployment's own checks keep: it proves nothing alone.
 
 ### Views
 
@@ -207,10 +243,13 @@ declares), the imports of every file per target (only the adapter imports Pi, no
 `cloudflare:*` for `durable` outside `configure.ts`, a deployment's commands and the files `commands`
 names, no sibling component's files), that each hook's and command's file exists and exports its
 function, that no command takes a name of the CLI's own, that a `compose` file is the component's own
-and its targets include `server`, that `dependencies` are exactly what the
-shipped files import, that a tool working on `api.env` uses `execution` or `execution.shell`, that only
+and its targets include `server`, that only a deployment has `deployment` and that a deployment has
+neither `requires.deployment` nor `compose`, and no component writes `services.compose` in
+`requires.deployment`; that `dependencies` are exactly what the shipped files import, that a tool working on `api.env` uses `execution` or `execution.shell`, that only
 `admin-*` reads `APP_DESCRIPTION`, that `setup` declares the same on every declared target (K1), and
-the generated fields. It also checks presets and schemas.
+the generated fields. It also checks presets (below: their policy, and each alternative with each
+feature), the dashboard's descriptor (`dashboard/dashboard.json`, [dashboard.md](dashboard.md)) and
+schemas.
 
 ## Install: `pikit add`
 
@@ -218,7 +257,9 @@ the generated fields. It also checks presets and schemas.
 
 1. Resolve the registry (`builtin`, or a local path) and read each component.
 2. Check targets against `pikit.json`'s, the kit ranges (`requires.*`), that no other component owns
-   one of its `commands`, and what is missing.
+   one of its `commands`, and what is missing. Then, with the offers resolved, plan the whole
+   project as it would be: an issue it would introduce with the deployment (none, two, or one that
+   does not support what a component needs) is refused, even with `--force`.
 3. Show what it writes, and confirm (`--yes` skips; without a terminal it must be given).
 4. Write its files and README. A file that exists and differs is refused without `--force`.
 5. Add its npm `dependencies` and `devDependencies` to `package.json`; `bun install`.
@@ -237,7 +278,7 @@ and `doctor` reports it.
 [pikit-json.ts](../packages/cli/src/project/pikit-json.ts). Per installed component: the registry,
 version and commit (`-dirty` when uncommitted), the kit ranges it accepts, each file with its
 `sha256` hash, the npm packages it declared and those `add` put in `package.json` for it, its
-`environment`, `hooks`, `commands`, `compose`, `generated`, `apps`, and `installedFor` when it came as an offer. Also the
+`environment`, `hooks`, `commands`, `compose`, `deployment`, `requires.deployment`, `generated`, `apps`, and `installedFor` when it came as an offer. Also the
 project's `targets`, its `registries`, the vendored kit's commit, and the dashboard's files. Whether a
 file is modified is never stored: it is computed from the hash.
 
@@ -275,7 +316,10 @@ and the project's copy:
 
 Manifest changes follow as `add` makes them (`.env.example`, npm packages, hooks, the Worker's App,
 offers). The vendored kit (`vendor/`: `@pikit/core`, `@pikit/contracts`, `@pikit/pi-adapter`) becomes
-this CLI's. Without names it upgrades every component that changed, then the dashboard.
+this CLI's. Without names it upgrades every component that changed, then the dashboard. A change of
+`requires.deployment`, `deployment` or `compose` is a change even when the version did not move.
+Everything asked is planned as one set before anything is written (`--dry-run` too): a new version
+that would leave a requirement unmet (a deployment that no longer supports one) is refused.
 
 ## Remove: `pikit remove`
 
@@ -284,12 +328,44 @@ entries (both Apps), `.env.example` block, npm packages it added that nothing el
 `pikit.json` record. It refuses when another component `use`s a capability only this one provides;
 without `--force`, also when an agent names a key only it provides (a tool, a model provider), when it
 would leave a channel without a router or routes without a server, or when a file is modified. What
-was installed for it goes too, unless something else uses it.
+was installed for it goes too, unless something else uses it. Even with `--force`, it refuses to
+introduce a deployment issue (removing the only deployment that supports what another component
+needs: remove that one first), but lets a wrong project be repaired (removing the consumer a
+deployment cannot run, one of two deployments, or a deployment that cannot run what is installed);
+`doctor` keeps reporting what remains, so `remove` then exits 1.
 
 ## Presets
 
-A preset ([registry/presets](../registry/presets)) is a YAML list of `pikit add` calls, with optional
-`choose` (a question answered by every component of a kind, `--with` answers it), `model` (the
-starter agent's), `features` (what `pikit new` offers to add: a component, or a group of them named by
-its first, `[agents-live, router-rules, settings-store]`), or `extends` + `with` (an alias). `pikit new
---preset` runs them; nothing reads the preset's name.
+A preset ([registry/presets](../registry/presets), `registry/schema/preset.schema.json`) is a YAML
+list of `pikit add` calls, `components`, with optional:
+
+| Field | What it is |
+|---|---|
+| `choose` | a question answered by every component of a kind (`--with` answers it) |
+| `model` | the starter agent's model |
+| `ui` | `true`: the project gets the dashboard, as `--ui` |
+| `steward` | `{ tools, extensions }`: the keys the starter agent, the steward, names. Nothing else grants it a tool or an extension: not a component, not a provider being installed |
+| `config` | project values for components of the preset or its answers, applied only to those chosen and checked against each one's schema (`router-basic: { defaultAgent: steward }`) |
+| `agents` | `{ folders: { feature, command } }`: the one-or-several-agents question; several chooses that feature, and `pikit new` runs that command (one its component declares) once before `doctor` |
+| `features` | what `pikit new` offers to add, each `{ components, ui?, steward? }`, named by its first component (`--with <first>`) and shown by its title. `ui: true` brings the dashboard when chosen; `steward` adds grants, shown before it is chosen |
+| `extends` + `with` | an alias of another preset, with its answers; it inherits all of the above |
+
+```yaml
+steward: { tools: [read, write, edit, fetch, websearch], extensions: [pikit-self] }
+config: { router-basic: { defaultAgent: steward } }
+agents: { folders: { feature: agents-folders, command: agents } }
+features:
+  - components: [agents-folders]
+  - components: [admin-proposals, proposals-local]
+    ui: true
+    steward: { tools: [bash] }
+```
+
+`pikit new --preset` resolves it once, as the wizard and `registry validate` do
+([preset-plan.ts](../packages/cli/src/project/preset-plan.ts)), and refuses before it writes: a grant
+of a key no chosen component provides (read from the candidate's description: setup, never start), a
+`config` entry for a component not chosen, a layout feature or command that does not exist, and a
+deployment issue. A feature the chosen deployment cannot run is offered disabled, with the reason;
+chosen by `--with` it fails. Grants are for the steward `pikit new` writes: `add`, `upgrade` and `ui
+on` never change an agent. Nothing reads the preset's name, and the CLI decides nothing by a
+component's name ([features/component-composition.md](../features/component-composition.md)).

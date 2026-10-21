@@ -4,8 +4,10 @@ Runs a pikit project as a service of this machine, without Docker: a systemd use
 launchd user agent on macOS. The process entrypoint, its log, the unit and plist templates, and the
 commands `pikit up | down | restart | logs | status | dev` delegate to.
 
-- **Provides:** nothing. It is not an app component and is not listed in `pikit.config.ts`: it runs
-  the app rather than running inside it.
+- **Provides:** nothing in the App. It declares no `deployment.supports`: it runs neither components'
+  Compose files (`services.compose`) nor the self-improvement deployer (`proposals.deployer`). It is
+  not an app component and is not listed in `pikit.config.ts`: it runs the app rather than running
+  inside it.
 - **Requires:** nothing. It runs whatever `pikit.config.ts` composes; for `/health` and `/ready` that
   is `server-bun`.
 - **Target:** `server` (it uses the process's signals and `node:child_process`).
@@ -85,7 +87,7 @@ The CLI delegates to these functions; you can call them from a script too. Each 
 
 | Function | Does |
 |---|---|
-| `up()` | Refuses a component that runs beside the app in Docker (`compose`: expose-cloudflare-tunnel, proposals-local). Then the components' `beforeDeploy` hooks; `bun install --frozen-lockfile`; each UI project's install and build (every folder of `src/` with a `package.json` but `src/pikit/`); the unit or plist written; the service (re)started (`daemon-reload`, `enable`, `restart`; or `bootout`, `bootstrap`); then it waits up to 45 s until the service is active and `/health` answers 200, and runs the components' `afterDeploy` hooks with `PIKIT_PUBLIC_URL` |
+| `up()` | Keeps a guard against components' Compose files (`compose`: expose-cloudflare-tunnel, proposals-local), after the CLI has checked the whole composition before hooks. Then the components' `beforeDeploy` hooks; `bun install --frozen-lockfile`; each UI project's install and build (every folder of `src/` with a `package.json` but `src/pikit/`); the unit or plist written; the service (re)started (`daemon-reload`, `enable`, `restart`; or `bootout`, `bootstrap`); then it waits up to 45 s until the service is active and `/health` answers 200, and runs the components' `afterDeploy` hooks with `PIKIT_PUBLIC_URL` |
 | `down()` | Stops the service, unloads it and removes its file. `.pikit/` stays |
 | `restart()` | `systemctl --user restart`, or `launchctl kickstart -k`: the files as they are |
 | `logs({ follow, tail })` | `.pikit/logs/app.log` and its rotated files, oldest first; `--follow` follows it across rotations |
@@ -108,10 +110,14 @@ Read the log with `pikit logs`, or `jq 'select(.level == "error")' .pikit/logs/a
 
 ## Not here
 
-- **Services beside the app**: `compose` in a component.json means "run by deployment-docker". A
-  tunnel (`expose-cloudflare-tunnel`) as a second unit is not built.
-- **Self-improvement's deployer** is built only for deployment-docker. With proposals-local installed,
-  `pikit up` here refuses its Compose file, even though the wizard currently offers the feature.
+- **Services beside the app**: `compose` in a component.json needs a deployment that supports
+  `services.compose` (deployment-docker does). A tunnel (`expose-cloudflare-tunnel`) as a second unit
+  is not built: `pikit new` and `pikit add` refuse it with deployment-local before writing.
+- **Self-improvement's deployer** is built only for deployment-docker. proposals-local needs
+  `proposals.deployer` and, from its Compose file, `services.compose`; deployment-local supports
+  neither. The wizard shows that feature disabled with the reason, and the direct commands refuse
+  this composition before writing. `pikit doctor` refuses before component hooks run; its own `up`
+  keeps the Compose guard.
   The missing local deployer, isolation, rollback and verification are recorded in
   [features/deployment-local.md](https://github.com/ajarellanod/pikit/blob/main/features/deployment-local.md),
   "Self-improvement without Docker".

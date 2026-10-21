@@ -3,7 +3,8 @@
  * sidebar and the tabs: the first `PAGE` (the sidebar's `SIDEBAR_CHATS`), read again every `every(20 s)`
  * while the person is here (busy flags, new titles), never more (every one, and the archived ones, are
  * on the Conversations page, `screens/chats.tsx`); renaming, archiving and deleting change it at once,
- * and move `changed`, which that page follows.
+ * and move `changed`, which that page follows. A conversation written to here goes first at once
+ * (`writtenFirst`), and the list is read again once the message is in (`screens/conversation.tsx`).
  *
  * Also what the pages share: the messages sent and not shown yet (`SentMessages`, the shared
  * conversation view's: New chat's first message shows in the conversation it opens), and the tabs, the
@@ -12,7 +13,7 @@
  */
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { type SentMessages, useSentMessages } from "@/components/pikit/conversation";
+import { type SentMessages, useSentMessages, writtenFirst } from "@/components/pikit/conversation";
 import { every } from "./activity.ts";
 import type { ChatConversation, ChatPage } from "./chat-api.ts";
 import { request, useGet } from "./client.ts";
@@ -131,11 +132,12 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
 
   const items = useMemo(() => {
     if (latest.data === undefined) return undefined;
-    return latest.data.items.flatMap((each) => {
+    const listed = latest.data.items.flatMap((each) => {
       const now = changed.get(each.id);
       return now === null || now?.archived === true ? [] : [now ?? each];
     });
-  }, [latest.data, changed]);
+    return writtenFirst(listed, latest.at, (each) => lastSentAt(each.id));
+  }, [latest.data, latest.at, changed, lastSentAt]);
 
   // The list's titles, by conversation: a tab shows its conversation's as it is now.
   const titled = useMemo(() => new Map((items ?? []).map((each) => [each.id, each.title])), [items]);

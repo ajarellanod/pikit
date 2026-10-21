@@ -78,7 +78,8 @@ test.skipIf(!E2E)(
     expect(readFileSync(join(project, ".env"), "utf8")).not.toContain("TELEGRAM_BOT_TOKEN=");
 
     const started = performance.now();
-    const configured = await pikit(["configure", "--yes"], {
+    // The preset comes with the dashboard: its admin token is generated, as a script would ask for it.
+    const configured = await pikit(["configure", "--yes", "--generate", "PIKIT_ADMIN_TOKEN"], {
       env: { ANTHROPIC_API_KEY: DUMMY_KEY, TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: String(OWNER.id) },
     });
     timings.configure = performance.now() - started;
@@ -88,6 +89,9 @@ test.skipIf(!E2E)(
     const env = readFileSync(join(project, ".env"), "utf8");
     expect(env).toContain(`TELEGRAM_BOT_TOKEN=${telegram.token}`);
     expect(env).toContain(`TELEGRAM_ALLOWED_USERS=${OWNER.id}`);
+    const adminToken = /^PIKIT_ADMIN_TOKEN=([0-9a-f]{64})$/m.exec(env)?.[1];
+    expect(adminToken).toBeDefined();
+    expect(configured.out + configured.err).not.toContain(adminToken as string);
     expect(statSync(join(project, ".env")).mode & 0o777).toBe(0o600);
     expect((await pikit(["doctor"], { env: { ANTHROPIC_API_KEY: "" } })).code).toBe(0);
   },

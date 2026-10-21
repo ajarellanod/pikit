@@ -77,7 +77,12 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const { app, agents: described, commands, newChat, conversationActions } = useShell();
   const agents = agentsOf(app, described);
   const delivery = useDelivery((app.capabilities["outbound.queue"]?.providers.length ?? 0) > 0).problems;
-  const source = useMemo(() => adminSource(id), [id]);
+  const { reload: reloadChats } = chats;
+  // Once a message is in, the sidebar reads the list again: this conversation is the latest now.
+  const source = useMemo(() => {
+    const admin = adminSource(id);
+    return { ...admin, send: (message: Parameters<typeof admin.send>[0]) => admin.send(message).finally(reloadChats) };
+  }, [id, reloadChats]);
   const summary = useApi<ApiConversation>(`/conversations/${encodeURIComponent(id)}`);
   const { reload } = summary;
   const conversation = summary.data?.conversationId === id ? summary.data : undefined;

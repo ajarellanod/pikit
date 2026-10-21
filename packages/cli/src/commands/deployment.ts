@@ -43,9 +43,13 @@ export { DEPLOYMENT_COMMANDS, type DeploymentCommand, deploymentComponent };
  * component with a `beforeDeploy` hook to that hook, which it runs right before the build. `dev` also
  * checks the model credentials on this machine (`checkLocalCredentials`); `up` checks them where the
  * app runs (`checkAppCredentials`).
+ * A composition that cannot work (what a component needs of the deployment, `composition.ts`) is
+ * refused for both, before any component's check runs (doctor runs none then): nothing reaches Docker
+ * to find out. The components' checks are told which of the two it is (`operation`): `dev` runs no
+ * deployment, so what only the deployment does is not checked for it.
  */
 async function checkReady(projectDir: string, command: "up" | "dev"): Promise<void> {
-  const report = await doctor(projectDir, { quiet: true, componentChecks: command === "up" ? "unless-before-deploy" : true });
+  const report = await doctor(projectDir, { quiet: true, componentChecks: command === "up" ? "unless-before-deploy" : true, operation: command });
   for (const problem of report.problems) log.problem(problem);
   for (const missing of report.unconfigured) log.problem(missing);
   if (report.problems.length + report.unconfigured.length > 0) throw new CliError("fix what `pikit doctor` reports first");

@@ -5,10 +5,12 @@
  *
  * `on`:
  *   1. installs what it needs and the project lacks (`missingUiComponents`), as `pikit add` does (its
- *      own operation, its own doctor): `admin-api`, whose API the dashboard reads, and the defaults
- *      `admin-auth-token` and `settings-store` unless what `pikit.config.ts` composes provides
- *      `admin.auth` and `settings` in every App already. On Cloudflare (`durable`) `add` puts each in
- *      both Apps: admin-api's Worker half serves the API and reaches the conversations' objects;
+ *      own operation, its own doctor): the components its registry's descriptor names
+ *      (`dashboard/dashboard.json`, `dashboardManifest`). The kit's: `admin-api`, whose API the
+ *      dashboard reads, and the defaults `admin-auth-token` and `settings-store` unless what
+ *      `pikit.config.ts` composes provides `admin.auth` and `settings` in every App already. On
+ *      Cloudflare (`durable`) `add` puts each in both Apps: admin-api's Worker half serves the API and
+ *      reaches the conversations' objects;
  *   2. writes `src/dashboard/`, keeps each file's base in `pikit-bases/` and records them in
  *      `pikit.json`'s `dashboard`, with the components step 2 installed; a failure puts back what it
  *      wrote;
@@ -27,6 +29,7 @@
 import { copyFileSync, existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basePath, unreferencedBases } from "../project/bases.ts";
 import { DASHBOARD_DIR, DASHBOARD_GENERATED, componentUiFiles, dashboardFiles, dashboardRecord, recordDashboard, unrecordedDashboardFiles } from "../project/dashboard.ts";
+import { type DashboardManifest, dashboardManifest } from "../project/dashboard-manifest.ts";
 import { assertNoIncompleteOperation, beginOperation, finishOperation } from "../project/operation.ts";
 import { confinedPath } from "../project/paths.ts";
 import { hashFile, type InstalledDashboard, modifiedFiles, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
@@ -42,34 +45,18 @@ import { remove } from "./remove.ts";
 import { type FileChanges, mergeShipped, type UpgradeOptions } from "./upgrade.ts";
 
 /**
- * What the dashboard needs, providers first: the order `on` installs them in. settings-store comes
- * with it: the Settings dialog is the dashboard's, and the sections the installed components bring
- * (router-basic's Agent) read and write through it; it needs nothing admin-api does not.
- */
-export const UI_COMPONENTS = ["admin-auth-token", "admin-api", "settings-store"] as const;
-
-/**
- * The capability each default of `UI_COMPONENTS` stands for: another provider of it, in every App,
- * takes its place. admin-api stands for none: the dashboard reads its own API.
- */
-export const UI_DEFAULT_FOR: Readonly<Partial<Record<(typeof UI_COMPONENTS)[number], string>>> = {
-  "admin-auth-token": "admin.auth",
-  "settings-store": "settings",
-};
-
-/**
- * The `UI_COMPONENTS` a project on `targets` lacks, in order, given the names it has (`present`:
+ * The `dashboard`'s components a project on `targets` lacks, in order, given the names it has (`present`:
  * installed, or chosen for a new project) and what it provides per App (`provided`). A default is
  * not missing when it is present, or when its capability is provided in each of the project's Apps
  * (the dashboard needs it in each: on Cloudflare admin-api's Worker half requires `admin.auth` too).
  * Provided in some of them only, it is refused: the default goes in every App, and would be a second
  * provider where one is, which no one chose.
  */
-export function missingUiComponents(present: readonly string[], targets: readonly string[], provided: ProvidedCapabilities): string[] {
+export function missingUiComponents(dashboard: DashboardManifest, present: readonly string[], targets: readonly string[], provided: ProvidedCapabilities): string[] {
   const apps: AppName[] = hasWorkerApp(targets) ? ["default", "worker"] : ["default"];
-  return UI_COMPONENTS.filter((component) => {
+  return dashboard.components.filter((component) => {
     if (present.includes(component)) return false;
-    const capability = UI_DEFAULT_FOR[component];
+    const capability = dashboard.defaultFor[component];
     if (capability === undefined) return true;
     const lacking = apps.filter((app) => !provided[app].has(capability));
     if (lacking.length === apps.length) return true;
@@ -87,13 +74,24 @@ export function missingUiComponents(present: readonly string[], targets: readonl
  * `new` and preset validation so both choose the same defaults, in every App of the target.
  */
 export function uiComponentsFor(registry: Registry, chosen: readonly string[], targets: readonly string[]): string[] {
+  const dashboard = descriptorOf(registry);
   const { order } = withOffers(registry, chosen, targets);
-  return missingUiComponents(order, targets, providedByManifests(order.map((name) => registry.manifest(name)), targets));
+  return missingUiComponents(dashboard, order, targets, providedByManifests(order.map((name) => registry.manifest(name)), targets));
 }
 
-/** Whether `missingUiComponents` needs to know what the project provides: a default is not present. */
-function needsComposition(present: readonly string[]): boolean {
-  return UI_COMPONENTS.some((component) => UI_DEFAULT_FOR[component] !== undefined && !present.includes(component));
+/** The registry's dashboard descriptor; refused when it has no dashboard. */
+function descriptorOf(registry: Registry): DashboardManifest {
+  const dashboard = dashboardManifest(registry);
+  if (dashboard === undefined) throw new CliError(`the registry ${registry.root} has no dashboard (dashboard/files/)`);
+  return dashboard;
+}
+
+/** The defaults of `dashboard` the project has not got (`present`): component → the capability it stands for. */
+function absentDefaults(dashboard: DashboardManifest, present: readonly string[]): [string, string][] {
+  return dashboard.components.flatMap((component) => {
+    const capability = dashboard.defaultFor[component];
+    return capability === undefined || present.includes(component) ? [] : [[component, capability] as [string, string]];
+  });
 }
 
 export interface UiOptions {
@@ -183,11 +181,15 @@ export async function uiOn(projectDir: string, options: UiOptions = {}): Promise
   const project = readProjectManifest(projectDir);
   const { registry, name: registryName } = defaultRegistry(projectDir, project);
   const files = project.dashboard === undefined ? shippedBy(registry) : undefined;
+  const dashboard = descriptorOf(registry);
   if (files !== undefined) checkDashboardFree(projectDir, project, options.force === true);
   const present = Object.keys(project.components);
-  const missing = missingUiComponents(present, project.targets, needsComposition(present) ? await composedForUi(projectDir, present) : { default: new Set(), worker: new Set() });
+  const defaults = absentDefaults(dashboard, present);
+  const provided = defaults.length > 0 ? await composedForUi(projectDir, defaults) : { default: new Set<string>(), worker: new Set<string>() };
+  const missing = missingUiComponents(dashboard, present, project.targets, provided);
   if (files === undefined && missing.length === 0) {
-    log.ok(`the project has a UI: ${DASHBOARD_DIR}/, with admin-api, ${Object.values(UI_DEFAULT_FOR).join(" and ")}`);
+    const needs = [...dashboard.components.filter((component) => dashboard.defaultFor[component] === undefined), ...new Set(Object.values(dashboard.defaultFor))];
+    log.ok(`the project has a UI: ${DASHBOARD_DIR}/, with ${needs.join(", ")}`);
     return;
   }
 
@@ -233,7 +235,7 @@ export async function uiOn(projectDir: string, options: UiOptions = {}): Promise
  * not compose, `ui on` is refused: whether a default's capability is provided is unknown, and
  * neither its provider nor a second one is guessed.
  */
-async function composedForUi(projectDir: string, present: readonly string[]): Promise<ProvidedCapabilities> {
+async function composedForUi(projectDir: string, defaults: readonly [string, string][]): Promise<ProvidedCapabilities> {
   let error: string;
   try {
     const result = await probe(projectDir);
@@ -243,7 +245,6 @@ async function composedForUi(projectDir: string, present: readonly string[]): Pr
   } catch (thrown) {
     error = thrown instanceof Error ? thrown.message : String(thrown);
   }
-  const defaults = Object.entries(UI_DEFAULT_FOR).filter(([component]) => !present.includes(component));
   throw new CliError(
     `pikit.config.ts does not compose (${error}), so whether the project provides ${defaults.map(([, capability]) => capability).join(" and ")} is unknown: ` +
       `fix it (\`pikit doctor\`), or add their providers yourself (\`pikit add ${defaults.map(([component]) => component).join(" ")}\`), then run \`pikit ui on\` again`,

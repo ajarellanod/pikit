@@ -11,6 +11,15 @@ SPEC §5. Three pieces:
   `celld` include it by default; `pikit new --ui` adds it for other compositions, and `pikit ui on`
   adds it later. `base-cloudflare` is storage-only and does not include it.
 
+Which components the dashboard needs is its registry's to say, in
+[registry/dashboard/dashboard.json](../registry/dashboard/dashboard.json) (its README): `components`
+(`admin-auth-token`, `admin-api`, `settings-store`, in install order) and `defaultFor` (the capability
+each default stands for: `admin.auth`, `settings`). `pikit ui on`, `pikit new --ui` and a preset
+feature with `ui: true` read it alike: a default goes in only when the project's Apps lack its
+capability, another provider in every App keeps its place, and a partial or unknown composition is
+refused. `registry validate` checks that each component exists, runs on every target, and that each
+default provides its capability.
+
 ## admin-auth-token
 
 [README](../registry/components/admin-auth-token/README.md). Provides `admin.auth`, on both targets and

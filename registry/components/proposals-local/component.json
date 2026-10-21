@@ -10,7 +10,10 @@
   "requires": {
     "pikit": "0.0.1",
     "contracts": "0.0.1",
-    "capabilities": []
+    "capabilities": [],
+    "deployment": [
+      "proposals.deployer"
+    ]
   },
   "optional": {
     "capabilities": []

@@ -15,7 +15,8 @@ import { doctor } from "./files/src/pikit/proposals-local/doctor.ts";
 const COMPONENTS = join(import.meta.dir, "..");
 const OVERRIDE = "src/pikit/proposals-local/compose.yaml";
 const TUNNEL = "src/pikit/expose-cloudflare-tunnel/compose.yaml";
-const hasDocker = Bun.which("docker") !== null && Bun.spawnSync(["docker", "compose", "version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
+// Async, never spawnSync (Bun 1.4's lost child exits: testing/cli.ts).
+const hasDocker = Bun.which("docker") !== null && (await Bun.spawn(["docker", "compose", "version"], { stdout: "ignore", stderr: "ignore" }).exited) === 0;
 
 /** A new project: compose.yaml, the two Compose files, pikit.json listing `listed`; no .env. */
 function project(listed: Record<string, string>): string {
@@ -54,6 +55,10 @@ test.skipIf(!hasDocker)("compose.yaml alone has no deployer; with the override i
     expect(await doctor(io, undefined, on)).toEqual({ problems: [], notes: [] });
     expect(readdirSync(on, { recursive: true }).sort()).toEqual(before);
     expect((await doctor(io, undefined, off)).problems).toEqual([expect.stringContaining("Compose lists no deployer service")]);
+    expect((await doctor({ ...io, operation: "up" }, undefined, off)).problems).toEqual([expect.stringContaining("Compose lists no deployer service")]);
+    // Before `pikit dev`, no deployer runs: nothing is checked, not even without compose.yaml.
+    rmSync(join(off, "compose.yaml"));
+    expect(await doctor({ ...io, operation: "dev" }, undefined, off)).toEqual({ problems: [], notes: [expect.stringContaining("`pikit dev` runs no deployer")] });
     // The override without the service it turns on fails out loud.
     rmSync(join(on, "compose.yaml"));
     writeFileSync(join(on, "compose.yaml"), "services:\n  app:\n    image: app\n");

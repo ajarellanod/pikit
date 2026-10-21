@@ -1,0 +1,7 @@
+{
+  "components": ["admin-auth-token", "admin-api", "settings-store"],
+  "defaultFor": {
+    "admin-auth-token": "admin.auth",
+    "settings-store": "settings"
+  }
+}

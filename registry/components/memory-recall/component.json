@@ -21,6 +21,9 @@
   "provides": [
     "agent.extension"
   ],
+  "extensions": [
+    "memory"
+  ],
   "dependencies": {
     "@pikit/contracts": "0.0.1",
     "@pikit/pi-adapter": "0.0.1",

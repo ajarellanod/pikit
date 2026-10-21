@@ -8,6 +8,9 @@
  * the app would compose and the runtime refuse to start; and to leave the app answering nobody, a
  * channel without a router or `http.route`s without a server (`serving.ts`). The answer
  * comes from the app itself (`describe()`), not from manifests, so project components count too.
+ * Never, `--force` or not, does it leave a remaining component needing of the deployment what it no
+ * longer has (`checkComposition` in `add.ts`, from `pikit.json` alone): the only deployment goes after
+ * what needs it. Removing a component whose need was not met is a repair, and goes ahead.
  * It never deletes a file the user modified without `--force`. The bases of its files (`bases.ts`) go
  * with it, unless another component installed the same content.
  *
@@ -49,6 +52,7 @@ import { servingGaps } from "../project/serving.ts";
 import { removeUiLeftovers, syncUiExclusions } from "../project/ui-project.ts";
 import { Undo } from "../project/undo.ts";
 import { CliError, log } from "../ui.ts";
+import { compositionIssues, compositionRefusal } from "./add.ts";
 import { doctor, projectSources } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
 
@@ -113,6 +117,7 @@ async function removeOne(projectDir: string, name: string, force: boolean, begin
   if (installed === undefined) throw new CliError(`${name} is not installed (pikit.json has ${Object.keys(project.components).join(", ") || "nothing"})`);
 
   await checkNoDependents(projectDir, project, name, force);
+  checkRemainingComposition(project, name);
 
   const modified = modifiedFiles(projectDir, installed);
   if (modified.length > 0 && !force) {
@@ -273,6 +278,24 @@ async function checkNoDependents(projectDir: string, project: ProjectManifest, n
   if (gaps.length > 0 && !force) {
     throw new Refused(`${name} cannot be removed; the app would answer nobody:\n  ${gaps.map((gap) => gap.message).join("\n  ")}\nDo so first, or pass --force.`);
   }
+}
+
+/**
+ * Refuses, `--force` or not, when what remains has a problem of its deployment (`composition.ts`) the
+ * project did not have: the only deployment that a remaining component needs. Taking out a component
+ * whose need was not met only removes problems: that repair goes ahead.
+ */
+function checkRemainingComposition(project: ProjectManifest, name: string): void {
+  const remaining = { ...project.components };
+  delete remaining[name];
+  const issues = compositionIssues(project.components, remaining);
+  if (issues.length === 0) return;
+  const dependents = [...new Set(issues.flatMap((issue) => (issue.component === undefined ? [] : [issue.component])))].sort();
+  const hint =
+    dependents.length === 0
+      ? ""
+      : `Remove ${dependents.join(", ")} first (\`pikit remove <name>\`), then ${name}; to change the deployment, add them again once the new one is installed.`;
+  throw new Refused(compositionRefusal(`pikit remove ${name}`, issues, hint));
 }
 
 /** Each App the probe described, with how a blocker names it: the Worker's is named. */

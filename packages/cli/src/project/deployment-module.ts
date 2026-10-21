@@ -4,12 +4,13 @@
  *
  * The protocol between them is declared here, once (`DeploymentModule`, `DEPLOYMENT_EXPORTS`): the
  * CLI calls it, and `registry validate` checks every `deployment-*` component's entry against it.
- * A component is a deployment by its name's prefix, as every kind is.
+ * A component is a deployment by its kind, as every kind is (`deploymentsOf`, the planner's rule).
  */
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { deploymentsOf } from "./composition.ts";
 import { readProjectManifest } from "./pikit-json.ts";
 import { CliError } from "../ui.ts";
 
@@ -70,7 +71,7 @@ export type DeploymentCommand = (typeof DEPLOYMENT_COMMANDS)[number];
 /** The installed `deployment-*` component: exactly one. */
 export function deploymentComponent(projectDir: string): string {
   const project = readProjectManifest(projectDir);
-  const names = Object.keys(project.components).filter((name) => name.startsWith("deployment-"));
+  const names = deploymentsOf(Object.keys(project.components));
   if (names.length === 0) {
     const example = project.targets.includes("durable") ? "deployment-cloudflare" : "deployment-docker";
     throw new CliError(`no deployment-* component is installed; add one, e.g. \`pikit add ${example}\``);
@@ -98,8 +99,7 @@ export type AppExec = (options: { command: string[]; share: { path: string; writ
  * installed, or when it does not export one (it runs the app on this machine, as `pikit dev` does).
  */
 export async function deploymentExec(projectDir: string): Promise<AppExec | undefined> {
-  const installed = Object.keys(readProjectManifest(projectDir).components).filter((name) => name.startsWith("deployment-"));
-  if (installed.length !== 1) return undefined;
+  if (deploymentsOf(Object.keys(readProjectManifest(projectDir).components)).length !== 1) return undefined;
   const { module } = await loadDeployment(projectDir);
   const exec = module.exec;
   if (typeof exec !== "function") return undefined;
@@ -111,8 +111,7 @@ export async function deploymentExec(projectDir: string): Promise<AppExec | unde
  * deployment component is installed, it exports no `url`, or nothing was deployed from here yet.
  */
 export async function deploymentUrl(projectDir: string): Promise<string | undefined> {
-  const installed = Object.keys(readProjectManifest(projectDir).components).filter((name) => name.startsWith("deployment-"));
-  if (installed.length !== 1) return undefined;
+  if (deploymentsOf(Object.keys(readProjectManifest(projectDir).components)).length !== 1) return undefined;
   const { module } = await loadDeployment(projectDir);
   if (typeof module.url !== "function") return undefined;
   const url: unknown = await (module.url as (args: { cwd: string }) => Promise<unknown>)({ cwd: projectDir });

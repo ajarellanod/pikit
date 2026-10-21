@@ -40,6 +40,31 @@ test("a written file reads back as it was: keys in one order, files sorted; anot
   expect(() => readProjectManifest(project)).toThrow("pikit.json has version 2; this CLI reads version 1");
 });
 
+test("what a component needs of the deployment, and what a deployment supports, are recorded and read back stably", () => {
+  const project = temp();
+  const record = { registry: "default", version: "0.0.1", files: {}, dependencies: {}, addedDependencies: [], environment: [] };
+  const manifest: ProjectManifest = {
+    ...emptyManifest(),
+    components: {
+      "proposals-acme": { ...record, requires: { pikit: "0.0.1", deployment: ["proposals.deployer", "acme.review-host"] }, compose: "src/pikit/proposals-acme/compose.yaml" },
+      "deployment-acme": { ...record, requires: { pikit: "0.0.1" }, deployment: { supports: ["services.compose", "proposals.deployer"] } },
+      "deployment-bare": { ...record, requires: { pikit: "0.0.1" }, deployment: { supports: [] } },
+    },
+  };
+  writeProjectManifest(project, manifest);
+  const text = readFileSync(join(project, PIKIT_JSON), "utf8");
+  const read = readProjectManifest(project);
+  expect(read).toEqual(manifest);
+  expect(read.components["proposals-acme"]?.requires.deployment).toEqual(["proposals.deployer", "acme.review-host"]);
+  expect(read.components["deployment-bare"]?.deployment).toEqual({ supports: [] });
+  // Written again, the same text.
+  writeProjectManifest(project, read);
+  expect(readFileSync(join(project, PIKIT_JSON), "utf8")).toBe(text);
+
+  writeFileSync(join(project, PIKIT_JSON), JSON.stringify({ ...manifest, components: { "deployment-acme": { ...record, requires: { pikit: "0.0.1" }, deployment: { supports: ["a.b"], extra: 1 } } } }));
+  expect(() => readProjectManifest(project)).toThrow("/components/deployment-acme/deployment/extra: is not a known field");
+});
+
 test("a pikit.json that does not have the schema's shape is refused, naming the file and the path of each bad field", () => {
   const project = temp();
   const component = { registry: "default", version: 1, requires: { pikit: "0.0.1" }, files: {}, dependencies: {}, addedDependencies: [], environment: [], note: "mine" };

@@ -19,6 +19,9 @@
   "provides": [
     "agent.extension"
   ],
+  "extensions": [
+    "house-rules"
+  ],
   "dependencies": {
     "@pikit/contracts": "0.0.1",
     "@pikit/pi-adapter": "0.0.1",

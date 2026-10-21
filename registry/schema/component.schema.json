@@ -75,6 +75,16 @@
           "minLength": 1,
           "description": "The @pikit/pi-adapter versions it works with (a semver range); declared when `dependencies` lists @pikit/pi-adapter. Checked and recorded by `pikit add` as `contracts` is."
         },
+        "deployment": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Written by hand: what the project's one deployment (its `deployment-*` component) must support for this component to work (`proposals.deployer`): names of protocols, never of components, matched against that deployment's `deployment.supports`. A `compose` file implies `services.compose` and is never written here. Never on a deployment itself. `pikit new`, `add`, `remove`, `upgrade` and `doctor` refuse a composition whose deployment does not support it (`project/composition.ts`)."
+        },
         "capabilities": {
           "type": "array",
           "items": {
@@ -84,7 +94,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "A component depends on capabilities, never on components."
+      "description": "A component depends on capabilities, never on components; on its deployment, by what it supports (`deployment`)."
     },
     "optional": {
       "type": "object",
@@ -305,7 +315,26 @@
     "compose": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ya?ml$",
-      "description": "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and `deployment-docker` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. Only for a component whose targets include server."
+      "description": "A Compose file of src/pikit/<name>/ whose services run beside the app on a server (expose-cloudflare-tunnel's `cloudflared`): `pikit add` records it in pikit.json, by project path, and the deployment that supports `services.compose` adds it after compose.yaml (`docker compose -f compose.yaml -f <it>`) for `up`, `down`, `restart`, `logs` and `status`, so its paths are relative to the project's directory. So it implies the requirement `services.compose`, never written in `requires.deployment`: a composition whose deployment does not support it is refused. Only for a component whose targets include server."
+    },
+    "deployment": {
+      "type": "object",
+      "required": [
+        "supports"
+      ],
+      "properties": {
+        "supports": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+          },
+          "uniqueItems": true,
+          "description": "The protocols this deployment implements beside running the app (`services.compose`: it runs the Compose files components record; `proposals.deployer`: it runs a deployer of @pikit/contracts/deployer). What a component's `requires.deployment` (and `compose`) is matched against. Only what it really does: a name here is a promise the deployment's own checks keep."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Written by hand, only on a `deployment-*` component: what it supports for the components that need it (`requires.deployment`)."
     },
     "generated": {
       "type": "array",
@@ -371,6 +400,13 @@
         "type": "string"
       },
       "description": "Generated: the `model.provider` keys setup provides, with the default config (`anthropic`: agents name its models `anthropic/<modelId>`). `pikit new` checks the starter agent's model against them before it writes anything."
+    },
+    "extensions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Generated: the `agent.extension` keys setup provides, with the default config (`pikit-self`). A preset's `steward.extensions` is checked against them before `pikit new` writes anything."
     },
     "dependencies": {
       "type": "object",

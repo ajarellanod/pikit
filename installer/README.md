@@ -34,7 +34,10 @@ before doing it. The steps and settings are at the top of the script.
   both say to answer "This machine's service". With `--durable` it is skipped.
 - Then, on a terminal, it runs `pikit new`: the guided path asks the project's name, where it runs,
   its channels, whether you will use one agent or several, and its optional features (routing rules,
-  MCP tools, health...). Full presets include the dashboard; several agents adds `agents-folders`.
+  MCP tools, health...). Full presets include the dashboard; several agents chooses the feature the
+  preset names (`agents-folders` in the kit's). A feature the chosen deployment cannot run is shown
+  disabled with the reason (Self-improvement on deployment-local); the wizard never switches the
+  deployment for you.
   It sets that up, logs in to the
   model and starts it. Ctrl-C stops it; `pikit new` continues later. `PIKIT_NO_WIZARD=1` skips it. It ends
   with any commands this already-open shell still needs (`PATH`, `newgrp docker`). The wizard reads from the actual
