@@ -92,6 +92,22 @@ test("an example tool's replay is checked but not written", async () => {
   expect(checkDrift(manifest, generated)).toEqual(['the agent.tool "poke" has replay "undefined"; every tool declares "safe" or "unsafe"']);
 });
 
+test("a tool setup provides with its default config is snake_case; an example config's names are its own (tool-mcp's)", async () => {
+  const component = defineComponent({
+    name: "tool-names",
+    config: Type.Object({ extra: Type.Array(Type.String(), { default: [] }) }, { examples: [{ extra: ["wiki_askQuestion"] }] }) as TSchema,
+    setup(pikit, config: { extra: string[] }) {
+      for (const tool of ["schedule", "schedule_list", "listJobs", "ask-user", "Ask", "a__b", "v2_run", ...config.extra]) {
+        pikit.provideKeyed("agent.tool", tool, { replay: "safe" } as never);
+      }
+    },
+  });
+  const generated = await describeComponent(component, "server");
+  const manifest = { provides: ["agent.tool"], requires: { pikit: "0.0.1", capabilities: [] }, optional: { capabilities: [] }, replay: { tools: generated.tools }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
+  const rule = 'is not snake_case (^[a-z][a-z0-9]*(_[a-z0-9]+)*$): lowercase words joined by "_", a family sharing its prefix (schedule, schedule_list), a lone tool verb_noun (ask_user)';
+  expect(checkDrift(manifest, generated)).toEqual(["listJobs", "ask-user", "Ask", "a__b"].map((tool) => `the agent.tool "${tool}" ${rule}`));
+});
+
 test("the model.provider keys setup provides are generated, so pikit new can check a model before writing", async () => {
   const provider = defineComponent({
     name: "provider-pair",

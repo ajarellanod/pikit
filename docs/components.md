@@ -76,7 +76,7 @@ target (K1).
 | `generated` | hand | files of `src/pikit/<name>/` a hook or build rewrites |
 | `view` | hand | a folder holding its dashboard view |
 | `ui` | hand | `{ "source": "<folder>", "target": "src/<name>" }`: a UI project of its own (below) |
-| `replay.tools` | generated | each `agent.tool` it provides with the default config → `safe` or `unsafe` |
+| `replay.tools` | generated | each `agent.tool` it provides with the default config → `safe` or `unsafe`; each name lowercase snake_case (`ask_user`, `schedule_list`: a family shares its prefix), or `validate` refuses it |
 | `modelProviders` | generated | the `model.provider` keys it provides with the default config |
 | `extensions` | generated | the `agent.extension` keys it provides with the default config (a preset's `steward.extensions` is checked against them) |
 | `dependencies` | hand | exactly the npm packages its shipped files import, pinned |

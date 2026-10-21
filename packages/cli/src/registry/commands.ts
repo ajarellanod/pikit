@@ -601,7 +601,17 @@ export function readManifests(root: string): Manifest[] {
   return componentNames(root).flatMap((name) => readManifest(join(root, "components", name)) ?? []);
 }
 
-/** The generated fields are exactly what setup declares, and every tool states its replay. */
+/**
+ * The names agents give their tools: lowercase words joined by `_`, a family sharing its prefix
+ * (`schedule`, `schedule_list`), a lone tool verb_noun (`ask_user`).
+ */
+export const TOOL_NAME = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
+
+/**
+ * The generated fields are exactly what setup declares, every tool states its replay, and every tool
+ * setup provides with its default config is named by `TOOL_NAME`. The tools only an example config
+ * provides are named by that config (tool-mcp's `<server>_<tool>`, from the server), not checked.
+ */
 export function checkDrift(manifest: Manifest, generated: Generated, regenerate = KIT_GENERATE): string[] {
   const problems: string[] = [];
   const expected = withGenerated(manifest, generated);
@@ -625,6 +635,11 @@ export function checkDrift(manifest: Manifest, generated: Generated, regenerate 
   for (const [tool, replay] of Object.entries({ ...generated.tools, ...generated.exampleTools })) {
     if (replay !== "safe" && replay !== "unsafe") {
       problems.push(`the agent.tool "${tool}" has replay ${JSON.stringify(replay)}; every tool declares "safe" or "unsafe"`);
+    }
+  }
+  for (const tool of Object.keys(generated.tools ?? {})) {
+    if (!TOOL_NAME.test(tool)) {
+      problems.push(`the agent.tool "${tool}" is not snake_case (${TOOL_NAME.source}): lowercase words joined by "_", a family sharing its prefix (schedule, schedule_list), a lone tool verb_noun (ask_user)`);
     }
   }
   return problems;

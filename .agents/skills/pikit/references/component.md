@@ -219,6 +219,10 @@ shared, upgraded or removed with `pikit remove`, or when it declares a kind or c
 - **Decisions are in the component's source**: a tool's `replay`, a policy, a default. Pi's own
   tools come as Pi ships them (`createReadTool()` from `@pikit/pi-adapter/tools`, no replay): spread
   one and set `replay` in your `setup`, as `tool-read` does.
+- **A tool's name is lowercase snake_case** (`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`): a family shares its
+  prefix (`schedule`, `schedule_list`, `schedule_cancel`), a lone tool reads verb_noun (`ask_user`).
+  `registry validate` refuses any other name; only names a config gives (tool-mcp's
+  `<server>_<tool>`) are exempt.
 - **A tool that works on `api.env`** (Pi's coding tools, or one of yours) `use`s `execution`
   (`execution.shell` when it needs a shell); `registry validate` refuses one that declares neither.
   The runtime gives each call its environment: never bind one to the tool.

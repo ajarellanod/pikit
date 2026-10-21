@@ -128,6 +128,10 @@ MANIFESTO principle 13 promises a conformance suite for every contract. These do
 - **`agent.tool`, the tool shape.** A tool is pi-durable's `ToolRegistration`; `runToolCalls`
   (`@pikit/pi-adapter/execution/testing`) runs it in a real Harness turn, but nothing checks every
   tool the same way (a description, a `replay`, errors the model can read, cancellation honoured).
+  Its name is checked: lowercase snake_case (`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`), a family sharing
+  its prefix (`schedule`, `schedule_list`, `schedule_cancel`), a lone tool verb_noun (`ask_user`);
+  `registry validate` refuses any other name a setup provides with its default config. Only names a
+  config gives are exempt (tool-mcp's `<server>_<tool>`, from the server).
 - **`execution` and `execution.shell`.** Their suite exists but lives in the adapter
   (`createDurableExecutionConformance`, `@pikit/pi-adapter/execution/testing`), since the contract is
   pi-durable's `ExecutionEnv`. Likewise `workspace` (`createWorkspaceConformance`) and

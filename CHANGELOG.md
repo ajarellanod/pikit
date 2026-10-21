@@ -33,6 +33,9 @@ line names its area.
 
 ### Components
 
+- Breaking: agent tools are named in lowercase snake_case, a family sharing its prefix. tool-ask-user's
+  `askUser` is `ask_user`; tool-schedule's `listSchedules` and `cancelSchedule` are `schedule_list`
+  and `schedule_cancel`. An agent that names the old ones names the new ones in its `tools`.
 - tool-delegate: `delegate_tasks({ id })` shows how a task not waited for is going, running or
   ended: its agent's last 5 steps, oldest first (what it wrote, at most 300 characters; the tools it
   called, their arguments clipped to 120 characters, `running`, `ok` or `error`) and how long ago the
@@ -110,6 +113,9 @@ line names its area.
 
 ### CLI (`pikit`)
 
+- `pikit registry validate` refuses an `agent.tool` a component's setup provides with its default
+  config whose name is not lowercase snake_case (`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`), naming the
+  component and the tool. Names a config gives (tool-mcp's `<server>_<tool>`) are exempt.
 - `pikit dev` stops a deployment's own `dev` on SIGTERM as on Ctrl-C: it aborts the `signal` the
   deployment's `dev({ cwd, signal })` now gets, so `celld dev` or `wrangler dev` stops and
   deployment-celld deletes `.dev.vars` and its derived config. Before, the CLI exited alone, leaving
