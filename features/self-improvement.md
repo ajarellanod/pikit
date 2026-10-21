@@ -178,10 +178,10 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
    and the tests. With Docker, `pikit up` then starts the deployer. proposals-local needs its deployment
    to support `proposals.deployer` (and, for its Compose file, `services.compose`), which only
    deployment-docker does: with `deployment-local` the wizard shows the feature unavailable, saying why,
-   and `new`, `add` and `doctor` refuse the combination. The deployer for `deployment-local` is
-   **not built**. The missing work and its verification belong in
-   [Self-improvement without Docker](deployment-local.md#self-improvement-without-docker), not a second
-   copy of the plan here.
+   and `new`, `add` and `doctor` refuse the combination. A deployer for `deployment-local` is
+   **decided against**: safe self-improvement on a server needs Docker, and on `deployment-local` code
+   changes by editing the project in place, ungated, at the user's choice and risk. Why, and how:
+   [Self-improvement without Docker](deployment-local.md#self-improvement-without-docker-decided-not-built).
 
 ## Open questions
 - The template's repository: decided, connected after the deploy (Settings → GitHub), not a variable

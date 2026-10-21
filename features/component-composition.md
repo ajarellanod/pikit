@@ -288,9 +288,10 @@ effects and their absence:
 
 ## Not in this change
 
-- **A deployer for deployment-local** (launchd or systemd). Self-improvement without Docker is still
-  not built; the CLI now refuses the combination with a reason instead of failing later on a Compose
-  file ([deployment-local.md](deployment-local.md#self-improvement-without-docker)).
+- **A deployer for deployment-local** (launchd or systemd): decided against, not built. Safe
+  self-improvement needs Docker; on deployment-local code changes by editing the project in place.
+  The CLI refuses the combination with a reason instead of failing later on a Compose file
+  ([deployment-local.md](deployment-local.md#self-improvement-without-docker-decided-not-built)).
 - **Services beside the app without Compose** (`cloudflared` as a unit): `compose` still means
   "a deployment that supports `services.compose`".
 - Git and HTTP registries, component namespaces, contract packages and presets that mix registries

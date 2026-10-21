@@ -113,14 +113,21 @@ Read the log with `pikit logs`, or `jq 'select(.level == "error")' .pikit/logs/a
 - **Services beside the app**: `compose` in a component.json needs a deployment that supports
   `services.compose` (deployment-docker does). A tunnel (`expose-cloudflare-tunnel`) as a second unit
   is not built: `pikit new` and `pikit add` refuse it with deployment-local before writing.
-- **Self-improvement's deployer** is built only for deployment-docker. proposals-local needs
-  `proposals.deployer` and, from its Compose file, `services.compose`; deployment-local supports
-  neither. The wizard shows that feature disabled with the reason, and the direct commands refuse
-  this composition before writing. `pikit doctor` refuses before component hooks run; its own `up`
-  keeps the Compose guard.
-  The missing local deployer, isolation, rollback and verification are recorded in
+- **Self-improvement (proposals, approval, deploy, rollback): decided, not built.** Safe
+  self-improvement needs Docker (`deployment-docker`): its deployer checks the agent's code in a
+  throwaway container and rolls back to the previous image, which a service of this machine cannot
+  do without a large project of its own. proposals-local needs `proposals.deployer` and, from its
+  Compose file, `services.compose`; this deployment supports neither, and will not. The wizard shows
+  that feature disabled with the reason, the direct commands refuse the composition before writing,
+  and `pikit doctor` refuses it before component hooks run.
+- **How code changes here instead:** edit the project in place (by hand, with a coding agent you run
+  in it, or as the steward tells you, file by file), check it (`pikit doctor`, `bun test`), then
+  `pikit restart` (`pikit dev` reloads on save), and commit what you keep. Nothing is gated: no
+  approval, no checks before it runs, no automatic rollback (`git` is the way back). A steward given
+  `bash` runs as you and could edit the project itself: outside the gate, your decision to make.
+  Why, and what a deployer here would have to bring:
   [features/deployment-local.md](https://github.com/ajarellanod/pikit/blob/main/features/deployment-local.md),
-  "Self-improvement without Docker".
+  "Self-improvement without Docker: decided, not built".
 - **A unit of the system, with a user of its own** (started at boot without a login, fenced from your
   home): it needs `sudo`. Not built.
 - **A hung process**: like Docker's healthcheck, the watchdog restarts on a 503, not on a process that

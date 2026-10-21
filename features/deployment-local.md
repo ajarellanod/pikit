@@ -82,57 +82,64 @@ HTTP messages answered, loopback binding, recovery after `kill -9`, restart, red
 - **Production operation:** a real bot over time on each platform, before moving this note to
   `completed/`.
 
-## Self-improvement without Docker
-Not built. Today `proposals-local` activates deployment-docker's deployer through its Compose file,
-and its doctor checks Compose. deployment-local runs neither Compose services nor the deployer.
-`proposals-local` declares `requires.deployment: ["proposals.deployer"]`; its `compose` file implies
-`services.compose`. deployment-local supports neither. The wizard shows the self-improvement feature
-disabled with the reason when deployment-local is selected; `--with admin-proposals` and `pikit add`
-refuse it before writing, as `doctor` does before any component hook or Docker runs. With Docker,
-`pikit dev` does not run a deployer: proposals-local's hook says proposals are not applied there and
-runs no Docker. The local deployer itself remains missing.
+## Self-improvement without Docker: decided, not built
 
-The missing work is not just another supervisor template:
-1. **An independent deployer service**, under systemd or launchd, that survives an app restart and
-   reports its heartbeat and outcomes through the existing `@pikit/contracts/deployer` file protocol
-   (`decisions.json`, `deployer.json`). Keep the dashboard on `proposals`; no new dashboard protocol
-   is needed merely to replace Docker.
-2. **Isolated validation and builds.** Candidate installation scripts, tests, typecheck and UI builds
-   must not run as the host user with access to the home, live state or service control. Gondolin/QEMU
-   is the proposed replacement for check containers, not an implemented deployer runner. A dedicated
-   OS user alone does not supply the filesystem and network isolation of a sandbox. Deploy hooks that
-   need secrets require an explicit, narrow boundary too; the controller must not import candidate
-   project code. Separately, `execution-gondolin` fences the agent's tools and protects the approval
-   files; it does not implement the deployer's check runner.
-3. **Recoverable deployment in the project's directory.** Prepare the candidate apart, keep the last
-   working code and dependencies, stop the app before replacing its files, then start and verify the
-   candidate. Serialize this with manual `up`, `restart` and other deployer attempts, and recheck that
-   the checkout and approved head have not moved. Persist the previous and candidate versions and
-   each transition so a killed deployer or power loss can resume or roll back without running a
-   half-applied tree. A failed activation must restore both code and dependencies and verify the
-   previous app, not just issue a restart.
-4. **Native dependency handling.** Linux VM checks do not prove macOS runtime compatibility; do not
-   copy Linux `node_modules` into a Mac deployment. Define how host-compatible dependencies and
-   artifacts are prepared and retained for rollback without bypassing the isolation above.
-5. **Approval and deployment fences.** Deploy the exact approved head, reject changes to the deployer,
-   supervisor templates and approval path, and refuse a changed or dirty checkout rather than
-   overwriting manual edits. A failure before activation leaves the current app alone.
-6. **State is not a release artifact.** Never automatically restore `.pikit/` with the old code: it
-   holds conversations, credentials and new writes. Code rollback cannot undo SQLite/schema changes;
-   specify which state-changing proposals are reversible and how an irreversible or failed rollback
-   is reported before enabling automatic deployment.
-7. **Integration without Compose.** Let `proposals-local` work with the local supervisor as well as
-   Docker, including its activation and doctor checks; do not just ignore its Compose file. The CLI
-   now refuses unsupported combinations (the wizard explains why); this does not build the missing
-   service. Any shared service registration must be justified by these real producers and consumers,
-   not a speculative framework.
+**Decision.** pikit does not build a deployer for `deployment-local`. Safe self-improvement (the agent
+proposes, a person approves, a deployer checks, deploys and rolls back) needs Docker on a server
+(`deployment-docker`), or GitHub and Workers Builds on Cloudflare. On `deployment-local` the project's
+code is changed by editing it in place, without proposals, and that is the user's choice and
+responsibility.
 
-Before shipping: run the existing deployer protocol conformance cases with the local deployer, then
-exercise approval, moved heads, protected paths, conflicts, dirty checkouts, failed checks/builds,
-failed health checks and failed rollback. Kill the deployer during activation and recovery, test
-concurrent/manual operations, and assert that conversations and credentials are retained. Test both
-supervisors and host-native dependencies on real Linux and macOS. This is missing implementation and
-verification, not a guarantee of today's `pikit up`.
+**Why.** Docker gives the gated path what it needs for free; a service of this machine gives none of it,
+and building each piece would be a large project of its own for one deployment:
+- **Isolation.** The proposal's `bun install`, typecheck and tests are code the agent wrote. Docker runs
+  them in a throwaway container without secrets or the socket. Here they would run as the user, with
+  their home, credentials and other projects; fencing them needs a real sandbox (a VM), not a
+  supervisor template.
+- **An immutable artifact and its rollback.** Docker builds a new image and keeps the previous one, so
+  a failed deploy returns to it. Here the project runs in place: the candidate code and its
+  `node_modules` would have to be prepared apart, the previous ones kept, and every transition recorded
+  so a crash or a power cut mid-deploy could resume or roll back without a half-applied tree.
+- **Native dependencies.** Checks in a Linux VM do not prove the code runs on the user's Mac.
+- **State beside the code.** `.pikit/` (conversations, logins) lives in the project's directory: a code
+  rollback must never restore it, and cannot undo a schema change.
+- **A separate, privileged process.** In Docker the deployer is one more Compose service, and only it
+  holds the socket. Here it would be another systemd or launchd unit with its own rights, which the
+  app and the agent must not be able to reach.
+
+A thin version (a `git pull` and a restart) would have run the agent's code unfenced and had no
+reliable rollback: the gated path it claims to be, without its guarantees. pikit offers none instead.
+
+**What the CLI does.** `proposals-local` needs `proposals.deployer` (and, for its Compose file,
+`services.compose`); `deployment-local` supports neither, and will not
+([component-composition](component-composition.md)). So the wizard shows self-improvement disabled,
+saying why; `pikit new --with admin-proposals` and `pikit add proposals-local` refuse before writing;
+`pikit doctor` (so `dev` and `up`) refuses a project that has both before any component's hook or Docker
+runs. To approve the agent's changes, use `deployment-docker` (`pikit remove deployment-local`, then
+`pikit add deployment-docker`).
+
+**How code changes on `deployment-local`.** By editing the project, in place, as any source:
+1. Edit `src/` (your agents, components, the dashboard): by hand, or with a coding agent you run in the
+   project (Pi, Claude Code), or by asking the steward, which then tells you what to change, file by
+   file (its `pikit-self` guide, when the project has no proposals).
+2. `pikit doctor` and `bun test`, as for any change.
+3. `pikit restart` (or `pikit up`): the service runs the files as they are on disk; `pikit dev` reloads on
+   each save. Commit what you keep: the project is a git repository.
+
+**Unsafe on purpose, and the user's to decide.** Nothing here is gated: no approval, no checks before
+the change runs, no automatic rollback (`git` is the way back). The steward never edits the project by
+itself: its guide says so, and its tools work in `.pikit/workspace/`. But on this deployment the app
+runs as the user, so a steward given `bash` (`steward.tools` in the preset, or `tools` in its
+`agent.ts`) could edit any file the user can, the project's included; that is outside SPEC P9's gate,
+which pikit offers only where a deployment supports `proposals.deployer`. Give it a shell only on a
+machine and a project where you accept that. To fence it, run its shell in a VM (`execution-gondolin`);
+for the gated path, use Docker.
+
+**If it is revisited.** A deployer for this deployment would declare `proposals.deployer` in
+`deployment-local`'s `deployment.supports` and implement the `@pikit/contracts/deployer` file protocol;
+the wizard, `add` and `doctor` would accept it with no CLI change. It must bring every guarantee above
+(sandboxed checks, recoverable deploys with rollback of code and dependencies, state never rolled
+back), proven by the deployer protocol's conformance cases on real Linux and macOS. None is planned.
 
 ## Open questions
 - **Windows.** Bun runs there, the installer does not (POSIX sh). WSL2 with systemd is the Linux path;

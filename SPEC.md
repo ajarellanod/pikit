@@ -602,6 +602,15 @@ that holds neither the repository nor the decisions: it reaches the repository o
 `proposals.remote().serve` (git's smart HTTP, answered in the host), which takes pushes of branches
 under the prefix and nothing else, so only the operator approves.
 
+**Without Docker, no gated path, by decision.** On `deployment-local` (a systemd or launchd service of
+the machine) pikit offers no self-improvement: the gate needs what Docker gives (the agent's code
+checked in a throwaway container, an image to roll back to), and building that for a service of the
+machine is not worth its size. `deployment-local` does not support `proposals.deployer`, so the CLI
+refuses the combination (§3.2). There the project's code changes by editing it in place and
+restarting: by the owner, a coding agent they run, or the steward if they give it a shell, which on
+that deployment runs as the user. That is outside the gate, the owner's choice and risk; P9 holds for
+what pikit offers, which there is nothing (features/deployment-local.md).
+
 **On Cloudflare** (checked against Cloudflare's documentation, August 2026):
 - **The workspace** is `execution-do`: each conversation's Durable Object, on the Free plan, with a
   shell without processes and its own `git` (the steward's subset, as real git; the workspace-git

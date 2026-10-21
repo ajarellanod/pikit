@@ -10,7 +10,8 @@ rolls back when the new version is unhealthy.
 - **Requires:** `proposals.deployer` of the project's deployment, and (from its Compose file)
   `services.compose`; deployment-docker supports both. With deployment-local the wizard shows
   Self-improvement unavailable and `pikit new` / `pikit add` refuse it before writing; `--force` does
-  not override this. **Works with:** `admin-proposals` (the dashboard's Proposals and Settings →
+  not override this. That is decided, not missing: safe self-improvement needs Docker, and on
+  deployment-local code is edited in place (deployment-local's README). **Works with:** `admin-proposals` (the dashboard's Proposals and Settings →
   Self-improvement), `deployment-docker` (the deployer: `pikit up` starts it when this component is
   installed), `extension-pikit-self` (it tells the steward how to propose, from `remote()`),
   `execution-gondolin` (the steward's shell in a VM, which reaches the repository only through
