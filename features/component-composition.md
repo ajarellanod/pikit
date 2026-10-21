@@ -260,9 +260,11 @@ effects and their absence:
 2. **An external registry** with other names for hosts and consumers, and a protocol of its own
    (`acme.review-host`): no built-in enum.
 3. **Two deployments** cannot satisfy a feature by adding what each supports: ambiguity.
-4. **Direct commands** (`new`, `add`, `remove`, `upgrade`) give the wizard's codes. A refusal leaves
-   config, `pikit.json`, `package.json`, lockfile, bases and `vendor/` byte for byte, and runs no hook
-   and no `bun install`.
+4. **Direct commands** (`new`, `add`, `remove`, `upgrade`, `ui on`) give the wizard's codes. A refusal
+   leaves config, `pikit.json`, `package.json`, lockfile, bases and `vendor/` byte for byte, and runs
+   no hook and no `bun install`: also when what the deployment cannot run comes with an offered
+   provider `add` accepted, or with a dashboard component of the registry's descriptor. Each of those
+   two tests fails when its check in `add` is taken out.
 5. **Upgrade:** a provider losing a protocol blocks it; changed metadata with the same version is
    seen; `--dry-run` writes nothing; several components are checked as one set.
 6. **Repairs:** removing an incompatible consumer, or resolving two deployments, goes through, and

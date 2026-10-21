@@ -272,7 +272,9 @@ test("refused before anything runs: a change of a Compose file pikit.json lists,
   // Nothing ran: no check, no build, no restart.
   expect(s.docker).toEqual([]);
   expect(await git(s.project, "rev-parse", "main")).toBe(s.first);
-});
+  // Twelve proposals, each approved and passed with real git: about 4 to 5 s alone, more under a full
+  // `bun test`, so Bun's 5 s default timed it out now and then.
+}, 30_000);
 
 test("a listed Compose file with an odd name (a leading space, a tab, non-ASCII) is matched as it is, never quoted or trimmed", async () => {
   const s = await server();

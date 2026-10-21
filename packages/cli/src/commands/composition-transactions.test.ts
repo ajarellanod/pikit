@@ -251,3 +251,66 @@ test("a registry's deployment fields that the schema does not check are refused 
   await refused(dir, ["add", "tool-reviewer", "--registry", from, "--yes"], ["tool-reviewer's component.json:", '"services.compose"']);
   await refused(dir, ["add", "tool-hosted", "--registry", from, "--yes"], ["tool-hosted's component.json:", "only a deployment-* component has it"]);
 }, 60_000);
+
+/** A component providing `capability` (`provides`), or using it (`requires.capabilities`), with a default export so the App composes. */
+const appComponent = (name: string, setup: string): string =>
+  `import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({\n  name: ${JSON.stringify(name)},\n  setup(pikit) {\n    ${setup}\n  },\n});\n`;
+
+test("add refuses what an offered provider would bring that the deployment cannot run, after the offer is accepted and before anything is written", async () => {
+  const dir = project();
+  const from = temp();
+  publish(from, {
+    ...BASE,
+    // The registry's own capability, offered: its only provider needs the review host of its deployment.
+    "outbound-acme": {
+      version: "0.1.0",
+      files: { "index.ts": appComponent("outbound-acme", 'pikit.provide("acme.queue" as never, {} as never);') },
+      fields: {
+        provides: ["acme.queue"],
+        declares: { capabilities: { "acme.queue": { mode: "single", stability: "experimental", summary: "Acme's queue of reviews.", offer: true } } },
+        requires: { pikit: "0.0.1", capabilities: [], deployment: ["acme.review-host"] },
+      },
+    },
+    // Needs nothing of the deployment itself: only what it brings does.
+    "tool-queuer": {
+      version: "0.1.0",
+      files: { "index.ts": appComponent("tool-queuer", 'pikit.use("acme.queue" as never);') },
+      fields: { requires: { pikit: "0.0.1", capabilities: ["acme.queue"] } },
+    },
+  });
+  await ok(dir, ["add", "deployment-plain", "--registry", from, "--yes"]);
+  // The named component passes the first check; the offer accepted (`--yes`) is what the second refuses.
+  await refused(dir, ["add", "tool-queuer", "--registry", from, "--yes"], [
+    'outbound-acme needs its deployment to support "acme.review-host"',
+    "which deployment-plain does not",
+  ]);
+  expect(components(dir)["tool-queuer"]).toBeUndefined();
+  expect(components(dir)["outbound-acme"]).toBeUndefined();
+  // With a deployment that runs it, the same add brings the offer and succeeds.
+  await ok(dir, ["remove", "deployment-plain"]);
+  await ok(dir, ["add", "deployment-acme", "--registry", from, "--yes"]);
+  await ok(dir, ["add", "tool-queuer", "--registry", from, "--yes"]);
+  expect(components(dir)["outbound-acme"]?.installedFor).toEqual(["tool-queuer"]);
+}, 120_000);
+
+test("ui on refuses a dashboard whose components the deployment cannot run, before anything is written", async () => {
+  const from = temp();
+  publish(from, {
+    ...BASE,
+    // A registry's own dashboard component, under any name: it needs the review host of its deployment.
+    "panel-acme": {
+      version: "0.1.0",
+      files: { "index.ts": appComponent("panel-acme", "") },
+      fields: { requires: { pikit: "0.0.1", capabilities: [], deployment: ["acme.review-host"] } },
+    },
+  });
+  mkdirSync(join(from, "dashboard", "files"), { recursive: true });
+  writeFileSync(join(from, "dashboard", "files", "README.md"), "# A dashboard\n");
+  writeFileSync(join(from, "dashboard", "dashboard.json"), JSON.stringify({ components: ["panel-acme"], defaultFor: {} }));
+  // The project's own registry is this one: `ui on` reads the dashboard of the project's default registry.
+  const dir = project();
+  writeProjectManifest(dir, emptyManifest(from));
+  await ok(dir, ["add", "deployment-plain", "--yes"]);
+  await refused(dir, ["ui", "on", "--yes"], ['panel-acme needs its deployment to support "acme.review-host"', "which deployment-plain does not"]);
+  expect(existsSync(join(dir, "src", "dashboard"))).toBe(false);
+}, 120_000);
