@@ -190,6 +190,12 @@ export const CAPABILITIES: Catalogue = {
     summary: "Small JSON values a component keeps across restarts, by key, in a namespace of its own (a cursor, a token).",
     offer: true,
   },
+  "storage.blob": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Files a component keeps by key, in a namespace of its own, too large for a row or a value (saved files, snapshots): put, get, delete, list by prefix.",
+  },
   "actor.mailbox": {
     mode: "single",
     definedIn: "@pikit/contracts",
