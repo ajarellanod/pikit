@@ -16,10 +16,10 @@ and no restart.
 
 A live agent is a name (kebab-case), a description, a system prompt, a model (one an installed
 provider has), and tools, extensions and skills by name (installed ones; skills are the project's,
-`agent.skill`). It is made in the dashboard's Settings, **Agents**: "New agent", then Edit or remove
-each. The project's own agents (`src/agents/`) are listed there too, read-only: their prompt, model,
-tools and skills are changed in **Agent**
-(router-basic's section), as overrides of their definition.
+`agent.skill`). It is made in the dashboard's Settings, **Agents**, in agents-live's part ("Made
+here", order 1): "New agent", then Edit or remove each. The project's own agents (`src/agents/`) are
+runtime-pi's part of the same entry, above it ("In the project's code"): their prompt, model, tools and
+skills are changed there, as overrides of their definition.
 
 - **Stored** as agents-live's settings, one key per agent (`{ support: { model, systemPrompt, … } }`),
   validated against a schema declared at start from what the App has: a value naming a model, tool,

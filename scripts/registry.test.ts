@@ -8,7 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { storageNameProblems } from "../packages/cli/src/registry/checks.ts";
+import { dashboardSettingsProblems, serverSettingsProblems, storageNameProblems } from "../packages/cli/src/registry/checks.ts";
 import { generate, validate } from "../packages/cli/src/registry/commands.ts";
 import { scanImports } from "../packages/cli/src/registry/imports.ts";
 import type { Manifest } from "../packages/cli/src/registry/manifest.ts";
@@ -728,4 +728,22 @@ test("scanImports: type-only, re-exports, side effects and dynamic imports; comm
   ].join("\n");
   // A method named require (the capability registry's) is not an import.
   expect(scanImports(source)).toEqual(["type-only", "mixed", "re-export", "side-effect", "dynamic", "common-js"]);
+});
+
+test("settings are their component's own: a section uses only useSettings(<its name>), never the routes; shipped files declare and read only their own", () => {
+  const dashboard = (source: string) => dashboardSettingsProblems("router-rules", "settings/index.tsx", source);
+  expect(dashboard(`const routing = useSettings("router-rules");`)).toEqual([]);
+  expect(dashboard(`// useSettings("runtime-pi") was here\nimport { x } from "@/lib/settings";`)).toEqual([]);
+  expect(dashboard(`const runtime = useSettings("runtime-pi");`)).toEqual([expect.stringContaining(`uses the settings of "runtime-pi"`)]);
+  expect(dashboard(`const any = useSettings(component);`)).toEqual([expect.stringContaining("validate cannot read")]);
+  expect(dashboard(`useApi("/settings/router-basic")`)).toEqual([expect.stringContaining("reaches the settings routes directly")]);
+  expect(dashboard("put(`/admin/api/settings/${name}`, value)")).toEqual([expect.stringContaining("reaches the settings routes directly")]);
+
+  const components = ["router-rules", "router-basic", "runtime-pi"];
+  const server = (source: string) => serverSettingsProblems("router-rules", "files/index.ts", source, components);
+  expect(server(`store.declare("router-rules", schema, {}); await store.get<Rules>("router-rules", ctx);`)).toEqual([]);
+  // A Map keyed by something else is not the settings contract's.
+  expect(server(`definitions.get("assistant", ctx); headers.get("content-type")`)).toEqual([]);
+  expect(server(`await store.get<{ defaultAgent: string }>("router-basic", ctx);`)).toEqual([expect.stringContaining(`reads the settings of "router-basic"`)]);
+  expect(server(`store.declare("runtime-pi", schema, {});`)).toEqual([expect.stringContaining(`declares the settings of "runtime-pi"`)]);
 });

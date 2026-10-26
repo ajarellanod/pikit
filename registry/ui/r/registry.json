@@ -188,6 +188,12 @@
       "type": "registry:file",
       "title": "router-rules-settings",
       "description": "router-rules's section of the Settings dialog: Each conversation goes to the agent of the first rule it matches: rules in config, edited live from the dashboard. Its settings come with the component (pikit add router-rules), stored by settings-store."
+    },
+    {
+      "name": "runtime-pi-settings",
+      "type": "registry:file",
+      "title": "runtime-pi-settings",
+      "description": "runtime-pi's section of the Settings dialog: The agent runtime: Pi runs your agents, and this component plugs it into the app. Its settings come with the component (pikit add runtime-pi), stored by settings-store."
     }
   ]
 }

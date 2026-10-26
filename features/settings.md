@@ -5,9 +5,10 @@ and model, which agent answers where, a component's options. Each installed comp
 settings, and only those.
 
 **Specified:** yes: the `settings` contract, its suite, its provider `settings-store` (both targets),
-the dashboard's Settings dialog and router-basic's Agent section (with runtime-pi's live overrides)
-are built ("What is built", below), and so is multi-agent (agents-live, `agent.directory`, router-rules'
-rules from settings: "Multi-agent", below); the open questions at the end are not. SPEC §5 and §6 name
+the dashboard's Settings dialog with its shared entries, runtime-pi's live overrides (Agents) and
+router-basic's default agent (Routing) are built ("What is built", below), and so is multi-agent
+(agents-live, `agent.directory`, router-rules' rules from settings: "Multi-agent", below); the open
+questions at the end are not. SPEC §5 and §6 name
 it.
 
 **Needed by:** the launch (the agent's prompt from the dashboard); multi-agent (agents and rules from
@@ -20,12 +21,18 @@ dashboard's own first, then one per installed component), and on the right each 
 label, a line saying what it does, and its control (a segmented choice, a select, a switch, a text,
 a prompt editor). A change applies to the next run, with no deploy and no restart.
 
-- **router-basic** (always installed) brings **Agent**: which agent answers by default, and that
-  agent's system prompt, model, tools and skills (among those its definition names). The basic version.
-- **The multi-agent feature** (below) brings **Agents** (create, edit, remove agents as data) and
-  **Routing** (router-rules' rules: this channel, chat or person → that agent, or denied). Without
-  it these sections do not exist: one agent needs neither.
-- Any component may bring a section (a channel's options, a tool's limits), the same way.
+An entry may hold the sections of several components, one after another: each part is its own
+component's and edits only that component's settings.
+
+- **runtime-pi** (always installed) brings **Agents**' first part: the code's agents, each one's
+  system prompt, model, tools and skills (among those its definition names) as overrides.
+- **router-basic** (always installed) brings **Routing**'s last part: which agent answers what
+  nothing else routes (alone, every message). With these two, the basic version.
+- **The multi-agent feature** (below) adds agents-live's part to **Agents** (create, edit, remove
+  agents as data) and router-rules' to **Routing** (its rules: this channel, chat or person → that
+  agent, or denied). Without it these parts do not exist: one agent needs neither.
+- Any component may bring a section (a channel's options, a tool's limits), or a part of a shared
+  entry, the same way.
 
 ## How it fits pikit
 
@@ -40,9 +47,13 @@ may come from its config.
 - `pikit add` copies it to `src/dashboard/src/settings/<component>/` when the project has a UI
   (`pikit ui on` later), recorded as the component's files: `pikit upgrade` merges it, `pikit remove`
   takes it away;
-- its `index.tsx` default-exports `defineSettings({ id, title, icon, group, order, requires,
+- its `index.tsx` default-exports `defineSettings({ id, title, icon, group, order, requires, entry,
   component })`, found when the dashboard is built (nothing loaded at run time), shown only when its
-  `requires` are provided, like `defineView`.
+  `requires` are provided, like `defineView`;
+- sections of one `entry` (optional) are listed as one entry of the dialog, under the first part's
+  title, icon and group (parts by `order`; the entry's order is the lowest), shown one after another;
+- a section reads and writes only its own component's settings (`useSettings("<its name>")`), and a
+  component's files declare and get only its own: `pikit registry validate` refuses any other.
 
 **The values: a `settings` contract** (new, `@pikit/contracts`), with its conformance suite:
 
@@ -87,17 +98,26 @@ the dashboard applies to the next run of every conversation.
   `GET /admin/api/settings`, `GET` and `PUT /admin/api/settings/:component`, behind `admin.auth`.
 - **The CLI**: `component.json`'s `settings` (a folder) is copied to `src/dashboard/src/settings/<name>/`
   as a view is (add, `ui on`, upgrade, remove, `ui off`), checked by `registry validate`, built by
-  `scripts/dashboard-build.ts`, published as `@pikit/<name>-settings`. The dashboard's descriptor
+  `scripts/dashboard-build.ts`, published as `@pikit/<name>-settings`. `registry validate` checks that
+  every section and every component's files use only its own settings (`checkSettingsOwnership`,
+  `packages/cli/src/registry/checks.ts`). The dashboard's descriptor
   (`registry/dashboard/dashboard.json`: what `pikit ui on` and `pikit new --ui` install) lists
   settings-store, the default for `settings`.
 - **The dashboard**: the Settings dialog (`components/pikit/settings-dialog.tsx`), General (theme,
   sounds), `defineSettings` and `useSettings` (`lib/settings.ts`), the rows and controls and
-  `SchemaSettings` (`components/pikit/settings.tsx`). Opened from the sidebar's foot menu.
+  `SchemaSettings` (`components/pikit/settings.tsx`). Opened from the sidebar's foot menu. The
+  entries (`lib/settings-entries.ts`, tested in `scripts/dashboard.test.ts`): the sections of one
+  `entry` together, each part shown while its own `requires` are provided; the search finds an entry
+  by any part's title, id and keywords, and `useOpenSettingsSection()("<component>")` opens the entry
+  holding that part.
 - **router-basic**: `defaultAgent` is also its setting (default: the config's), used while it names an
-  agent; its section, Agent: the default agent, then any agent's system prompt, model, tools and skills.
+  agent; its section, Routing's last part: a locked last card, "ELSE · Everything else goes to
+  [agent]" (without router-rules, alone: "ALWAYS · Every message goes to [agent]"), the agent chosen
+  there and saved at once.
 - **runtime-pi** (`overrides.ts`): its settings are an override per agent; read before every
   admission, resume, `/compact` and driving wakeup (on a server also at start), applied after
-  `prepare`.
+  `prepare`. Its section, Agents' first part ("In the project's code"): the code's agents, each with
+  Edit opening its system prompt, model, tools and skills overrides, "Use default".
 
 ## Decisions taken while building it
 
@@ -128,7 +148,18 @@ the dashboard applies to the next run of every conversation.
   another provider of `settings` in every App takes its place; it requires nothing admin-api does not. A project
   without a UI has no settings and behaves as before.
 - **The section, not the store, decides what is shown**: a declared component without a section in
-  `src/settings/` shows nothing (runtime-pi's settings are edited in router-basic's Agent section).
+  `src/settings/` shows nothing.
+- **A component's settings are its own.** No component reads or writes another's: its sections use
+  `useSettings` with its own name only (never another's, never the settings routes directly), and
+  its files declare and get only its own. A component then changes its settings (a key renamed, a
+  schema narrowed) and breaks no other. `registry validate` enforces it (`checkSettingsOwnership`),
+  as it does storage names. What a section needs of another component is that component's to show:
+  a part of a shared entry, or its own section's words (channel-web's Web chat says how its picker
+  starts; router-rules says nothing of it).
+- **Shared entries, not one section writing another's settings.** What an operator looks for in one
+  place may be two components' (the agents: the code's and the live ones; routing: the rules and the
+  default agent). One section editing both would read a schema its component does not ship; two
+  entries would split one thing. An `entry` lists them once, each part its own component's.
 - **Routes are the provider's** (settings-store), served in both Apps on Cloudflare as admin-api's; a
   `PUT` is at most 256 KiB.
 
@@ -139,7 +170,7 @@ A feature component (`agents-live`, with `router-rules`), offered by `pikit new`
 
 - **Agents as data:** name, description, system prompt, model, tools and extensions (installed ones
   only), created and edited in the dashboard. The project's code agents (`src/agents/`) stay, and are
-  listed too, editable through their overrides.
+  listed in the same entry (runtime-pi's part), editable through their overrides.
 - **Routing as data:** router-rules' rules, edited in the dashboard, read from `settings` instead of
   config; its config keeps the rules a project deploys with.
 - **Subagents** (`features/subagents.md`) fit here: one agent delegating to another, by name.
@@ -154,9 +185,8 @@ A feature component (`agents-live`, with `router-rules`), offered by `pikit new`
 - **agents-live** (`registry/components/agents-live/`, the kind `agents`, both targets): its settings
   are one key per agent, its schema declared at start from the App (the installed providers' models,
   tools, extensions but `pikit-self`, and `propertyNames` refusing the code's agents); it provides them
-  as `agent.directory`, read when used. Its Settings section, **Agents**: create, edit, remove live
-  agents; the code's listed read-only, each with a link to Agent (router-basic's section, where its
-  overrides are).
+  as `agent.directory`, read when used. Its Settings section, **Agents**' second part ("Made here",
+  order 1): create, edit, remove live agents; the code's agents are runtime-pi's part, above it.
 - **runtime-pi** resolves a conversation's agent from `agent.definition`, else the directory, read
   with the overrides (every admission, resume, `/compact`, driving wakeup) and checked then: a model a
   provider has, installed tools (and an execution for the file tools) and extensions, never the
@@ -166,8 +196,10 @@ A feature component (`agents-live`, with `router-rules`), offered by `pikit new`
 - **router-rules**: its rules are also its settings (the config's the default, an operator's replacing
   them whole, validated as the config's: without a directory only the code's agents). With a
   directory, the config's rules may name a live agent (not checked at start), and a rule's agent is
-  checked when a message matches it: no agent halts the message, logged. Its section, **Routing**: the
-  ordered rules (channel, chat, sender; an agent or deny with a reason), "Use the config's rules".
+  checked when a message matches it: no agent halts the message, logged. Its section, **Routing**'s
+  first part: the ordered rules (channel, chat, sender; an agent or deny with a reason), "Add rule" in
+  the heading, a save bar while there are changes, "Use the config's rules"; the last card, where
+  everything else goes, is router-basic's part.
 - **admin-api**: `GET /admin/api/agents` lists the live agents after the code's (`live: true`,
   `description`, `steward: false`); a dashboard conversation may start with one, and the new-conversation
   picker offers them (read again after a change in Agents).

@@ -199,16 +199,22 @@ theme, the sounds: this browser's) and App (what the App is made of, read only: 
 agents, its components by what they are for with each one's details and config, the wiring), and one
 per installed component with `"settings": "settings"` in `component.json`, copied to
 `src/dashboard/src/settings/<name>/` as a view is (`defineSettings`, `src/lib/settings.ts`), shown when
-its `requires` are provided. Its values are the component's settings (settings-store's
-`/admin/api/settings/:component`), or its own routes. A section may open another
-(`useOpenSettingsSection`), and the page's URL may name one: `/admin/?settings=<id>` opens the dialog
+its `requires` are provided. Its values are the component's settings (`useSettings("<its name>")`,
+over settings-store's `/admin/api/settings/:component`), or its own routes: a section reads and
+writes only its own component's settings, never another's (`pikit registry validate` refuses it).
+Sections of one `entry` (`defineSettings`'s, optional) are one entry of the dialog, under the first
+part's title, icon and group (parts by `order`), shown one after another, each part shown while its
+own `requires` are provided; the search finds the entry by any part (`src/lib/settings-entries.ts`).
+A section may open another
+(`useOpenSettingsSection`, by its component's name: the entry holding it), and the page's URL may name one: `/admin/?settings=<id>` opens the dialog
 at it (repo-github-app's setup comes back to `/admin/?settings=repo-github-app`).
 
 | Section | Component | `requires` | What |
 |---|---|---|---|
-| Agent | router-basic | `settings` | the default agent; any code agent's prompt, model, tools and skills (runtime-pi's overrides) |
-| Agents | agents-live | `settings`, `agent.directory` | create, edit, remove live agents; the code's listed read-only, linking to Agent |
-| Routing | router-rules | `settings` | the ordered rules: channel, chat, sender; an agent (the code's or a live one) or deny with a reason |
+| Agents (part 1) | runtime-pi | `settings` | the code's agents ("In the project's code"), each with Edit: its prompt, model, tools and skills overrides, "Use default" |
+| Agents (part 2) | agents-live | `settings`, `agent.directory` | "Made here": create, edit, remove live agents |
+| Routing (part 1) | router-rules | `settings` | the ordered rules: channel, chat, sender; an agent (the code's or a live one) or deny with a reason; "Add rule", a save bar while there are changes |
+| Routing (part 2) | router-basic | `settings` | the locked last card: "ELSE · Everything else goes to [agent]" (alone: "ALWAYS · Every message goes to [agent]"), saved at once |
 | GitHub | repo-github-token | `settings`, `repo.github` | the repository (the token is the `GITHUB_TOKEN` secret, never here) |
 | GitHub | repo-github-app | `repo.github` | Connect GitHub (a GitHub App created from a manifest and installed on the repository), the App, its installation and repository, the last token minted, Disconnect; its own routes (`/admin/api/repo-github-app/*`), not settings |
 | Self-improvement | admin-proposals | `proposals` | each part the provider checks (server: the proposals repository, the deployer, the project's checkout; GitHub: the repository, the token, a ruleset advised), the last deploy, rollback and failure, a link to where it is set up (GitHub's section) |

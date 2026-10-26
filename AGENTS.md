@@ -73,6 +73,13 @@ or a registry's own contract:
     prefix (`delegate_tasks`, `schedule_list`), a lone tool reads verb_noun (`ask_user`). Never
     camelCase (`askUser` and `listSchedules` had to be renamed). `registry validate` refuses any
     other (tool-mcp's server-given names are exempt).
+11. A component's settings are its own. Its dashboard code (`view/`, `settings/`) calls only
+    `useSettings("<its name>")`, never another's and never the `/settings` routes; its shipped files
+    `declare` and `get` only its own. What it needs of another is that one's to show: a part of a
+    shared Settings entry (`defineSettings`' `entry`, as Agents = runtime-pi + agents-live and Routing
+    = router-rules + router-basic), or that component's own section. `registry validate` refuses the
+    rest (`checkSettingsOwnership`); router-basic once edited runtime-pi's overrides, and router-rules
+    read router-basic's and channel-web's settings.
 
 # Downloaded references
 

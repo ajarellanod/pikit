@@ -69,10 +69,13 @@ switches and selects save at once; a text or a prompt with its own Save.
   and from whom, and its config (redacted); and, folded, the wiring (choices of providers, what
   nothing provides, the pipelines' stages, every route and command with its provider).
 - **One section per installed component that brings one** (`src/settings/<component>/`, installed
-  with it by `pikit add`), shown when the App provides what it requires: router-basic's **Agent**
-  (which agent answers by default, and that agent's system prompt, model and tools). Their values
-  are the components' settings, kept by `settings-store` (`/admin/api/settings`, installed with the
-  dashboard): a change applies to the next run, with no deploy and no restart.
+  with it by `pikit add`), shown when the App provides what it requires. Sections of one `entry` are
+  one entry, each component's part shown one after another: **Agents** (runtime-pi's code agents, each
+  one's system prompt, model, tools and skills; agents-live's agents made here) and **Routing**
+  (router-rules' rules; router-basic's default agent, the last card). Their values are the
+  components' settings, kept by `settings-store` (`/admin/api/settings`, installed with the
+  dashboard): a change applies to the next run, with no deploy and no restart. Each part edits only
+  its own component's settings.
 
 ## A channel of its own
 
@@ -238,15 +241,23 @@ export default defineSettings({
   group: "Components",              // the heading it is listed under (Dashboard, Agents, Components, or yours)
   requires: ["settings"],           // shown only while these capabilities are provided
   keywords: ["tone"],               // what the search finds it by, besides its title
+  // entry: "agents",               // optional: a part of a shared entry, listed with its other parts
   component: () => <SchemaSettings component="my-component" />,
 });
 ```
+
+A section reads and writes only its own component's settings: `useSettings("<its own name>")`,
+never another's, never the settings routes (`/admin/api/settings/...`) directly; `pikit registry
+validate` refuses any other. What it needs of another component is that component's to show: a
+part of a shared entry (`entry`: listed once, under the first part's title, icon and group, the
+parts by `order`), or its own words.
 
 `SchemaSettings` shows a switch for a boolean, a segmented choice for up to three options and a
 select past them, a prompt editor for a long text, a text otherwise, a switch per option for a list
 of options; each label and line is the schema's `title` and `description`. A custom section places
 its own rows (`SettingsHeading`, `SettingsRow`, the controls) and saves the component's whole value
-(`save`; `storedOf` keeps only what differs from the defaults). A component with a section installs
+(`save`; `storedOf` keeps only what differs from the defaults): runtime-pi's section (Agents) is one.
+A component with a section installs
 it here itself (`pikit add`, its `component.json`'s `settings`); `shadcn add @pikit/<component>-settings`
 installs it alone.
 

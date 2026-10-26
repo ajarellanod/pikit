@@ -50,7 +50,8 @@ it into the app.
   App, so a refused start would leave no way in), and the agent's runs fail until one is.
 - **Target:** `server` and `durable`. On Cloudflare it goes in the conversation object's App, with
   `actors-do` for `wakeups` ("Cloudflare" below).
-- **Installs to:** `src/pikit/runtime-pi/`.
+- **Installs to:** `src/pikit/runtime-pi/`, and its Settings section to
+  `src/dashboard/src/settings/runtime-pi/` when the project has a dashboard.
 - **npm dependencies:** `@pikit/pi-adapter`, pinned with Pi.
 
 ## What it does
@@ -267,9 +268,13 @@ or must see each model request or tool call is an extension.
 
 With `settings` installed (`settings-store`, installed with the dashboard), an operator changes an
 agent's **system prompt**, **model** (one a provider with credentials has), **tools** and **skills** (on or
-off, among those its definition names) from the dashboard's Settings, Agent (router-basic's section), with no
+off, among those its definition names) from the dashboard's Settings, **Agents**, with no
 deploy and no restart ([features/settings.md](https://github.com/ajarellanod/pikit/blob/main/features/settings.md)). The definition still owns the agent (SPEC §6): the
 overrides are data over it (`overrides.ts`).
+
+Its section (`settings/`) is Agents' first part (order 0, "In the project's code"; agents-live's live
+agents follow it in the same entry): the code's agents, each with Edit opening its system prompt,
+model, tools and skills, and "Use default" to drop an override. It edits runtime-pi's settings only.
 
 - **Declared at start** as runtime-pi's settings: one optional object per agent, its schema built from
   the App (the models of the providers with credentials, the tools and skills the definition names), its

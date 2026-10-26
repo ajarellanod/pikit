@@ -122,8 +122,9 @@ installed (`admin-auth-token`). Three ways in, the same routes behind each:
 - **Settings, Web chat** (`settings/`, while `settings` is provided): who may make an account
   (`signUp.mode`: invited only, an allow list, anyone) and the allow list (`ana@example.com`, or
   `@example.com` for a whole domain); what users see (Thinking, Tools: None, Names or Full, Context);
-  the assistants users may pick (a switch per agent of the App). It stores only what differs from the
-  config's values.
+  the assistants users may pick (a switch per agent of the App), with a line saying how the picker
+  starts (on the one Routing chooses, else the first; with none picked, Routing decides). It stores
+  only what differs from the config's values.
 - **`pikit channel-web`** (the component's command, `command.ts`), from the project's directory:
 
   ```sh

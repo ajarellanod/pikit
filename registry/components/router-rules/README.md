@@ -6,7 +6,7 @@ operator sets from the dashboard.
 - **Provides:** nothing. It adds the stage `router-rules` (priority 1) to the `route.resolve`
   pipeline.
 - **Uses:** `agent.definition`, to check at start that every agent a rule names exists;
-  `settings`, if installed, for the rules an operator sets (its Routing section); `agent.directory`,
+  `settings`, if installed, for the rules an operator sets (its part of the Routing entry); `agent.directory`,
   if installed (agents-live), for rules naming a live agent, checked when used.
 - **Targets:** `server` and `durable`.
 - **Installs to:** `src/pikit/router-rules/`, and its Settings section to
@@ -43,15 +43,15 @@ It refuses to start when a rule names an agent that is not an `agent.definition`
 
 With `settings` installed (settings-store, which comes with the dashboard), the rules are also a
 setting: an operator edits them in Settings, Routing, and they apply from the next message, with no
-deploy. Each rule reads as a sentence ("Messages from [web] in chat [...] from sender [...] go to
-[Researcher]", or "are refused", with a reason for the log): the channel one of the App's (its
+deploy. Each rule is a card that reads down ("When channel is [web], and chat is [...], and sender is
+[...], then answered by [Researcher]", or "Nobody: refused", with a reason for the log): the channel one of the App's (its
 `channel-*` components and their named instances: Telegram's `accounts`, `telegram:support`; Google
 Chat's `instances`, `googlechat:ops`, read as "Google Chat: ops") or typed, the chat and the sender added only when wanted;
-rules are dragged or moved up and down; a fixed last line says where everything else goes (the
-default agent, set in Agent). Under a rule, what is wrong with it: no agent chosen, a rule an earlier
-one always takes first. Where the web chat lets users pick an assistant (channel-web's `agents`), a
-rule for `web` picks the one its picker starts on (when that agent is offered; else the first offered),
-and a user may pick another: its note says so. "Use default" goes back to the config's rules. The section's logic is `settings/rules.ts`,
+rules are dragged by their number or moved from their menu; "Add rule" is in the heading, and a save
+bar stays fixed at the bottom while there are changes. In a rule's card, what is wrong with it: no
+agent chosen, a rule an earlier one always takes first. The locked last card, where everything else
+goes ("ELSE", the default agent, chosen there), is router-basic's part of the same Routing entry, and
+its setting. "Use default" goes back to the config's rules. The section's logic is `settings/rules.ts`,
 tested by the repository's `scripts/routing-settings.test.ts`. The config's `rules` are
 the default, what the project deploys with; the operator's replace them whole, validated as the
 config's are (a typo is refused). Settings that cannot be read leave the config's, logged.

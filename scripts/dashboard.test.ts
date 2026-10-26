@@ -16,6 +16,7 @@ import { INITIAL, type LiveState, reduce } from "../registry/dashboard/files/src
 import type { ApiPendingPiece, ApiReceipt } from "../registry/dashboard/files/src/lib/admin-api.ts";
 import { groupsOf, placeOf, providersOf, summaryOf, usersOf, wiringOf } from "../registry/dashboard/files/src/lib/composition.ts";
 import { EMPTY_TALLY, needsAttention, problemsOf, RECENT_MS, STUCK_AFTER_MS, tallyReceipts } from "../registry/dashboard/files/src/lib/delivery.ts";
+import { entriesOf, entryIdOf } from "../registry/dashboard/files/src/lib/settings-entries.ts";
 import { generated, OUTPUT } from "./ui-registry.ts";
 
 const REPO = join(import.meta.dir, "..");
@@ -392,4 +393,27 @@ test("Delivery lists answers, not pieces, and only those with a problem: stuck, 
   expect(quiet.undelivered).toHaveLength(2);
   expect(needsAttention(quiet, later)).toBe(false);
   expect(needsAttention(problemsOf([], EMPTY_TALLY, now), now)).toBe(false);
+});
+
+test("Settings entries: sections of one entry are its parts, by order, under the first's title and group; the search finds any part; a part's id opens its entry", () => {
+  const sections = [
+    { id: "router-basic", title: "Routing", group: "Agents", order: 3, entry: "routing", keywords: ["default agent"] },
+    { id: "channel-web", title: "Web chat" },
+    { id: "agents-live", title: "Agents", group: "Agents", order: 1, entry: "agents", keywords: ["new agent"] },
+    { id: "router-rules", title: "Routing", group: "Agents", order: 2, entry: "routing", keywords: ["rules"] },
+    { id: "runtime-pi", title: "Agents", group: "Agents", order: 0, entry: "agents", keywords: ["system prompt"] },
+  ];
+  const entries = entriesOf(sections);
+  expect(entries.map((entry) => [entry.id, entry.title, entry.group, entry.order, entry.parts.map((part) => part.id)])).toEqual([
+    ["agents", "Agents", "Agents", 0, ["runtime-pi", "agents-live"]],
+    ["routing", "Routing", "Agents", 2, ["router-rules", "router-basic"]],
+    ["channel-web", "Web chat", "Components", 100, ["channel-web"]],
+  ]);
+  expect(entries[1]?.keywords).toEqual(["Routing", "router-rules", "rules", "router-basic", "default agent"]);
+  expect(entryIdOf(entries, "router-basic")).toBe("routing");
+  expect(entryIdOf(entries, "routing")).toBe("routing");
+  expect(entryIdOf(entries, "channel-web")).toBe("channel-web");
+  expect(entryIdOf(entries, "gone")).toBe("gone");
+  // One part alone (no router-rules): the entry is still there, the part's own title.
+  expect(entriesOf(sections.filter((section) => section.id !== "router-rules")).find((entry) => entry.id === "routing")?.parts.map((part) => part.id)).toEqual(["router-basic"]);
 });

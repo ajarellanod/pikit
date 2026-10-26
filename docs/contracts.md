@@ -758,7 +758,8 @@ interface Settings {
 
 Provider: settings-store (on `storage.sql`; on Cloudflare the values are one object's,
 `settings-store:settings`, which every App reaches through `actor.mailbox`). Users: agents-live (its agents), router-basic, router-rules, runtime-pi (an agent's
-overrides), repo-github-token (the repository). Suite: `createSettingsConformance`, whose fixture changes
+overrides), repo-github-token (the repository). Each declares and reads only its own component's
+settings, and its dashboard section edits only those (`pikit registry validate` enforces it). Suite: `createSettingsConformance`, whose fixture changes
 values as an operator would (`operate`).
 
 ### `repo.github` ([github.ts](../packages/contracts/src/github.ts))

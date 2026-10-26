@@ -22,8 +22,8 @@ of its own:
 - **`components`**, in the order `pikit ui on` (and `pikit new --ui`, or a preset feature with
   `ui: true`) installs them, providers first: `admin-auth-token` (who is an operator), `admin-api`
   (the API the dashboard reads, and its built files), `settings-store` (the Settings dialog is the
-  dashboard's, and the sections of installed components, router-basic's Agent first, read and write
-  through `settings`).
+  dashboard's, and the sections of installed components, runtime-pi's Agents and router-basic's
+  Routing first, read and write through `settings`).
 - **`defaultFor`**: the capability a default stands for. It is installed only when the project's Apps
   lack that capability; another provider of it in every App keeps its place, and one in some Apps
   only, or a composition that cannot be described, is refused rather than guessed. `admin-api` has no

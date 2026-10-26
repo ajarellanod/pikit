@@ -45,8 +45,8 @@ agent's (`packages/pi-adapter/src/agent.ts`). The catalog adds only names and th
   Settings section has a Skills switch per skill.
 - **Overrides**: runtime-pi's `skills` override turns off, live, skills among those an agent's
   definition names (a catalog name, or one of its own by its name); a skill `prepare` adds beyond them
-  stays, as with tools. For a live agent, among the installed ones. router-basic's Agent section has a
-  Skills switch per skill.
+  stays, as with tools. For a live agent, among the installed ones. runtime-pi's part of Settings, Agents,
+  has a Skills switch per skill.
 - **pikit-self** lists an agent's skills by name, the catalog's included.
 - **A change is a change of the project.** Adding or editing a skill is source, through the steward's
   proposal and the operator's approval (SPEC §6). Choosing which installed skills an agent has is

@@ -31,6 +31,7 @@ import {
   checkLayout,
   checkManifest,
   checkNaming,
+  checkSettingsOwnership,
   checkSettingsSection,
   checkUiProject,
   checkStorageNames,
@@ -338,6 +339,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     checkDescriptionReaders(dir, name).forEach(report);
     checkTargetReaders(dir).forEach(report);
     checkStorageNames(dir, name).forEach(report);
+    checkSettingsOwnership(dir, name, manifest, names).forEach(report);
 
     try {
       const described = await generatedFor(dir, name, manifest);

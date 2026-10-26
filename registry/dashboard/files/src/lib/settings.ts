@@ -6,13 +6,20 @@
  *
  *   export default defineSettings({
  *     id: "router-basic",                 // the folder's name: the component's
- *     title: "Agent",
- *     icon: User,
+ *     title: "Routing",
+ *     icon: GitFork,
  *     group: "Agents",                    // the left column's heading (default "Components")
+ *     order: 3,                           // its place in its group, and in its entry
+ *     entry: "routing",                   // a part of the Routing entry, after router-rules' rules
  *     requires: ["settings"],             // shown only when these capabilities are installed
- *     keywords: ["prompt", "model"],      // what the search box finds it by, besides its title
- *     component: AgentSettings,
+ *     keywords: ["default agent"],        // what the search box finds it by, besides its title
+ *     component: DefaultAgentSettings,
  *   });
+ *
+ * Sections of one `entry` are listed as one, each a part of it shown one after another
+ * (`settings-entries.ts`): Agents holds runtime-pi's and agents-live's, Routing router-rules' and
+ * router-basic's. **A section reads and writes only its own component's settings** (`useSettings` with
+ * its own id; never another's, never the routes directly): `pikit registry validate` refuses any other.
  *
  * A component installs its folder here (`pikit add`, component.json's `settings`). Its values are the
  * component's settings (settings-store's routes, `/admin/api/settings/:component`): `useSettings`
@@ -22,6 +29,7 @@
 
 import { type ComponentType, createContext, useCallback, useContext, useEffect, useState } from "react";
 import { type ApiApp, api } from "./api.ts";
+import { byOrder, type Entry, entriesOf, groupOf } from "./settings-entries.ts";
 
 export interface SettingsSectionDefinition {
   /** The folder's name: the component's. */
@@ -34,6 +42,12 @@ export interface SettingsSectionDefinition {
   order?: number;
   /** Capabilities that must be provided in the App for it to show. */
   requires?: string[];
+  /**
+   * The entry it is a part of, with every section of the same `entry` (`"agents"`, `"routing"`): listed
+   * once, under the first part's title, icon and group, the parts one after another by `order`.
+   * Its own entry when not given.
+   */
+  entry?: string;
   /** Words the search box finds it by, besides its title. */
   keywords?: string[];
   component: ComponentType;
@@ -51,9 +65,6 @@ export function useOpenSettingsSection(): (id: string) => void {
   return useContext(SettingsNavigation);
 }
 
-/** The groups listed first, in this order; any other after them, by name. */
-const GROUPS = ["Dashboard", "Agents", "Components"];
-
 const found = import.meta.glob<{ default: SettingsSectionDefinition }>("../settings/*/index.tsx", { eager: true });
 
 /** Every section of `src/settings/`, by group, then order, then title. */
@@ -66,24 +77,21 @@ export const settingsSections: SettingsSectionDefinition[] = Object.entries(foun
   })
   .sort(bySectionOrder);
 
-export function groupOf(section: SettingsSectionDefinition): string {
-  return section.group ?? "Components";
-}
+export { groupOf };
 
 export function bySectionOrder(a: SettingsSectionDefinition, b: SettingsSectionDefinition): number {
-  const rank = (group: string) => (GROUPS.includes(group) ? GROUPS.indexOf(group) : GROUPS.length);
-  return (
-    rank(groupOf(a)) - rank(groupOf(b)) ||
-    groupOf(a).localeCompare(groupOf(b)) ||
-    (a.order ?? 100) - (b.order ?? 100) ||
-    a.title.localeCompare(b.title)
-  );
+  return byOrder(a, b);
 }
 
 /** The sections whose capabilities `app` provides. */
 export function visibleSettings(app: ApiApp): SettingsSectionDefinition[] {
   const provided = (name: string) => (app.capabilities[name]?.providers.length ?? 0) > 0;
   return settingsSections.filter((section) => (section.requires ?? []).every(provided));
+}
+
+/** The entries of the sections `app` shows: a part shows when its own `requires` are provided. */
+export function visibleEntries(app: ApiApp): Entry<SettingsSectionDefinition>[] {
+  return entriesOf(visibleSettings(app));
 }
 
 /** A JSON Schema, as the routes answer it (TypeBox's). */

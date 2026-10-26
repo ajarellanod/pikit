@@ -41,7 +41,7 @@ src/skills/
   stops the App, naming both: one source.
 - **`channels/<channel>.md`** is appended to the prompt in that channel's conversations
   (`ConversationRef.channel`), after what the agent's own `prepare` gives. An operator's prompt override
-  (the dashboard's Agent section) replaces the whole prompt, channel text included.
+  (the dashboard's Settings, Agents) replaces the whole prompt, channel text included.
 - **`skills/<skill>/SKILL.md`** (an agent's) and **`src/skills/<skill>/SKILL.md`** (the catalog) are
   Agent Skills folders; a skill's folder is its name. On a server, a skill whose folder holds more than
   its `SKILL.md` (scripts, references) gets the folder as its location, so the agent's tools reach them

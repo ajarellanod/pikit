@@ -5,8 +5,9 @@
  * service's) and App (what the App is made of, read only: `app-settings.tsx`); then one per installed
  * component that brings one (`src/settings/<component>/`,
  * `lib/settings.ts`), shown when the App provides what it requires. A change applies to the next run.
- * A section may open another (`useOpenSettingsSection`); the shell opens one by its id (`section`: the
- * page's `?settings=<id>`). Its frame, navigation and rows are the shared `settings-shell` and
+ * Sections of one `entry` are one entry of the navigation, their parts one after another, each its own
+ * component's (`settings-entries.ts`). A section may open another (`useOpenSettingsSection`); the shell
+ * opens one by its id (`section`: the page's `?settings=<id>`): a part's id opens the entry holding it. Its frame, navigation and rows are the shared `settings-shell` and
  * `settings-rows`.
  */
 
@@ -18,7 +19,8 @@ import { AppSettings } from "@/components/pikit/app-settings";
 import { Segmented, SettingsHeading, SettingsRow } from "@/components/pikit/settings-rows";
 import { SETTINGS_FRAME_STYLE, type SettingsEntry, SettingsPanels, settingsFrameClass, useSettingsChoice } from "@/components/pikit/settings-shell";
 import type { ApiApp } from "@/lib/api";
-import { groupOf, type SettingsSectionDefinition, SettingsNavigation, visibleSettings } from "@/lib/settings";
+import { type SettingsSectionDefinition, SettingsNavigation, visibleEntries } from "@/lib/settings";
+import { entryIdOf } from "@/lib/settings-entries";
 import { setSounds, useSounds } from "@/lib/sounds";
 import { setTheme, type Theme, useTheme } from "@/lib/theme";
 
@@ -59,13 +61,16 @@ const APP: SettingsSectionDefinition = {
   component: AppSettings,
 };
 
-/** A section as the shared navigation lists it: its group by `groupOf`. */
-const entryOf = (section: SettingsSectionDefinition): SettingsSectionDefinition & SettingsEntry => ({ ...section, group: groupOf(section) });
+/** An entry as the shared navigation lists it: the first part's icon, every part to show. */
+type DialogEntry = SettingsEntry & { parts: readonly SettingsSectionDefinition[] };
+const own = (section: SettingsSectionDefinition): DialogEntry => ({ id: section.id, title: section.title, group: section.group ?? "Dashboard", icon: section.icon, keywords: section.keywords ?? [], parts: [section] });
 
 export function SettingsDialog({ app, open, onOpenChange, section }: { app: ApiApp; open: boolean; onOpenChange: (open: boolean) => void; section?: string }) {
-  const all = useMemo(() => [GENERAL, APP, ...visibleSettings(app)].map(entryOf), [app]);
-  const choice = useSettingsChoice(all, open, section);
-  const Section = choice.current?.component;
+  const entries = useMemo(() => visibleEntries(app), [app]);
+  const all = useMemo<DialogEntry[]>(() => [own(GENERAL), own(APP), ...entries.map((entry) => ({ ...entry, icon: entry.parts[0]?.icon }))], [entries]);
+  const choice = useSettingsChoice(all, open, section === undefined ? undefined : entryIdOf(entries, section));
+  const current = choice.current;
+  const openPart = (id: string) => choice.open(entryIdOf(entries, id));
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -75,9 +80,15 @@ export function SettingsDialog({ app, open, onOpenChange, section }: { app: ApiA
           <Dialog.Title className="sr-only">Settings</Dialog.Title>
           <SettingsPanels choice={choice} onClose={() => onOpenChange(false)}>
             {/* A section's link to another: shown whatever the search. */}
-            {choice.current !== undefined && Section !== undefined && (
-              <SettingsNavigation.Provider value={choice.open}>
-                <Section key={choice.current.id} />
+            {current !== undefined && (
+              <SettingsNavigation.Provider value={openPart}>
+                <div key={current.id}>
+                  {current.parts.map(({ id, component: Part }) => (
+                    <section key={id} data-settings-part={id}>
+                      <Part />
+                    </section>
+                  ))}
+                </div>
               </SettingsNavigation.Provider>
             )}
           </SettingsPanels>

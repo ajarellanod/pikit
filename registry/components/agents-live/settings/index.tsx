@@ -1,9 +1,9 @@
 /**
- * agents-live's section of the Settings dialog, Agents (features/settings.md, "Multi-agent"): the
- * agents an operator made (agents-live's settings: one key per agent), created, edited and removed
- * here, live; and the project's own agents (`src/agents/`), listed read-only, their prompt, model and
- * tools changed in Agent (router-basic's section). Each tool and skill says what it does in one line
- * (`GET /admin/api/agents`' `tools` and `skills`).
+ * agents-live's section of the Settings dialog (features/settings.md, "Multi-agent"): part 2 of the
+ * Agents entry, right after runtime-pi's agents of the code, the agents an operator made (agents-live's
+ * settings: one key per agent), created, edited and removed here, live. It reads and writes only
+ * agents-live's settings; the code's agents' names (the shell's agents list) only keep a new one from
+ * taking one. Each tool and skill says what it does in one line (`GET /admin/api/agents`' `tools` and `skills`).
  *
  * What agents-live's schema says is all it offers: the models the installed providers have, the
  * installed tools and extensions, the project's skills (each agent's `patternProperties`), and no code agent's name
@@ -18,7 +18,7 @@ import { ErrorNote } from "@/components/pikit/error-note";
 import { type ApiAgents, type ApiSummary, useApi } from "@/lib/api";
 import { SelectControl, SettingsHeading, SettingsRow } from "@/components/pikit/settings";
 import { assistantName } from "@/lib/names";
-import { choicesOf, defineSettings, type JsonSchema, type SettingsValue, useOpenSettingsSection, useSettings } from "@/lib/settings";
+import { choicesOf, defineSettings, type JsonSchema, type SettingsValue, useSettings } from "@/lib/settings";
 import { useShell } from "@/lib/shell";
 
 /** An agent's name, as agents-live's schema says it. */
@@ -141,15 +141,19 @@ function storedFields(fields: Fields): Fields {
 function AgentsSettings() {
   const live = useSettings("agents-live");
   const { agents, reloadAgents } = useShell();
-  const openSection = useOpenSettingsSection();
   const [draft, setDraft] = useState<Draft>();
   const [failed, setFailed] = useState<Error>();
   /** The agent whose removal waits for a second click. */
   const [removing, setRemoving] = useState<string>();
 
-  if (live.error !== undefined && live.section === undefined) return <ErrorNote error={live.error} title="The live agents cannot be read" />;
+  if (live.error !== undefined && live.section === undefined)
+    return (
+      <div className="mt-10">
+        <ErrorNote error={live.error} title="The live agents cannot be read" />
+      </div>
+    );
   const section = live.section;
-  if (section === undefined) return <p className="text-[13px] text-ink-3">Loading</p>;
+  if (section === undefined) return <p className="mt-10 text-[13px] text-ink-3">Loading</p>;
   const schema = (Object.values((section.schema.patternProperties ?? {}) as Record<string, JsonSchema>)[0] ?? {}) as JsonSchema;
   const models = choicesOf(schema.properties?.model) ?? [];
   const stored = section.value as Record<string, Fields>;
@@ -178,8 +182,9 @@ function AgentsSettings() {
     save(value);
   };
 
+  // a second block, right under runtime-pi's part (the parts of an entry have no gap of their own)
   return (
-    <div>
+    <div className="mt-10">
       {failed !== undefined && (
         <div className="mb-4">
           <ErrorNote error={failed} title="Not saved" />
@@ -233,16 +238,6 @@ function AgentsSettings() {
           </SettingsRow>
         ),
       )}
-
-      <SettingsHeading>In the project's code</SettingsHeading>
-      {code.length === 0 && <p className="py-3 text-[13px] text-ink-3">Loading</p>}
-      {code.map((agent) => (
-        <SettingsRow key={agent.name} label={assistantName(agent.name)} description={`${agent.model} · defined in src/agents/; its prompt, model, tools and skills are changed in Agent.`}>
-          <Button size="sm" variant="quiet" onClick={() => openSection("router-basic")}>
-            Open in Agent
-          </Button>
-        </SettingsRow>
-      ))}
     </div>
   );
 }
@@ -253,6 +248,7 @@ export default defineSettings({
   icon: Community,
   group: "Agents",
   order: 1,
+  entry: "agents",
   requires: ["settings", "agent.directory"],
   keywords: ["agents", "new agent", "create", "live", "prompt", "model", "tools", "extensions", "skills"],
   component: AgentsSettings,

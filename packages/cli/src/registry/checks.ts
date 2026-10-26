@@ -393,6 +393,68 @@ export function storageNameProblems(name: string, at: string, source: string): s
   return problems;
 }
 
+/** A dashboard hook call on a component's settings: `useSettings(...)`. */
+const USE_SETTINGS = /\buseSettings\s*\(/g;
+/** A string naming the settings routes (`/admin/api/settings`, or `/settings/...` as `useApi` takes it). */
+const SETTINGS_ROUTE = /(["'`])(?:\/admin\/api)?\/settings(?:[/?][^"'`]*)?\1/g;
+/** The settings contract's calls naming a component first: `declare("x", ...)`, `get("x", ...)`. */
+const SETTINGS_CALL = /\.(declare|get)\s*(?:<[^>()]*>)?\s*\(\s*(["'])([a-z][a-z0-9-]*)\2\s*,/g;
+
+/**
+ * A component's settings are its own (features/settings.md, "Each component edits only its own"): no
+ * component reads or writes another's, on either side, so one changing its settings breaks no other.
+ *
+ * - Its dashboard code (its `view` and `settings` folders): `useSettings` only with its own name, as a
+ *   string literal, and never the settings routes directly (a `/settings` URL).
+ * - Its shipped files: `settings` `declare` only under its own name, and `get` of no other component of
+ *   the registry (`components`).
+ *
+ * Read outside comments. What another component's settings would give is that component's to offer: a
+ * part of a shared Settings entry (`entry`), a contract, or its own section's words.
+ */
+export function checkSettingsOwnership(componentDir: string, name: string, manifest: Pick<Manifest, "view" | "settings">, components: readonly string[]): string[] {
+  const problems: string[] = [];
+  for (const folder of [manifest.view, manifest.settings]) {
+    if (folder === undefined || !isDirectory(join(componentDir, folder))) continue;
+    for (const file of listFiles(join(componentDir, folder)).filter((each) => SOURCE.test(each) && !forTests(each))) {
+      problems.push(...dashboardSettingsProblems(name, `${folder}/${file}`, readFileSync(join(componentDir, folder, file), "utf8")));
+    }
+  }
+  const filesDir = join(componentDir, "files");
+  for (const file of listFiles(filesDir).filter((each) => SOURCE.test(each) && !forTests(each))) {
+    problems.push(...serverSettingsProblems(name, `files/${file}`, readFileSync(join(filesDir, file), "utf8"), components));
+  }
+  return problems;
+}
+
+/** `checkSettingsOwnership` on one file of a component's dashboard code, reported as `at`. */
+export function dashboardSettingsProblems(name: string, at: string, source: string): string[] {
+  const code = stripComments(source);
+  const problems: string[] = [];
+  for (const m of code.matchAll(USE_SETTINGS)) {
+    const argument = callArgument(code, m.index + m[0].length).trim();
+    const literal = /^(["'`])([^"'`\\$]*)\1$/.exec(argument)?.[2];
+    if (literal === undefined) problems.push(`${at} calls useSettings(${argument}), whose component validate cannot read: write useSettings("${name}")`);
+    else if (literal !== name) problems.push(`${at} uses the settings of "${literal}": a component reads and writes only its own, useSettings("${name}"); what it needs of another is that one's to show (a part of a shared entry, its own section)`);
+  }
+  for (const m of code.matchAll(SETTINGS_ROUTE)) {
+    problems.push(`${at} reaches the settings routes directly (${m[0]}): use useSettings("${name}"), its own settings only`);
+  }
+  return problems;
+}
+
+/** `checkSettingsOwnership` on one shipped file, reported as `at`. */
+export function serverSettingsProblems(name: string, at: string, source: string, components: readonly string[]): string[] {
+  const problems: string[] = [];
+  for (const m of stripComments(source).matchAll(SETTINGS_CALL)) {
+    const [, method, , named = ""] = m;
+    if (named === name) continue;
+    if (method === "declare") problems.push(`${at} declares the settings of "${named}": a component declares only its own, declare("${name}", ...)`);
+    else if (components.includes(named)) problems.push(`${at} reads the settings of "${named}": a component reads only its own, get("${name}", ...)`);
+  }
+  return problems;
+}
+
 /** The text between `(`, just before `from`, and its matching `)`; strings may hold parentheses. */
 function callArgument(code: string, from: number): string {
   let depth = 1;

@@ -1,207 +1,80 @@
 /**
- * router-basic's section of the Settings dialog, Agent (features/settings.md): which agent answers by
- * default (router-basic's own setting, its default the config's `defaultAgent`), and that agent's
- * system prompt, model, tools and skills (runtime-pi's settings: an operator's override over the agent's
- * definition, applied from its next run). With several agents, any one of them is edited here.
+ * router-basic's section of the Settings dialog, part 2 of the Routing entry (features/settings.md): its
+ * own setting only, which agent answers by default (its default the config's `defaultAgent`). It is a
+ * locked card under router-rules' rules, "Everything else goes to [agent]", or, without router-rules,
+ * the only one, "Every message goes to [agent]". Whether router-rules is there is the App's composition
+ * (`useShell`), not its settings. A change is saved at once and applies to new conversations.
  *
- * What runtime-pi's schema says is all it reads: the agents (its properties), each one's definition
- * (the `default`s), the models of the providers with credentials (as runtime-pi found them at start:
- * a provider logged in since shows its models after the next start) and the tools and skills the definition
- * names (the options). It stores only what differs from the definition, so "Use default" takes an override
- * away. Each tool and skill says what it does in one line: `GET /admin/api/agents`' `tools` and `skills`
- * (a tool's `summary`, written where its component provides it; a skill's description).
+ * The agents' prompt, model, tools and skills are not here: they are runtime-pi's part of Agents.
  */
 
-import { User } from "iconoir-react";
+import { GitFork, Lock } from "iconoir-react";
 import { useState } from "react";
-import { Button } from "@/components/bui/Button";
-import { Switch } from "@/components/bui/Switch";
+import { Combobox } from "@/components/bui/Combobox";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { type ApiAgents, useApi } from "@/lib/api";
-import { PromptEditor, SelectControl, SettingsHeading, SettingsRow, storedOf } from "@/components/pikit/settings";
+import { storedOf } from "@/components/pikit/settings";
 import { assistantName } from "@/lib/names";
-import { choicesOf, defineSettings, type SettingsValue, useSettings } from "@/lib/settings";
+import { choicesOf, defineSettings, useSettings } from "@/lib/settings";
+import { useShell } from "@/lib/shell";
 
-/** One agent's override (runtime-pi's settings): absent, the definition's. */
-type Override = { systemPrompt?: string; model?: string; tools?: string[]; skills?: string[] };
-
-/** What `name` does, in one line (`ApiAgents.tools` or `skills`); `undefined` until read, or when it says nothing. */
-const summaryIn = (list: readonly { name: string; summary: string }[] | undefined, name: string) => {
-  const summary = list?.find((each) => each.name === name)?.summary;
-  return summary === undefined || summary === "" ? undefined : summary;
-};
-
-const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((each) => b.includes(each));
-
-function AgentSettings() {
+function DefaultAgentSettings() {
   const router = useSettings("router-basic");
-  const runtime = useSettings("runtime-pi");
-  const catalog = useApi<ApiAgents>("/agents").data;
-  const [editing, setEditing] = useState<string>();
+  const { app } = useShell();
   const [failed, setFailed] = useState<Error>();
-  const saving = (work: Promise<void>) => {
+
+  if (router.error !== undefined && router.section === undefined) return <ErrorNote error={router.error} title="The default agent cannot be read" />;
+  const section = router.section;
+  if (section === undefined) return <p className="text-[13px] text-ink-3">Loading</p>;
+  const current = String(section.value.defaultAgent);
+  const names = choicesOf(section.schema.properties?.defaultAgent) ?? [current];
+  // Under router-rules' cards, it continues them (ELSE); alone, it is every message's (ALWAYS).
+  const rules = app.components.some((component) => component.name === "router-rules");
+  const choose = (name: string) => {
     setFailed(undefined);
-    work.catch((thrown: unknown) => setFailed(thrown instanceof Error ? thrown : new Error(String(thrown))));
-  };
-
-  if (router.error !== undefined && router.section === undefined) return <ErrorNote error={router.error} title="The router's settings cannot be read" />;
-  if (router.section === undefined) return <p className="text-[13px] text-ink-3">Loading</p>;
-  const routing = router.section;
-  const defaultAgent = String(routing.value.defaultAgent);
-  const agentNames = choicesOf(routing.schema.properties?.defaultAgent) ?? [defaultAgent];
-  const agent = editing !== undefined && agentNames.includes(editing) ? editing : defaultAgent;
-
-  const agents = runtime.section;
-  const fields = agents?.schema.properties?.[agent]?.properties ?? {};
-  const override = (agents?.value[agent] ?? {}) as Override;
-  const definition = {
-    systemPrompt: typeof fields.systemPrompt?.default === "string" ? fields.systemPrompt.default : "",
-    model: typeof fields.model?.default === "string" ? fields.model.default : "",
-    tools: Array.isArray(fields.tools?.default) ? (fields.tools.default as string[]) : [],
-    skills: Array.isArray(fields.skills?.default) ? (fields.skills.default as string[]) : [],
-  };
-  const models = choicesOf(fields.model) ?? [definition.model];
-  const toolOptions = choicesOf(fields.tools?.items) ?? definition.tools;
-  const tools = override.tools ?? definition.tools;
-  const skillOptions = choicesOf(fields.skills?.items) ?? definition.skills;
-  const skills = override.skills ?? definition.skills;
-
-  /** Saves `next` as `agent`'s override, without what is the definition's. */
-  const saveOverride = (next: Override): Promise<void> => {
-    if (agents === undefined) return Promise.resolve();
-    const kept: Override = {
-      ...(next.systemPrompt !== undefined && next.systemPrompt !== definition.systemPrompt && { systemPrompt: next.systemPrompt }),
-      ...(next.model !== undefined && next.model !== definition.model && { model: next.model }),
-      ...(next.tools !== undefined && !sameSet(next.tools, definition.tools) && { tools: next.tools }),
-      ...(next.skills !== undefined && !sameSet(next.skills, definition.skills) && { skills: next.skills }),
-    };
-    const all: SettingsValue = { ...agents.value };
-    if (Object.keys(kept).length === 0) delete all[agent];
-    else all[agent] = kept;
-    return runtime.save(all);
+    router.save(storedOf({ defaultAgent: name }, section.defaults)).catch((thrown: unknown) => setFailed(thrown instanceof Error ? thrown : new Error(String(thrown))));
   };
 
   return (
-    <div>
+    <div className={rules ? "mt-3" : ""}>
       {failed !== undefined && (
         <div className="mb-4">
           <ErrorNote error={failed} title="Not saved" />
         </div>
       )}
-      <SettingsHeading>Routing</SettingsHeading>
-      <SettingsRow label="Default agent" description="Answers every message no Routing rule sends elsewhere." htmlFor="settings-default-agent">
-        <SelectControl
-          id="settings-default-agent"
-          label="Default agent"
-          value={defaultAgent}
-          disabled={router.saving}
-          options={agentNames.map((name) => ({ value: name, label: assistantName(name) }))}
-          onChange={(name) => saving(router.save(storedOf({ defaultAgent: name }, routing.defaults)))}
-        />
-      </SettingsRow>
-
-      {/* the agent being edited: its own block, apart from routing, everything in it the chosen agent's */}
-      <section aria-labelledby="settings-agent-heading" className="mt-10 rounded-card border border-line p-4 sm:p-5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <div className="min-w-0 flex-1">
-            <h3 id="settings-agent-heading" className="text-[15px] font-semibold text-ink">
-              Agent settings
-            </h3>
-            <p className="text-[12.5px] text-ink-3">The prompt, model, tools and skills of the agent chosen here.</p>
-          </div>
-          {Object.keys(override).length > 0 && (
-            <Button size="sm" variant="quiet" disabled={runtime.saving} onClick={() => saving(saveOverride({}))}>
-              Use default
-            </Button>
-          )}
-          {agentNames.length > 1 ? (
-            <SelectControl id="settings-agent" label="Agent to edit" value={agent} options={agentNames.map((name) => ({ value: name, label: assistantName(name) }))} onChange={setEditing} />
-          ) : (
-            <span className="text-[13.5px] font-medium text-ink">{assistantName(agent)}</span>
-          )}
+      {!rules && <p className="mb-3 text-[13px] text-ink-3">One agent answers every message. Add router-rules to send a channel, chat or sender to another.</p>}
+      <div className="relative flex items-center gap-2 rounded-card border border-dashed border-line-strong px-3 py-2.5">
+        {rules && <span aria-hidden="true" className="absolute -top-3 left-[23.5px] h-3 w-px bg-line-strong" />}
+        <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-inset text-ink-3 shadow-hairline">
+          <Lock width={13} height={13} strokeWidth={1.8} />
+        </span>
+        <span className="w-11 shrink-0 text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase select-none">{rules ? "Else" : "Always"}</span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-2">
+            {rules ? "Everything else goes to" : "Every message goes to"}
+            <Combobox
+              label="Default agent"
+              value={current}
+              disabled={router.saving}
+              options={names.map((name) => ({ value: name, label: assistantName(name) }))}
+              onChange={choose}
+              className="max-w-72 min-w-36"
+            />
+          </span>
+          <span className="text-[12px] text-ink-3">{rules ? "The default agent: it answers whatever no rule matches." : "The default agent."} Applies to new conversations.</span>
         </div>
-
-      {/* keyed by the agent: switching replays its entrance, so the rows read as the new agent's */}
-      <div key={agent} className="rise-in mt-2">
-      {agents === undefined ? (
-        runtime.error !== undefined ? (
-          <div className="mt-6">
-            <ErrorNote error={runtime.error} title="The agents' settings cannot be read" />
-          </div>
-        ) : (
-          <p className="mt-6 text-[13px] text-ink-3">Loading</p>
-        )
-      ) : fields.systemPrompt === undefined ? (
-        <p className="mt-6 text-[13px] text-ink-3">{`The runtime does not offer ${assistantName(agent)}'s settings.`}</p>
-      ) : (
-        <>
-          <SettingsRow label="System prompt" description="What the agent is told before every conversation. Applies from its next run." stacked htmlFor="settings-system-prompt">
-            <PromptEditor
-              id="settings-system-prompt"
-              label="System prompt"
-              placeholder="You are a helpful assistant: answer briefly, ask when unsure."
-              value={override.systemPrompt}
-              fallback={definition.systemPrompt}
-              saving={runtime.saving}
-              onSave={(text) => saving(saveOverride({ ...override, systemPrompt: text }))}
-              onReset={() => {
-                saving(saveOverride({ ...override, systemPrompt: undefined }));
-              }}
-            />
-          </SettingsRow>
-          <SettingsRow label="Model" description="The model that answers, among those of the providers with credentials." htmlFor="settings-model">
-            <SelectControl
-              id="settings-model"
-              label="Model"
-              value={override.model ?? definition.model}
-              disabled={runtime.saving}
-              options={models.map((model) => ({ value: model, label: model === definition.model ? `${model} (default)` : model }))}
-              onChange={(model) => saving(saveOverride({ ...override, model }))}
-            />
-          </SettingsRow>
-          {toolOptions.length > 0 && (
-            <>
-              <SettingsHeading>Tools</SettingsHeading>
-              {toolOptions.map((tool) => (
-                <SettingsRow key={tool} label={tool} description={summaryIn(catalog?.tools, tool) ?? (tools.includes(tool) ? "The agent may call it." : "Off: the agent does not have it.")}>
-                  <Switch
-                    checked={tools.includes(tool)}
-                    label={tool}
-                    onChange={(on) => saving(saveOverride({ ...override, tools: toolOptions.filter((each) => (each === tool ? on : tools.includes(each))) }))}
-                  />
-                </SettingsRow>
-              ))}
-            </>
-          )}
-          {skillOptions.length > 0 && (
-            <>
-              <SettingsHeading>Skills</SettingsHeading>
-              {skillOptions.map((skill) => (
-                <SettingsRow key={skill} label={skill} description={summaryIn(catalog?.skills, skill) ?? (skills.includes(skill) ? "The agent knows it, and loads it when a task needs it." : "Off: the agent does not know it.")}>
-                  <Switch
-                    checked={skills.includes(skill)}
-                    label={skill}
-                    onChange={(on) => saving(saveOverride({ ...override, skills: skillOptions.filter((each) => (each === skill ? on : skills.includes(each))) }))}
-                  />
-                </SettingsRow>
-              ))}
-            </>
-          )}
-        </>
-      )}
       </div>
-      </section>
     </div>
   );
 }
 
 export default defineSettings({
   id: "router-basic",
-  title: "Agent",
-  icon: User,
+  title: "Routing",
+  icon: GitFork,
   group: "Agents",
-  order: 0,
+  order: 3,
+  entry: "routing",
   requires: ["settings"],
-  keywords: ["default agent", "system prompt", "prompt", "model", "tools", "skills", "routing"],
-  component: AgentSettings,
+  keywords: ["default agent", "routing", "fallback", "else"],
+  component: DefaultAgentSettings,
 });

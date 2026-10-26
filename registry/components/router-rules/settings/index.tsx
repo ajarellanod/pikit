@@ -1,25 +1,28 @@
 /**
- * router-rules' section of the Settings dialog, Routing (features/settings.md, "Multi-agent"): its
- * rules, an ordered list an operator edits live, each one read as a sentence: "Messages from [web]
- * (in chat …) (from sender …) [go to Researcher]", or "[are refused] (reason)". The last line is fixed:
- * everything else goes to the default agent (router-basic's, set in Agent). The config's rules are the
- * default: the operator's replace them whole, and "Use default" takes them away.
+ * router-rules' section of the Settings dialog, part 1 of the Routing entry (features/settings.md,
+ * "Multi-agent"): its rules, an ordered list an operator edits live. Each rule is a card that reads down:
+ * "When channel is [web], and chat is […], and sender is […], then answered by [Researcher]" (or
+ * "nobody, refused", with a reason). Where everything else goes is router-basic's part, drawn right
+ * under the last card (its default agent): this part reads and writes only router-rules' settings. The
+ * config's rules are the default: the operator's replace them whole, and "Use default" takes them away.
  *
  * The channels offered are the App's (`channel-*` components, `rules.ts`' `channelsOf`), or one typed
  * (`telegram:support`). The agents are the schema's (the code's agents, without a directory), else every
- * agent of `GET /admin/api/agents`. A rule is dragged by its handle, or moved with its arrows. What is
- * wrong shows under its rule (`problemsOf`); the list is saved whole, with its own button.
+ * agent of `GET /admin/api/agents`. A rule is dragged by its number, or moved from its menu. What is
+ * wrong shows in its card (`problemsOf`); the list is saved whole, from the heading, which stays at the top
+ * of the panel.
  */
 
-import { ArrowDown, ArrowUp, GitFork, Plus, Trash, Xmark } from "iconoir-react";
-import { type DragEvent, useRef, useState } from "react";
+import { Antenna, ArrowDown, ArrowRight, ArrowUp, GitFork, InfoCircle, MultiBubble, Plus, Trash, User, WarningTriangle, Xmark } from "iconoir-react";
+import { type DragEvent, type ReactNode, useRef, useState } from "react";
+import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
+import { Combobox } from "@/components/bui/Combobox";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { SelectControl, SettingsHeading, storedOf } from "@/components/pikit/settings";
 import { Input } from "@/components/ui/input";
-import { useApi } from "@/lib/api";
 import { assistantName } from "@/lib/names";
-import { type ApiSettingsSection, choicesOf, defineSettings, type JsonSchema, useOpenSettingsSection, useSettings } from "@/lib/settings";
+import { choicesOf, defineSettings, type JsonSchema, useSettings } from "@/lib/settings";
 import { useShell } from "@/lib/shell";
 import { channelsOf, cleaned, moved, problemsOf, type Rule } from "./rules";
 
@@ -40,38 +43,66 @@ function channelLabel(channel: string): string {
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const isWeb = (channel: string | undefined) => channel === "web" || channel?.startsWith("web:") === true;
 
-/** A small grip: what a rule is dragged by. */
+/** A small grip: what a rule is dragged by (its number shows it on hover). */
 function Grip() {
   return (
-    <svg width="8" height="14" viewBox="0 0 8 14" aria-hidden="true" className="fill-current">
+    <svg width="8" height="12" viewBox="0 0 8 14" aria-hidden="true" className="fill-current">
       {[1, 7, 13].flatMap((y) => [<circle key={`a${y}`} cx="1.5" cy={y} r="1.3" />, <circle key={`b${y}`} cx="6.5" cy={y} r="1.3" />])}
     </svg>
   );
 }
 
-/** An optional match field, shown once added: its words, its text, and × to take it away. */
-function Optional({ words, value, placeholder, label, onChange, onRemove }: { words: string; value: string; placeholder: string; label: string; onChange: (value: string) => void; onRemove: () => void }) {
+/** The left column of a card's line: "When", "And", "Then", in small capitals. */
+function Word({ children }: { children: ReactNode }) {
+  return <span className="w-11 shrink-0 pt-[11px] text-[11px] font-medium tracking-[0.06em] text-ink-3 uppercase select-none">{children}</span>;
+}
+
+/**
+ * One line of a rule: its word, then an inset row with the field's icon and name, "is" (`relation`),
+ * its control(s), and × to take it away. The field's column is one width, so every control lines up.
+ */
+function Line({ word, icon, field, relation = "is", onRemove, removeLabel, children }: { word: string; icon: ReactNode; field: string; relation?: string; onRemove?: () => void; removeLabel?: string; children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="text-[13px] text-ink-2">{words}</span>
-      <Input aria-label={label} value={value} placeholder={placeholder} autoFocus={value === ""} onChange={(event) => onChange(event.target.value)} className="h-8 w-36 text-[13px]" />
-      <Button size="xs" variant="quiet" aria-label={`Remove ${label.toLowerCase()}`} title="Remove" onClick={onRemove} className="w-7 px-0">
-        <Xmark width={13} height={13} strokeWidth={2} />
-      </Button>
-    </span>
+    <div className="flex items-start gap-2">
+      <Word>{word}</Word>
+      <div className="flex min-h-10 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-control bg-inset py-1 pr-1 pl-3 shadow-hairline">
+        <span className="inline-flex w-[104px] shrink-0 items-center gap-2 text-[13px] text-ink-2 [&_svg]:shrink-0 [&_svg]:text-ink-3">
+          {icon}
+          {field}
+        </span>
+        <span className={`w-3.5 shrink-0 text-[13px] text-ink-3 ${relation === "" ? "invisible" : ""}`}>{relation || "is"}</span>
+        {children}
+        {onRemove !== undefined && (
+          <Button size="xs" variant="quiet" aria-label={removeLabel} title="Remove" onClick={onRemove} className="ml-auto w-7 px-0 text-ink-3">
+            <Xmark width={13} height={13} strokeWidth={2} />
+          </Button>
+        )}
+      </div>
+    </div>
   );
+}
+
+/** A note in a rule's card: an error (red), a warning (orange), or only information. */
+function Note({ tone, children }: { tone: "error" | "warning" | "info"; children: ReactNode }) {
+  const colors = tone === "error" ? "bg-red-tint text-red" : tone === "warning" ? "bg-orange-tint text-orange" : "text-ink-3";
+  const Icon = tone === "info" ? InfoCircle : WarningTriangle;
+  return (
+    <p className={`ml-[84px] flex items-start gap-2 rounded-control text-[12.5px] leading-[18px] ${tone === "info" ? "px-0.5" : "px-2.5 py-1.5"} ${colors}`}>
+      <Icon width={14} height={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+/** The line that links one card to the next: the rules are read down, the first that matches wins. */
+function Joint() {
+  return <span aria-hidden="true" className="absolute -top-3 left-[23.5px] h-3 w-px bg-line-strong" />;
 }
 
 function RoutingSettings() {
   const routing = useSettings("router-rules");
   const { agents, app } = useShell();
-  const openSection = useOpenSettingsSection();
-  const installed = (name: string) => app.components.some((component) => component.name === name);
-  // The default agent (router-basic's setting) for the last line; channel-web's pickable assistants for the Web rules.
-  const basic = useApi<ApiSettingsSection>(installed("router-basic") ? "/settings/router-basic" : null).data;
-  const web = useApi<ApiSettingsSection>(installed("channel-web") ? "/settings/channel-web" : null).data;
   const [draft, setDraft] = useState<Row[]>();
   /** The rows whose channel is typed, not chosen. */
   const [typed, setTyped] = useState<ReadonlySet<number>>(new Set());
@@ -95,9 +126,8 @@ function RoutingSettings() {
   const blocked = problems.some((problem) => problem?.level === "error");
   const channels = [...new Set([...channelsOf(app), ...rules.flatMap((rule) => (rule.channel !== undefined && rule.channel !== "" ? [rule.channel] : []))])];
   const known = channelsOf(app);
-  const defaultAgent = typeof basic?.value.defaultAgent === "string" ? basic.value.defaultAgent : undefined;
-  // The assistants the web chat's picker offers: there it starts on the one Routing chooses, and a user may pick another.
-  const webPicks = Array.isArray(web?.value.agents) ? (web.value.agents as unknown[]).filter((name): name is string => typeof name === "string") : [];
+  // router-basic's part, under this one, draws where everything else goes (the App's composition, not its settings).
+  const fallback = app.components.some((component) => component.name === "router-basic");
 
   const edit = (index: number, patch: Partial<Rule>) => setDraft(rows.map((row, at) => (at === index ? { ...row, rule: { ...row.rule, ...patch } } : row)));
   const without = (index: number, field: "conversation" | "actor") =>
@@ -126,31 +156,68 @@ function RoutingSettings() {
 
   return (
     <div>
-      {failed !== undefined && (
+      {failed !== undefined && !changed && (
         <div className="mb-4">
           <ErrorNote error={failed} title="Not saved" />
         </div>
       )}
       <p className="mb-5 text-[13px] text-ink-3">Read from the top: the first rule a message matches picks who answers it.</p>
-      <SettingsHeading
-        aside={
-          !same(saved, defaults) &&
-          draft === undefined && (
-            <Button size="sm" variant="quiet" disabled={routing.saving} onClick={() => save(defaults)}>
-              Use default
-            </Button>
-          )
-        }
-      >
-        Rules <span className="text-[13px] font-normal text-ink-3">{same(saved, defaults) && draft === undefined ? "(default)" : "(changed here)"}</span>
-      </SettingsHeading>
-      <ol className="mt-2 flex flex-col gap-2">
+      {/*
+       * The heading stays at the top of the scrolling panel while the rules scroll under it, with Save and
+       * Revert while there are changes: nothing comes between the last card and router-basic's part below.
+       * It sits on the panel's edge past its top padding (`-top-12`, the panel's `pt-12`) and reaches its
+       * sides (`-mx-6 sm:-mx-10`), so nothing shows above or beside it.
+       */}
+      <div className="sticky -top-12 z-10 -mx-6 bg-page px-6 pt-3 pb-2 sm:-mx-10 sm:px-10">
+        <SettingsHeading
+          aside={
+            <>
+              {!same(saved, defaults) && draft === undefined && (
+                <Button size="sm" variant="quiet" disabled={routing.saving} onClick={() => save(defaults)}>
+                  Use default
+                </Button>
+              )}
+              <Button size="sm" variant="secondary" onClick={add}>
+                <Plus width={14} height={14} strokeWidth={2} />
+                Add rule
+              </Button>
+              {changed && (
+                <>
+                  <Button size="sm" variant="quiet" disabled={routing.saving} onClick={() => {
+                    setDraft(undefined);
+                    setTyped(new Set());
+                    setFailed(undefined);
+                  }}>
+                    Revert
+                  </Button>
+                  <Button size="sm" variant="primary" disabled={routing.saving || blocked} onClick={() => save(rules.map(cleaned))}>
+                    Save
+                  </Button>
+                </>
+              )}
+            </>
+          }
+        >
+          Rules <span className="text-[13px] font-normal text-ink-3">{same(saved, defaults) && draft === undefined ? "(default)" : "(changed here)"}</span>
+        </SettingsHeading>
+        {changed && <p className="text-right text-[12px] text-ink-3">Not saved yet. Applies to new conversations once saved.</p>}
+        {changed && failed !== undefined && (
+          <div className="mt-2">
+            <ErrorNote error={failed} title="Not saved" />
+          </div>
+        )}
+      </div>
+      {rows.length === 0 && (
+        <p className="mt-3 text-[13px] text-ink-3">{fallback ? "No rules yet: every message goes to the default agent below." : "No rules yet: add one to send a channel, a chat or a sender to an agent."}</p>
+      )}
+      <ol className={`flex flex-col gap-3 ${rows.length > 0 ? "mt-3" : ""}`}>
         {rows.map(({ key, rule }, index) => {
           const n = index + 1;
           const deny = rule.deny === true;
           const channelValue = rule.channel === undefined ? "" : typed.has(key) || !channels.includes(rule.channel) ? TYPED : rule.channel;
           const outcome = deny ? DENY : (rule.agent ?? "");
           const problem = problems[index];
+          const target = drag?.over === index && drag.from !== index;
           return (
             <li
               key={key}
@@ -170,8 +237,9 @@ function RoutingSettings() {
                 setDrag(undefined);
                 setHeld(undefined);
               }}
-              className={`rounded-card border bg-surface px-3 py-2.5 transition-[border-color,opacity] duration-100 ${drag?.over === index && drag.from !== index ? "border-ink-3" : "border-line"} ${drag?.from === index ? "opacity-50" : ""}`}
+              className={`group relative flex flex-col gap-1.5 rounded-card bg-surface p-3 shadow-card transition-[outline-color,opacity] duration-100 outline-2 outline-offset-2 ${target ? "outline-ink-3" : "outline-transparent"} ${drag?.from === index ? "opacity-50" : ""}`}
             >
+              {index > 0 && <Joint />}
               <div className="flex items-start gap-2">
                 <button
                   type="button"
@@ -179,21 +247,22 @@ function RoutingSettings() {
                   title="Drag to reorder"
                   onPointerDown={() => setHeld(key)}
                   onPointerUp={() => setHeld(undefined)}
-                  className="mt-2 flex h-4 w-3 shrink-0 cursor-grab items-center justify-center text-ink-3 hover:text-ink-2 active:cursor-grabbing"
+                  className="mt-2 flex size-6 shrink-0 cursor-grab items-center justify-center rounded-[7px] bg-inset text-[12px] font-medium text-ink-2 tabular-nums shadow-hairline active:cursor-grabbing"
                 >
-                  <Grip />
+                  <span className="group-hover:hidden">{n}</span>
+                  <span className="hidden text-ink-3 group-hover:block">
+                    <Grip />
+                  </span>
                 </button>
-                <span className="mt-[7px] w-4 shrink-0 text-right text-[12.5px] text-ink-3 tabular-nums">{n}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-                    <span className="text-[13px] text-ink-2">Messages from</span>
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <Line word="When" icon={<Antenna width={15} height={15} strokeWidth={1.7} />} field="Channel">
                     <SelectControl
                       label={`Rule ${n}: channel`}
                       value={channelValue}
                       options={[
-                        { value: "", label: "any channel" },
+                        { value: "", label: "Any channel" },
                         ...channels.map((channel) => ({ value: channel, label: known.includes(channel) ? channelLabel(channel) : `${channelLabel(channel)} (not installed)` })),
-                        { value: TYPED, label: "another, typed…" },
+                        { value: TYPED, label: "Another, typed…", description: "A channel or an account not listed: telegram:support" },
                       ]}
                       onChange={(value) => {
                         setTyped((current) => {
@@ -216,110 +285,73 @@ function RoutingSettings() {
                         className="h-8 w-40 text-[13px]"
                       />
                     )}
-                    {rule.conversation !== undefined && (
-                      <Optional words="in chat" label="Chat" value={rule.conversation} placeholder="chat id" onChange={(conversation) => edit(index, { conversation })} onRemove={() => without(index, "conversation")} />
-                    )}
-                    {rule.actor !== undefined && (
-                      <Optional words="from sender" label="Sender" value={rule.actor} placeholder="sender id" onChange={(actor) => edit(index, { actor })} onRemove={() => without(index, "actor")} />
-                    )}
-                    <SelectControl
-                      label={`Rule ${n}: what happens`}
+                  </Line>
+                  {rule.conversation !== undefined && (
+                    <Line word="And" icon={<MultiBubble width={15} height={15} strokeWidth={1.7} />} field="Chat" onRemove={() => without(index, "conversation")} removeLabel={`Rule ${n}: remove chat`}>
+                      <Input aria-label={`Rule ${n}: chat`} value={rule.conversation} placeholder="chat id" autoFocus={rule.conversation === ""} onChange={(event) => edit(index, { conversation: event.target.value })} className="h-8 w-44 text-[13px]" />
+                    </Line>
+                  )}
+                  {rule.actor !== undefined && (
+                    <Line word="And" icon={<User width={15} height={15} strokeWidth={1.7} />} field="Sender" onRemove={() => without(index, "actor")} removeLabel={`Rule ${n}: remove sender`}>
+                      <Input aria-label={`Rule ${n}: sender`} value={rule.actor} placeholder="sender id" autoFocus={rule.actor === ""} onChange={(event) => edit(index, { actor: event.target.value })} className="h-8 w-44 text-[13px]" />
+                    </Line>
+                  )}
+                  {(rule.conversation === undefined || rule.actor === undefined) && (
+                    <div className="ml-[52px] flex items-center gap-1">
+                      {rule.conversation === undefined && (
+                        <Button size="xs" variant="quiet" title="Only the messages of one chat" onClick={() => edit(index, { conversation: "" })} className="text-ink-3">
+                          <Plus width={12} height={12} strokeWidth={2} />
+                          Chat
+                        </Button>
+                      )}
+                      {rule.actor === undefined && (
+                        <Button size="xs" variant="quiet" title="Only the messages of one sender" onClick={() => edit(index, { actor: "" })} className="text-ink-3">
+                          <Plus width={12} height={12} strokeWidth={2} />
+                          Sender
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  <Line word="Then" icon={<ArrowRight width={15} height={15} strokeWidth={1.7} />} field="Answered by" relation="">
+                    <Combobox
+                      label={`Rule ${n}: who answers`}
                       value={outcome}
+                      placeholder="Choose an agent"
                       options={[
-                        ...(outcome === "" ? [{ value: "", label: "go to… (choose)" }] : []),
-                        ...[...new Set([...names, ...(rule.agent !== undefined && rule.agent !== "" ? [rule.agent] : [])])].map((name) => ({ value: name, label: `go to ${assistantName(name)}` })),
-                        { value: DENY, label: "are refused" },
+                        ...[...new Set([...names, ...(rule.agent !== undefined && rule.agent !== "" ? [rule.agent] : [])])].map((name) => ({ value: name, label: assistantName(name), group: "Agents" })),
+                        { value: DENY, label: "Nobody: refused", description: "The channel says it cannot answer", group: "Refuse" },
                       ]}
                       onChange={(value) => edit(index, value === DENY ? { deny: true, agent: undefined } : { agent: value, deny: undefined, reason: undefined })}
+                      className="max-w-72 min-w-36"
                     />
                     {deny && (
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="text-[13px] text-ink-2">reason</span>
-                        <Input aria-label={`Rule ${n}: reason`} value={rule.reason ?? ""} placeholder="optional, for the log" maxLength={500} onChange={(event) => edit(index, { reason: event.target.value })} className="h-8 w-48 text-[13px]" />
-                      </span>
+                      <Input
+                        aria-label={`Rule ${n}: reason`}
+                        value={rule.reason ?? ""}
+                        placeholder="Reason, for the log (optional)"
+                        maxLength={500}
+                        onChange={(event) => edit(index, { reason: event.target.value })}
+                        className="h-8 min-w-40 flex-1 text-[13px]"
+                      />
                     )}
-                    {(rule.conversation === undefined || rule.actor === undefined) && (
-                      <span className="inline-flex items-center">
-                        {rule.conversation === undefined && (
-                          <Button size="xs" variant="quiet" title="Only the messages of one chat" onClick={() => edit(index, { conversation: "" })} className="text-ink-3">
-                            <Plus width={12} height={12} strokeWidth={2} />
-                            chat
-                          </Button>
-                        )}
-                        {rule.actor === undefined && (
-                          <Button size="xs" variant="quiet" title="Only the messages of one sender" onClick={() => edit(index, { actor: "" })} className="text-ink-3">
-                            <Plus width={12} height={12} strokeWidth={2} />
-                            sender
-                          </Button>
-                        )}
-                      </span>
-                    )}
-                  </div>
-                  {problem !== undefined && <p className={`mt-2 text-[12.5px] ${problem.level === "error" ? "text-red" : "text-orange"}`}>{problem.text}</p>}
-                  {problem === undefined && !deny && webPicks.length > 0 && isWeb(rule.channel) && (
-                    <p className="mt-2 text-[12.5px] text-ink-3">
-                      {webPicks.includes(rule.agent ?? "")
-                        ? "In the web chat, the picker starts on this assistant; a user may pick another."
-                        : "In the web chat, users pick among the assistants offered, and this one is not: the picker starts on the first."}
-                    </p>
-                  )}
+                  </Line>
                 </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <Button size="xs" variant="quiet" aria-label={`Move rule ${n} up`} title="Up" disabled={index === 0} onClick={() => move(index, index - 1)} className="w-7 px-0">
-                    <ArrowUp width={14} height={14} strokeWidth={1.8} />
-                  </Button>
-                  <Button size="xs" variant="quiet" aria-label={`Move rule ${n} down`} title="Down" disabled={index === rows.length - 1} onClick={() => move(index, index + 1)} className="w-7 px-0">
-                    <ArrowDown width={14} height={14} strokeWidth={1.8} />
-                  </Button>
-                  <Button size="xs" variant="quiet" aria-label={`Remove rule ${n}`} title="Remove" onClick={() => setDraft(rows.filter((_, at) => at !== index))} className="w-7 px-0">
-                    <Trash width={14} height={14} strokeWidth={1.8} />
-                  </Button>
-                </div>
+                <ActionsMenu
+                  label={`Actions for rule ${n}`}
+                  iconSize={15}
+                  className="mt-2 flex size-6 shrink-0 items-center justify-center rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink aria-expanded:bg-hover-2 aria-expanded:text-ink"
+                  actions={[
+                    ...(index > 0 ? [{ key: "up", label: "Move up", icon: <ArrowUp />, onSelect: () => move(index, index - 1) }] : []),
+                    ...(index < rows.length - 1 ? [{ key: "down", label: "Move down", icon: <ArrowDown />, onSelect: () => move(index, index + 1) }] : []),
+                    { key: "remove", label: "Remove", icon: <Trash />, danger: true, onSelect: () => setDraft(rows.filter((_, at) => at !== index)) },
+                  ]}
+                />
               </div>
+              {problem !== undefined && <Note tone={problem.level}>{problem.text}</Note>}
             </li>
           );
         })}
-        <li className="flex items-center gap-2 rounded-card border border-dashed border-line px-3 py-2.5 text-[13px] text-ink-2">
-          <span className="w-3 shrink-0" />
-          <span className="w-4 shrink-0" />
-          <span className="min-w-0 flex-1">
-            {rows.length === 0 ? "Every message goes to " : "Everything else goes to "}
-            <span className="font-medium text-ink">{defaultAgent === undefined ? "the default agent" : assistantName(defaultAgent)}</span>
-            {defaultAgent !== undefined && <span className="text-ink-3">, the default agent</span>}
-          </span>
-          {installed("router-basic") && (
-            <Button size="xs" variant="quiet" onClick={() => openSection("router-basic")}>
-              Change in Agent
-            </Button>
-          )}
-        </li>
       </ol>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="secondary" onClick={add}>
-          <Plus width={14} height={14} strokeWidth={2} />
-          Add a rule
-        </Button>
-        <span className="flex-1" />
-        {changed && (
-          <>
-            <span className="text-[12.5px] text-ink-3">Applies to new conversations.</span>
-            <Button
-              size="sm"
-              variant="quiet"
-              disabled={routing.saving}
-              onClick={() => {
-                setDraft(undefined);
-                setTyped(new Set());
-              }}
-            >
-              Revert
-            </Button>
-            <Button size="sm" variant="primary" disabled={routing.saving || blocked} onClick={() => save(rules.map(cleaned))}>
-              Save
-            </Button>
-          </>
-        )}
-      </div>
     </div>
   );
 }
@@ -330,6 +362,7 @@ export default defineSettings({
   icon: GitFork,
   group: "Agents",
   order: 2,
+  entry: "routing",
   requires: ["settings"],
   keywords: ["routing", "rules", "channel", "chat", "sender", "deny", "refuse", "block", "agent"],
   component: RoutingSettings,

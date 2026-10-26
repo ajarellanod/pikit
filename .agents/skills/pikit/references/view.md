@@ -153,12 +153,22 @@ Settings dialog, with no route of your own.
    ```tsx
    export default defineSettings({ id: "my-component", title: "My component", icon: Tools, group: "Components", requires: ["settings"], keywords: ["tone"], component: () => <SchemaSettings component="my-component" /> });
    ```
+   `entry` (optional) makes it a part of a shared entry: the sections of one `entry` (`"agents"`,
+   `"routing"`) are listed once, under the first part's title, icon and group, the parts by `order`
+   one after another, each shown while its own `requires` are provided.
+   **A section MUST read and write only its own component's settings**: `useSettings("<its own
+   name>")`, never another's, never the settings routes directly (`/admin/api/settings/...`,
+   `useApi("/settings/...")`); the component's shipped files `declare` only under its own name and
+   `get` no other registry component's. `pikit registry validate` refuses any other
+   (`checkSettingsOwnership`). What the section needs of another component is that component's to
+   show: a part of a shared entry, or its own words.
    `SchemaSettings` (`@/components/pikit/settings`) renders it from the schema (switch, segmented
    choice, select, text, prompt editor). A custom section places `SettingsHeading`, `SettingsRow` and
    the controls itself over `useSettings("<component>")` (its `section`: schema, defaults, value; its
-   `save(value)`: the whole value; `storedOf` keeps what differs from the defaults). router-basic's
-   `settings/index.tsx` (Agent) is the reference for a custom one.
+   `save(value)`: the whole value; `storedOf` keeps what differs from the defaults). runtime-pi's
+   `settings/index.tsx` (Agents' first part) is the reference for a custom one.
 4. **Check it** as a view: the dashboard builds, the section shows in Settings only while its
    `requires` are provided, a change shows in the next `get` (test it in the component with a
    `settings` double, or settings-store's conformance suite for a provider). `pikit registry validate`
-   checks `settings/index.tsx` defines the section under the component's name.
+   checks `settings/index.tsx` defines the section under the component's name, and that it and the
+   component use no other component's settings.
