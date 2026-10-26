@@ -140,6 +140,17 @@ export function commandOf(text: string, commands: CommandLookup): { name: string
   return { name, args: (match[2] ?? "").trim() };
 }
 
+/**
+ * `commands` cut to the names a channel lets its users type (`"all"`: every one): what a channel gives
+ * `admitInbound` when its config says which commands run from its chat. A name not allowed is unknown
+ * there, so `/name` goes to the agent as text.
+ */
+export function allowedCommands(commands: CommandLookup, allow: "all" | readonly string[]): CommandLookup {
+  if (allow === "all") return commands;
+  const names = new Set(allow);
+  return { keys: () => commands.keys().filter((name) => names.has(name)), get: (name) => (names.has(name) ? commands.get(name) : undefined) };
+}
+
 declare module "@pikit/core" {
   interface AppKeyedCapabilities {
     /** One slash command per name (Pi's rule), run in a conversation; provided by any component. */

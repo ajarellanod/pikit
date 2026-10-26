@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { ConversationRef } from "../agent.ts";
-import { type AgentCommand, commandOf, listAgentCommands, runAgentCommand } from "../command.ts";
+import { type AgentCommand, allowedCommands, commandOf, listAgentCommands, runAgentCommand } from "../command.ts";
 import { createAgentCommandConformance } from "./agent-command.ts";
 
 const CONVERSATION: ConversationRef = { key: "test:1", agent: "assistant", conversationId: "c1" };
@@ -115,4 +115,18 @@ test("commandOf: a registered command's name and its arguments; anything else is
   expect(commandOf("rules add x", lookup)).toBeUndefined();
   expect(commandOf("please /rules", lookup)).toBeUndefined();
   expect(commandOf("/", lookup)).toBeUndefined();
+});
+
+test("allowedCommands: only the names allowed are found or listed; all keeps every one", () => {
+  const command: AgentCommand = { description: "C", run: async () => undefined };
+  const all = new Map<string, AgentCommand>([["rules", command], ["new", command]]);
+  const lookup = { keys: () => [...all.keys()], get: (name: string) => all.get(name) };
+
+  const some = allowedCommands(lookup, ["rules"]);
+  expect(some.keys()).toEqual(["rules"]);
+  expect(some.get("new")).toBeUndefined();
+  expect(commandOf("/new", some)).toBeUndefined();
+  expect(commandOf("/rules", some)).toEqual({ name: "rules", args: "" });
+  expect(allowedCommands(lookup, "all").keys()).toEqual(["rules", "new"]);
+  expect(allowedCommands(lookup, []).keys()).toEqual([]);
 });

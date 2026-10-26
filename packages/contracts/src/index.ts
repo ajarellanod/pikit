@@ -38,7 +38,7 @@ export { RUN_REQUESTS } from "./run-requests.ts";
 export type { AgentDirectory, DirectoryAgent } from "./agent-directory.ts";
 
 export type { AgentCommand, CommandInfo, CommandLookup, CommandOutcome } from "./command.ts";
-export { COMMAND_NAME, commandOf, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
+export { allowedCommands, COMMAND_NAME, commandOf, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
 export type { CompletionRequest, ModelComplete } from "./model.ts";
 export type { ConversationDescriber, ConversationParty, DescribedConversation, PartyId } from "./conversation-describe.ts";
 export { channelKindOf, cleanParty, describeConversation, describeStage, PARTY_LIMITS } from "./conversation-describe.ts";
