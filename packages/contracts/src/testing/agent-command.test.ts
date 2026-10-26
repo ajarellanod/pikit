@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { ConversationRef } from "../agent.ts";
-import { type AgentCommand, listAgentCommands, runAgentCommand } from "../command.ts";
+import { type AgentCommand, commandOf, listAgentCommands, runAgentCommand } from "../command.ts";
 import { createAgentCommandConformance } from "./agent-command.ts";
 
 const CONVERSATION: ConversationRef = { key: "test:1", agent: "assistant", conversationId: "c1" };
@@ -86,4 +86,33 @@ test("runAgentCommand: the note, a failure's message, an unknown name; listAgent
   expect(await runAgentCommand(lookup, "Bad", CONVERSATION, "", context)).toEqual({ kind: "unknown" });
   expect(await runAgentCommand(lookup, "empty", CONVERSATION, "", context)).toEqual({ kind: "unknown" });
   expect(listAgentCommands(lookup).map((each) => each.name)).toEqual(["good", "odd", "quiet", "throws"]);
+});
+
+test("runAgentCommand passes the sender to the command, a copy, and none when not given", async () => {
+  const seen: unknown[] = [];
+  const who: AgentCommand = { description: "Who", run: async (_c, _args, _ctx, sender) => void seen.push(sender) };
+  const all = new Map<string, AgentCommand>([["who", who]]);
+  const lookup = { keys: () => [...all.keys()], get: (name: string) => all.get(name) };
+  const context = (await defineApp({ components: [], logger: silentLogger }).create()).context();
+
+  const sender = { channel: "googlechat", id: "users/1", extra: "dropped" };
+  await runAgentCommand(lookup, "who", CONVERSATION, "", context, sender);
+  await runAgentCommand(lookup, "who", CONVERSATION, "", context);
+
+  expect(seen).toEqual([{ channel: "googlechat", id: "users/1" }, undefined]);
+});
+
+test("commandOf: a registered command's name and its arguments; anything else is a message", () => {
+  const command: AgentCommand = { description: "Rules", run: async () => undefined };
+  const all = new Map<string, AgentCommand>([["rules", command], ["Bad", command]]);
+  const lookup = { keys: () => [...all.keys()], get: (name: string) => all.get(name) };
+
+  expect(commandOf("/rules", lookup)).toEqual({ name: "rules", args: "" });
+  expect(commandOf("  /rules add  Always answer in Spanish ", lookup)).toEqual({ name: "rules", args: "add  Always answer in Spanish" });
+  expect(commandOf("/rules\napprove r1", lookup)).toEqual({ name: "rules", args: "approve r1" });
+  expect(commandOf("/unknown thing", lookup)).toBeUndefined();
+  expect(commandOf("/Bad", lookup)).toBeUndefined();
+  expect(commandOf("rules add x", lookup)).toBeUndefined();
+  expect(commandOf("please /rules", lookup)).toBeUndefined();
+  expect(commandOf("/", lookup)).toBeUndefined();
 });

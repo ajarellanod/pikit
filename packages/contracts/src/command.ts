@@ -30,7 +30,7 @@
  */
 
 import type { AppContext } from "@pikit/core";
-import type { ConversationRef } from "./agent.ts";
+import type { ConversationRef, Sender } from "./agent.ts";
 
 /** A command's name (its `agent.command` key, without the slash): Pi's rule for slash commands. */
 export const COMMAND_NAME = /^[a-z0-9][a-z0-9:-]*$/;
@@ -48,9 +48,11 @@ export interface AgentCommand {
   /**
    * Runs it in `conversation` (the key's current one) with `args`, the text after the name, trimmed
    * (`""` when none). Resolves with a note for whoever ran it, or nothing; rejects, with a message for
-   * the operator, when it cannot.
+   * the operator, when it cannot. `sender` is who typed it in a channel (`{ channel, id }`, as a
+   * request's sender), after the channel's own authentication and routing; absent when the operator
+   * runs it from the dashboard. A command that acts for a person (their preferences) refuses without one.
    */
-  run(conversation: ConversationRef, args: string, ctx: AppContext): Promise<{ text?: string } | void>;
+  run(conversation: ConversationRef, args: string, ctx: AppContext, sender?: Sender): Promise<{ text?: string } | void>;
 }
 
 /** A command as a menu lists it. */
@@ -100,17 +102,42 @@ export type CommandOutcome = { kind: "ran"; text?: string } | { kind: "failed"; 
  * malformed name is `unknown`, and runs nothing; a command that rejects is `failed`, with its message
  * (never thrown); what it answers other than `{ text: string }` or nothing is taken as nothing.
  */
-export async function runAgentCommand(commands: CommandLookup, name: string, conversation: ConversationRef, args: string, ctx: AppContext): Promise<CommandOutcome> {
+export async function runAgentCommand(
+  commands: CommandLookup,
+  name: string,
+  conversation: ConversationRef,
+  args: string,
+  ctx: AppContext,
+  sender?: Sender,
+): Promise<CommandOutcome> {
   const command = isCommandName(name) ? commands.get(name) : undefined;
   if (command === undefined || commandProblem(name, command) !== undefined) return { kind: "unknown" };
   try {
-    const answer = await command.run(conversation, args.trim(), ctx);
+    const answer = sender === undefined ? await command.run(conversation, args.trim(), ctx) : await command.run(conversation, args.trim(), ctx, { channel: sender.channel, id: sender.id });
     const text = typeof answer === "object" && answer !== null && typeof answer.text === "string" && answer.text.trim() !== "" ? answer.text : undefined;
     return { kind: "ran", ...(text !== undefined && { text }) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { kind: "failed", message: message.trim() === "" ? `/${name} failed` : message };
   }
+}
+
+/**
+ * The command a channel's message names, or `undefined`: its text is `/name` or `/name args` (leading
+ * spaces aside; the name ends at the first space or line break, `args` is the rest, trimmed) and `name`
+ * is a command of `commands` that `runAgentCommand` would run. Anything else, an unknown `/word`
+ * included, is a message for the agent. A channel that runs commands (typed in its chat) asks this
+ * before `admitInbound`, then runs the command with `runAgentCommand` in the App that holds the
+ * conversation, with the message's sender, and tells the sender the outcome; the command's message is
+ * never dispatched to the agent.
+ */
+export function commandOf(text: string, commands: CommandLookup): { name: string; args: string } | undefined {
+  const match = /^\s*\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
+  if (match === null) return undefined;
+  const name = match[1] ?? "";
+  const command = isCommandName(name) ? commands.get(name) : undefined;
+  if (command === undefined || commandProblem(name, command) !== undefined) return undefined;
+  return { name, args: (match[2] ?? "").trim() };
 }
 
 declare module "@pikit/core" {
