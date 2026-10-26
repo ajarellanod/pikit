@@ -23,6 +23,7 @@
 import { type AppContext, Halt } from "@pikit/core";
 import type { Admission, AgentImage, AgentRuntime, ConversationRef } from "./agent.ts";
 import type { ConversationRegistry } from "./conversations.ts";
+import { type CommandLookup, type CommandOutcome, commandOf, runAgentCommand } from "./command.ts";
 import { DASHBOARD_REQUEST_PREFIX, isDashboardRequest } from "./delivery.ts";
 
 /** One message from a channel, whatever the platform. */
@@ -88,7 +89,16 @@ export type InboundOutcome =
   /** The router decided no agent answers it. */
   | { kind: "denied"; message: InboundMessage; reason?: string }
   /** No stage of `route.resolve` decided: no router is installed. Logged as an error. */
-  | { kind: "no_route"; message: InboundMessage };
+  | { kind: "no_route"; message: InboundMessage }
+  /**
+   * The message was a command typed in the chat (`AdmitOptions.commands`, `commandOf`): it ran in its
+   * conversation, with the message's sender, instead of reaching the agent. The channel tells the
+   * sender `outcome` (its note, or why it failed); nothing was dispatched.
+   */
+  | { kind: "command"; message: InboundMessage; conversation: ConversationRef; name: string; outcome: CommandOutcome };
+
+/** What `admitInbound` resolves with for `options`: a `command` outcome only when it may be given `commands`. */
+export type AdmitOutcome<O extends AdmitOptions> = "commands" extends keyof O ? InboundOutcome : Exclude<InboundOutcome, { kind: "command" }>;
 
 /**
  * What `AgentRuntime.dispatch` rejects with when the conversation's agent is no agent now, for good: a
@@ -126,6 +136,16 @@ export interface AdmitOptions {
    */
   space?: string;
   /**
+   * The App's commands (`agent.command`, as `useKeyed` gives them), when the channel runs commands
+   * typed in its chat: a message whose text (as `inbound.normalize` left it) is `/name args` for one of
+   * them (`commandOf`) is routed like any message (a denied sender runs nothing), then runs in its
+   * conversation with its sender (`runAgentCommand`) and is never dispatched: the outcome is `command`.
+   * Absent: every message goes to the agent, `/` or not. A command is not deduplicated: a platform's
+   * redelivery runs it again, so a command typed in a chat is harmless to repeat (or the channel keeps
+   * which messages ran one, as it does for its own `/new`).
+   */
+  commands?: CommandLookup;
+  /**
    * Called with the conversation once it resolved, right before `dispatch`: the last moment to start
    * waiting for the run's events (`agent.settled`), which may arrive before `dispatch` returns, and to
    * prepare what the run reads in that conversation (a file the message brings, written to its
@@ -153,7 +173,11 @@ export interface AdmitOptions {
  * naming both), and the message goes there. When routing names the gone agent itself, the message is
  * `denied` with why: its sender is told once, and the platform is acknowledged.
  */
-export async function admitInbound(ctx: AppContext, message: InboundMessage, options: AdmitOptions): Promise<InboundOutcome> {
+export function admitInbound<O extends AdmitOptions>(ctx: AppContext, message: InboundMessage, options: O): Promise<AdmitOutcome<O>> {
+  return admit(ctx, message, options) as Promise<AdmitOutcome<O>>;
+}
+
+async function admit(ctx: AppContext, message: InboundMessage, options: AdmitOptions): Promise<InboundOutcome> {
   // The operator's request ids are reserved: a channel's message with one would be passed over by
   // answer delivery, and taken for the operator's in the dashboard.
   if (isDashboardRequest(message.id)) {
@@ -196,6 +220,12 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
   // The message's channel is the conversation's when this message creates it (the registry keeps the first).
   const place = { channel: normalized.channel, ...(options.space !== undefined && { space: options.space }) };
   let conversation = await options.conversations.resolve(options.key, decision.agent, place, ctx);
+  const command = options.commands === undefined ? undefined : commandOf(normalized.text, options.commands);
+  if (command !== undefined && options.commands !== undefined) {
+    const sender = { channel: normalized.channel, id: normalized.actor.id };
+    const outcome = await runAgentCommand(options.commands, command.name, conversation, command.args, ctx, sender);
+    return { kind: "command", message: normalized, conversation, name: command.name, outcome };
+  }
   let admission: Admission;
   try {
     admission = await dispatch(conversation);

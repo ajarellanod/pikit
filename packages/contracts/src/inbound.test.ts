@@ -320,3 +320,35 @@ test("a plain dispatch failure (for a while) still throws: the platform delivers
   await expect(admitInbound(app.context(), message, { conversations: e.conversations, runtime: e.runtime, key: "test:c1" })).rejects.toThrow("the store is down");
   expect(e.pointer().conversationId).toBe("c-1");
 });
+
+test("admitInbound with commands: a registered /name runs in its conversation with the sender, after routing, and is never dispatched; anything else is", async () => {
+  const ran: { conversation: string; args: string; sender: unknown }[] = [];
+  const all = new Map([
+    ["rules", { description: "Rules", run: async (conversation: ConversationRef, args: string, _ctx: unknown, sender?: unknown) => void ran.push({ conversation: conversation.key, args, sender }) }],
+    ["fails", { description: "Fails", run: async () => Promise.reject(new Error("no such rule")) }],
+  ]);
+  const commands = { keys: () => [...all.keys()], get: (name: string) => all.get(name) };
+
+  const e = ends();
+  const ctx = await appWith(() => {});
+  const outcome = await admitInbound(ctx, { ...message, text: "/rules add Answer in Spanish" }, { ...e, key: "test:c1", commands });
+  expect(outcome).toMatchObject({ kind: "command", name: "rules", outcome: { kind: "ran" }, conversation: { key: "test:c1", agent: "support" } });
+  expect(ran).toEqual([{ conversation: "test:c1", args: "add Answer in Spanish", sender: { channel: "test", id: "someone" } }]);
+  expect(e.dispatched).toEqual([]);
+
+  expect(await admitInbound(ctx, { ...message, id: "m2", text: "/fails" }, { ...e, key: "test:c1", commands })).toMatchObject({ kind: "command", outcome: { kind: "failed", message: "no such rule" } });
+  // An unknown /word, or any other text, goes to the agent.
+  expect((await admitInbound(ctx, { ...message, id: "m3", text: "/unknown x" }, { ...e, key: "test:c1", commands })).kind).toBe("admitted");
+  expect(e.dispatched.map((each) => each.prompt)).toEqual(["/unknown x"]);
+});
+
+test("admitInbound with commands: a sender the router denies runs no command", async () => {
+  let ran = 0;
+  const commands = { keys: () => ["rules"], get: () => ({ description: "Rules", run: async () => void ran++ }) };
+  const e = ends();
+  const ctx = await appWith((pikit) => pikit.pipeline("route.resolve", (v) => ({ ...v, decision: { agent: "support", access: "deny" as const, reason: "no" } })), { router: false });
+
+  expect((await admitInbound(ctx, { ...message, text: "/rules add x" }, { ...e, key: "test:c1", commands })).kind).toBe("denied");
+  expect(ran).toBe(0);
+  expect(e.steps.filter((step) => step.startsWith("resolve"))).toEqual([]);
+});

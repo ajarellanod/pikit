@@ -44,7 +44,7 @@ export type { ConversationDescriber, ConversationParty, DescribedConversation, P
 export { channelKindOf, cleanParty, describeConversation, describeStage, PARTY_LIMITS } from "./conversation-describe.ts";
 
 export { AgentUnavailableError, admitInbound, isAgentUnavailable } from "./inbound.ts";
-export type { AdmitOptions, InboundMessage, InboundOutcome, RouteDecision } from "./inbound.ts";
+export type { AdmitOptions, AdmitOutcome, InboundMessage, InboundOutcome, RouteDecision } from "./inbound.ts";
 
 export type { AgentState } from "./agent-state.ts";
 export { AGENT_STATE } from "./agent-state.ts";
