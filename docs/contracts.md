@@ -37,6 +37,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
+| `storage.blob` | single | none | none | `createBlobConformance` |
 | `actor.mailbox` | single | actors-do, mailbox-local | admin-api, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, settings-store | `createMailboxConformance` |
 | `actor.inbox` | single | actors-do, mailbox-local | approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, runtime-pi? | `createWakeupsConformance` |
