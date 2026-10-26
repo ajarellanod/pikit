@@ -9,29 +9,38 @@
  *
  * A pointer also records the conversation's channel (`ConversationRef.channel`), given with the key's
  * first resolve: a conversation belongs to one channel for good, so neither a later resolve nor a
- * reset changes it.
+ * reset changes it. So is its space (`ConversationRef.space`), when the channel gives one.
  */
 
 import type { ConversationRef } from "./agent.ts";
 import type { AppContext } from "@pikit/core";
 
+/** Where a conversation belongs, given with its key's first resolve and kept for good. */
+export interface ConversationPlace {
+  /** Its channel (`ConversationRef.channel`). */
+  channel: string;
+  /** Its space (`ConversationRef.space`), when the channel gives one: non-empty. */
+  space?: string;
+}
+
 export interface ConversationRegistry {
   /**
    * The conversation for `key`. The first time, the registry creates its runtime conversation and
-   * records the pointer with `agent` and `channel`; after that it returns what it recorded. A
-   * conversation keeps the agent it was created with (an actor does not change class) and its channel:
-   * a later call's `agent` and `channel` change nothing. Concurrent first calls for one key create one
-   * conversation. The ref it returns has the recorded `channel`.
+   * records the pointer with `agent` and `place` (its channel, and its space when given); after that it
+   * returns what it recorded. A conversation keeps the agent it was created with (an actor does not
+   * change class), its channel and its space: a later call's `agent` and `place` change nothing.
+   * Concurrent first calls for one key create one conversation. The ref it returns has the recorded
+   * `channel`, and `space` when one was recorded. An empty `place.space` is refused (throws).
    */
-  resolve(key: string, agent: string, channel: string, ctx: AppContext): Promise<ConversationRef>;
-  /** The conversation for `key`, with its `channel`, or `undefined` if none was ever resolved. Creates nothing. */
+  resolve(key: string, agent: string, place: ConversationPlace, ctx: AppContext): Promise<ConversationRef>;
+  /** The conversation for `key`, with its `channel` (and `space`), or `undefined` if none was ever resolved. Creates nothing. */
   get(key: string, ctx: AppContext): Promise<ConversationRef | undefined>;
   /**
    * Point `key` to a new runtime conversation, keep the previous one, and emit `conversation.reset`
    * once the new pointer is durable. `undefined`, with no event, when `key` has no conversation. A
    * run still going on the previous conversation finishes there. The new conversation keeps the key's
    * agent when `agent` is `undefined`, else the agent it names: what `admitInbound` gives when the key's agent is no agent
-   * now (removed), the agent routing chooses now. It keeps the key's channel either way.
+   * now (removed), the agent routing chooses now. It keeps the key's channel and space either way.
    */
   reset(key: string, agent: string | undefined, ctx: AppContext): Promise<ConversationReset | undefined>;
 }

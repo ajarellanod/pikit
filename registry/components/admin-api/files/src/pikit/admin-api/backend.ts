@@ -384,7 +384,7 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       // Before the key is made: a refused message makes no conversation.
       await searchable(message.agent, message, ctx);
       // The dashboard's own conversation: its channel is the dashboard's, for good.
-      const conversation = await contracts.registry().resolve(message.key, message.agent, DASHBOARD_CHANNEL, ctx);
+      const conversation = await contracts.registry().resolve(message.key, message.agent, { channel: DASHBOARD_CHANNEL }, ctx);
       const admission = await dispatch(conversation, message, ctx);
       return { key: conversation.key, conversationId: conversation.conversationId, requestId: message.requestId, admission: admission.kind };
     },

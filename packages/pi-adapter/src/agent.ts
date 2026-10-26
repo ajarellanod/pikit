@@ -69,12 +69,12 @@ type JsonObject = { [key: string]: JsonValue };
 
 /**
  * What pikit knows of a conversation that pi-durable does not: its `ConversationRef` minus the id
- * (`key`, `agent`, `channel` once a ref gave one, and `origin` for a delegated one). Written when a
- * message is admitted, so a settlement found later (a run resumed after a restart) can be announced with
- * its conversation, and a run sees its channel and origin whatever ref reached it. `origin` is written
+ * (`key`, `agent`, `channel` and `space` once a ref gave them, and `origin` for a delegated one). Written
+ * when a message is admitted, so a settlement found later (a run resumed after a restart) can be announced
+ * with its conversation, and a run sees its channel, space and origin whatever ref reached it. `origin` is written
  * only by the delegation, when it creates the conversation (`delegation.ts`), never from a ref.
  */
-export const ConversationDoc = defineDoc<{ key: string; agent: string; channel?: string; origin?: ConversationOrigin }>({
+export const ConversationDoc = defineDoc<{ key: string; agent: string; channel?: string; space?: string; origin?: ConversationOrigin }>({
   kind: "pikit.conversation",
   version: 1,
   scope: "conversation",
@@ -128,19 +128,35 @@ export interface AgentConfigSource {
 }
 
 /**
- * `ref` as its conversation's record (`ConversationDoc`) has it: the recorded channel wins over a ref's
- * own (a conversation's channel never changes), and the origin is the recorded one or none, whatever
+ * `ref` as its conversation's record (`ConversationDoc`) has it: the recorded channel and space win over a
+ * ref's own (a conversation's channel and space never change), and the origin is the recorded one or none, whatever
  * the ref says (only the runtime fixes it).
  */
-export function asRecorded(ref: ConversationRef, recorded: { channel?: string | undefined; origin?: ConversationOrigin | undefined }): ConversationRef {
-  const { origin: _given, ...own } = ref;
+export function asRecorded(
+  ref: ConversationRef,
+  recorded: { channel?: string | undefined; space?: string | undefined; origin?: ConversationOrigin | undefined },
+): ConversationRef {
+  const { origin: _given, space: _space, ...own } = ref;
   const channel = recorded.channel ?? ref.channel;
-  return { ...own, ...(channel !== undefined && { channel }), ...(recorded.origin !== undefined && { origin: copyOrigin(recorded.origin) }) };
+  // A recorded channel means the conversation was recorded with its place: its space is the recorded one or none.
+  const space = recorded.channel !== undefined ? recorded.space : ref.space;
+  return {
+    ...own,
+    ...(channel !== undefined && { channel }),
+    ...(space !== undefined && { space }),
+    ...(recorded.origin !== undefined && { origin: copyOrigin(recorded.origin) }),
+  };
 }
 
-/** A plain copy of an origin (a document's draft or a ref's): its four fields, nothing else. */
+/** A plain copy of an origin (a document's draft or a ref's): its five fields, nothing else. */
 export function copyOrigin(origin: ConversationOrigin): ConversationOrigin {
-  return { key: origin.key, agent: origin.agent, conversationId: origin.conversationId, ...(origin.channel !== undefined && { channel: origin.channel }) };
+  return {
+    key: origin.key,
+    agent: origin.agent,
+    conversationId: origin.conversationId,
+    ...(origin.channel !== undefined && { channel: origin.channel }),
+    ...(origin.space !== undefined && { space: origin.space }),
+  };
 }
 
 /** The effective state: the agent's initial state with the stored updates over it, a copy. */
@@ -207,11 +223,11 @@ export class AgentConfigs {
   }
 
   /**
-   * In `tx`: record the conversation's key and agent (and its channel, the first time a ref gives one),
+   * In `tx`: record the conversation's key and agent (and its channel and space, the first time a ref gives a channel),
    * and make its `pi.agent` what `prepare` gives for `state` (installing the tools it names). Writes
    * `pi.agent` only when it differs, so an unchanged agent adds nothing to the transcript. The
    * definition owns `pi.agent` (SPEC §6): a `configure()` made on the conversation directly is undone
-   * here. Returns the conversation as a run sees it: `ref` with the recorded channel and origin.
+   * here. Returns the conversation as a run sees it: `ref` with the recorded channel, space and origin.
    */
   async apply(
     tx: Tx,
@@ -224,8 +240,12 @@ export class AgentConfigs {
     const recorded = await tx.doc(ConversationDoc, conversationId);
     if (recorded.key !== ref.key) recorded.key = ref.key;
     if (recorded.agent !== ref.agent) recorded.agent = ref.agent;
-    // A conversation belongs to one channel for good: the first ref with one records it.
-    if (recorded.channel === undefined && ref.channel !== undefined) recorded.channel = ref.channel;
+    // A conversation belongs to one channel and one space for good: the first ref with a channel records
+    // both (its space, if it has one, comes with it: the registry gives them together).
+    if (recorded.channel === undefined && ref.channel !== undefined) {
+      recorded.channel = ref.channel;
+      if (ref.space !== undefined) recorded.space = ref.space;
+    }
     // Its origin is the delegation's to write, before this; a ref's is ignored.
     const conversation = asRecorded(ref, recorded);
 

@@ -332,6 +332,47 @@ describe("contexts", () => {
     expect(seen).toEqual(["telegram", "telegram", "telegram", "telegram"]);
     expect(new Set(prepared)).toEqual(new Set(["telegram"]));
   });
+
+  test("a run sees its conversation's space: recorded with its channel, kept for a ref without one or with another, and after a restart; none when the first ref had none", async () => {
+    const seen: (string | undefined)[] = [];
+    const prepared: (string | undefined)[] = [];
+    const probe = holdTool(async (context) => {
+      seen.push(context.value(CONVERSATION)?.space);
+      return "seen";
+    });
+    const agent = defineAgent({
+      ...scriptedAgent([probe as never]),
+      prepare: (_state, ctx) => {
+        prepared.push(ctx.conversation.space);
+        return {};
+      },
+    });
+    const w = await worker({ agents: [agent] });
+    const spaced = await w.conversation();
+    const plain = await w.conversation();
+
+    await w.dispatch("r1", "hold", { ...spaced, channel: "googlechat", space: "googlechat:spaces/A" });
+    await w.result("r1");
+    await w.dispatch("r2", "hold", spaced);
+    expect((await w.started("r2")).conversation.space).toBe("googlechat:spaces/A");
+    await w.result("r2");
+    await w.dispatch("r3", "hold", { ...spaced, channel: "dashboard", space: "elsewhere" });
+    await w.result("r3");
+    // Recorded with its channel and no space: a later ref's space changes nothing.
+    await w.dispatch("p1", "hold", { ...plain, channel: "telegram" });
+    await w.result("p1");
+    await w.dispatch("p2", "hold", { ...plain, channel: "telegram", space: "late" });
+    await w.result("p2");
+    await w.close();
+
+    const again = await openWorker(w.path, { agents: [agent] });
+    cleanup.push(() => again.close());
+    await again.dispatch("r4", "hold", spaced);
+    await again.result("r4");
+
+    expect(seen).toEqual(["googlechat:spaces/A", "googlechat:spaces/A", "googlechat:spaces/A", undefined, undefined, "googlechat:spaces/A"]);
+    expect(new Set(prepared)).toEqual(new Set(["googlechat:spaces/A", undefined]));
+  });
 });
 
 describe("conversation refs", () => {

@@ -74,6 +74,19 @@ export interface ConversationRef {
    */
   channel?: string;
   /**
+   * The space the conversation belongs to: a place several conversations share (a Google Chat space
+   * whose threads are each a conversation, a project of the web chat whose chats are), opaque to all
+   * but the channel that names it. The channel gives it (`AdmitOptions.space`) and
+   * `conversations.registry` records it with the key's first resolve, as the channel: a conversation
+   * belongs to one space for good, kept through resets, and the runtime records it with the
+   * conversation, so a run sees it whatever ref reached it. It is for what the conversations of a place
+   * share (memory, instructions): read it with `spaceOf`, which gives the conversation's own key when
+   * no space was given (a private chat is its own space). Never for finding where an answer goes, and
+   * never an access boundary by itself: who may write in a space is the channel's and the router's.
+   * Absent: the channel gives none (its conversations are their own spaces), or a ref made by hand.
+   */
+  space?: string;
+  /**
    * Where a delegated conversation comes from: the conversation a person or a channel opened, from
    * which its tree of delegations descends (a task delegated from a delegated task has the origin of
    * the one that delegated it). Absent in a conversation that is not delegated: it is its own origin.
@@ -99,6 +112,16 @@ export type ConversationOrigin = Omit<ConversationRef, "origin">;
 export function originOf(ref: ConversationRef): ConversationOrigin {
   const { origin, ...own } = ref;
   return origin ?? own;
+}
+
+/**
+ * The space `ref` belongs to, for what the conversations of a place share (memory, instructions):
+ * its origin's `space` when the channel gave one, else its origin's key (a conversation with no space
+ * is its own). A delegated conversation is in its origin's space, never in one of its own.
+ */
+export function spaceOf(ref: ConversationRef): string {
+  const origin = originOf(ref);
+  return origin.space ?? origin.key;
 }
 
 /**

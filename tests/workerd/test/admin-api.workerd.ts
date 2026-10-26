@@ -64,7 +64,7 @@ function channelActor(answers: string[]) {
         start() {
           inbox.get().handle("test.message", async (key, message, ctx) => {
             const { id, text } = message as { id: string; text: string };
-            const conversation = await registry.get().resolve(key, "scripted", "test", ctx);
+            const conversation = await registry.get().resolve(key, "scripted", { channel: "test" }, ctx);
             await runtime.get().dispatch({ requestId: id, conversation, prompt: text }, ctx);
           });
         },

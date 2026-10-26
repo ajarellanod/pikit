@@ -324,7 +324,13 @@ async function stepsOf(tx: Tx, child: ConversationId): Promise<{ steps: Delegati
 async function originFrom(tx: Tx, parent: ConversationId): Promise<ConversationOrigin> {
   const recorded = await tx.doc(ConversationDoc, parent);
   if (recorded.origin !== undefined) return copyOrigin(recorded.origin);
-  return { key: recorded.key, agent: recorded.agent, conversationId: String(parent), ...(recorded.channel !== undefined && { channel: recorded.channel }) };
+  return {
+    key: recorded.key,
+    agent: recorded.agent,
+    conversationId: String(parent),
+    ...(recorded.channel !== undefined && { channel: recorded.channel }),
+    ...(recorded.space !== undefined && { space: recorded.space }),
+  };
 }
 
 /** In `tx`: a new conversation for a task, owned by `owner`, recorded with `origin`, and run as `agent` (`options.apply`). */

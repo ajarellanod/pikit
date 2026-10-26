@@ -83,7 +83,7 @@ test("the file records each pointer and the conversations a conversation was in 
   const r = records();
   const { app, registry } = await started(r);
   const ctx = app.context();
-  const first = await registry.resolve("http:c1", "assistant", "http", ctx);
+  const first = await registry.resolve("http:c1", "assistant", { channel: "http" }, ctx);
   const reset = await registry.reset("http:c1", undefined, ctx);
 
   const file = JSON.parse(readFileSync(r.path, "utf8"));
@@ -102,7 +102,7 @@ test("the file records each pointer and the conversations a conversation was in 
 test("a key named __proto__ is a key like any other, also after a restart", async () => {
   const r = records();
   const first = await started(r);
-  const created = await first.registry.resolve("__proto__", "assistant", "test", first.app.context());
+  const created = await first.registry.resolve("__proto__", "assistant", { channel: "test" }, first.app.context());
   await first.app.stop();
 
   const second = await started(r);
@@ -158,5 +158,5 @@ test("the registry is refused while the app is not running", async () => {
   await app.stop();
 
   await expect(registry.get("http:c1", app.context())).rejects.toThrow("while the app is not running");
-  await expect(registry.resolve("http:c1", "assistant", "test", app.context())).rejects.toThrow("while the app is not running");
+  await expect(registry.resolve("http:c1", "assistant", { channel: "test" }, app.context())).rejects.toThrow("while the app is not running");
 });

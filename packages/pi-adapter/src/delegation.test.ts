@@ -9,7 +9,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineTool } from "@earendil-works/pi-durable";
-import { CONVERSATION, type ConversationOrigin, type ConversationRef, defineAgent, type MessagePart, originOf, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
+import { CONVERSATION, type ConversationOrigin, type ConversationRef, defineAgent, type MessagePart, originOf, RUN_REQUESTS, type RunRequest, spaceOf } from "@pikit/contracts";
 import type { DurableTool } from "./agent.ts";
 import { ConversationDoc } from "./agent.ts";
 import { toChord } from "./context.ts";
@@ -456,6 +456,21 @@ test("a child's origin is the conversation its tree descends from, two delegatio
   // The conversation a person talks in has none.
   const { harness } = await w2.runtime.opened(w2.ctx);
   expect((await harness.snapshot(ConversationDoc, Number(conversation.conversationId) as ConversationId, toChord(w2.ctx)))?.origin).toBeUndefined();
+});
+
+test("a child is in its origin's space: the origin carries the space recorded with the parent, the child records none of its own", async () => {
+  const held = hold();
+  const w = await (await records()).worker({ tools: { delegate, hold: held.tool } });
+  const conversation = { ...(await w.conversation("assistant")), channel: "googlechat", space: "googlechat:spaces/A" };
+
+  await w.dispatch("r1", `call: delegate ${JSON.stringify({ agent: "helper", task: "hold" })}`, conversation);
+  await held.started;
+  expect(held.seen.origin?.space).toBe("googlechat:spaces/A");
+  expect(spaceOf({ key: held.seen.key ?? "", agent: "helper", conversationId: "child", ...(held.seen.origin !== undefined && { origin: held.seen.origin }) })).toBe(
+    "googlechat:spaces/A",
+  );
+  held.release();
+  expect((await w.result("r1")).kind).toBe("completed");
 });
 
 test("a child's ref dropped from the runtime's bounded refs (refsKept) is read back from its record with its origin", async () => {

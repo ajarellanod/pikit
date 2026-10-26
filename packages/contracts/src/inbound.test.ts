@@ -38,9 +38,9 @@ function ends() {
   const steps: string[] = [];
   const dispatched: AgentRequest[] = [];
   const conversations: ConversationRegistry = {
-    async resolve(key, agent, channel) {
-      steps.push(`resolve ${key} ${agent} ${channel}`);
-      return { key, agent, channel, conversationId: `conversation-of-${key}` };
+    async resolve(key, agent, place) {
+      steps.push(`resolve ${key} ${agent} ${place.channel}`);
+      return { key, agent, ...place, conversationId: `conversation-of-${key}` };
     },
     get: async () => undefined,
     reset: async () => undefined,
@@ -88,6 +88,16 @@ test("admitInbound: normalized, routed, into its conversation, dispatched as the
       conversation: { key: "test:c1", agent: "support", channel: "test", conversationId: "conversation-of-test:c1" },
     },
   ]);
+});
+
+test("admitInbound: the channel's space is given to the registry with the message's channel; none when the channel gives none", async () => {
+  const spaced = ends();
+  await admitInbound(await appWith(() => {}), message, { ...spaced, key: "test:s1:t1", space: "test:s1" });
+  expect(spaced.dispatched[0]?.conversation).toEqual({ key: "test:s1:t1", agent: "support", channel: "test", space: "test:s1", conversationId: "conversation-of-test:s1:t1" });
+
+  const plain = ends();
+  await admitInbound(await appWith(() => {}), message, { ...plain, key: "test:c1" });
+  expect(plain.dispatched[0]?.conversation).not.toHaveProperty("space");
 });
 
 test("admitInbound: the sender is the actor a normalize stage leaves (it may resolve one), on the message's own channel", async () => {

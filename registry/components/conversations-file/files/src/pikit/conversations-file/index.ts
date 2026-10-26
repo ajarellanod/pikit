@@ -40,6 +40,8 @@ const Pointer = Type.Object({
   conversationId: Type.String({ minLength: 1 }),
   /** The channel the conversation belongs to (`ConversationRef.channel`): the first resolve's, kept through resets. */
   channel: Type.String({ minLength: 1 }),
+  /** The space the conversation belongs to (`ConversationRef.space`), when its first resolve gave one: kept through resets. */
+  space: Type.Optional(Type.String({ minLength: 1 })),
   /** Runtime conversations this key was in before, oldest first. Kept, never deleted. */
   previousConversationIds: Type.Array(Type.String()),
   createdAt: Type.Number(),
@@ -76,7 +78,7 @@ export default defineComponent({
       if (path === undefined) throw new Error("conversations-file: conversations.registry used while the app is not running");
       return path;
     };
-    const ref = (key: string, pointer: Pointer): ConversationRef => ({ key, agent: pointer.agent, conversationId: pointer.conversationId, channel: pointer.channel });
+    const ref = (key: string, pointer: Pointer): ConversationRef => ({ key, agent: pointer.agent, conversationId: pointer.conversationId, channel: pointer.channel, ...(pointer.space !== undefined && { space: pointer.space }) });
 
     /** A new, empty conversation in the agent runtime. */
     const newConversation = (ctx: AppContext): Promise<string> => conversations.get().create(ctx);
@@ -88,13 +90,14 @@ export default defineComponent({
     };
 
     const registry: ConversationRegistry = {
-      resolve: (key, agent, channel, ctx) =>
+      resolve: (key, agent, place, ctx) =>
         serial(async () => {
+          if (place.space === "") throw new Error(`conversations-file: resolve(${JSON.stringify(key)}): a space is non-empty text`);
           const file = running();
           const found = pointers.get(key);
           if (found !== undefined) return ref(key, found);
           const now = ctx.clock.now();
-          const pointer: Pointer = { agent, conversationId: await newConversation(ctx), channel, previousConversationIds: [], createdAt: now, updatedAt: now };
+          const pointer: Pointer = { agent, conversationId: await newConversation(ctx), channel: place.channel, ...(place.space !== undefined && { space: place.space }), previousConversationIds: [], createdAt: now, updatedAt: now };
           await commit(file, new Map(pointers).set(key, pointer));
           return ref(key, pointer);
         }),

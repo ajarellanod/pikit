@@ -120,6 +120,12 @@ export interface AdmitOptions {
   /** The conversation's key. The channel builds it: `telegram:<chat id>`, `http:<id>`. */
   key: string;
   /**
+   * The conversation's space (`ConversationRef.space`), when the channel's conversations share one: a
+   * Google Chat space for each of its threads (`googlechat:spaces/AAA`). Recorded with the key's first
+   * resolve and kept for good; omitted when the conversation is its own space. Non-empty when given.
+   */
+  space?: string;
+  /**
    * Called with the conversation once it resolved, right before `dispatch`: the last moment to start
    * waiting for the run's events (`agent.settled`), which may arrive before `dispatch` returns, and to
    * prepare what the run reads in that conversation (a file the message brings, written to its
@@ -188,7 +194,8 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
     return { kind: "denied", message: normalized, reason: `the agent "${error.agent}" is no agent now` };
   };
   // The message's channel is the conversation's when this message creates it (the registry keeps the first).
-  let conversation = await options.conversations.resolve(options.key, decision.agent, normalized.channel, ctx);
+  const place = { channel: normalized.channel, ...(options.space !== undefined && { space: options.space }) };
+  let conversation = await options.conversations.resolve(options.key, decision.agent, place, ctx);
   let admission: Admission;
   try {
     admission = await dispatch(conversation);

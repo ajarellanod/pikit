@@ -877,7 +877,7 @@ for (const c of createAgentCommandConformance(() => {
   });
   return {
     components: [auth, agents, sqliteStorage(), runtime.component(), adminApi, reader],
-    conversation: async (_app, ctx) => runtime.registry.resolve("dashboard:suite", "assistant", "test", ctx),
+    conversation: async (_app, ctx) => runtime.registry.resolve("dashboard:suite", "assistant", { channel: "test" }, ctx),
     runs: [
       {
         name: "name",

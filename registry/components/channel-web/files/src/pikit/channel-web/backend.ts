@@ -238,7 +238,7 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
       // A retry of the same first message (its chat id is the request id's): the same conversation.
       if (row !== undefined && (row.hidden || row.userId !== ref.userId)) throw refusal("not_found", NOT_FOUND);
       // Made with the agent picked: admitInbound's resolve then finds it, whatever the router names.
-      if (row === undefined && agent !== undefined) await contracts.conversations().resolve(ref.key, agent, CHANNEL, ctx);
+      if (row === undefined && agent !== undefined) await contracts.conversations().resolve(ref.key, agent, { channel: CHANNEL }, ctx);
       return admit(ref, message, row === undefined, ctx);
     },
 

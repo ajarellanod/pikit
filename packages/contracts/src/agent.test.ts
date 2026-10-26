@@ -156,3 +156,12 @@ test("stewardProblem: one steward or none is fine; two or more are named, sorted
     'agents "assistant" and "support" are each marked `steward: true`; a project has one steward, its main agent: take it off the others',
   );
 });
+
+test("spaceOf: the origin's space, else the origin's key; a delegated conversation is in its origin's space, never its own", async () => {
+  const { spaceOf } = await import("./agent.ts");
+  expect(spaceOf({ key: "telegram:1", agent: "a", conversationId: "c" })).toBe("telegram:1");
+  expect(spaceOf({ key: "googlechat:spaces/A:threads/T", agent: "a", conversationId: "c", space: "googlechat:spaces/A" })).toBe("googlechat:spaces/A");
+  const origin = { key: "googlechat:spaces/A:threads/T", agent: "a", conversationId: "c", space: "googlechat:spaces/A" };
+  expect(spaceOf({ key: "delegate:x", agent: "b", conversationId: "d", space: "ignored", origin })).toBe("googlechat:spaces/A");
+  expect(spaceOf({ key: "delegate:x", agent: "b", conversationId: "d", origin: { key: "telegram:1", agent: "a", conversationId: "c" } })).toBe("telegram:1");
+});

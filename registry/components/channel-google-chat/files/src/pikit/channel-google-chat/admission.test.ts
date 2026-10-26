@@ -117,8 +117,8 @@ function ends() {
   const pointers = new Map<string, ConversationRef>();
   const resets: string[] = [];
   const conversations: ConversationRegistry = {
-    async resolve(key, agent, channel) {
-      const found = pointers.get(key) ?? { key, agent, channel, conversationId: `${key}#1` };
+    async resolve(key, agent, place) {
+      const found = pointers.get(key) ?? { key, agent, ...place, conversationId: `${key}#1` };
       pointers.set(key, found);
       return found;
     },

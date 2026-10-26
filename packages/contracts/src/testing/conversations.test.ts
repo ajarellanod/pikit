@@ -5,7 +5,7 @@
  * such as `conversations-file`, whose records survive the process.
  */
 
-import { test } from "bun:test";
+import { expect, test } from "bun:test";
 import type { ConversationRef } from "../agent.ts";
 import { defineComponent } from "@pikit/core";
 import type { ConversationRegistry } from "../conversations.ts";
@@ -16,7 +16,10 @@ interface Records {
   conversations: Set<string>;
 }
 
-function memoryRegistry(records: Records) {
+/** How a broken double breaks: it forgets spaces, or lets a later resolve replace one. */
+type Broken = "drops-space" | "replaces-space";
+
+function memoryRegistry(records: Records, broken?: Broken) {
   return defineComponent({
     name: "conversations-memory",
     setup(pikit) {
@@ -27,11 +30,15 @@ function memoryRegistry(records: Records) {
         return id;
       };
       const registry: ConversationRegistry = {
-        async resolve(key, agent, channel) {
+        async resolve(key, agent, place) {
+          if (place.space === "") throw new Error("a space is non-empty text");
           // Synchronous from lookup to record: concurrent first resolves cannot both create.
           let ref = records.pointers.get(key);
           if (ref === undefined) {
-            ref = { key, agent, channel, conversationId: newSession() };
+            ref = { key, agent, channel: place.channel, ...(broken !== "drops-space" && place.space !== undefined && { space: place.space }), conversationId: newSession() };
+            records.pointers.set(key, ref);
+          } else if (broken === "replaces-space" && place.space !== undefined) {
+            ref = { ...ref, space: place.space };
             records.pointers.set(key, ref);
           }
           return { ...ref };
@@ -55,9 +62,21 @@ function memoryRegistry(records: Records) {
   });
 }
 
-for (const c of createConversationRegistryConformance(() => {
-  const records: Records = { pointers: new Map(), conversations: new Set() };
-  return { components: [memoryRegistry(records)], conversationIds: async () => [...records.conversations] };
-})) {
+const suite = (broken?: Broken) =>
+  createConversationRegistryConformance(() => {
+    const records: Records = { pointers: new Map(), conversations: new Set() };
+    return { components: [memoryRegistry(records, broken)], conversationIds: async () => [...records.conversations] };
+  });
+
+for (const c of suite()) {
   test(`${c.group}: ${c.name}`, () => c.run());
+}
+
+const SPACE_CASE = "a conversation keeps the space it was created with";
+for (const broken of ["drops-space", "replaces-space"] as const) {
+  test(`a provider that ${broken === "drops-space" ? "forgets a space" : "lets a later resolve replace a space"} fails the space case`, async () => {
+    const c = suite(broken).find((each) => each.name.startsWith(SPACE_CASE));
+    if (c === undefined) throw new Error("the space case is missing");
+    await expect(c.run()).rejects.toThrow();
+  });
 }
