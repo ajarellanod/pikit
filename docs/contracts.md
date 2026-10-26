@@ -84,13 +84,21 @@ interface AgentRuntime {
 ```
 
 - `AgentRequest` is `{ requestId, conversation, prompt, images?, whenBusy?, sender?, parts? }`. `ConversationRef` is
-  `{ key, agent, conversationId, channel?, origin? }`: the channel's key, the agent's name, the runtime's
+  `{ key, agent, conversationId, channel?, space?, origin? }`: the channel's key, the agent's name, the runtime's
   conversation, and the channel the conversation belongs to for good (`telegram`, `http`, `dashboard`,
   `delegate`). `conversations.registry` records the channel with the key's first resolve; the runtime
   records it with the conversation, so a run sees it (`CONVERSATION`, `PrepareContext`, its `workspace`)
   even when the ref that reached it has none (an operator's action). It is for treating a channel's
   conversations apart (a directory, a prompt), never for finding where an answer goes. Settlements
   (`AgentResult`, `agent.submissions`) do not carry it.
+- `space` is the place several conversations share, when the channel's conversations share one: a
+  Google Chat space whose threads are each a conversation, a web chat project whose chats are. The
+  channel gives it (`AdmitOptions.space`), `conversations.registry` records it with the key's first
+  resolve and the runtime with the conversation, for good, as the channel. It is for what the
+  conversations of a place share (memory, saved files); read it with `spaceOf(ref)`, which gives the
+  origin's space, else the origin's key (a private chat is its own space, a delegated task is in its
+  origin's). Never for finding where an answer goes, and not an access boundary by itself. See
+  [features/spaces.md](../features/spaces.md).
 - `origin` (`ConversationOrigin`: a ref without an origin of its own) is where a delegated
   conversation comes from: the conversation a person or a channel opened, from which its tree of
   delegations descends (two delegations deep, still that one). Absent in a conversation that is not
@@ -273,13 +281,16 @@ tools. An agent runs with the ones it names, in order, after its own tools. Name
 ### `agent.command` (keyed, [command.ts](../packages/contracts/src/command.ts))
 
 One slash command per name (`COMMAND_NAME`: lowercase letters, digits, `-`, `:`):
-`{ description, argumentHint?, run(conversation, args, ctx) }`. It runs in the App that holds the
-conversation and acts only through contracts. `run` resolves with `{ text? }`, a note for whoever ran
+`{ description, argumentHint?, run(conversation, args, ctx, sender?) }`. It runs in the App that holds the
+conversation and acts only through contracts. `sender` is who typed it in a channel (absent for the
+operator's dashboard): a command acting for a person (their preferences) refuses without one. `run` resolves with `{ text? }`, a note for whoever ran
 it; a thrown `Error` is the reason it failed. `listAgentCommands` and `runAgentCommand` are the
-helpers a runner uses (`runAgentCommand` never throws). Providers: admin-api (`new`, `name`),
+helpers a runner uses (`runAgentCommand` never throws); `commandOf(text, commands)` finds a registered
+`/name args` in a chat's message and `allowedCommands(commands, "all" | names)` cuts them to a channel's
+config. Providers: admin-api (`new`, `name`),
 runtime-pi (`compact`). Runners: admin-api (the dashboard's "/"), channel-web (`/name` with each
 title it sets, so the dashboard lists a web conversation by the chat's title and asks no model of its
-own).
+own), and the channels that run commands typed in their chats through `admitInbound` (below).
 
 ---
 
@@ -291,16 +302,17 @@ Which runtime conversation a conversation key is in now.
 
 ```ts
 interface ConversationRegistry {
-  resolve(key, agent, channel, ctx): Promise<ConversationRef>; // creates on first call, then returns the record
+  resolve(key, agent, { channel, space? }, ctx): Promise<ConversationRef>; // creates on first call, then returns the record
   get(key, ctx): Promise<ConversationRef | undefined>;  // creates nothing
   reset(key, agent, ctx): Promise<ConversationReset | undefined>; // agent: undefined keeps the key's
 }
 ```
 
 - The pointer is a record, never memory. Concurrent first resolves of one key make one conversation.
-- A conversation keeps the agent and the channel it was created with: a later resolve's change nothing,
-  a reset keeps the channel. `admitInbound` resolves with the message's channel, admin-api with
-  `dashboard`. Every ref the registry gives has its channel.
+- A conversation keeps the agent, the channel and the space it was created with: a later resolve's
+  change nothing, a reset keeps the channel and the space. `admitInbound` resolves with the message's
+  channel and the channel's `space`, admin-api with `dashboard`. Every ref the registry gives has its
+  channel, and its space when one was recorded. An empty space is refused.
 - `reset` points the key to a new conversation, keeps the old one, and emits `conversation.reset`
   once the pointer is durable. No pointer is ever deleted. `reset(key, agent, ctx)` with an `agent` gives
   the new conversation another agent (`undefined` keeps the key's): what `admitInbound` does when the key's agent is gone (below).
@@ -311,13 +323,19 @@ Both use `agent.conversations`, so the runtime starts first.
 ### The inbound path ([inbound.ts](../packages/contracts/src/inbound.ts))
 
 Not a capability: a function and two pipelines every channel shares. `admitInbound(ctx, message,
-{ conversations, runtime, key, beforeDispatch? })` runs `inbound.normalize`, then `route.resolve`,
+{ conversations, runtime, key, space?, commands?, beforeDispatch? })` runs `inbound.normalize`, then `route.resolve`,
 then `conversations.resolve(key, agent)`, then `beforeDispatch(conversation)` (awaited: a channel
 starts waiting for the run there, or writes the message's files to that conversation's workspace; a
 rejection dispatches nothing and is thrown, so the platform delivers the message again, and what it
 does must be harmless to repeat), then `runtime.dispatch`, and returns an `InboundOutcome`:
-`admitted`, `duplicate`, `halted` (a stage halted), `denied` (the router said deny) or `no_route` (no
-stage decided). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
+`admitted`, `duplicate`, `halted` (a stage halted), `denied` (the router said deny), `no_route` (no
+stage decided) or `command`. With `commands` (the App's `agent.command`, cut by `allowedCommands` to the
+channel's config), a message whose text is a registered `/name args` is routed like any other (a
+denied sender runs nothing), runs in its conversation with the message's sender (`runAgentCommand`)
+and is never dispatched: the outcome is `command`, with the `CommandOutcome` the channel tells the
+sender (the type `AdmitOutcome` has it only for callers that may pass `commands`). A command is not
+deduplicated by request id: the channel keeps which messages ran one, or the command is harmless to
+repeat. It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
 when a capability fails. Identity is captured before either pipeline runs: mutating the original
 object in place or replacing it cannot bypass the check, including the reserved `dashboard:` ids
 that channels cannot admit. A dispatch rejected with `AgentUnavailableError` (the conversation's agent

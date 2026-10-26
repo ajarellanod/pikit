@@ -22,6 +22,11 @@ day that decision changes; it is not to be built. From the architecture audit's 
   `delegate`), recorded by `conversations.registry` with the key's first resolve and kept through
   resets, so a component reads it without parsing a key ([channel context](channel-context.md)).
   Answers still find their chat by the key alone.
+- **Which space a conversation belongs to is recorded the same way**: `ConversationRef.space`, the
+  place several conversations of a channel share (a Google Chat space whose threads are each a
+  conversation, a web chat project), given by the channel with the key's first resolve and kept for
+  good. What the conversations of a place share (memory, saved files) reads `spaceOf(conversation)`;
+  no key is parsed and no key grows a space part ([spaces](spaces.md)).
 - **A delegated conversation records where it comes from**: `ConversationRef.origin`, the
   conversation a person or a channel opened and its tree of delegations descends from, written by the
   runtime's delegation when it creates the child and never by a ref. Code acting for the person behind
