@@ -17,7 +17,8 @@ asked with buttons and forms.
   `storage.kv`, `wakeups`. **Uses, if installed:** `outbound.queue` (answers stored before they are
   sent, with a receipt for each; without it, answers survive a restart too, from the runtime's
   record), `settings` (the `conversations` setting, edited
-  from the dashboard), `workspace` or `execution` (where files other than images and text go), and on
+  from the dashboard), `workspace` or `execution` (where files other than images and text go),
+  `agent.command` (the App's commands, typed in the chat: Commands below), and on
   Cloudflare `actor.inbox` and `actor.mailbox`. The Worker's half requires `secrets` and
   `actor.mailbox`, and uses `settings`.
 - **Targets:** `server` and `durable` (Cloudflare). One code on both: in `start`, `actor.inbox`'s
@@ -194,6 +195,21 @@ missing or unusable required one fails the start, naming it.
   `/reset`) starts the conversation over, once per message. Acknowledged `{}` once admitted, within 25 s (under Google's
   30); a failure is `500`, and Google sends it again. Google sends a Chat app no event when a message
   is edited or deleted: an edit is not answered.
+- **Commands.** A message that is `/name args` (after the app's mention, or a slash command of the
+  app named so in its *Configuration*) for one of the App's commands (`agent.command`: admin-api's
+  `/name`, runtime-pi's `/compact`, another component's) that the `commands` config allows is routed
+  like any message (a sender the router denies runs nothing), then runs in its conversation with its
+  sender (`{ channel, id: "users/<id>" }`), and never reaches the agent. Its note is said in the
+  message's thread (`/name: done.` when it has none; `/name failed: <why>` when it fails). It runs
+  once per message: what it said is kept under `command:<message name>`, and Google delivering the
+  message again is told the same, under the same ids. `/new` and `/reset` stay the channel's (they
+  win over an App command of that name). An unknown `/word`, or a command `commands` does not allow,
+  goes to the agent as text. The default, `"all"`, suits a channel whose spaces are allow-listed
+  (`GOOGLE_CHAT_ALLOWED_SPACES`) and routed: list names to keep some from the chat.
+- **Space.** Every conversation of a chat, a thread's or the whole chat's, has the chat's own key as
+  its space (`ConversationRef.space`: `googlechat:spaces/AAA`, given to `admitInbound`, recorded with
+  the conversation's first message): what the chat's threads share (memory, instructions). In
+  `"chat"` mode the space is the conversation's key, so a chat switching modes keeps one space.
 - **Conversations.** Each thread is a conversation (`googlechat:spaces/AAA:threads/BBB`), unless the
   `conversations` setting says the chat is one (`googlechat:spaces/AAA`). Either way every answer
   goes to the thread of the message it answers. A chat without threads (a meeting's chat, an old
@@ -271,6 +287,7 @@ config is the setting. A change applies to the next message: a conversation alre
   conversations: { default: "thread", chats: {} }, // the setting's defaults: { "spaces/AAA": "chat" } makes that chat one conversation
   thinkingText: "Thinking…",
   previewEveryMs: 3000,                           // 0 keeps "Thinking…" until the answer
+  commands: "all",                                // the App's commands people may type: "all", or their names (["name", "compact"])
   apiBase: "https://chat.googleapis.com",         // values, for a test double
   jwksUrl: "https://www.googleapis.com/oauth2/v3/certs",
 },
@@ -289,7 +306,9 @@ double and on a local port, ID tokens signed with a test key pair, event builder
   setting and event parser, and the fake itself.
 - `route.test.ts` and `token.test.ts`: the endpoint and the ID token (a wrong audience, issuer, email,
   signature or key, an expired token), on a server first, then over a mailbox.
-- `admission.test.ts`: keys, threads, the setting, access, `/new`, mentions, quotes, attachments.
+- `admission.test.ts`: keys, threads, the setting, the space, access, `/new`, commands typed in the
+  chat (run once with their sender, denied, not allowed, unknown, `/new` winning), mentions, quotes,
+  attachments.
 - `transport.test.ts`: the access token, the API client, markdown to text and cards, pieces, both ids,
   the placeholder, previews and the sweep, each failure classified.
 - `questions.test.ts`: cards, dialogs, clicks and answers, a reset closing a question.
@@ -300,8 +319,10 @@ double and on a local port, ID tokens signed with a test key pair, event builder
 
 In the registry, beside `files/`: `server.test.ts`, the server lane (the default export composed as
 `pikit add` composes it on a server, over real HTTP: a message answered in its thread, the setting, an
-image and a PDF, a question clicked, a restart in the middle of an answer, a refused token; and with
+image and a PDF, a command typed in the chat (its space as conversations-kv recorded it), a question
+clicked, a restart in the middle of an answer, a refused token; and with
 `mailbox-local` installed, `actor.inbox` scope `"all"`, events handled in process as with none). The
 workerd lane's `tests/workerd/test/google-chat.workerd.ts` runs the Worker half and a real Durable
-Object, with execution-do: a message's PDF written to the workspace in the object's SQLite. What only the real Google Chat can show (a DM's thread, the errors Google gives a repeated id,
+Object, with execution-do: a message's PDF written to the workspace in the object's SQLite, and a
+command typed twice in a thread run once, in its conversation with the space the object recorded. What only the real Google Chat can show (a DM's thread, the errors Google gives a repeated id,
 the look of cards) is checked live, once: the feature note's "Checked live".
