@@ -4,9 +4,11 @@
 its pull request in the Telegram "ops" group, a routine posts its daily summary to a Google Chat or
 Slack space, a scheduled job that went wrong tells the team chat)
 
-**Specified:** yes (design), not built (owner's decision, 2026-10-20).
+**Status:** built (`tool-notify`, both targets), as specified (owner's decision, 2026-10-20), with
+attribution on by default (decided when built, below). Checked against fake platforms, not yet by hand
+in a real Telegram group or Google Chat space.
 
-**Needed by:** nothing required. It fills [team agents](team-agents.md)' row "An agent writes to
+**Needed by:** nothing required. It fills [team agents](../team-agents.md)' row "An agent writes to
 another chat". Builds on `outbound.queue` (`outbound-durable`) and `actor.mailbox` / `actor.inbox`;
 runs on `server` and `durable` (celld, Cloudflare).
 
@@ -41,6 +43,14 @@ and the agents that may use it name the tool (`defineAgent({ ..., tools: ["notif
 It is **send-only**. The sending agent never reads the destination's conversation, never enters it,
 and never gets a reply from it: the tool returns once the message is stored for delivery, and
 nothing comes back. Nothing here lets one session read another.
+
+## Where it is
+- The component: `registry/components/tool-notify/` (`index.ts`: the tool and the `tool-notify.enqueue`
+  handler; `callers.ts`, tool-delegate's twin; README with its guarantees).
+- tool-delegate's `callers.ts` (`chainOf`, `depthOf`, `callersOf`, moved out of its `index.ts`).
+- Tests: `tool-notify.test.ts` (copied), `app.test.ts` and `twins.test.ts` (registry only),
+  `tests/workerd/test/tool-notify.workerd.ts`; listed in the component's README, each negative case
+  checked to fail on a broken tool.
 
 ## Decisions
 1. **A name, never an address.** `to` is a union of the configured names (as `delegate`'s `agent`
@@ -87,11 +97,11 @@ nothing comes back. Nothing here lets one session read another.
    rate limit counted by one owner. Enqueuing in the caller's own object would also work on Cloudflare
    (every object runs the channel's object half, which attaches every bot's transport to its queue:
    `channel-telegram-webhook/files/.../index.ts`, `startAnswerDelivery`), but would scatter one chat's
-   outbox over every sender's object. This is how [memory](memory.md) reaches `memory:<person>`.
+   outbox over every sender's object. This is how [memory](../memory.md) reaches `memory:<person>`.
 6. **Text only, bounded.** `text` is Markdown, at most 4,000 characters; the channel's transport
    splits it. No parts in v1: a `question` part would ask in a chat whose answer lands in a
-   conversation that never asked it ([approvals](approvals.md)), and files wait for
-   [rich content](rich-content.md).
+   conversation that never asked it ([approvals](../approvals.md)), and files wait for
+   [rich content](../rich-content.md).
 7. **Stored, not delivered, is the tool's result.** It returns `Queued for "ops".` once the queue holds
    it; it never waits for delivery, which may take up to a day, and never reads receipts. What becomes
    of it is outbound-durable's: retries, rate limits, abandonment after a permanent refusal or 24
@@ -110,6 +120,15 @@ nothing comes back. Nothing here lets one session read another.
     nothing is in its transcript or in `agent.submissions`: the notification exists only as outbox
     pieces. On Cloudflare the destination's object may exist only for its outbox (Durable Objects
     exist by name, `admin-api` README).
+11. **Attribution, on by default** (decided when built). Each message starts with the sending agent's
+    name, in bold on its own line (`**developer:**`, then the text): Telegram shows it bold, Google
+    Chat as `*developer:*`, and a text that starts with a list or a heading keeps it. The tool adds it
+    (it knows the calling conversation's agent); a destination with `attribution: false` sends only
+    what the model wrote. The origin is never written ("Origin", below).
+12. **The rate limit's count** is one `storage.kv` value per destination: the last hour's idempotency
+    keys with their times. A replay more than an hour after its first call is counted again (the queue
+    still stores it once): replays come within minutes, and keeping every key for good would grow
+    without bound.
 
 ## How it fits pikit
 - **A tool component**, `agent.tool` under `notify` (`replay: "safe"`), with `defineTool` from
@@ -139,8 +158,8 @@ nothing comes back. Nothing here lets one session read another.
   goes nowhere. Google Chat: a space's key sends to its top level, a thread's key to the thread
   (`createAnswerTargets`, `key.ts`). Not `channel-web` (its transport writes a run's answer it did
   not hear, `delivery.ts`) nor `channel-http` (it answers request by request). Slack once
-  [channel-slack](channel-slack.md) has a transport.
-- **Not `deliver_to`**: [scheduler](scheduler.md) keeps "an answer delivered elsewhere than its
+  [channel-slack](../channel-slack.md) has a transport.
+- **Not `deliver_to`**: [scheduler](../scheduler.md) keeps "an answer delivered elsewhere than its
   conversation" out of scope. A routine whose result belongs elsewhere names `notify` and sends it;
   its answer still goes to its own conversation.
 
@@ -155,7 +174,7 @@ nothing comes back. Nothing here lets one session read another.
   belong at the top of the tree.
 - **Approvals.** v1 adds no approval of its own: an operator who wants a person to approve each post
   lists `notify` in `extension-approvals`' `tools`, which approves the exact call (destination and
-  text), on a server. Approval per destination is open.
+  text), on both targets. Approval per destination is open.
 - **Duplicates.** At-least-once, as every answer: a send cut by a crash goes again with
   `possibleDuplicate`; Google Chat drops the copy (idempotent), Telegram shows it with `↻ `
   (`POSSIBLE_DUPLICATE_MARK`). `call` is neither retried nor deduplicated (SPEC C2), so the handler is
@@ -166,8 +185,8 @@ nothing comes back. Nothing here lets one session read another.
 
 ## Pi first
 Pi has no message from one session to another chat. Its `ctx.ui.notify` is a notice to the session's
-own user (the former SPEC's `Interaction.notify`, kept in [approvals](approvals.md)), and pi-durable's
-subagents are child conversations whose answers come back ([subagents](subagents.md)): the opposite of
+own user (the former SPEC's `Interaction.notify`, kept in [approvals](../approvals.md)), and pi-durable's
+subagents are child conversations whose answers come back ([subagents](../subagents.md)): the opposite of
 send-only. Delivery to a chat platform is pikit's (P1, `delivery.ts`'s "Pi first"), so this is a pikit
 component on pikit's queue.
 
@@ -192,12 +211,13 @@ broken tool (the `from` check removed, the key built from a fresh id).
 - **Twins**: `callers.ts` is the same in tool-delegate and tool-notify (repository test).
 - **workerd lane**: from conversation A's object, a notify lands in the destination's object (its
   `pending`, not A's), and is delivered by that object's alarm after an eviction, with no new message.
-- Not covered by tests: a real Telegram group or Google Chat space (checked by hand once).
+- Not covered by tests: a real Telegram group or Google Chat space (to check by hand once, not done
+  yet).
 
 ## Open questions
 - **Approval per destination** (`approval: true` on `ops`): `extension-approvals` matching a tool by
   its arguments, or tool-notify asking for approval itself through `approvals`. Both are component
-  changes, not contracts; approvals run on a server only today.
+  changes, not contracts.
 - **Per person** (only when the tree started in some chats or for some senders): `from` is agents;
   a destination's `origins` would read `originOf`.
 - **Checking destinations at start**: channels do not say which instances they run, and transports
@@ -207,12 +227,10 @@ broken tool (the `from` check removed, the key built from a fresh id).
 - **The `tool-notify:` request id prefix**: a channel's request id that starts with it would share a
   key namespace with a notification. `admitInbound` reserves only `dashboard:`; reserving this one too
   is a kit change, or the key could leave the answer-key shape (and the Delivery link with it).
-- **Attribution**: whether the message says which agent sent it (a prefix per destination), or only
-  what the model wrote.
 - **Telling the sender of an abandoned message**: reading the destination's receipts and messaging the
   sender back would be the first reply path, against send-only; today the operator sees it.
 - **The chain as runtime data**: if a third component needs the delegation chain (house rules by
   chain, approvals), the runtime could record it beside the origin (`ConversationRef`), a contract
   change in the adapter's layer, instead of more twins of `callers.ts`.
 - **Reply context**: a person who answers the notification in a chat the channel admits starts a
-  conversation that does not know it ([team agents](team-agents.md), "Reply context").
+  conversation that does not know it ([team agents](../team-agents.md), "Reply context").

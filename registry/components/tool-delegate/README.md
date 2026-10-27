@@ -9,7 +9,7 @@ steer and stop the tasks it did not wait for.
   `delegate_cancel` (replay `safe`, all four).
 - **Uses, optionally:** `agent.definition`, to check at start that the agents its config lists exist.
 - **Targets:** `server` and `durable` (Cloudflare, celld): the child lives in the parent's storage.
-- **Installs to:** `src/pikit/tool-delegate/` (`index.ts`, `tool-delegate.test.ts`).
+- **Installs to:** `src/pikit/tool-delegate/` (`index.ts`, `callers.ts`, `tool-delegate.test.ts`).
 
 ## Use it
 
@@ -146,7 +146,9 @@ Each sees only the tasks its own conversation started: another's id is an unknow
 - **A task's key is the call's**: `delegate:<depth>:<chain>:<tool call's task id>`, `<chain>` the
   child's ancestors' agents, root first, joined by `.` (`delegate:2:support.orchestrator:17`: support
   delegated to orchestrator, whose child this is). This tool alone makes `delegate:` keys, and reads a
-  conversation's depth (`depthOf`) and chain (`chainOf`) from them; nothing else parses them.
+  conversation's depth (`depthOf`) and chain (`chainOf`) from them, in `callers.ts`. Its one twin is
+  tool-notify's `callers.ts` (its `from` is this tool's rule), the same file, kept identical by the
+  registry's `tool-notify/twins.test.ts`: change one, copy it to the other. Nothing else parses them.
 - **Who is above a conversation is never the model's**: its chain is in its key, which the runtime
   gives the tool (`CONVERSATION`), and the chain's first agent must be the origin's, which the runtime
   fixed when it created the conversation (`originOf`). A chain that does not parse, does not match its

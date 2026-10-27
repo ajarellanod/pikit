@@ -1,0 +1,46 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "tool-notify",
+  "version": "0.0.1",
+  "title": "Notifications: your agent sends a message to a chat you named (the notify tool)",
+  "description": "The `notify` tool, for the agents that name it: a Markdown message sent to a chat the operator configured by name (a channel instance and a conversation key), restricted by `from`, rate limited per destination, stored in the destination's outbox by its actor; send-only.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
+    "capabilities": [
+      "actor.mailbox",
+      "actor.inbox",
+      "outbound.queue",
+      "storage.kv"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "agent.definition"
+    ]
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "notify": "safe"
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
