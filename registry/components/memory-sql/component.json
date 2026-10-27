@@ -2,7 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "memory-sql",
   "version": "0.0.1",
-  "description": "What each agent remembers of each person, across their conversations: one actor per person, its storage.sql. Declares and provides memory.",
+  "description": "What the agents of each space remember (facts, summaries, rules), and what each person prefers: one actor per owner (a space, an agent kept apart, a person), its storage.sql, full-text search. Declares and provides memory.",
   "targets": [
     "server",
     "durable"
@@ -30,12 +30,13 @@
       "memory": {
         "mode": "single",
         "stability": "experimental",
-        "summary": "What an agent remembers of each person, across that person's conversations."
+        "summary": "What the agents of a space remember (facts, summaries, rules) and what each person prefers, per owner, with full-text search."
       }
     }
   },
   "dependencies": {
-    "@pikit/contracts": "0.0.1"
+    "@pikit/contracts": "0.0.1",
+    "typebox": "1.3.27"
   },
   "devDependencies": {
     "@pikit/pi-adapter": "0.0.1"

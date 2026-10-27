@@ -2,9 +2,10 @@
   "$schema": "../../schema/component.schema.json",
   "name": "memory-summaries",
   "version": "0.0.1",
-  "description": "Summarizes each conversation that went quiet into the memory of its person, credentials redacted: read from the answers feed with a cursor, woken by wakeups, idempotent across retries and restarts.",
+  "description": "Summarizes each conversation that went quiet into the memory of its space (or of its agent, when memory keeps it apart), structured to be found by search, credentials redacted: read from the answers feed with a cursor, woken by wakeups, idempotent across retries and restarts.",
   "targets": [
-    "server"
+    "server",
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.1",
@@ -15,7 +16,8 @@
       "agent.submissions",
       "agent.observe",
       "model.complete",
-      "memory"
+      "memory",
+      "conversations.registry"
     ]
   },
   "optional": {

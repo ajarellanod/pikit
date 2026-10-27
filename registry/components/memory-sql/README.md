@@ -1,9 +1,9 @@
 # memory-sql
 
-What each agent remembers of each person, across that person's conversations and channels: the
-store of memory ([features/memory.md](https://github.com/ajarellanod/pikit/blob/main/features/memory.md)). It **declares** the kind `memory` and the capability
+What the agents of each space remember, and what each person prefers: the store of memory
+([features/memory.md](https://github.com/ajarellanod/pikit/blob/main/features/memory.md)). It **declares** the kind `memory` and the capability
 `memory` (its contract is `contract.ts`, which every component that uses it carries an identical copy
-of), and provides it over `storage.sql`, with **one actor per person**.
+of), and provides it over `storage.sql`, with **one actor per owner**.
 
 - **Provides:** `memory` (declared here).
 - **Requires:** `storage.sql`, `actor.mailbox`, `actor.inbox` (on a server: storage-sqlite and
@@ -13,58 +13,110 @@ of), and provides it over `storage.sql`, with **one actor per person**.
   `memory-sql.test.ts`).
 
 It changes nothing an agent does by itself: [memory-recall](../memory-recall/README.md) gives agents
-the section and the tools, and [memory-summaries](../memory-summaries/README.md) keeps summaries of
-quiet conversations.
+the section, the tools and the commands `/rules` and `/prefs`, and
+[memory-summaries](../memory-summaries/README.md) keeps summaries of quiet conversations.
+
+## Whose memory
+
+A memory belongs to an **owner**:
+
+- **a space** (`{ type: "space", space }`): the place several conversations share (a Google Chat space
+  whose threads are each a conversation, a web chat project), `spaceOf(conversation)` of
+  `@pikit/contracts`: the channel's space, else the conversation's own key (a private chat is its own
+  space); a delegated conversation is in its origin's. Every agent working in that space shares its
+  memory: a fact about a client serves them all. The default for every agent.
+- **an agent** (`{ type: "agent", agent }`): one agent's own memory across every space it works in,
+  for the agents named in `agentScope` (pi-hive's `memory_scope: agent`). Such an agent reads and
+  writes only its own, never a space's.
+- **a person** (`{ type: "person", channel, id }`): their preferences, as a channel identifies them (a
+  request's `Sender`), wherever they write.
+
+`ownerOf(conversation)` gives a conversation's (a space's or an agent's): the one place that policy is
+decided, which memory-recall and memory-summaries both ask.
+
+```ts
+// pikit.config.ts
+export const config = {
+  "memory-sql": { agentScope: ["trader"] },   // default []: every agent shares its space's memory
+};
+```
 
 ## The contract
 
 ```ts
-type MemoryScope = { agent: string; person: string };              // one agent's memory of one person
-type Memory = { id: string; kind: "fact" | "summary"; text: string; createdAt: number };
+type MemoryOwner = { type: "space"; space: string } | { type: "agent"; agent: string } | { type: "person"; channel: string; id: string };
+type MemoryKind = "fact" | "summary" | "rule" | "preference";
+type MemoryStatus = "active" | "pending";
+type Memory = { id: string; kind: MemoryKind; status: MemoryStatus; text: string; createdAt: number };
+type MemoryMatch = Memory & { snippet: string };
+type MemoryFilter = { kinds: readonly MemoryKind[]; status?: MemoryStatus };
 
 interface MemoryStore {
-  list(scope, kind, limit, ctx): Promise<Memory[]>;     // the newest `limit` of `kind`, oldest first
-  remember(scope, memory, ctx): Promise<void>;          // idempotent by id
-  forget(scope, id, ctx): Promise<void>;                // an unknown id is fine
-  search(scope, query, limit, ctx): Promise<Memory[]>;  // both kinds, text contains query, newest first
+  ownerOf(conversation): MemoryOwner;                   // its space's, or its agent's own
+  list(owner, filter, limit, ctx): Promise<Memory[]>;   // the newest `limit` the filter takes, oldest first
+  get(owner, id, ctx): Promise<Memory | undefined>;
+  remember(owner, memory, ctx): Promise<void>;          // idempotent by id: text and status stay
+  approve(owner, id, kind, ctx): Promise<boolean>;      // pending -> active; true when active now
+  forget(owner, id, filter, ctx): Promise<boolean>;     // true when one was removed
+  search(owner, query, limit, ctx): Promise<MemoryMatch[]>; // facts and summaries, full-text, best first
 }
 ```
 
-Who the person is, is the caller's: memory-recall and memory-summaries use the conversation's key
-(one chat is one person) until keys can be linked.
+A space or an agent keeps `fact`s and `summary`s (data, always `active`) and `rule`s (instructions,
+`pending` until a person approves them); a person keeps `preference`s (`pending` or `active`).
 
 ## What it guarantees
 
-- **Per agent and person.** Every query filters by agent and person. Every operation is
-  `mailbox.call("memory:<person>", "memory-sql.<op>", …)`, answered by the person's actor
-  (`actor.inbox`'s `answer`), which checks the message on arrival and refuses, as `invalid`, a call
-  meant for another person or one that is malformed.
-- **Idempotent.** `remember` of an id already kept (in that scope) changes nothing, so a replayed tool
-  call or a retried summary keeps one memory.
-- **No secrets.** A text with a known credential's shape (`sk-…`, a GitHub token, a bot token, a JWT,
-  a private key, a URL with a password, whole or as a word: `credentialSettingProblem` of
-  `@pikit/contracts`), an empty text or one over 4000 characters is refused, keeps nothing, and the
-  error never echoes it. A card number or an unknown token shape is not recognised.
-- **Durable.** Each memory is a committed row of `memory_sql_items` before `remember` resolves; nothing
-  is held in memory, so a `kill -9` loses nothing and `stop` is never needed (K6).
-- **Search** is SQL `LIKE`, its `%` and `_` taken literally, ASCII case ignored (SQLite's). Full-text
-  search (FTS5) is open.
+- **Per owner.** Every query filters by owner. Every operation is
+  `mailbox.call(<owner's key>, "memory-sql.<op>", ...)`, answered by that owner's actor
+  (`memory:space:<space>`, `memory:agent:<agent>` or `memory:person:<channel>:<id>`, the channel
+  URI-encoded so no two owners share a key; `actor.inbox`'s `answer`), which checks the message on
+  arrival and refuses, as `invalid`, a call meant for another owner, a kind that owner does not keep,
+  a pending fact or summary, or a malformed call.
+- **Idempotent.** `remember` of an id already kept (in that owner) changes nothing, text and status:
+  a replayed tool call, a retried summary or a command run twice keeps one memory, and a proposal never
+  demotes an active rule. `approve` of an active memory leaves it active and answers `true`.
+- **No secrets.** A text with a known credential's shape (`sk-...`, a GitHub token, a bot token, a
+  JWT, a private key, a URL with a password, whole or as a word: `credentialSettingProblem` of
+  `@pikit/contracts`), an empty text or one over 4000 characters is refused for every kind, keeps
+  nothing, and the error never echoes it. A card number or an unknown token shape is not recognised.
+- **Durable.** Each memory is a committed row of `memory_sql_memories` before its call resolves;
+  nothing is held in memory, so a `kill -9` loses nothing and `stop` is never needed (K6).
+- **Full-text search.** `search` uses SQLite's FTS5 (`memory_sql_search`, an external-content index of
+  the facts and summaries, kept in step by triggers in the statement that changes a row): BM25-ranked,
+  any case, diacritics ignored, each match with a snippet (`[matched]` words). The query is cut into
+  words (runs of letters and digits), each quoted, tried as all of them, then as the phrase, then as any
+  of them: an email, a URL, quotes, `NOT`, `*` or a hyphenated id is never a syntax error; a query with
+  no word finds nothing. FTS5 is in both targets' SQLite (node:sqlite under Bun on a server, a Durable
+  Object's on Cloudflare), so there is no `LIKE` fallback (a Durable Object refuses long `LIKE`
+  patterns anyway).
 
-On a server every key's actor is the App itself (mailbox-local), so the table is in the App's one
-database. On Cloudflare the person's actor is the Durable Object `memory:<person>` (actors-do), with
-the table in its own SQLite: one owner per person, whose writes are ordered, at the cost of one call
-between objects per model request (the section) and per tool call. Every object's App creates the
-(empty) table at start; only the person's object fills it.
+On a server every key's actor is the App itself (mailbox-local), so the tables are in the App's one
+database. On Cloudflare each owner's actor is the Durable Object of its key (actors-do), with the
+tables in its own SQLite: one owner per space, agent or person, whose writes are ordered, at the cost
+of one call between objects per list in the section (the owner's, and one per person the run answers)
+and per tool call. Every object's App creates the (empty) tables at start; only the owner's object
+fills them.
 
 ## Tests
 
-- `conformance.ts`: `createMemoryConformance(factory)`, the `memory` suite any provider runs: listed
-  by kind, newest `limit`, oldest first; the same id kept once; `forget` of an unknown id; another
-  person's or agent's memories never listed, searched or forgotten; search with literal wildcards and
-  `limit`; a credential, an empty or a too long text refused and never echoed; a restart keeps
-  everything.
-- `memory-sql.test.ts`: the suite over `createMemoryMailbox()` and `sqliteStorage()`; what `setup`
-  declares; a person's actor refusing another person's call and malformed ones (`invalid`).
+- `conformance.ts`: `createMemoryConformance(factory)`, the `memory` suite any provider runs:
+  `ownerOf` (a thread's space, a private chat's key, a delegated conversation's origin's space, an
+  agent kept apart's own); listed by kind and status, newest `limit`, oldest first, and got by id; the
+  same id kept once, text and status (a proposal never demotes an active rule, a later active write
+  never activates a pending one); `approve` (once, never across kinds); `forget` by filter (an unknown
+  id, or one the filter leaves, stays); another owner's memories never listed, got, searched, approved
+  or forgotten, even under the same id; each owner only its kinds, a fact or summary only active;
+  full-text search (every word in any order and case, then any word, ranked, snippets, diacritics, a
+  hyphenated id, rules never found, queries of punctuation and FTS5 operators never failing); a
+  credential, an empty or a too long text refused for every kind and never echoed; a restart keeps
+  everything, searchable. Each case uses owners of its own, so a provider whose storage outlives a
+  case runs it too. Each case was checked against a broken provider (no owner filter in search,
+  `DO UPDATE` on remember, approve ignoring the kind, every kind for every owner, rules indexed,
+  forget ignoring the filter, pending facts, no credential check, no OR fallback): each fails.
+- `memory-sql.test.ts`: the suite over `createMemoryMailbox()` and `sqliteStorage()` (with `trader`
+  kept apart); what `setup` declares; an owner's actor refusing another owner's call, a kind its owner
+  does not keep and malformed ones (`invalid`); how a query becomes FTS5 queries.
 - In the registry, `memory-recall/app.test.ts` runs it in a real App with runtime-pi, and the
   workerd lane (`tests/workerd/test/memory.workerd.ts`) runs the suite over storage-do and actors-do,
-  each person in their own Durable Object, and the refused call across an RPC.
+  each owner in their own Durable Object (FTS5 included), and the refused call across an RPC.
