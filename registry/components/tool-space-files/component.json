@@ -1,0 +1,44 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "tool-space-files",
+  "version": "0.0.1",
+  "description": "Files a space keeps on purpose, for the agents that name space-files: files_save, files_list, files_get and files_delete between a conversation's workspace and its space's archive (one actor per space, the bytes in storage.blob), and a stable section listing them.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
+    "capabilities": [
+      "storage.sql",
+      "storage.blob",
+      "actor.mailbox",
+      "actor.inbox",
+      "execution"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "workspace"
+    ]
+  },
+  "provides": [
+    "agent.extension"
+  ],
+  "extensions": [
+    "space-files"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

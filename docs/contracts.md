@@ -30,16 +30,16 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-schedule, tool-websearch-brave, tool-websearch-gemini, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
-| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, memory-recall | agents-live?, runtime-pi? | none |
+| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, memory-recall, tool-space-files | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, scheduler-admit | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql, tool-space-files | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `storage.blob` | single | storage-blob-fs, storage-blob-s3 | none | `createBlobConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
+| `storage.blob` | single | storage-blob-fs, storage-blob-s3 | tool-space-files | `createBlobConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, settings-store, tool-space-files | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
@@ -52,10 +52,10 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `model.complete` | single | runtime-pi | memory-summaries, admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-do, credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
-| `execution` | single | execution-do, execution-gondolin, execution-local, execution-remote | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
+| `execution` | single | execution-do, execution-gondolin, execution-local, execution-remote | channel-google-chat?, tool-edit, tool-read, tool-space-files, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-gondolin, execution-local, execution-remote | tool-bash | same |
 | `approvals` | single | approvals-sql | admin-approvals, extension-approvals | `createApprovalsConformance` (approvals-sql's `conformance.ts`) |
-| `workspace` | single | execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
+| `workspace` | single | execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
 | `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
 
