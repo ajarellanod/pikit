@@ -21,6 +21,7 @@ import { get, onUnauthorized } from "@/lib/client";
 import { ConversationsProvider } from "@/lib/conversations";
 import { asError, ChatFailure, landingText } from "@/lib/errors";
 import { chatIdOf, go, takeLandingError, useRoute } from "@/lib/location";
+import { ProjectsProvider } from "@/lib/projects";
 import { screenKey, setPasswordOf, settingsSectionOf } from "@/lib/routes";
 import { type ChatSession, SessionContext } from "@/lib/session";
 import { onVisibleAgain } from "@/lib/visible";
@@ -141,9 +142,9 @@ export function App() {
     chatId !== undefined ? (
       <ConversationScreen key={chatId} chatId={chatId} />
     ) : route.path === "/" || SIGNED_OUT.has(route.path) || settingsSectionOf(route.path) !== undefined ? (
-      <NewChatScreen agent={route.query.get("agent") ?? undefined} />
+      <NewChatScreen agent={route.query.get("agent") ?? undefined} project={route.query.get("project") ?? undefined} />
     ) : route.path === "/chats" ? (
-      <ChatsScreen />
+      <ChatsScreen key={route.query.get("project") ?? ""} project={route.query.get("project") ?? undefined} />
     ) : (
       <div className="p-8 text-[13.5px] text-ink-3">
         No page here. <a href="#/" className="font-medium text-ink underline underline-offset-2">Start a new chat</a>
@@ -153,19 +154,21 @@ export function App() {
   return (
     <SessionContext.Provider value={session}>
       <ConversationsProvider key={me.user.id} userId={me.user.id}>
-        <Layout route={route}>
-          {landing !== undefined && (
-            <div className="flex items-start gap-2 border-b border-line px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <ErrorNote error={{ message: landing }} title="That did not work" />
+        <ProjectsProvider key={me.user.id}>
+          <Layout route={route}>
+            {landing !== undefined && (
+              <div className="flex items-start gap-2 border-b border-line px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <ErrorNote error={{ message: landing }} title="That did not work" />
+                </div>
+                <button type="button" onClick={() => setLanding(undefined)} className="mt-1 rounded-[6px] px-2 py-1 text-[12.5px] font-medium text-ink-2 hover:bg-hover">
+                  Dismiss
+                </button>
               </div>
-              <button type="button" onClick={() => setLanding(undefined)} className="mt-1 rounded-[6px] px-2 py-1 text-[12.5px] font-medium text-ink-2 hover:bg-hover">
-                Dismiss
-              </button>
-            </div>
-          )}
-          {screen}
-        </Layout>
+            )}
+            {screen}
+          </Layout>
+        </ProjectsProvider>
       </ConversationsProvider>
     </SessionContext.Provider>
   );

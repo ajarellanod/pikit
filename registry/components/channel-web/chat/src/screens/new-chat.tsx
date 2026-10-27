@@ -8,19 +8,28 @@
  * another one is picked there), else the one Routing chooses for this user (`ChatMe.suggestedAgent`),
  * else the first, and the conversation is made with it (`agent`). With none to pick, no picker: the
  * router decides.
+ *
+ * In a project (`?project=<id>`, from the project's menu or its page) the chat is made in it, for good:
+ * its name shows over the composer (× leaves it), and the chats to go on with are the project's.
+ *
+ * The commands the operator lets users type (`ChatConfig.commands`: `/rules`…) have the composer's "/"
+ * menu; one typed makes the chat (empty) and runs there, and the conversation opens with what it
+ * answered as a quiet note, never in its transcript.
  */
 
-import { ChatBubble } from "iconoir-react";
+import { ChatBubble, Folder, Xmark } from "iconoir-react";
 import { type CSSProperties, useEffect, useState } from "react";
 import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
-import type { ChatStartRequest, ChatStartResponse } from "@/lib/chat-api";
+import type { ChatImage, ChatStartRequest, ChatStartResponse } from "@/lib/chat-api";
 import { post } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
 import { asError } from "@/lib/errors";
 import { imageLimits, messageProblem } from "@/lib/images";
 import { chatPath, go } from "@/lib/location";
 import { assistantName } from "@/lib/names";
+import { useProjects } from "@/lib/projects";
+import { newChatPath, projectPath } from "@/lib/routes";
 import { usePageTitle, useSession } from "@/lib/session";
 import { titleOf } from "./layout";
 
@@ -38,9 +47,11 @@ function revealStyle(visible: boolean): CSSProperties {
   };
 }
 
-export function NewChatScreen({ agent: asked }: { agent?: string | undefined }) {
+export function NewChatScreen({ agent: asked, project }: { agent?: string | undefined; project?: string | undefined }) {
   const { config, me } = useSession();
   const conversations = useConversations();
+  const projects = useProjects();
+  const inProject = projects.get(project);
   const agents = config.agents.map((each) => each.name);
   const [agent, setAgent] = useState(() => [asked, me.suggestedAgent].find((name) => name !== undefined && agents.includes(name)) ?? agents[0]);
   const [error, setError] = useState<Error>();
@@ -59,16 +70,24 @@ export function NewChatScreen({ agent: asked }: { agent?: string | undefined }) 
       setError(new Error(problem));
       throw new Error(problem);
     }
+    return begin(text, chatImages);
+  };
+
+  /** The chat made with its first message (a command too: it runs there), then opened. */
+  const begin = async (text: string, images: ChatImage[]) => {
     setError(undefined);
     try {
-      const body: ChatStartRequest = { text, ...(chatImages.length > 0 && { images: chatImages }), ...(agent !== undefined && { agent }) };
+      const body: ChatStartRequest = { text, ...(images.length > 0 && { images }), ...(agent !== undefined && { agent }), ...(project !== undefined && { project }) };
       const started = await post<ChatStartResponse>("/conversations", body);
+      if (started.command !== undefined) conversations.addNote(started.id, started.command);
       // The conversation shows the message at once, before its transcript is read.
-      if (started.admission !== "duplicate") {
-        const sent = conversations.addSent(started.id, { text, images: chatImages, before: 0 });
+      else if (started.admission !== "duplicate") {
+        const sent = conversations.addSent(started.id, { text, images, before: 0 });
         if (started.admission === "queued") conversations.updateSent(started.id, sent, "queued");
       }
       conversations.reload();
+      // Its count of chats.
+      if (project !== undefined) projects.reload();
       go(chatPath(started.id));
     } catch (thrown) {
       setError(asError(thrown));
@@ -77,7 +96,7 @@ export function NewChatScreen({ agent: asked }: { agent?: string | undefined }) 
   };
 
   const first = me.user.name.trim().split(/\s+/)[0] ?? "";
-  const recent = (conversations.items ?? []).slice(0, SUGGESTED);
+  const recent = (conversations.items ?? []).filter((each) => project === undefined || each.project === project).slice(0, SUGGESTED);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -92,9 +111,30 @@ export function NewChatScreen({ agent: asked }: { agent?: string | undefined }) 
         </h1>
 
         <div className="chat new-chat-reveal relative mt-7" style={revealStyle(stage >= 3)}>
+          {project !== undefined && (
+            <div className="mb-2.5 flex items-center gap-1.5 px-1 text-[13px] text-ink-3">
+              <Folder width={14} height={14} strokeWidth={1.9} aria-hidden />
+              <span>In</span>
+              <a href={`#${projectPath(project)}`} className="min-w-0 truncate font-medium text-ink-2 hover:text-ink">
+                {inProject?.name ?? "a project"}
+              </a>
+              <button
+                type="button"
+                aria-label="Not in a project"
+                title="Not in a project"
+                onClick={() => go(newChatPath({ agent }))}
+                className="flex size-5 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink"
+              >
+                <Xmark width={13} height={13} strokeWidth={2} />
+              </button>
+            </div>
+          )}
           <PromptBar
             autoFocus
-            commandsMenu={false}
+            commands={config.commands}
+            commandsMenu={config.commands.length > 0}
+            commandsNote="Runs here, never sent to the assistant"
+            onCommand={(name, args) => begin(args === "" ? `/${name}` : `/${name} ${args}`, [])}
             placeholder={`Ask ${agent === undefined ? config.name : assistantName(agent)} anything…`}
             images={imageLimits(config.target)}
             {...(agent !== undefined && {

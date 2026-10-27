@@ -4,9 +4,9 @@
  *
  * | Route | Screen |
  * |---|---|
- * | `#/` | a new conversation |
+ * | `#/[?agent=<name>][&project=<id>]` | a new conversation (with that assistant, in that project) |
  * | `#/c/<chat id>` | a conversation |
- * | `#/chats` | the conversations |
+ * | `#/chats[?project=<id>]` | the conversations (of that project) |
  * | `#/settings[/<section>]` | opens Settings (a modal) at a section: `profile`, `password`, `accounts`, `sessions`, `appearance` |
  * | `#/sign-in`, `#/sign-up`, `#/forgot` | signing in |
  * | `#/set-password?token=…&email=…[&invite=1]` | an invitation's, a confirmation's or a reset's landing |

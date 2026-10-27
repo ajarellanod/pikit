@@ -1,9 +1,15 @@
 /**
  * The signed-in page, in the dashboard's harness: Beautiful UI's sidebar (the assistant's name; New
  * chat, Conversations; the user's latest conversations, each with its menu, and "View all" to
- * Conversations when there are more: the archived ones are there only; at its foot the user's name, opening Settings, the theme and Sign out), and the screen in a window
+ * Conversations when there are more: the archived ones are there only; under them the user's projects
+ * and "New project"; at its foot the user's name, opening Settings, the theme and Sign out), and the screen in a window
  * beside it. On a narrow screen the sidebar starts folded to its icons, and Conversations lists them
  * full width.
+ *
+ * A project (`useProjects`) opens Conversations showing only its chats (`#/chats?project=<id>`); its
+ * menu (`useProjectMenu`, the sidebar row's and that page's) starts a new chat in it
+ * (`#/?project=<id>`), renames it, or deletes it once it has no chats (the server refuses before:
+ * its words are shown). A chat's project is fixed when it is made.
  *
  * A conversation has one menu wherever it shows (the sidebar's row, the list's, its own header):
  * Rename, Archive (Restore when archived), Delete (`useConversationMenu`, `bui/ActionsMenu`). Renaming
@@ -16,7 +22,7 @@
  * Archived, Context and menu), and beside the window a panel a page may fill (`SidePanel`: the Context).
  */
 
-import { Archive, ChatBubble, EditPencil, LogOut, Plus, Settings, Trash, Undo, User } from "iconoir-react";
+import { Archive, ChatBubble, EditPencil, Folder, FolderPlus, LogOut, Plus, Settings, Trash, Undo, User } from "iconoir-react";
 import { createContext, Fragment, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { ActionsMenuItem } from "@/components/bui/ActionsMenu";
@@ -25,22 +31,29 @@ import { ThemeToggle } from "@/components/bui/ThemeToggle";
 import { ConfirmDialog, RenameDialog } from "@/components/chat/dialog";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { TabBar } from "@/components/pikit/tab-bar";
-import { type ChatConversation, TITLE_MAX } from "@/lib/chat-api";
+import { type ChatConversation, type ChatProject, PROJECT_NAME_MAX, TITLE_MAX } from "@/lib/chat-api";
 import { useConversations } from "@/lib/conversations";
 import { asError } from "@/lib/errors";
 import { chatIdOf, chatPath, go } from "@/lib/location";
-import { type Route, settingsSectionOf } from "@/lib/routes";
+import { useProjects } from "@/lib/projects";
+import { newChatPath, projectPath, type Route, settingsSectionOf } from "@/lib/routes";
 import { useSession } from "@/lib/session";
 import { AssistantBadge } from "./auth-card";
 import { SettingsModal } from "./settings";
 
 /** A conversation's menu, the same everywhere: its items for `conversation`; `changed` hears it was renamed, archived, restored or deleted. */
 export type ConversationMenu = (conversation: ChatConversation, changed?: () => void) => ActionsMenuItem[];
+/** A project's menu, the same everywhere: a new chat in it, Rename, Delete. */
+export type ProjectMenu = (project: ChatProject) => ActionsMenuItem[];
+
+/** What a new chat starts with: an assistant chosen, a project it is made in. */
+export type NewChatOptions = { agent?: string | undefined; project?: string | undefined };
 
 interface Shell {
   menu: ConversationMenu;
-  /** A fresh New chat (its draft empty), with `agent` chosen when given. */
-  newChat(agent?: string): void;
+  projectMenu: ProjectMenu;
+  /** A fresh New chat (its draft empty), with `agent` chosen and in `project` when given. */
+  newChat(options?: NewChatOptions): void;
   /** Where a page's actions go (the tab bar's end), and its side panel (beside the window). */
   slots: { actions: HTMLDivElement | null; side: HTMLDivElement | null };
 }
@@ -54,6 +67,7 @@ function useShell(): Shell {
 }
 
 export const useConversationMenu = (): ConversationMenu => useShell().menu;
+export const useProjectMenu = (): ProjectMenu => useShell().projectMenu;
 export const useNewChat = (): Shell["newChat"] => useShell().newChat;
 
 /** A page's actions, at the tab bar's right end. */
@@ -113,22 +127,34 @@ export const titleOf = (conversation: ChatConversation): string => (conversation
 
 const href = (path: string): string => `${import.meta.env.BASE_URL}#${path}`;
 
+/** The sidebar's row that makes a project (in the projects' section, which never has a project of that id). */
+const NEW_PROJECT = "new-project";
+const PROJECT_ROW = "project:";
+
+/** Where the page is about a project now: Conversations or New chat in it (`?project=`). */
+const routeProject = (route: Route): string | undefined => (route.path === "/" || route.path === "/chats" ? (route.query.get("project") ?? undefined) : undefined);
+
 export function Layout({ route, children }: { route: Route; children: ReactNode }) {
   const { config, me, signOut } = useSession();
   const conversations = useConversations();
+  const projects = useProjects();
   const narrow = useNarrow();
   const [renaming, setRenaming] = useState<{ conversation: ChatConversation; changed?: (() => void) | undefined }>();
   const [deleting, setDeleting] = useState<{ conversation: ChatConversation; changed?: (() => void) | undefined }>();
-  const [problem, setProblem] = useState<Error>();
+  const [making, setMaking] = useState(false);
+  const [renamingProject, setRenamingProject] = useState<ChatProject>();
+  const [deletingProject, setDeletingProject] = useState<ChatProject>();
+  const [problem, setProblem] = useState<{ error: Error; title: string }>();
   const [settings, setSettings] = useState<string>();
   const [draft, setDraft] = useState(0);
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [side, setSide] = useState<HTMLDivElement | null>(null);
   const openId = chatIdOf(route.path);
-  const newChat = useCallback((agent?: string) => {
+  const newChat = useCallback((options: NewChatOptions = {}) => {
     setDraft((n) => n + 1);
-    go(agent === undefined ? "/" : `/?agent=${encodeURIComponent(agent)}`);
+    go(newChatPath(options));
   }, []);
+  const shownProject = routeProject(route);
 
   // `#/settings/<section>` opens Settings over a new chat.
   const asked = settingsSectionOf(route.path);
@@ -141,10 +167,31 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
   const remove = ({ conversation, changed }: { conversation: ChatConversation; changed?: (() => void) | undefined }) => {
     setProblem(undefined);
     conversations.remove(conversation.id).then(
-      () => (openId === conversation.id ? go("/", true) : changed?.()),
-      (error: unknown) => setProblem(asError(error)),
+      () => {
+        projects.reload();
+        if (openId === conversation.id) go("/", true);
+        else changed?.();
+      },
+      (error: unknown) => setProblem({ error: asError(error), title: "The conversation could not be changed" }),
     );
   };
+
+  const removeProject = (project: ChatProject) => {
+    setProblem(undefined);
+    projects.remove(project.id).then(
+      () => shownProject === project.id && go(route.path === "/chats" ? "/chats" : "/", true),
+      (error: unknown) => setProblem({ error: asError(error), title: `“${project.name}” could not be deleted` }),
+    );
+  };
+
+  const projectMenu: ProjectMenu = useCallback(
+    (project) => [
+      { key: "new", label: "New chat here", icon: <Plus />, onSelect: () => newChat({ project: project.id }) },
+      { key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenamingProject(project) },
+      { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeletingProject(project) },
+    ],
+    [newChat],
+  );
 
   const { archive } = conversations;
   const menu: ConversationMenu = useCallback(
@@ -153,7 +200,7 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
         setProblem(undefined);
         archive(conversation.id, archived).then(
           () => changed?.(),
-          (error: unknown) => setProblem(asError(error)),
+          (error: unknown) => setProblem({ error: asError(error), title: "The conversation could not be changed" }),
         );
       };
       return [
@@ -168,9 +215,26 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
   );
 
   const items: SidebarItem[] = [
-    { key: "new", label: "New chat", icon: <Plus />, active: route.path === "/", href: href("/"), onSelect: () => newChat() },
-    { key: "chats", label: "Conversations", icon: <ChatBubble />, active: route.path === "/chats", href: href("/chats"), onSelect: () => go("/chats") },
+    { key: "new", label: "New chat", icon: <Plus />, active: route.path === "/" && shownProject === undefined, href: href("/"), onSelect: () => newChat() },
+    { key: "chats", label: "Conversations", icon: <ChatBubble />, active: route.path === "/chats" && shownProject === undefined, href: href("/chats"), onSelect: () => go("/chats") },
   ];
+  // The projects, under the chats: each opens its chats; the last row makes one.
+  const projectRows: SidebarChat[] = [
+    ...(projects.items ?? []).map((project) => ({
+      id: `${PROJECT_ROW}${project.id}`,
+      label: project.name,
+      icon: <Folder />,
+      active: shownProject === project.id,
+      href: href(projectPath(project.id)),
+      actions: projectMenu(project),
+    })),
+    { id: NEW_PROJECT, label: "New project", icon: <FolderPlus /> },
+  ];
+  const pick = (id: string) => {
+    if (id === NEW_PROJECT) setMaking(true);
+    else if (id.startsWith(PROJECT_ROW)) go(projectPath(id.slice(PROJECT_ROW.length)));
+    else go(chatPath(id));
+  };
   const rowOf = (conversation: ChatConversation): SidebarChat => ({
     id: conversation.id,
     label: titleOf(conversation),
@@ -181,7 +245,7 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
   });
 
   return (
-    <ShellContext.Provider value={{ menu, newChat, slots: { actions, side } }}>
+    <ShellContext.Provider value={{ menu, projectMenu, newChat, slots: { actions, side } }}>
       <main className="flex h-[100dvh] bg-canvas p-1.5 pl-0 text-ink sm:p-2.5 sm:pl-0">
         <SidebarNav
           key={narrow ? "narrow" : "wide"}
@@ -190,7 +254,8 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
           items={items}
           chats={(conversations.items ?? []).map(rowOf)}
           chatsEmpty={conversations.error !== undefined ? "The conversations cannot be read" : conversations.items === undefined ? "Loading" : "No conversations yet"}
-          onPickChat={(id) => go(chatPath(id))}
+          onPickChat={pick}
+          moreChats={{ label: "Projects", chats: projectRows }}
           {...(conversations.hasMore && { viewAll: { href: href("/chats"), onSelect: () => go("/chats") } })}
           menuLabel={me.user.name.trim() === "" ? me.user.email : me.user.name}
           menuIcon={<User width={17} height={17} strokeWidth={1.8} className="shrink-0" />}
@@ -228,13 +293,13 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
           <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-window border border-line bg-page">
             {problem !== undefined && (
               <div className="border-b border-line px-3 py-2">
-                <ErrorNote error={problem} title="The conversation could not be changed" />
+                <ErrorNote error={problem.error} title={problem.title} />
               </div>
             )}
             <ChatTabs route={route} onActions={setActions} onNewChat={() => newChat()} />
             {/* New chat starts anew each time it is asked for ("+", another assistant picked) */}
             <div className="flex min-h-0 flex-1 flex-col">
-              <Fragment key={route.path === "/" ? `new-${draft}-${route.query.get("agent") ?? ""}` : "page"}>{children}</Fragment>
+              <Fragment key={route.path === "/" ? `new-${draft}-${route.query.get("agent") ?? ""}-${shownProject ?? ""}` : "page"}>{children}</Fragment>
             </div>
           </section>
           <div ref={setSide} className="contents" />
@@ -252,6 +317,48 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
           await conversations.rename(renaming.conversation.id, title);
           renaming.changed?.();
         }}
+      />
+      <RenameDialog
+        open={making}
+        title=""
+        max={PROJECT_NAME_MAX}
+        heading="New project"
+        label="Name"
+        placeholder="Work"
+        action="Make it"
+        onClose={() => setMaking(false)}
+        onRename={async (name) => {
+          const made = await projects.create(name);
+          newChat({ project: made.id });
+        }}
+      />
+      <RenameDialog
+        open={renamingProject !== undefined}
+        title={renamingProject?.name ?? ""}
+        max={PROJECT_NAME_MAX}
+        heading="Rename the project"
+        label="Name"
+        placeholder="Work"
+        onClose={() => setRenamingProject(undefined)}
+        onRename={async (name) => {
+          if (renamingProject !== undefined) await projects.rename(renamingProject.id, name);
+        }}
+      />
+      <ConfirmDialog
+        open={deletingProject !== undefined}
+        title="Delete this project?"
+        description={
+          deletingProject === undefined ? "" : deletingProject.chats === 0 ? (
+            <>“{deletingProject.name}” has no chats: it goes for good.</>
+          ) : (
+            <>
+              “{deletingProject.name}” still has {deletingProject.chats === 1 ? "a chat" : `${deletingProject.chats} chats`}: only a project with none is deleted. Delete them first.
+            </>
+          )
+        }
+        action="Delete"
+        onClose={() => setDeletingProject(undefined)}
+        onConfirm={() => deletingProject !== undefined && removeProject(deletingProject)}
       />
       <ConfirmDialog
         open={deleting !== undefined}

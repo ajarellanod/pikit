@@ -7,7 +7,9 @@
  * (`writtenFirst`), and the list is read again once the message is in (`screens/conversation.tsx`).
  *
  * Also what the pages share: the messages sent and not shown yet (`SentMessages`, the shared
- * conversation view's: New chat's first message shows in the conversation it opens), and the tabs, the
+ * conversation view's: New chat's first message shows in the conversation it opens), what the commands
+ * typed answered (`CommandNote`: a quiet note in their conversation, this page's only, never in its
+ * transcript: New chat's shows in the conversation it made), and the tabs, the
  * conversations opened (as the dashboard's), kept in this browser for this user
  * (`localStorage["pikit-chat-tabs:<user id>"]`: another user signing in here never sees them).
  */
@@ -15,7 +17,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { type SentMessages, useSentMessages, writtenFirst } from "@/components/pikit/conversation";
 import { every } from "./activity.ts";
-import type { ChatConversation, ChatPage } from "./chat-api.ts";
+import type { ChatCommandResult, ChatConversation, ChatPage } from "./chat-api.ts";
 import { request, useGet } from "./client.ts";
 import { conversationsPath } from "./source.ts";
 
@@ -29,6 +31,27 @@ const KEPT_TABS = 12;
 export interface Tab {
   id: string;
   title: string;
+}
+
+/** What a command typed in a conversation came to, shown there to its user only. */
+export interface CommandNote {
+  id: number;
+  /** The command, without its slash. */
+  command: string;
+  text: string;
+  failed: boolean;
+  /** Epoch ms. */
+  at: number;
+}
+
+let nextNote = 0;
+
+/** What the note says of `result`: its own words, else what came of it. */
+function noteOf(result: ChatCommandResult): Omit<CommandNote, "id" | "at"> {
+  const failed = result.outcome === "failed";
+  const said = result.text?.trim() ?? "";
+  const text = said !== "" ? said : result.outcome === "unfinished" ? `/${result.name} is running, or did not finish: it is not run again.` : failed ? `/${result.name} did not work.` : `Ran /${result.name}.`;
+  return { command: result.name, text, failed };
 }
 
 const tabsKey = (userId: string): string => `pikit-chat-tabs:${userId}`;
@@ -54,6 +77,9 @@ export interface Conversations extends SentMessages {
   /** Archives it (listed apart) or restores it (`archived` false). */
   archive(id: string, archived: boolean): Promise<ChatConversation>;
   remove(id: string): Promise<void>;
+  /** What the commands typed in conversation `id` answered, oldest first. */
+  notesOf(id: string): CommandNote[];
+  addNote(id: string, result: ChatCommandResult): void;
   tabs: Tab[];
   /** A tab's title: its conversation's, as the lists have it now. */
   tabTitle(tab: Tab): string;
@@ -71,6 +97,11 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
   const [changes, setChanges] = useState(0);
   const [tabs, setTabs] = useState<Tab[]>(() => loadTabs(userId));
   const { sentOf, addSent, updateSent, lastSentAt } = useSentMessages();
+  const [notes, setNotes] = useState<Record<string, CommandNote[]>>({});
+  const notesOf = useCallback((id: string): CommandNote[] => notes[id] ?? [], [notes]);
+  const addNote = useCallback((id: string, result: ChatCommandResult) => {
+    setNotes((all) => ({ ...all, [id]: [...(all[id] ?? []), { ...noteOf(result), id: nextNote++, at: Date.now() }] }));
+  }, []);
   const { reload: reloadLatest } = latest;
 
   // A newer read of the first page knows better than what was changed here.
@@ -157,12 +188,14 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
       rename,
       archive,
       remove,
+      notesOf,
+      addNote,
       tabs,
       tabTitle,
       openTab,
       closeTab,
     }),
-    [sentOf, addSent, updateSent, lastSentAt, items, latest.data, latest.error, reload, changes, rename, archive, remove, tabs, tabTitle, openTab, closeTab],
+    [sentOf, addSent, updateSent, lastSentAt, items, latest.data, latest.error, reload, changes, rename, archive, remove, notesOf, addNote, tabs, tabTitle, openTab, closeTab],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

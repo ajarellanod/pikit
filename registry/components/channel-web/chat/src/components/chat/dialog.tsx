@@ -1,7 +1,8 @@
 /**
  * A modal dialog in the look of the dashboard's (a raised card over a dimmed page), on the browser's
  * own `<dialog>`: focus moves into it and stays, Escape and a click outside close it, the page behind
- * is inert. `RenameDialog` and `ConfirmDialog` are the two the page needs.
+ * is inert. `RenameDialog` (a conversation's title, a project's name, a new project's) and `ConfirmDialog`
+ * are the two the page needs.
  */
 
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
@@ -42,8 +43,28 @@ export function Dialog({ open, title, description, onClose, children }: { open: 
   );
 }
 
-/** Asks for a conversation's new title (1 to `max` characters). */
-export function RenameDialog({ open, title, max, onClose, onRename }: { open: boolean; title: string; max: number; onClose: () => void; onRename: (title: string) => Promise<void> }) {
+/** Asks for a name (1 to `max` characters): by default a conversation's new title. */
+export function RenameDialog({
+  open,
+  title,
+  max,
+  onClose,
+  onRename,
+  heading = "Rename the conversation",
+  label = "Title",
+  placeholder = "Trip to Lisbon",
+  action = "Rename",
+}: {
+  open: boolean;
+  title: string;
+  max: number;
+  onClose: () => void;
+  onRename: (title: string) => Promise<void>;
+  heading?: string;
+  label?: string;
+  placeholder?: string;
+  action?: string;
+}) {
   const [value, setValue] = useState(title);
   const [problem, setProblem] = useState<string>();
   const [saving, setSaving] = useState(false);
@@ -69,7 +90,7 @@ export function RenameDialog({ open, title, max, onClose, onRename }: { open: bo
   };
 
   return (
-    <Dialog open={open} title="Rename the conversation" onClose={onClose}>
+    <Dialog open={open} title={heading} onClose={onClose}>
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
@@ -77,13 +98,13 @@ export function RenameDialog({ open, title, max, onClose, onRename }: { open: bo
           void save();
         }}
       >
-        <TextField label="Title" value={value} onChange={setValue} maxLength={max} placeholder="Trip to Lisbon" required autoFocus problem={problem} />
+        <TextField label={label} value={value} onChange={setValue} maxLength={max} placeholder={placeholder} required autoFocus problem={problem} />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" variant="primary" disabled={value.trim() === "" || saving} aria-busy={saving}>
-            Rename
+            {action}
           </Button>
         </div>
       </form>

@@ -36,6 +36,18 @@ export function settingsSectionOf(path: string): string | undefined {
   return match === null ? undefined : (match[1] ?? "profile");
 }
 
+/** A project's chats: Conversations showing only them. */
+export const projectPath = (id: string): string => `/chats?project=${encodeURIComponent(id)}`;
+
+/** New chat, with an assistant chosen and in a project when given. */
+export function newChatPath({ agent, project }: { agent?: string | undefined; project?: string | undefined } = {}): string {
+  const params = new URLSearchParams();
+  if (agent !== undefined) params.set("agent", agent);
+  if (project !== undefined) params.set("project", project);
+  const query = params.toString();
+  return query === "" ? "/" : `/?${query}`;
+}
+
 /** What a link that sets a password carries (channel-web's `setPasswordLink`): its token, why, and whose account. */
 export interface SetPasswordLink {
   token: string | null;

@@ -11,21 +11,30 @@
  * was made with one of `ChatConfig.agents`: a conversation keeps its assistant, so picking another
  * starts a new chat with it.
  *
+ * Its project, when it was made in one, is named at the tab bar's end (a link to the project's chats);
+ * another assistant picked starts the new chat in the same project. The commands the operator lets
+ * users type (`ChatConfig.commands`) have the composer's "/" menu: one runs in this conversation and
+ * what it answered shows as a quiet note (`CommandNoteRow`), never in the transcript.
+ *
  * An archived conversation is still talked to: a message lists it again (the server's rule), and the
  * page reads it again when the live stream says it changed.
  */
 
+import { Folder } from "iconoir-react";
 import { useEffect, useMemo } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Badge } from "@/components/bui/Badge";
-import { ConversationView } from "@/components/pikit/conversation";
+import { CommandNoteRow } from "@/components/chat/command-note";
+import { ConversationView, type ThreadNote } from "@/components/pikit/conversation";
 import { ErrorNote } from "@/components/pikit/error-note";
-import type { ChatConversation } from "@/lib/chat-api";
+import type { ChatConversation, ChatSendRequest, ChatSendResponse } from "@/lib/chat-api";
 import { follow, get, post, useGet } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
 import { ChatFailure } from "@/lib/errors";
 import { imageLimits } from "@/lib/images";
 import { assistantName } from "@/lib/names";
+import { useProjects } from "@/lib/projects";
+import { projectPath } from "@/lib/routes";
 import { usePageTitle, useSession } from "@/lib/session";
 import { chatSource, conversationPath } from "@/lib/source";
 import { SidePanel, TabActions, titleOf, useConversationMenu, useNewChat } from "./layout";
@@ -37,7 +46,8 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
   const conversations = useConversations();
   const menu = useConversationMenu();
   const newChat = useNewChat();
-  const { openTab, reload: reloadList } = conversations;
+  const projects = useProjects();
+  const { openTab, reload: reloadList, addNote } = conversations;
   // Once a message is in, the sidebar reads the list again: this conversation is the latest now.
   const source = useMemo(() => {
     const chat = chatSource(chatId, client, config.target);
@@ -66,11 +76,23 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
 
   const agents = config.agents.map((agent) => agent.name);
   const agent = conversation?.agent;
+  const project = conversation?.project;
+  const projectName = projects.get(project)?.name;
+
+  /** A command typed here: run in this conversation, what it answered a note (else, sent as a message after all). */
+  const runCommand = async (name: string, args: string) => {
+    const body: ChatSendRequest = { text: args === "" ? `/${name}` : `/${name} ${args}` };
+    const answer = await post<ChatSendResponse>(`${conversationPath(chatId)}/messages`, body);
+    if (answer.command !== undefined) addNote(chatId, answer.command);
+    reloadList();
+  };
+  const notes: ThreadNote[] = conversations.notesOf(chatId).map((note) => ({ key: `note-${note.id}`, at: note.at, node: <CommandNoteRow note={note} /> }));
 
   return (
     <ConversationView
       source={source}
       sent={conversations}
+      notes={notes}
       context={config.visibility.context}
       toolDetails={config.visibility.tools === "full"}
       // Its busy flag, its title and where it is listed (a message lists an archived one again) follow.
@@ -81,6 +103,12 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
       actions={(contextButton) =>
         conversation !== undefined && (
           <TabActions>
+            {project !== undefined && projectName !== undefined && (
+              <a href={`#${projectPath(project)}`} title={`Project: ${projectName}`} className="flex max-w-[160px] min-w-0 items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[12.5px] font-medium text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink">
+                <Folder width={13} height={13} strokeWidth={1.9} aria-hidden className="shrink-0" />
+                <span className="truncate">{projectName}</span>
+              </a>
+            )}
             {conversation.archived && <Badge>Archived</Badge>}
             {contextButton}
             <ActionsMenu
@@ -94,7 +122,10 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
       side={(panel) => <SidePanel>{panel}</SidePanel>}
       composer={{
         disabled: conversation === undefined,
-        commandsMenu: false,
+        commands: config.commands,
+        commandsMenu: config.commands.length > 0,
+        commandsNote: "Runs here, never sent to the assistant",
+        onCommand: runCommand,
         images: imageLimits(config.target),
         placeholder: (busy) => (busy ? "Reply: it runs after the answer going" : "Reply"),
         picker:
@@ -104,7 +135,7 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
                 label: "assistant",
                 options: (agents.includes(agent) ? agents : [agent, ...agents]).map((name) => ({ key: name, name: assistantName(name), ...(name !== agent && { tag: "new chat" }) })),
                 value: agent,
-                onChange: (name) => newChat(name),
+                onChange: (name) => newChat({ agent: name, project }),
                 ...(agents.some((name) => name !== agent) && { note: "A chat keeps its assistant: another one starts a new chat with it." }),
               },
       }}
