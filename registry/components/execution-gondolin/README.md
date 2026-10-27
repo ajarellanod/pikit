@@ -180,7 +180,8 @@ default), nothing is ever deleted: deleting what agents wrote must be asked for.
   out of every guest's reach (a guest can change its own directory's times: `touch /workspace`), and
   is on the app's clock, not the filesystem's (a restore or a copy that resets file times changes
   nothing). A chat with no marker (from before `retentionDays` was set) starts its count when a sweep
-  first sees it.
+  first sees it. Since the marker may lag the last use by up to an hour, a chat whose process
+  restarted meanwhile may go up to an hour before N days have passed.
 - **When**: a sweep at start (in the background: start does not wait for it), then every hour.
   `stop` ends it.
 - **Never in use**: a chat is kept while one of its sandboxes has a VM up (until `idleSeconds` after
