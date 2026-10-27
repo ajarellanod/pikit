@@ -9,7 +9,7 @@
  *
  * | Type | Message | Answer |
  * |---|---|---|
- * | `channel-web.start` | `{ userId, chatId, text, images?, requestId, agent? }` | `ChatSendResponse`: the conversation made with its first message (with `agent`, the agent the user picked, which the Worker checked) |
+ * | `channel-web.start` | `{ userId, chatId, text, images?, requestId, agent?, project? }` | `ChatSendResponse`: the conversation made with its first message (with `agent`, the agent the user picked; with `project`, one of the user's projects, its space: the Worker checked both) |
  * | `channel-web.send` | the same | `ChatSendResponse` |
  * | `channel-web.conversation` | `{ userId, chatId }` | `ChatConversation` |
  * | `channel-web.rename` | `{ userId, chatId, title }` | `ChatConversation` |
@@ -27,8 +27,13 @@
  *
  * | Type | Message | Answer |
  * |---|---|---|
- * | `channel-web.list` | `{ userId, limit, cursor?, archived?, q? }` | `ChatPage<ChatConversation>`: not archived, or with `archived: true` the archived ones; with `q`, those whose title holds it |
- * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations leave the index |
+ * | `channel-web.list` | `{ userId, limit, cursor?, archived?, q?, project? }` | `ChatPage<ChatConversation>`: not archived, or with `archived: true` the archived ones; with `q`, those whose title holds it; with `project`, that project's (`""`: of none); `not_found` for a project not the user's |
+ * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations and projects leave the index |
+ * | `channel-web.projects` | `{ userId }` | `ChatPage<ChatProject>`: the user's projects |
+ * | `channel-web.project` | `{ userId, id }` | `ChatProject`, or `not_found` (another user's too) |
+ * | `channel-web.project.create` | `{ userId, name }` | `ChatProject` (`invalid_request` past `MAX_PROJECTS`) |
+ * | `channel-web.project.rename` | `{ userId, id, name }` | `ChatProject`, or `not_found` |
+ * | `channel-web.project.delete` | `{ userId, id }` | `{}`, or `not_found`, `not_empty` |
  * | `channel-web.config` | `{}` | `ChatConfig`: the page's config as the accounts' App makes it (its methods, its live settings: sign-up mode, visibility, the agents users may pick; whether it sends email) |
  * | `channel-web.rate` | `{ userId }` | `{ retryAfter? }`: one message of the user's counted (`messagesPerMinute`); `retryAfter` (seconds) when it is one too many |
  * | `channel-web.routed` | `{ userId }` | `{ agent? }`: the agent this App's `route.resolve` names for a new chat of the user, a dry run (`routed.ts`); absent when it denies or halts |
@@ -37,14 +42,14 @@
  * actor: `channel-web.seen` `{ rows: ConversationRow[] }`, each row's newest version.
  *
  * A refusal is an `ActorCallError` (`not_found`, `invalid_request`, `invalid_cursor`, `too_large`,
- * `denied`, `rejected`, `no_route`) whose code crosses the call.
+ * `denied`, `rejected`, `no_route`, `not_empty`) whose code crosses the call.
  */
 
 import type { AppContext } from "@pikit/core";
 import { ActorCallError, type ActorInbox, type JsonValue } from "@pikit/contracts";
-import { type ChatConfig, type ChatImage, MAX_IMAGES, SEARCH_MAX } from "./api.ts";
-import { type ChatBackend, type ChatRef, conversationOf, type FirstMessage, type NewMessage, refusal } from "./backend.ts";
-import { isChatId, keyOf, REQUEST_ID } from "./chat.ts";
+import { type ChatConfig, type ChatImage, MAX_IMAGES, PROJECT_NAME_MAX, SEARCH_MAX } from "./api.ts";
+import { type ChatBackend, type ChatRef, createIndex, type FirstMessage, type NewMessage, refusal } from "./backend.ts";
+import { isChatId, isProjectId, keyOf, REQUEST_ID } from "./chat.ts";
 import type { RateLimiter } from "./rate.ts";
 import { routedAgent } from "./routed.ts";
 import type { ChatStore, ConversationRow } from "./store.ts";
@@ -67,6 +72,11 @@ export const CALL = {
   image: "channel-web.image",
   rate: "channel-web.rate",
   routed: "channel-web.routed",
+  projects: "channel-web.projects",
+  project: "channel-web.project",
+  createProject: "channel-web.project.create",
+  renameProject: "channel-web.project.rename",
+  deleteProject: "channel-web.project.delete",
 } as const;
 export const LIVE = "channel-web.live";
 export const SEEN = "channel-web.seen";
@@ -116,14 +126,27 @@ function messageOf(message: JsonValue): NewMessage {
   return { text: written, requestId, ...(list.length > 0 && { images: list }) };
 }
 
-/** A conversation's first message, and the agent picked, if any. */
-function firstOf(message: JsonValue): FirstMessage {
-  const { agent } = fieldsOf(message);
-  if (agent !== undefined && (typeof agent !== "string" || agent === "")) throw refusal("invalid_request", 'channel-web: "agent" is an agent\'s name');
-  return { ...messageOf(message), ...(typeof agent === "string" && { agent }) };
+/** A project id, or `invalid_request`. */
+function projectIdOf(value: unknown): string {
+  if (typeof value !== "string" || !isProjectId(value)) throw refusal("invalid_request", 'channel-web: "project" is a project id');
+  return value;
 }
 
-const ROW_FIELDS = { key: "string", userId: "string", chatId: "string", agent: "string", title: "string", createdAt: "number", lastActivity: "number", hidden: "boolean", archived: "boolean", busy: "boolean", version: "number" } as const;
+/** A conversation's first message, and the agent picked and its project, if any. */
+function firstOf(message: JsonValue): FirstMessage {
+  const { agent, project } = fieldsOf(message);
+  if (agent !== undefined && (typeof agent !== "string" || agent === "")) throw refusal("invalid_request", 'channel-web: "agent" is an agent\'s name');
+  return { ...messageOf(message), ...(typeof agent === "string" && { agent }), ...(project !== undefined && { project: projectIdOf(project) }) };
+}
+
+/** A project's name, as the route cleaned it. */
+const projectNameOf = (fields: Fields): string => {
+  const name = text(fields, "name");
+  if (name.length > PROJECT_NAME_MAX) throw refusal("invalid_request", `channel-web: "name" is at most ${PROJECT_NAME_MAX} characters`);
+  return name;
+};
+
+const ROW_FIELDS = { key: "string", userId: "string", chatId: "string", agent: "string", project: "string", title: "string", createdAt: "number", lastActivity: "number", hidden: "boolean", archived: "boolean", busy: "boolean", version: "number" } as const;
 
 function rowsOf(message: JsonValue): ConversationRow[] {
   const rows = fieldsOf(message).rows;
@@ -135,6 +158,7 @@ function rowsOf(message: JsonValue): ConversationRow[] {
     }
     const checked = fields as ConversationRow;
     if (keyOf(checked.userId, checked.chatId) !== checked.key) throw new ActorCallError("invalid_request", "channel-web: a row's key is not its user's and chat's");
+    if (checked.project !== "" && !isProjectId(checked.project)) throw new ActorCallError("invalid_request", "channel-web: a row's project is not a project id");
     return checked;
   });
 }
@@ -209,12 +233,26 @@ export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (c
     return agent === undefined ? {} : { agent };
   });
   inbox.handle(SEEN, async (_key, message) => store.seen(rowsOf(message)));
-  inbox.answer(CALL.list, async (_key, message) => {
-    const { archived, q } = fieldsOf(message);
+  const index = createIndex(store);
+  const userOf = (message: JsonValue): string => text(fieldsOf(message), "userId");
+  inbox.answer(CALL.list, async (_key, message, ctx) => {
+    const { archived, q, project } = fieldsOf(message);
     if (archived !== undefined && typeof archived !== "boolean") throw refusal("invalid_request", 'channel-web: "archived" is a boolean');
     if (q !== undefined && (typeof q !== "string" || q.length > SEARCH_MAX)) throw refusal("invalid_request", `channel-web: "q" is a string of at most ${SEARCH_MAX} characters`);
-    const listed = await store.list(text(fieldsOf(message), "userId"), { ...pageOf(message), archived: archived === true, ...(typeof q === "string" && q !== "" && { q }) });
-    return json({ items: listed.items.map((row) => conversationOf(row)), ...(listed.next !== undefined && { next: listed.next }) });
+    const inProject = project === undefined ? undefined : project === "" ? "" : projectIdOf(project);
+    const query = { ...pageOf(message), archived: archived === true, ...(typeof q === "string" && q !== "" && { q }), ...(inProject !== undefined && { project: inProject }) };
+    return json(await index.list(userOf(message), query, ctx));
+  });
+  inbox.answer(CALL.projects, async (_key, message, ctx) => json(await index.projects(userOf(message), ctx)));
+  inbox.answer(CALL.project, async (_key, message, ctx) => json(await index.project(userOf(message), projectIdOf(fieldsOf(message).id), ctx)));
+  inbox.answer(CALL.createProject, async (_key, message, ctx) => json(await index.createProject(userOf(message), projectNameOf(fieldsOf(message)), ctx)));
+  inbox.answer(CALL.renameProject, async (_key, message, ctx) => {
+    const fields = fieldsOf(message);
+    return json(await index.renameProject(userOf(message), projectIdOf(fields.id), projectNameOf(fields), ctx));
+  });
+  inbox.answer(CALL.deleteProject, async (_key, message, ctx) => {
+    await index.deleteProject(userOf(message), projectIdOf(fieldsOf(message).id), ctx);
+    return {};
   });
   inbox.answer(CALL.forget, async (_key, message) => {
     await store.forget(text(fieldsOf(message), "userId"));

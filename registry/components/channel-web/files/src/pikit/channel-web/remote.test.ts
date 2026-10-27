@@ -48,6 +48,8 @@ class Platform {
   readonly unreachable = new Set<string>();
   /** Each object's runtime ends a started run before its dispatch returns (`Runtime.runsAtOnce`). */
   runsAtOnce = false;
+  /** The `/rules` command each object's App has, as it ran: in which conversation and space, for whom. */
+  readonly ran: { key: string; space?: string; args: string; sender?: string }[] = [];
   constructor(
     readonly accounts: FakeAccounts,
     /** channel-web's config in every object's App (the default App's). */
@@ -113,6 +115,13 @@ class Platform {
       setup: (pikit) => {
         pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "test/model" });
         pikit.provideKeyed("agent.definition", "helper", { name: "helper", model: "test/model" });
+        pikit.provideKeyed("agent.command", "rules", {
+          description: "Your rules",
+          run: async (conversation, args, _ctx, sender) => {
+            this.ran.push({ key: conversation.key, ...(conversation.space !== undefined && { space: conversation.space }), args, ...(sender !== undefined && { sender: sender.id }) });
+            return { text: `kept: ${args}` };
+          },
+        });
       },
     });
     const app = await defineApp({
@@ -400,6 +409,11 @@ test("only the accounts actor answers the index's calls: a conversation's object
     [CALL.config, {}],
     [CALL.rate, { userId: "ana" }],
     [CALL.routed, { userId: "ana" }],
+    [CALL.projects, { userId: "ana" }],
+    [CALL.project, { userId: "ana", id: "a".repeat(32) }],
+    [CALL.createProject, { userId: "ana", name: "x" }],
+    [CALL.renameProject, { userId: "ana", id: "a".repeat(32), name: "x" }],
+    [CALL.deleteProject, { userId: "ana", id: "a".repeat(32) }],
   ] as const) {
     const refused = await platform.mailbox.call(key, type, message, w.app.context()).catch((error: unknown) => error);
     expect({ type, code: (refused as ActorCallError).code }).toEqual({ type, code: "no_handler" });
@@ -414,7 +428,7 @@ test("the index keeps each conversation's newest version: a late or repeated one
   const { platform } = await cloud();
   const index = await platform.object(ACCOUNTS_KEY);
   const chatId = crypto.randomUUID();
-  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, agent: "assistant", title: "new", createdAt: 1, lastActivity: 5, hidden: false, archived: false, busy: false, version: 3 };
+  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, agent: "assistant", project: "", title: "new", createdAt: 1, lastActivity: 5, hidden: false, archived: false, busy: false, version: 3 };
   await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [row] }, index.ctx);
   await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [{ ...row, title: "old", version: 2 }] }, index.ctx);
   const listed = callResult(await answerCall(index.answers.get(CALL.list) as ActorCallHandler, ACCOUNTS_KEY, { userId: "ana", limit: 10 }, index.ctx)) as unknown as { items: ChatConversation[] };
@@ -489,4 +503,87 @@ test("who a conversation is with, in its object: its user read from the accounts
   } finally {
     await app.stop();
   }
+});
+
+type ProjectJson = { id: string; name: string; chats: number };
+
+test("PROJECTS on the Worker: the accounts actor's (one call each); a chat made in one reaches its object with it, admitted in the project's space; the list by project from the index; deleted once empty (409 before)", async () => {
+  const { platform, worker: w } = await cloud();
+  platform.calls.length = 0;
+  const made = await w.fetch(`${API}/projects`, post("ana", { name: "Work" }));
+  expect(made.status).toBe(201);
+  const work = (await made.json()) as ProjectJson;
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.createProject}`]);
+
+  platform.calls.length = 0;
+  const started = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "the report", project: work.id }))).json()) as { id: string; requestId: string };
+  const key = `web:ana:${started.id}`;
+  // Counted, the project checked (the accounts actor's), then the conversation's object.
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `${ACCOUNTS_KEY} ${CALL.project}`, `${key} ${CALL.start}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+  const { runtime } = await platform.object(key);
+  expect(runtime.pointers.get(key)?.space).toBe(`web:ana:project:${work.id}`);
+  expect(runtime.dispatched.at(-1)?.conversation.space).toBe(`web:ana:project:${work.id}`);
+  const other = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "another", project: work.id }))).json()) as { id: string };
+  expect((await platform.object(`web:ana:${other.id}`)).runtime.pointers.get(`web:ana:${other.id}`)?.space).toBe(`web:ana:project:${work.id}`);
+  const loose = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "loose" }))).json()) as { id: string };
+  expect((await platform.object(`web:ana:${loose.id}`)).runtime.pointers.get(`web:ana:${loose.id}`)?.space).toBeUndefined();
+
+  expect(await (await w.fetch(`${API}/conversations/${started.id}`, as("ana"))).json()).toMatchObject({ project: work.id });
+  platform.calls.length = 0;
+  const inWork = (await (await w.fetch(`${API}/conversations?project=${work.id}`, as("ana"))).json()) as { items: ChatConversation[] };
+  // Made in the same millisecond, maybe: their order is the chat ids'.
+  expect(inWork.items.map((each) => each.title).sort()).toEqual(["Another", "The report"]);
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`]);
+  expect(((await (await w.fetch(`${API}/conversations?project=none`, as("ana"))).json()) as { items: ChatConversation[] }).items.map((each) => each.title)).toEqual(["Loose"]);
+  expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toMatchObject({ items: [{ id: work.id, name: "Work", chats: 2 }] });
+  expect(await (await w.fetch(`${API}/projects/${work.id}`, post("ana", { name: "Office" }, "PATCH"))).json()).toMatchObject({ id: work.id, name: "Office" });
+
+  expect((await w.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(409);
+  for (const id of [started.id, other.id]) expect((await w.fetch(`${API}/conversations/${id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
+  expect((await w.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
+  expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toEqual({ items: [] });
+});
+
+test("PROJECT ISOLATION on the Worker: user B with user A's project id gets 404 on every route; no object is made for it; A's project untouched", async () => {
+  const { platform, worker: w } = await cloud();
+  const mine = (await (await w.fetch(`${API}/projects`, post("ana", { name: "Secret" }))).json()) as ProjectJson;
+  await w.fetch(`${API}/conversations`, post("ana", { text: "inside", project: mine.id }));
+  const objects = [...platform.objects.keys()];
+  const attempts: [string, string, unknown?][] = [
+    ["PATCH", `/projects/${mine.id}`, { name: "theirs" }],
+    ["DELETE", `/projects/${mine.id}`],
+    ["GET", `/conversations?project=${mine.id}`],
+    ["POST", "/conversations", { text: "into yours", project: mine.id }],
+  ];
+  for (const [method, path, body] of attempts) {
+    const response = await w.fetch(`${API}${path}`, as("ben", { method, ...(body !== undefined && { body: JSON.stringify(body) }) }));
+    expect({ method, path, status: response.status, body: await response.json() }).toMatchObject({ method, path, status: 404, body: { error: "not_found" } });
+  }
+  expect([...platform.objects.keys()]).toEqual(objects);
+  expect(await (await w.fetch(`${API}/projects`, as("ben"))).json()).toEqual({ items: [] });
+  expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toMatchObject({ items: [{ id: mine.id, name: "Secret", chats: 1 }] });
+  // The index refuses a project id that is not one, before it reads anything.
+  const forged = await platform.mailbox.call(ACCOUNTS_KEY, CALL.list, { userId: "ana", limit: 10, project: "x" }, w.app.context()).catch((error: unknown) => error);
+  expect((forged as ActorCallError).code).toBe("invalid_request");
+});
+
+test("COMMANDS on the Worker: listed by the accounts actor's config; typed, it runs in the conversation's object (its space, the user as sender), nothing dispatched; the same request id runs once", async () => {
+  const { platform, worker: w } = await cloud();
+  expect(((await (await w.fetch(`${API}/config`)).json()) as ChatConfig).commands).toEqual([{ name: "rules", description: "Your rules" }]);
+  const work = (await (await w.fetch(`${API}/projects`, post("ana", { name: "Work" }))).json()) as ProjectJson;
+  const first = await w.fetch(`${API}/conversations`, post("ana", { text: "/rules be brief", project: work.id, requestId: "web:c1" }));
+  expect(first.status).toBe(201);
+  const made = (await first.json()) as { id: string; admission: string; command: unknown };
+  expect(made).toMatchObject({ admission: "command", command: { name: "rules", outcome: "ran", text: "kept: be brief" } });
+  const key = `web:ana:${made.id}`;
+  expect(platform.ran).toEqual([{ key, space: `web:ana:project:${work.id}`, args: "be brief", sender: "ana" }]);
+  expect((await platform.object(key)).runtime.dispatched).toEqual([]);
+  expect(((await (await w.fetch(`${API}/conversations?project=${work.id}`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id: made.id, title: "New conversation" }]);
+  expect(await transcriptOf(w, "ana", made.id)).toEqual([]);
+
+  const again = await w.fetch(`${API}/conversations/${made.id}/messages`, post("ana", { text: "/rules be brief", requestId: "web:c1" }));
+  expect(await again.json()).toMatchObject({ admission: "duplicate", command: { name: "rules", outcome: "ran" } });
+  const next = await w.fetch(`${API}/conversations/${made.id}/messages`, post("ana", { text: "/rules no emojis" }));
+  expect({ status: next.status, body: await next.json() }).toMatchObject({ status: 202, body: { admission: "command", command: { text: "kept: no emojis" } } });
+  expect(platform.ran.map((each) => each.args)).toEqual(["be brief", "no emojis"]);
 });

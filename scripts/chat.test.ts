@@ -21,7 +21,7 @@ import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../r
 import { base64Bytes, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
 import { INITIAL, type LiveState, reduce } from "../registry/components/channel-web/chat/src/lib/transcript.ts";
 import { type ChatClient, chatSource, conversationsPath, transcriptPath } from "../registry/components/channel-web/chat/src/lib/source.ts";
-import { parseRoute, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
+import { newChatPath, parseRoute, projectPath, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
 import { readSse, SseParser } from "../registry/components/channel-web/chat/src/lib/sse.ts";
 import { onVisibleAgain } from "../registry/components/channel-web/chat/src/lib/visible.ts";
 import { CHAT, chatBoundaryViolations, chatCopies, staleCopies } from "./chat-shared.ts";
@@ -271,6 +271,12 @@ describe("live events", () => {
     expect(conversationsPath({ limit: 30 })).toBe("/conversations?limit=30");
     expect(conversationsPath({ limit: 30, cursor: "n/1", archived: true, q: "  trip to Rome " })).toBe("/conversations?limit=30&cursor=n%2F1&archived=1&q=trip+to+Rome");
     expect(conversationsPath({ limit: 30, q: "   " })).toBe("/conversations?limit=30");
+    expect(conversationsPath({ limit: 30, q: "report", project: "a".repeat(32) })).toBe(`/conversations?limit=30&q=report&project=${"a".repeat(32)}`);
+    expect(conversationsPath({ limit: 30, project: "none" })).toBe("/conversations?limit=30&project=none");
+    // A new chat with an assistant and in a project; a project's chats.
+    expect([newChatPath(), newChatPath({ agent: "helper" }), newChatPath({ agent: "helper", project: "p1" }), newChatPath({ project: "p1" })]).toEqual(["/", "/?agent=helper", "/?agent=helper&project=p1", "/?project=p1"]);
+    expect(projectPath("p1")).toBe("/chats?project=p1");
+    expect(parseRoute(`#${newChatPath({ project: "p1" })}`).query.get("project")).toBe("p1");
   });
 
   test("the old conversation code is gone: the page renders the shared view, never its own", () => {

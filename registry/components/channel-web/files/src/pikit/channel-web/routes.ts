@@ -10,6 +10,9 @@
  * - **The key is the session's.** A route names a conversation by the chat id in its path only, and the
  *   key is `keyOf(user, chat id)`, built in one place (`refOf`): another user's chat id names no
  *   conversation of theirs, and is `404` as one that never existed.
+ * - **A project is the session's user's too**: `/projects/:id`, `?project=` and a new chat's `project`
+ *   name only one of theirs (the index answers by user and id): another user's is `404`, checked before
+ *   any chat is made in it.
  * - **A change needs the page's header** (`x-pikit-chat: 1`, `CHAT_CLIENT_HEADER`): `400` without, so a
  *   page of another site cannot make a signed-in browser send, rename, archive, delete or stop anything.
  * - **Bodies are bounded**: a message at most what its images in base64 and its text need on this
@@ -45,12 +48,14 @@ import {
   CHAT_CLIENT_HEADER,
   type ChatAbortResponse,
   type ChatAgent,
+  type ChatCommand,
   type ChatConfig,
   type ChatConversation,
   type ChatError,
   type ChatEvent,
   type ChatMe,
   type ChatPage,
+  type ChatProject,
   type ChatSendResponse,
   type ChatSignInMethod,
   type ChatStartResponse,
@@ -60,12 +65,14 @@ import {
   MAX_IMAGE_BYTES,
   MAX_IMAGES,
   MAX_TEXT,
+  NO_PROJECT,
+  PROJECT_NAME_MAX,
   SEARCH_MAX,
   TITLE_MAX,
 } from "./api.ts";
 import { type Assets, BASE } from "./assets.ts";
 import type { ChatBackend, ChatRef, NewMessage } from "./backend.ts";
-import { chatIdFor, imagesProblem, isChatId, keyOf, newChatId, REQUEST_ID, requestIdOf } from "./chat.ts";
+import { chatIdFor, imagesProblem, isChatId, isProjectId, keyOf, newChatId, REQUEST_ID, requestIdOf } from "./chat.ts";
 import { type ChannelWebConfig, providerName, type SignUpSettings, type VisibilitySettings } from "./config.ts";
 import { routedAgent } from "./routed.ts";
 import { createEventProjector, projectEntry } from "./visibility.ts";
@@ -102,8 +109,12 @@ const SendBody = Type.Object(
   },
   { additionalProperties: false },
 );
-const StartBody = Type.Object({ ...SendBody.properties, agent: Type.Optional(Type.String({ maxLength: 64 })) }, { additionalProperties: false });
+const StartBody = Type.Object(
+  { ...SendBody.properties, agent: Type.Optional(Type.String({ maxLength: 64 })), project: Type.Optional(Type.String({ maxLength: 64 })) },
+  { additionalProperties: false },
+);
 const RenameBody = Type.Object({ title: Type.String({ minLength: 1, maxLength: TITLE_MAX * 4 }) }, { additionalProperties: false });
+const ProjectBody = Type.Object({ name: Type.String({ minLength: 1, maxLength: PROJECT_NAME_MAX * 4 }) }, { additionalProperties: false });
 
 /** The status of each refusal a backend throws; any other is `503`. */
 const STATUS: Record<string, number> = {
@@ -114,6 +125,7 @@ const STATUS: Record<string, number> = {
   denied: 403,
   rejected: 422,
   no_route: 500,
+  not_empty: 409,
 };
 
 const json = <T>(status: number, body: T, headers: Record<string, string> = {}): Response =>
@@ -144,6 +156,13 @@ class Refused extends Error {
 function chatIdOf(request: Request): string {
   const id = new URL(request.url).pathname.split("/")[4] ?? "";
   if (!isChatId(id)) throw new Refused(404, "not_found", "no such conversation");
+  return id;
+}
+
+/** The `:id` of `/chat/api/projects/:id`: a project id, or `404`. */
+function projectIdOf(request: Request): string {
+  const id = new URL(request.url).pathname.split("/")[4] ?? "";
+  if (!isProjectId(id)) throw new Refused(404, "not_found", "no such project");
   return id;
 }
 
@@ -195,14 +214,14 @@ async function bodyOf(request: Request, max: number): Promise<unknown> {
 }
 
 /** `value` against `schema`, or `400` with the first problem. */
-function checked<S extends typeof SendBody | typeof StartBody | typeof RenameBody>(schema: S, value: unknown): Static<S> {
+function checked<S extends typeof SendBody | typeof StartBody | typeof RenameBody | typeof ProjectBody>(schema: S, value: unknown): Static<S> {
   if (Value.Check(schema, value)) return value as Static<S>;
   const [first] = Value.Errors(schema, value);
   throw new Refused(400, "invalid_request", `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}`);
 }
 
 /** A message from the request's body, checked: something written or attached, images the API takes; a first one may name an agent. */
-async function messageOf(request: Request, target: string, first = false): Promise<Omit<NewMessage, "requestId"> & { requestId?: string; agent?: string }> {
+async function messageOf(request: Request, target: string, first = false): Promise<Omit<NewMessage, "requestId"> & { requestId?: string; agent?: string; project?: string }> {
   const body: Static<typeof StartBody> = checked(first ? StartBody : SendBody, await bodyOf(request, maxBodyOf(target)));
   const images = body.images ?? [];
   if (body.text.trim() === "" && images.length === 0) throw new Refused(400, "invalid_request", "/text: write something, or attach an image");
@@ -213,7 +232,15 @@ async function messageOf(request: Request, target: string, first = false): Promi
     ...(images.length > 0 && { images }),
     ...(body.requestId !== undefined && { requestId: body.requestId }),
     ...(body.agent !== undefined && { agent: body.agent }),
+    ...(body.project !== undefined && { project: body.project }),
   };
+}
+
+/** A project's name from the request's body: spaces collapsed, 1 to `PROJECT_NAME_MAX` characters. */
+async function projectNameOf(request: Request): Promise<string> {
+  const name = checked(ProjectBody, await bodyOf(request, MAX_SMALL_BODY)).name.replace(/\s+/g, " ").trim();
+  if (name === "" || name.length > PROJECT_NAME_MAX) throw new Refused(400, "invalid_request", `/name: 1 to ${PROJECT_NAME_MAX} characters`);
+  return name;
 }
 
 /**
@@ -345,6 +372,8 @@ export async function chatConfigOf(
     target: "server" | "durable";
     settings(ctx: AppContext): Promise<LiveSettings>;
     agents(names: readonly string[], ctx: AppContext): Promise<ChatAgent[]>;
+    /** The commands users may type in a chat (`ChatConfig.commands`). */
+    commands(): ChatCommand[];
     email: boolean;
   },
   ctx: AppContext,
@@ -352,7 +381,16 @@ export async function chatConfigOf(
   const { config, target, email } = options;
   const live = await options.settings(ctx);
   const { thinking, tools, context } = live.visibility;
-  return { name: config.name, target, methods: methodsOf(config, email), signUp: live.signUp.mode, email, visibility: { thinking, tools, context }, agents: await options.agents(live.agents, ctx) };
+  return {
+    name: config.name,
+    target,
+    methods: methodsOf(config, email),
+    signUp: live.signUp.mode,
+    email,
+    visibility: { thinking, tools, context },
+    agents: await options.agents(live.agents, ctx),
+    commands: options.commands(),
+  };
 }
 
 /** The sign-in methods the page offers, from the config (a link by email only when the App sends email). */
@@ -447,7 +485,11 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     if (archived !== null && archived !== "1" && archived !== "0") throw new Refused(400, "invalid_request", "archived is 1 or 0");
     const q = params.get("q")?.trim() ?? "";
     if (q.length > SEARCH_MAX) throw new Refused(400, "invalid_request", `q is at most ${SEARCH_MAX} characters`);
-    const listed = await backend().list(me.id, { ...pageOf(request), archived: archived === "1", ...(q !== "" && { q }) }, ctx);
+    // A project's own, or (`none`) those of no project; one that is no project id is no project of theirs.
+    const given = params.get("project");
+    if (given !== null && given !== NO_PROJECT && !isProjectId(given)) throw new Refused(404, "not_found", "no such project");
+    const project = given === null ? undefined : given === NO_PROJECT ? "" : given;
+    const listed = await backend().list(me.id, { ...pageOf(request), archived: archived === "1", ...(q !== "" && { q }), ...(project !== undefined && { project }) }, ctx);
     // The policy only when there is an agent to say or not.
     if (!listed.items.some((each) => each.agent !== undefined)) return json<ChatPage<ChatConversation>>(200, listed);
     const config = await options.chatConfig(ctx);
@@ -465,17 +507,53 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   user(`POST ${API}/conversations`, async (request, ctx, me) => {
     const refused = await limited(me, ctx);
     if (refused !== undefined) return refused;
-    const { requestId: given, agent, ...message } = await messageOf(request, options.limits(), true);
+    const { requestId: given, agent, project, ...message } = await messageOf(request, options.limits(), true);
     // Only an agent the operator lets users pick; the routing still allows or denies the message.
     if (agent !== undefined && !(await options.chatConfig(ctx)).agents.some((each) => each.name === agent)) {
       throw new Refused(400, "invalid_request", "/agent: not an assistant you may pick");
     }
+    // Only a project of the user's: another's is no project (404), and its space is never named.
+    if (project !== undefined) {
+      if (!isProjectId(project)) throw new Refused(404, "not_found", "no such project");
+      await backend().project(me.id, project, ctx);
+    }
     // The page's request id names the conversation too: a retry reaches the same one.
     const chatId = given === undefined ? newChatId() : await chatIdFor(me.id, given);
     const requestId = requestIdOf(given);
-    const started = await backend().start(refOf(me, chatId), { ...message, requestId, ...(agent !== undefined && { agent }) }, ctx);
-    ctx.logger.info("channel-web: a user started a conversation", { user: me.id, chat: chatId, requestId, admission: started.admission, ...(agent !== undefined && { agent }), ...facts(message) });
+    const started = await backend().start(refOf(me, chatId), { ...message, requestId, ...(agent !== undefined && { agent }), ...(project !== undefined && { project }) }, ctx);
+    ctx.logger.info("channel-web: a user started a conversation", {
+      user: me.id,
+      chat: chatId,
+      requestId,
+      admission: started.admission,
+      ...(agent !== undefined && { agent }),
+      ...(project !== undefined && { project }),
+      ...commandFacts(started),
+      ...facts(message),
+    });
     return json<ChatStartResponse>(201, { id: chatId, ...started });
+  });
+
+  user(`GET ${API}/projects`, async (_request, ctx, me) => json<ChatPage<ChatProject>>(200, await backend().projects(me.id, ctx)));
+
+  user(`POST ${API}/projects`, async (request, ctx, me) => {
+    const made = await backend().createProject(me.id, await projectNameOf(request), ctx);
+    ctx.logger.info("channel-web: a user made a project", { user: me.id, project: made.id });
+    return json<ChatProject>(201, made);
+  });
+
+  user(`PATCH ${API}/projects/:id`, async (request, ctx, me) => {
+    const id = projectIdOf(request);
+    const renamed = await backend().renameProject(me.id, id, await projectNameOf(request), ctx);
+    ctx.logger.info("channel-web: a user renamed a project", { user: me.id, project: id });
+    return json<ChatProject>(200, renamed);
+  });
+
+  user(`DELETE ${API}/projects/:id`, async (request, ctx, me) => {
+    const id = projectIdOf(request);
+    await backend().deleteProject(me.id, id, ctx);
+    ctx.logger.info("channel-web: a user deleted a project", { user: me.id, project: id });
+    return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
   });
 
   /** A conversation as the user may see it (its agent only when one they may pick). */
@@ -550,7 +628,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     const { requestId: given, ...message } = await messageOf(request, options.limits());
     const requestId = requestIdOf(given);
     const sent = await backend().send(refOf(me, chatId), { ...message, requestId }, ctx);
-    ctx.logger.info("channel-web: a user sent a message", { user: me.id, chat: chatId, requestId, admission: sent.admission, ...facts(message) });
+    ctx.logger.info("channel-web: a user sent a message", { user: me.id, chat: chatId, requestId, admission: sent.admission, ...commandFacts(sent), ...facts(message) });
     return json<ChatSendResponse>(202, sent);
   });
 
@@ -577,6 +655,9 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
 }
 
 const heartbeatOf = (options: RouteOptions): number => options.config.heartbeatMs;
+
+/** What the log says of a command typed: its name and what came of it, never its arguments or note. */
+const commandFacts = (sent: ChatSendResponse) => (sent.command === undefined ? {} : { command: sent.command.name, outcome: sent.command.outcome });
 
 /** What the log says of a message besides its text: how many images. */
 const facts = (message: { images?: unknown[] | undefined }) => (message.images !== undefined && message.images.length > 0 ? { images: message.images.length } : {});
