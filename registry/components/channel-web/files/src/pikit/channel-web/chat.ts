@@ -40,6 +40,30 @@ export function parseKey(key: string): { userId: string; chatId: string } | unde
 /** A new chat id. */
 export const newChatId = (): string => crypto.randomUUID();
 
+/** A project's id: 32 lowercase hex digits, never a chat id's shape (a space is never parsed as a key). */
+const PROJECT_ID = /^[0-9a-f]{32}$/;
+export const isProjectId = (id: string): boolean => PROJECT_ID.test(id);
+/** A new project id. */
+export const newProjectId = (): string => crypto.randomUUID().replace(/-/g, "");
+
+/**
+ * The space (`ConversationRef.space`) of `userId`'s project `projectId`: what its conversations share
+ * (memory, instructions, files). Opaque to everyone else; its project id is not a chat id, so
+ * `parseKey` never takes it for a key. A conversation of no project gives none: it is its own space.
+ */
+export function projectSpace(userId: string, projectId: string): string {
+  if (userId === "" || !isProjectId(projectId)) throw new Error(`channel-web: no space for user "${userId}" and project "${projectId}"`);
+  return `${KEY_PREFIX}${userId}:project:${projectId}`;
+}
+
+/** The project of `userId` that `space` names (as `conversations.registry` recorded it), or `""` (none). */
+export function projectOfSpace(userId: string, space: string | undefined): string {
+  const prefix = `${KEY_PREFIX}${userId}:project:`;
+  if (space === undefined || !space.startsWith(prefix)) return "";
+  const projectId = space.slice(prefix.length);
+  return isProjectId(projectId) ? projectId : "";
+}
+
 /**
  * The chat id of a new conversation whose first message the page named (`requestId`): the same for the
  * same user and request id, so a retry of `POST /chat/api/conversations` reaches the same conversation

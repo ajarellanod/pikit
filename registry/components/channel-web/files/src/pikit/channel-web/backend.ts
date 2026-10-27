@@ -19,6 +19,15 @@
  * (`conversations.registry.resolve`): routing still allows or denies the message, and a key keeps the
  * agent it was made with.
  *
+ * **A project** (`createIndex`, beside the list) is the user's own: another user's id is `not_found`.
+ * A conversation made in one is admitted with its space (`projectSpace`), recorded with the key's first
+ * resolve, for good; one of no project gives none (it is its own space).
+ *
+ * **A command** typed in a chat (`LocalContracts.commands`, `commandOf`) claims its request id before it
+ * runs (`claimCommand`), then goes through `admitInbound` with the commands: routed like any message,
+ * run in its conversation, never dispatched nor stored in the transcript. Sent again with the same
+ * request id it is a `duplicate` that says what came of it (or `unfinished`): it runs at most once.
+ *
  * **The transcript and the live events** are what the store and the runtime hold, every entry and run
  * the user's (`entries.ts`, `live.ts`): the routes cut them by the operator's policy (`visibility.ts`).
  *
@@ -33,14 +42,17 @@ import {
   type AgentObserver,
   type AgentRuntime,
   type AgentSubmissions,
+  type CommandLookup,
+  type CommandOutcome,
+  commandOf,
   type ConversationRegistry,
   type InboundOutcome,
 } from "@pikit/contracts";
-import type { ChatConversation, ChatEvent, ChatImage, ChatPage, ChatSendResponse, ChatTranscriptEntry } from "./api.ts";
-import { CHANNEL, firstTitle, imagesProblem } from "./chat.ts";
+import { type ChatCommandResult, type ChatConversation, type ChatEvent, type ChatImage, type ChatPage, type ChatProject, type ChatSendResponse, type ChatTranscriptEntry, MAX_PROJECTS } from "./api.ts";
+import { CHANNEL, firstTitle, imagesProblem, newProjectId, projectSpace } from "./chat.ts";
 import { userEntryOf } from "./entries.ts";
 import { liveEvents } from "./live.ts";
-import type { ChatStore, ConversationRow, EntryRow, ListQuery, MessageState } from "./store.ts";
+import type { ChatStore, ConversationRow, EntryRow, ListQuery, MessageState, ProjectRow } from "./store.ts";
 
 /** A user's conversation, as the routes name it: the key is `keyOf(userId, chatId)`. JSON. */
 export type ChatRef = { userId: string; chatId: string; key: string };
@@ -48,13 +60,33 @@ export type ChatRef = { userId: string; chatId: string; key: string };
 /** A user's message, checked by the route. JSON. */
 export type NewMessage = { text: string; images?: ChatImage[]; requestId: string };
 
-/** A conversation's first message, and the agent the user picked (one the route allowed). JSON. */
-export type FirstMessage = NewMessage & { agent?: string };
+/**
+ * A conversation's first message, the agent the user picked (one the route allowed) and the project it
+ * is made in (one of the user's: the route checked it). JSON.
+ */
+export type FirstMessage = NewMessage & { agent?: string; project?: string };
 
-export interface ChatBackend {
-  /** The user's conversations, newest activity first (with `q`, those whose title holds it). Throws `invalid_cursor`. */
+/** The users' index: their conversations' list and their projects. On a server the App's store; on Cloudflare the accounts actor's. */
+export interface ChatIndex {
+  /** The user's conversations, newest activity first (with `q`, those whose title holds it; with `project`, that project's). Throws `invalid_cursor`, and `not_found` for a project not the user's. */
   list(userId: string, query: ListQuery, ctx: AppContext): Promise<ChatPage<ChatConversation>>;
-  /** A new conversation, with its first message. Throws the admission's refusals (`denied`, `rejected`, `no_route`), `invalid_request`, `too_large`. */
+  /** The user's projects, by name. */
+  projects(userId: string, ctx: AppContext): Promise<ChatPage<ChatProject>>;
+  /** The user's project `id`. Throws `not_found` (none, or another user's). */
+  project(userId: string, id: string, ctx: AppContext): Promise<ChatProject>;
+  /** A new project. Throws `invalid_request` past `MAX_PROJECTS`. */
+  createProject(userId: string, name: string, ctx: AppContext): Promise<ChatProject>;
+  /** Throws `not_found`. */
+  renameProject(userId: string, id: string, name: string, ctx: AppContext): Promise<ChatProject>;
+  /** Throws `not_found`, and `not_empty` while a conversation of the user's (not deleted) is in it. */
+  deleteProject(userId: string, id: string, ctx: AppContext): Promise<void>;
+}
+
+export interface ChatBackend extends ChatIndex {
+  /**
+   * A new conversation, with its first message (in its project's space, when it has one). Throws the
+   * admission's refusals (`denied`, `rejected`, `no_route`), `invalid_request`, `too_large`.
+   */
   start(ref: ChatRef, message: FirstMessage, ctx: AppContext): Promise<ChatSendResponse>;
   /** Throws `not_found`. */
   conversation(ref: ChatRef, ctx: AppContext): Promise<ChatConversation>;
@@ -77,10 +109,11 @@ export interface ChatBackend {
   forget(userId: string, ctx: AppContext): Promise<void>;
 }
 
-export type RefusalCode = "not_found" | "invalid_request" | "invalid_cursor" | "too_large" | "denied" | "rejected" | "no_route";
+export type RefusalCode = "not_found" | "invalid_request" | "invalid_cursor" | "too_large" | "denied" | "rejected" | "no_route" | "not_empty";
 
 export const refusal = (code: RefusalCode, message: string): ActorCallError => new ActorCallError(code, message);
 export const NOT_FOUND = "no such conversation";
+export const NO_PROJECT = "no such project";
 
 export interface LocalContracts {
   store: ChatStore;
@@ -94,6 +127,8 @@ export interface LocalContracts {
   changed(row: ConversationRow, ctx: AppContext): Promise<void>;
   /** A message was admitted: answers may be due soon. */
   wake(ctx: AppContext): Promise<void>;
+  /** The commands users may type in a chat (`agent.command`, cut by the config's `commands`). Absent: none, every message goes to the agent. */
+  commands?(): CommandLookup;
   /** The titles (`titles.ts`): a new conversation's first title, a user's rename. Absent: the row's title alone. */
   titles?: {
     creating(key: string, title: string): () => void;
@@ -115,7 +150,56 @@ export const conversationOf = (row: ConversationRow, busy = row.busy): ChatConve
   lastActivity: row.lastActivity,
   createdAt: row.createdAt,
   ...(row.agent !== "" && { agent: row.agent }),
+  ...(row.project !== "" && { project: row.project }),
 });
+
+const projectOf = (row: ProjectRow): ChatProject => ({ id: row.id, name: row.name, createdAt: row.createdAt, chats: row.chats });
+
+/** What a command came to, as the page is told it. */
+const commandResultOf = (name: string, outcome: CommandOutcome): ChatCommandResult =>
+  outcome.kind === "ran"
+    ? { name, outcome: "ran", ...(outcome.text !== undefined && { text: outcome.text }) }
+    : { name, outcome: "failed", text: outcome.kind === "failed" ? outcome.message : `/${name} is not a command here` };
+
+/** The title of a conversation whose first message was a command: nothing of it names the conversation. */
+export const COMMAND_TITLE = "New conversation";
+
+/** The users' index over `store` (its list and projects tables): a server's, and the accounts actor's on Cloudflare. */
+export function createIndex(store: ChatStore): ChatIndex {
+  const owned = async (userId: string, id: string): Promise<ProjectRow> => {
+    const found = await store.project(userId, id);
+    if (found === undefined) throw refusal("not_found", NO_PROJECT);
+    return found;
+  };
+  return {
+    async list(userId, query) {
+      // Another user's project is no project: 404, as one that never existed.
+      if (query.project !== undefined && query.project !== "") await owned(userId, query.project);
+      const listed = await store.list(userId, query);
+      return { items: listed.items.map((row) => conversationOf(row)), ...(listed.next !== undefined && { next: listed.next }) };
+    },
+    async projects(userId) {
+      return { items: (await store.projects(userId)).map(projectOf) };
+    },
+    async project(userId, id) {
+      return projectOf(await owned(userId, id));
+    },
+    async createProject(userId, name, ctx) {
+      const id = newProjectId();
+      if (!(await store.createProject({ userId, id, name, createdAt: ctx.clock.now() }, MAX_PROJECTS))) throw refusal("invalid_request", `at most ${MAX_PROJECTS} projects`);
+      return projectOf(await owned(userId, id));
+    },
+    async renameProject(userId, id, name) {
+      if (!(await store.renameProject(userId, id, name))) throw refusal("not_found", NO_PROJECT);
+      return projectOf(await owned(userId, id));
+    },
+    async deleteProject(userId, id) {
+      const deleted = await store.deleteProject(userId, id);
+      if (deleted === "not_found") throw refusal("not_found", NO_PROJECT);
+      if (deleted === "not_empty") throw refusal("not_empty", "this project has conversations: delete them first");
+    },
+  };
+}
 
 /** A stored entry as the transcript says it (`entries.ts`): a user's message with its images by URL, a run's message as it wrote it. */
 export const transcriptEntryOf = (chatId: string, row: EntryRow): ChatTranscriptEntry =>
@@ -151,28 +235,56 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
   };
 
   /**
-   * `message` through the inbound path into `ref`'s conversation; stored once admitted. `create` makes
-   * the conversation's row then (its first message's title).
+   * `message` through the inbound path into `ref`'s conversation (in `project`'s space, when it is one:
+   * recorded with the key's first resolve); stored once admitted. `create` makes the conversation's row
+   * then (its first message's title). A command typed (`commands`) runs instead, once by its request id
+   * (`ranCommand`).
    */
-  const admit = async (ref: ChatRef, message: NewMessage, create: boolean, ctx: AppContext): Promise<ChatSendResponse> => {
+  const admit = async (ref: ChatRef, message: NewMessage, { create, project }: { create: boolean; project: string }, ctx: AppContext): Promise<ChatSendResponse> => {
     const images = message.images ?? [];
     const wrong = imagesProblem(images, contracts.limits());
     if (wrong !== undefined) throw refusal(wrong.status === 413 ? "too_large" : "invalid_request", wrong.message);
     // Before the admission: what its run writes is always later.
     const at = ctx.clock.now();
+    // A command claims its request id first: sent again, it does not run again.
+    const allowed = contracts.commands?.();
+    const typed = allowed === undefined ? undefined : commandOf(message.text, allowed);
+    if (typed !== undefined && !(await store.claimCommand(ref.key, message.requestId, typed.name, at))) {
+      const prior = (await store.command(ref.key, message.requestId)) ?? { name: typed.name, outcome: "unfinished" };
+      return { requestId: message.requestId, admission: "duplicate", command: prior };
+    }
     const title = firstTitle(message.text, images.length);
     // A new conversation's title is the App's too (`/name`), given while its first message is dispatched.
     const forget = create ? contracts.titles?.creating(ref.key, title) : undefined;
-    const outcome = await admitInbound(
-      ctx,
-      { id: message.requestId, channel: CHANNEL, conversationId: `${ref.userId}:${ref.chatId}`, actor: { id: ref.userId }, text: message.text, ...(images.length > 0 && { images }) },
-      { conversations: contracts.conversations(), runtime: contracts.runtime(), key: ref.key },
-    ).finally(() => forget?.());
+    let inbound: InboundOutcome;
+    try {
+      inbound = await admitInbound(
+        ctx,
+        { id: message.requestId, channel: CHANNEL, conversationId: `${ref.userId}:${ref.chatId}`, actor: { id: ref.userId }, text: message.text, ...(images.length > 0 && { images }) },
+        {
+          conversations: contracts.conversations(),
+          runtime: contracts.runtime(),
+          key: ref.key,
+          ...(project !== "" && { space: projectSpace(ref.userId, project) }),
+          // Only when this message claimed its id as a command: a stage that made one of another message runs none.
+          ...(typed !== undefined && allowed !== undefined && { commands: allowed }),
+        },
+      );
+    } catch (error) {
+      if (typed !== undefined) await store.unclaimCommand(ref.key, message.requestId);
+      throw error;
+    } finally {
+      forget?.();
+    }
+    const outcome = inbound;
+    if (outcome.kind === "command") return ranCommand(ref, message.requestId, outcome.name, outcome.outcome, { create, project, agent: outcome.conversation.agent, at }, ctx);
+    // Nothing ran: the claim goes (a stage refused it, or made it a message for the agent).
+    if (typed !== undefined) await store.unclaimCommand(ref.key, message.requestId);
     if (outcome.kind !== "admitted" && outcome.kind !== "duplicate") throw refused(outcome);
     const admitted = outcome.kind === "admitted";
     const conversationId = outcome.conversation.conversationId;
     if (create) {
-      await store.create({ key: ref.key, userId: ref.userId, chatId: ref.chatId, agent: outcome.conversation.agent, title, createdAt: at, lastActivity: at, busy: admitted });
+      await store.create({ key: ref.key, userId: ref.userId, chatId: ref.chatId, agent: outcome.conversation.agent, project, title, createdAt: at, lastActivity: at, busy: admitted });
     }
     // Waiting behind a run going: out of the transcript until that run's messages are in it.
     const held = admitted && outcome.admission.kind === "queued";
@@ -190,6 +302,29 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     if (held && (await contracts.observe().conversation(conversationId, ctx))?.busy === false) await releaseHeld(ref);
     if (admitted) await contracts.wake(ctx);
     return { requestId: message.requestId, admission: outcome.kind === "duplicate" ? "duplicate" : outcome.admission.kind };
+  };
+
+  /**
+   * A command ran as request `requestId`: what came of it kept by that id (a duplicate answers it), and
+   * a new conversation made, empty (it ran there: in its project's space). Nothing was dispatched, and
+   * nothing of it is in the transcript.
+   */
+  const ranCommand = async (
+    ref: ChatRef,
+    requestId: string,
+    name: string,
+    outcome: CommandOutcome,
+    made: { create: boolean; project: string; agent: string; at: number },
+    ctx: AppContext,
+  ): Promise<ChatSendResponse> => {
+    const command = commandResultOf(name, outcome);
+    if (made.create) {
+      const { at } = made;
+      const row = await store.create({ key: ref.key, userId: ref.userId, chatId: ref.chatId, agent: made.agent, project: made.project, title: COMMAND_TITLE, createdAt: at, lastActivity: at, busy: false });
+      await contracts.changed(row, ctx);
+    }
+    await store.commandRan(ref.key, requestId, command);
+    return { requestId, admission: "command", command };
   };
 
   /**
@@ -228,18 +363,18 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
   };
 
   return {
-    async list(userId, query) {
-      const listed = await store.list(userId, query);
-      return { items: listed.items.map((row) => conversationOf(row)), ...(listed.next !== undefined && { next: listed.next }) };
-    },
+    ...createIndex(store),
 
-    async start(ref, { agent, ...message }, ctx) {
+    async start(ref, { agent, project: picked, ...message }, ctx) {
       const row = await store.conversation(ref.key);
-      // A retry of the same first message (its chat id is the request id's): the same conversation.
+      // A retry of the same first message (its chat id is the request id's): the same conversation, in its project.
       if (row !== undefined && (row.hidden || row.userId !== ref.userId)) throw refusal("not_found", NOT_FOUND);
+      const project = row?.project ?? picked ?? "";
       // Made with the agent picked: admitInbound's resolve then finds it, whatever the router names.
-      if (row === undefined && agent !== undefined) await contracts.conversations().resolve(ref.key, agent, { channel: CHANNEL }, ctx);
-      return admit(ref, message, row === undefined, ctx);
+      if (row === undefined && agent !== undefined) {
+        await contracts.conversations().resolve(ref.key, agent, { channel: CHANNEL, ...(project !== "" && { space: projectSpace(ref.userId, project) }) }, ctx);
+      }
+      return admit(ref, message, { create: row === undefined, project }, ctx);
     },
 
     async conversation(ref, ctx) {
@@ -287,8 +422,8 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     },
 
     async send(ref, message, ctx) {
-      await owned(ref);
-      return admit(ref, message, false, ctx);
+      const row = await owned(ref);
+      return admit(ref, message, { create: false, project: row.project }, ctx);
     },
 
     async live(ref, ctx) {

@@ -414,7 +414,7 @@ test("the index keeps each conversation's newest version: a late or repeated one
   const { platform } = await cloud();
   const index = await platform.object(ACCOUNTS_KEY);
   const chatId = crypto.randomUUID();
-  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, agent: "assistant", title: "new", createdAt: 1, lastActivity: 5, hidden: false, archived: false, busy: false, version: 3 };
+  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, agent: "assistant", project: "", title: "new", createdAt: 1, lastActivity: 5, hidden: false, archived: false, busy: false, version: 3 };
   await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [row] }, index.ctx);
   await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [{ ...row, title: "old", version: 2 }] }, index.ctx);
   const listed = callResult(await answerCall(index.answers.get(CALL.list) as ActorCallHandler, ACCOUNTS_KEY, { userId: "ana", limit: 10 }, index.ctx)) as unknown as { items: ChatConversation[] };

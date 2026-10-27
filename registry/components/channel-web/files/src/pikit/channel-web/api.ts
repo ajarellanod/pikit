@@ -12,6 +12,17 @@
  * conversation key is `web:<user id>:<chat id>`, built from the session's user. A chat id of another
  * user's is `404`, as one that never existed.
  *
+ * A user organizes their conversations in projects (`ChatProject`, their own: another user's project id
+ * is `404` too). A conversation's project is fixed when it is made (`ChatStartRequest.project`): the
+ * project is the place its conversations share (what the App keeps per space: memory, instructions,
+ * files). A project with conversations is not deleted (`409 not_empty`): delete them first.
+ *
+ * A message whose text is `/name args` for one of `ChatConfig.commands` runs that command in its
+ * conversation instead of reaching the agent: the answer says what came of it (`ChatSendResponse.command`),
+ * for the page to show apart; nothing of it is in the transcript. The same request id never runs it twice.
+ * A first message that is a command makes the conversation (empty, titled `New conversation`): the
+ * command ran in it, in its project's space.
+ *
  * A conversation reads as the dashboard's does (features/completed/chat-parity.md): a transcript of entries
  * (`ChatTranscriptEntry`, admin-api's `ApiTranscriptEntry`: pi-ai messages) and live events (`ChatEvent`,
  * admin-api's `ApiEvent`), both cut to what the operator lets users see (`ChatConfig.visibility`).
@@ -21,8 +32,12 @@
  * | `GET /chat/api/config` | `ChatConfig` (no session needed) |
  * | `/chat/api/auth/*` | better-auth's own routes (sign in, sign up, OAuth callbacks, links, sessions) |
  * | `GET /chat/api/me` | `ChatMe`: the user, their sign-in methods, and the assistant Routing picks for their new chat (`suggestedAgent`) |
- * | `GET /chat/api/conversations?limit&cursor&archived&q` | `ChatPage<ChatConversation>`, newest activity first: those not archived, or with `archived=1` the archived ones; with `q`, only those whose title holds it (any case) |
- * | `POST /chat/api/conversations` | `ChatStartRequest` → `201 ChatStartResponse` (`429` past `ChatConfig`'s rate; `400` for an `agent` not in `ChatConfig.agents`) |
+ * | `GET /chat/api/projects` | `ChatPage<ChatProject>`: every project of the user's (at most `MAX_PROJECTS`), by name |
+ * | `POST /chat/api/projects` | `ChatProjectRequest` → `201 ChatProject` (`400` past `MAX_PROJECTS`) |
+ * | `PATCH /chat/api/projects/:id` | `ChatProjectRequest` → `200 ChatProject` |
+ * | `DELETE /chat/api/projects/:id` | `204`; `409 not_empty` while it has conversations (archived ones too; deleted ones not) |
+ * | `GET /chat/api/conversations?limit&cursor&archived&q&project` | `ChatPage<ChatConversation>`, newest activity first: those not archived, or with `archived=1` the archived ones; with `q`, only those whose title holds it (any case); with `project`, only that project's (`none`: those of no project) |
+ * | `POST /chat/api/conversations` | `ChatStartRequest` → `201 ChatStartResponse` (a command too: the conversation is made, the command ran in it; `429` past `ChatConfig`'s rate; `400` for an `agent` not in `ChatConfig.agents`; `404` for a `project` not the user's) |
  * | `GET /chat/api/conversations/:id` | `ChatConversation` |
  * | `PATCH /chat/api/conversations/:id` | `ChatRenameRequest` → `200 ChatConversation` |
  * | `POST /chat/api/conversations/:id/archive`, `…/unarchive` | `200 ChatConversation`: listed apart, or back in the list (new activity lists an archived one again) |
@@ -54,6 +69,12 @@ export const TITLE_MAX = 60;
 export const PAGE_JSON_MAX = 1024 * 1024;
 /** The longest search (`q`), in characters. */
 export const SEARCH_MAX = 200;
+/** The longest project name, in characters. */
+export const PROJECT_NAME_MAX = 60;
+/** The most projects a user has. */
+export const MAX_PROJECTS = 100;
+/** `GET /chat/api/conversations?project=` for the conversations of no project. */
+export const NO_PROJECT = "none";
 
 /** One way to sign in, as the sign-in page offers it. */
 export type ChatSignInMethod =
@@ -91,6 +112,15 @@ export interface ChatAgent {
   description?: string;
 }
 
+/** A command a user may type in a chat (`/name args`), as the App registered it. */
+export interface ChatCommand {
+  name: string;
+  /** One line, for a menu. */
+  description: string;
+  /** What its arguments are, for a menu: `<rule>`. */
+  argumentHint?: string;
+}
+
 /** What the page needs before anyone signed in. */
 export interface ChatConfig {
   /** The assistant's name, as the page titles itself. */
@@ -108,6 +138,8 @@ export interface ChatConfig {
   visibility: ChatVisibility;
   /** The assistants a new conversation may be made with (`ChatStartRequest.agent`); empty: no choice, the router decides. */
   agents: ChatAgent[];
+  /** The commands users may type in a chat (`/name args`): those the operator allows that the App has. */
+  commands: ChatCommand[];
 }
 
 /** The signed-in user. */
@@ -137,6 +169,23 @@ export interface ChatPage<T> {
   next?: string;
 }
 
+/** One of the user's projects: a place several of their conversations share. */
+export interface ChatProject {
+  /** What `:id` is in the routes, and `ChatConversation.project`. */
+  id: string;
+  /** 1 to `PROJECT_NAME_MAX` characters. */
+  name: string;
+  /** Epoch ms it was made. */
+  createdAt: number;
+  /** How many of the user's conversations are in it (archived ones too). */
+  chats: number;
+}
+
+export interface ChatProjectRequest {
+  /** 1 to `PROJECT_NAME_MAX` characters. */
+  name: string;
+}
+
 /** One of the user's conversations. */
 export interface ChatConversation {
   /** Its chat id: what `:id` is in the routes. */
@@ -153,6 +202,8 @@ export interface ChatConversation {
   createdAt: number;
   /** The assistant it was made with, when it is one of `ChatConfig.agents`. */
   agent?: string;
+  /** The project it was made in (`ChatProject.id`), for good; absent: none. */
+  project?: string;
 }
 
 /** An image a message is sent with. */
@@ -227,16 +278,35 @@ export interface ChatSendRequest {
 export interface ChatStartRequest extends ChatSendRequest {
   /** The assistant the conversation is made with: one of `ChatConfig.agents` (else `400`). Absent: the router decides. */
   agent?: string;
+  /** The project the conversation is made in, for good: one of the user's (`ChatProject.id`, else `404`). Absent: none. */
+  project?: string;
+}
+
+/** What came of a command typed in a chat: shown to its user, never in the transcript. */
+export interface ChatCommandResult {
+  /** The command's name, without its slash. */
+  name: string;
+  /**
+   * `ran` (`text`: its note, when it has one), `failed` (`text`: why), or `unfinished`: the same request
+   * sent again while it ran, or one that never finished (it runs at most once).
+   */
+  outcome: "ran" | "failed" | "unfinished";
+  text?: string;
 }
 
 export interface ChatSendResponse {
   requestId: string;
-  /** `started`: a run started; `queued`: it waits for the run going; `duplicate`: already there. */
-  admission: "started" | "queued" | "duplicate";
+  /**
+   * `started`: a run started; `queued`: it waits for the run going; `duplicate`: already there;
+   * `command`: it was a command, which ran (`command` says what came of it).
+   */
+  admission: "started" | "queued" | "duplicate" | "command";
+  /** When the message was a command (`command`, or a `duplicate` of one): what came of it. */
+  command?: ChatCommandResult;
 }
 
 export interface ChatStartResponse extends ChatSendResponse {
-  /** The new conversation's chat id. */
+  /** The new conversation's chat id (also when its first message was a command: made, empty). */
   id: string;
 }
 
@@ -252,7 +322,8 @@ export interface ChatAbortResponse {
 export interface ChatError {
   /**
    * `unauthorized` (401), `invalid_request` (400), `not_found` (404), `too_large` (413), `rate_limited`
-   * (429: too many messages a minute, `retry-after` says when to send again), `denied`
+   * (429: too many messages a minute, `retry-after` says when to send again), `not_empty` (409: a project
+   * that still has conversations), `denied`
    * (403: the router refused the message, `message` says why), `rejected` (422: a stage refused it),
    * `no_route` (500: no router installed), `unavailable` (503: on Cloudflare an object did not answer).
    */

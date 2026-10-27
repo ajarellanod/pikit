@@ -25,6 +25,11 @@
  * - **Who a conversation is with**, for the dashboard (its stage of `conversation.describe`): its
  *   user's name and email, as the accounts know them (on Cloudflare one call to the accounts actor),
  *   its ids, and a link to the Web users page showing that user (`usersPagePath`).
+ * - **Projects** (`createIndex`, `backend.ts`): each user's, beside the list; a conversation made in one
+ *   is admitted with its space (`projectSpace`, `chat.ts`), so what the App keeps per space (memory,
+ *   instructions, files) is shared by that project's conversations.
+ * - **Commands typed in the chat** (`commands`, the config's names of `agent.command`) run in their
+ *   conversation through `admitInbound`, never dispatched, at most once by request id.
  * - **What users see** (`visibility`: thinking, tools, context) and **the agents they may pick**
  *   (`agents`) are the operator's policy, cut in the routes (`visibility.ts`); with `signUp`, live
  *   settings when `settings` is installed (the dashboard's Settings), read at each request.
@@ -42,7 +47,19 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import { type ActorInbox, type ActorMailbox, type AgentResult, type AnswerDelivery, answersOnlyTheDashboard, type ChannelTransport, type ConversationDescriber, describeStage, startAnswerDelivery } from "@pikit/contracts";
+import {
+  type ActorInbox,
+  type ActorMailbox,
+  type AgentResult,
+  allowedCommands,
+  type AnswerDelivery,
+  answersOnlyTheDashboard,
+  type ChannelTransport,
+  type ConversationDescriber,
+  describeStage,
+  listAgentCommands,
+  startAnswerDelivery,
+} from "@pikit/contracts";
 import Type from "typebox";
 import { linkOrigin } from "./accounts/links.ts";
 import type { Accounts } from "./accounts/types.ts";
@@ -113,6 +130,8 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       // Titles: a model's, through the runtime's models; each one given to the App's `/name` (admin-api's).
       const completion = pikit.useOptional("model.complete");
       const commands = pikit.useKeyed("agent.command");
+      /** The commands users may type in a chat: the App's, cut by the config's `commands`. */
+      const typed = () => allowedCommands(commands, config.commands);
 
       const store = createChatStore(() => sql.get());
       const assets = createAssets(CHAT_FILES, () => avatarHosts(config.signIn.social));
@@ -194,6 +213,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         limits: () => limits,
         changed,
         titles,
+        commands: typed,
         wake: async (ctx) => {
           await delivery?.wake(ctx).catch((error: unknown) => ctx.logger.warn("channel-web: could not ask for answers to be delivered; the next run's end does", { error: String(error) }));
         },
@@ -249,7 +269,8 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       };
 
       /** The page's config, as this App's accounts make it (on Cloudflare the accounts actor answers the Worker with it). */
-      const chatConfig = (ctx: AppContext) => chatConfigOf({ config, target: limits, settings: liveSettings, agents: agentsOf, email: email.get() !== undefined }, ctx);
+      const chatConfig = (ctx: AppContext) =>
+        chatConfigOf({ config, target: limits, settings: liveSettings, agents: agentsOf, commands: () => listAgentCommands(typed()), email: email.get() !== undefined }, ctx);
 
       provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => limits, rate: async (userId, ctx) => rate.take(userId, ctx.clock.now()), assets });
       provideAdminRoutes(pikit, {

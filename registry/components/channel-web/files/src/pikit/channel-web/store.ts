@@ -3,7 +3,7 @@
  * their conversations. It is the channel's platform: what a run wrote is stored into it.
  *
  * - **`channel_web_conversations`**: one row per conversation (its key, user, chat id, the agent it was
- *   made with, title (and the title lowercased, for a search), when it was made, its newest activity,
+ *   made with, the project it was made in (`""`: none), title (and the title lowercased, for a search), when it was made, its newest activity,
  *   whether the user deleted it from the list, whether they archived it (listed apart until new
  *   activity comes), whether a run goes, and a version). On a server it is the App's own table, and the
  *   list reads it. On Cloudflare each conversation's object holds its own row, the truth, and tells the
@@ -26,6 +26,12 @@
  *   page of entries holds at most `PAGE_JSON_MAX` characters of stored JSON (at least one entry).
  *   On Cloudflare, in the conversation's object.
  *
+ * - **`channel_web_projects`**: each user's projects (id, name, when made), beside the users' index (on
+ *   Cloudflare in the accounts actor): a project with conversations not deleted is not deleted.
+ * - **`channel_web_commands`**: the commands typed in a conversation, by request id (claimed before it
+ *   runs, then what came of it): a request id runs a command at most once. On Cloudflare, in the
+ *   conversation's object.
+ *
  * Who follows a conversation live (`live.ts`) hears of each entry of the user's stored or released and
  * of anything else stored or changed (`notify`), in this process: the store is written where the
  * conversation's live view is made.
@@ -37,6 +43,8 @@ import type { UserRow } from "./entries.ts";
 
 const CONVERSATIONS = "channel_web_conversations";
 const ENTRIES = "channel_web_entries";
+const PROJECTS = "channel_web_projects";
+const COMMANDS = "channel_web_commands";
 
 /** One conversation as the channel keeps it. JSON: it crosses an actor (`seen`). */
 export type ConversationRow = {
@@ -45,6 +53,8 @@ export type ConversationRow = {
   chatId: string;
   /** The agent it was made with (`ConversationRef.agent`). */
   agent: string;
+  /** The user's project it was made in (`ChatProject.id`), for good; `""`: none. */
+  project: string;
   title: string;
   createdAt: number;
   /** Epoch ms of its newest message. */
@@ -77,8 +87,17 @@ export type StoreNote = { type: "entry"; entry: ChatTranscriptEntry } | { type: 
 
 export type Paged<T> = { items: T[]; next?: string };
 
-/** A page of the list: not archived, or with `archived` the archived ones; with `q`, only titles holding it. */
-export type ListQuery = { limit: number; cursor?: string; archived?: boolean; q?: string };
+/**
+ * A page of the list: not archived, or with `archived` the archived ones; with `q`, only titles holding
+ * it; with `project`, only that project's (`""`: those of no project, or of a project that is no more).
+ */
+export type ListQuery = { limit: number; cursor?: string; archived?: boolean; q?: string; project?: string };
+
+/** One of a user's projects, and how many of their conversations (not deleted) are in it. */
+export type ProjectRow = { userId: string; id: string; name: string; createdAt: number; chats: number };
+
+/** What came of a command typed in a conversation (`ChatCommandResult`), as kept by its request id. */
+export type CommandRow = { name: string; outcome: "ran" | "failed" | "unfinished"; text?: string };
 
 export interface ChatStore {
   conversation(key: string): Promise<ConversationRow | undefined>;
@@ -95,8 +114,30 @@ export interface ChatStore {
   seen(rows: readonly ConversationRow[]): Promise<void>;
   /** The index's: `userId`'s conversations not deleted, newest activity first. Throws `invalid_cursor`. */
   list(userId: string, query: ListQuery): Promise<Paged<ConversationRow>>;
-  /** The index's: `userId`'s conversations leave it (the user was removed). */
+  /** The index's: `userId`'s conversations and projects leave it (the user was removed). */
   forget(userId: string): Promise<void>;
+
+  /** The index's: `userId`'s projects, by name. */
+  projects(userId: string): Promise<ProjectRow[]>;
+  /** The index's: `userId`'s project `id`, or `undefined` (none, or another user's). */
+  project(userId: string, id: string): Promise<ProjectRow | undefined>;
+  /** The index's: a new project of `userId`'s, unless they have `max` already (`false`). */
+  createProject(row: Omit<ProjectRow, "chats">, max: number): Promise<boolean>;
+  /** The index's: whether `userId` has the project `id`, renamed. */
+  renameProject(userId: string, id: string, name: string): Promise<boolean>;
+  /** The index's: `userId`'s project `id` deleted, unless a conversation (not deleted) is in it. */
+  deleteProject(userId: string, id: string): Promise<"deleted" | "not_found" | "not_empty">;
+
+  /**
+   * The conversation's: the command typed as request `id` claimed, before it runs (`false`: claimed
+   * already, by a run of it or one going): a request id runs a command at most once.
+   */
+  claimCommand(key: string, id: string, name: string, at: number): Promise<boolean>;
+  /** What came of the command claimed as `id`: `unfinished` until `commandRan`; `undefined` when none was claimed. */
+  command(key: string, id: string): Promise<CommandRow | undefined>;
+  commandRan(key: string, id: string, result: CommandRow): Promise<void>;
+  /** The claim of `id` dropped: nothing ran (it was refused, or was no command after all). */
+  unclaimCommand(key: string, id: string): Promise<void>;
 
   /** Stores a user's message in `key`, opening a turn, unless it has one of its id: whether it did. */
   addUser(key: string, message: NewUserRow): Promise<boolean>;
@@ -164,6 +205,7 @@ type ConversationSqlRow = {
   user_id: string;
   chat_id: string;
   agent: string;
+  project: string;
   title: string;
   created_at: number;
   last_activity: number;
@@ -187,11 +229,18 @@ type EntrySqlRow = {
   size: number;
 };
 
+type ProjectSqlRow = { user_id: string; id: string; name: string; created_at: number; chats: number };
+/** A project and its conversations not deleted; its parameters: the user's id twice. */
+const PROJECT_SELECT =
+  `SELECT p.user_id, p.id, p.name, p.created_at, (SELECT COUNT(*) FROM ${CONVERSATIONS} c WHERE c.user_id = ? AND c.project = p.id AND c.hidden = 0) AS chats FROM ${PROJECTS} p`;
+const projectOf = (row: ProjectSqlRow): ProjectRow => ({ userId: row.user_id, id: row.id, name: row.name, createdAt: Number(row.created_at), chats: Number(row.chats) });
+
 const rowOf = (row: ConversationSqlRow): ConversationRow => ({
   key: row.key,
   userId: row.user_id,
   chatId: row.chat_id,
   agent: row.agent,
+  project: row.project,
   title: row.title,
   createdAt: Number(row.created_at),
   lastActivity: Number(row.last_activity),
@@ -214,8 +263,8 @@ const entryOf = (row: EntrySqlRow): EntryRow =>
     ? { kind: "user", ...userOf(row), ...(row.conversation !== null && { conversation: row.conversation }) }
     : { kind: row.kind === "answer" ? "answer" : "run", id: row.id, run: row.run ?? "", message: JSON.parse(row.message ?? "null") as unknown, at: Number(row.at) };
 
-const COLUMNS = "key, user_id, chat_id, agent, title, title_search, created_at, last_activity, hidden, archived, busy, version";
-const SELECTED = "key, user_id, chat_id, agent, title, created_at, last_activity, hidden, archived, busy, version";
+const COLUMNS = "key, user_id, chat_id, agent, project, title, title_search, created_at, last_activity, hidden, archived, busy, version";
+const SELECTED = "key, user_id, chat_id, agent, project, title, created_at, last_activity, hidden, archived, busy, version";
 const ENTRY_COLUMNS = "id, kind, turn, pos, run, text, image_types, message, at, state, conversation, size";
 /** A title as a search reads it: lowercased here (SQLite's `lower` knows ASCII only). */
 const searchOf = (title: string): string => title.toLowerCase();
@@ -229,7 +278,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
     const database = sql();
     ready ??= (async () => {
       await database.run(
-        `CREATE TABLE IF NOT EXISTS ${CONVERSATIONS} (key TEXT PRIMARY KEY, user_id TEXT NOT NULL, chat_id TEXT NOT NULL, agent TEXT NOT NULL, title TEXT NOT NULL, ` +
+        `CREATE TABLE IF NOT EXISTS ${CONVERSATIONS} (key TEXT PRIMARY KEY, user_id TEXT NOT NULL, chat_id TEXT NOT NULL, agent TEXT NOT NULL, project TEXT NOT NULL, title TEXT NOT NULL, ` +
           "title_search TEXT NOT NULL, created_at BIGINT NOT NULL, last_activity BIGINT NOT NULL, hidden INTEGER NOT NULL, archived INTEGER NOT NULL, busy INTEGER NOT NULL, version BIGINT NOT NULL)",
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${CONVERSATIONS}_user ON ${CONVERSATIONS} (user_id, last_activity, chat_id)`);
@@ -239,6 +288,10 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${ENTRIES}_order ON ${ENTRIES} (key, turn, pos, id)`);
       await database.run(`CREATE INDEX IF NOT EXISTS ${ENTRIES}_run ON ${ENTRIES} (key, run)`);
+      await database.run(`CREATE TABLE IF NOT EXISTS ${PROJECTS} (user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (user_id, id))`);
+      await database.run(
+        `CREATE TABLE IF NOT EXISTS ${COMMANDS} (key TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, outcome TEXT NOT NULL, text TEXT, at BIGINT NOT NULL, PRIMARY KEY (key, id))`,
+      );
     })().catch((error: unknown) => {
       ready = undefined;
       throw error;
@@ -272,8 +325,8 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
 
     async create(row) {
       await (await db()).run(
-        `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 1) ON CONFLICT (key) DO NOTHING`,
-        [row.key, row.userId, row.chatId, row.agent, row.title, searchOf(row.title), Math.floor(row.createdAt), Math.floor(row.lastActivity), row.busy ? 1 : 0],
+        `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 1) ON CONFLICT (key) DO NOTHING`,
+        [row.key, row.userId, row.chatId, row.agent, row.project, row.title, searchOf(row.title), Math.floor(row.createdAt), Math.floor(row.lastActivity), row.busy ? 1 : 0],
       );
       return (await conversation(row.key)) as ConversationRow;
     },
@@ -313,7 +366,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       await database.transaction(async (tx) => {
         for (const row of rows) {
           await tx.run(
-            `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET ` +
+            `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET ` +
               "title = excluded.title, title_search = excluded.title_search, last_activity = excluded.last_activity, hidden = excluded.hidden, archived = excluded.archived, " +
               `busy = excluded.busy, version = excluded.version WHERE excluded.version > ${CONVERSATIONS}.version`,
             [
@@ -321,6 +374,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
               row.userId,
               row.chatId,
               row.agent,
+              row.project,
               row.title,
               searchOf(row.title),
               Math.floor(row.createdAt),
@@ -335,15 +389,26 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       });
     },
 
-    async list(userId, { limit, cursor, archived = false, q }) {
+    async list(userId, { limit, cursor, archived = false, q, project }) {
       const after = cursor === undefined ? undefined : parseCursor(cursor);
       const search = q === undefined || q.trim() === "" ? undefined : likeOf(q.trim());
+      // No project: none, or one deleted while a conversation was being made in it (it lists with none).
+      const inProject =
+        project === undefined ? "" : project === "" ? ` AND (project = '' OR project NOT IN (SELECT id FROM ${PROJECTS} WHERE user_id = ?))` : " AND project = ?";
       const rows = await (await db()).query<ConversationSqlRow>(
         `SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE user_id = ? AND hidden = 0 AND archived = ?` +
+          inProject +
           (search === undefined ? "" : " AND title_search LIKE ? ESCAPE '\\'") +
           (after === undefined ? "" : " AND (last_activity < ? OR (last_activity = ? AND chat_id > ?))") +
           " ORDER BY last_activity DESC, chat_id ASC LIMIT ?",
-        [userId, archived ? 1 : 0, ...(search === undefined ? [] : [search]), ...(after === undefined ? [] : [after.at, after.at, after.id]), limit + 1],
+        [
+          userId,
+          archived ? 1 : 0,
+          ...(project === undefined ? [] : project === "" ? [userId] : [project]),
+          ...(search === undefined ? [] : [search]),
+          ...(after === undefined ? [] : [after.at, after.at, after.id]),
+          limit + 1,
+        ],
       );
       const items = rows.slice(0, limit).map(rowOf);
       const last = items.at(-1);
@@ -351,7 +416,67 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
     },
 
     async forget(userId) {
-      await (await db()).run(`DELETE FROM ${CONVERSATIONS} WHERE user_id = ?`, [userId]);
+      const database = await db();
+      await database.run(`DELETE FROM ${CONVERSATIONS} WHERE user_id = ?`, [userId]);
+      await database.run(`DELETE FROM ${PROJECTS} WHERE user_id = ?`, [userId]);
+    },
+
+    async projects(userId) {
+      const rows = await (await db()).query<ProjectSqlRow>(`${PROJECT_SELECT} WHERE p.user_id = ? ORDER BY p.name, p.id`, [userId, userId]);
+      return rows.map(projectOf);
+    },
+
+    async project(userId, id) {
+      const [row] = await (await db()).query<ProjectSqlRow>(`${PROJECT_SELECT} WHERE p.user_id = ? AND p.id = ?`, [userId, userId, id]);
+      return row === undefined ? undefined : projectOf(row);
+    },
+
+    async createProject(row, max) {
+      // One statement: two at once never make more than `max`.
+      const { changes } = await (await db()).run(
+        `INSERT INTO ${PROJECTS} (user_id, id, name, created_at) SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM ${PROJECTS} WHERE user_id = ?) < ?`,
+        [row.userId, row.id, row.name, Math.floor(row.createdAt), row.userId, max],
+      );
+      return changes > 0;
+    },
+
+    async renameProject(userId, id, name) {
+      const { changes } = await (await db()).run(`UPDATE ${PROJECTS} SET name = ? WHERE user_id = ? AND id = ?`, [name, userId, id]);
+      return changes > 0;
+    },
+
+    async deleteProject(userId, id) {
+      const database = await db();
+      const { changes } = await database.run(
+        `DELETE FROM ${PROJECTS} WHERE user_id = ? AND id = ? AND NOT EXISTS (SELECT 1 FROM ${CONVERSATIONS} WHERE user_id = ? AND project = ? AND hidden = 0)`,
+        [userId, id, userId, id],
+      );
+      if (changes > 0) return "deleted";
+      const [found] = await database.query<{ id: string }>(`SELECT id FROM ${PROJECTS} WHERE user_id = ? AND id = ?`, [userId, id]);
+      return found === undefined ? "not_found" : "not_empty";
+    },
+
+    async claimCommand(key, id, name, at) {
+      const { changes } = await (await db()).run(
+        `INSERT INTO ${COMMANDS} (key, id, name, outcome, text, at) VALUES (?, ?, ?, 'unfinished', NULL, ?) ON CONFLICT (key, id) DO NOTHING`,
+        [key, id, name, Math.floor(at)],
+      );
+      return changes > 0;
+    },
+
+    async command(key, id) {
+      const [row] = await (await db()).query<{ name: string; outcome: string; text: string | null }>(`SELECT name, outcome, text FROM ${COMMANDS} WHERE key = ? AND id = ?`, [key, id]);
+      if (row === undefined) return undefined;
+      const outcome = row.outcome === "ran" || row.outcome === "failed" ? row.outcome : "unfinished";
+      return { name: row.name, outcome, ...(row.text !== null && { text: row.text }) };
+    },
+
+    async commandRan(key, id, result) {
+      await (await db()).run(`UPDATE ${COMMANDS} SET name = ?, outcome = ?, text = ? WHERE key = ? AND id = ?`, [result.name, result.outcome, result.text ?? null, key, id]);
+    },
+
+    async unclaimCommand(key, id) {
+      await (await db()).run(`DELETE FROM ${COMMANDS} WHERE key = ? AND id = ? AND outcome = 'unfinished'`, [key, id]);
     },
 
     async addUser(key, message) {

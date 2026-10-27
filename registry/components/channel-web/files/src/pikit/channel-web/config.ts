@@ -38,6 +38,9 @@ export const Visibility = Type.Object(
 );
 export type VisibilitySettings = Static<typeof Visibility>;
 
+/** A command's name, as `agent.command` keys it (`COMMAND_NAME`). */
+const COMMAND_NAME = "^[a-z0-9][a-z0-9:-]*$";
+
 /** An agent's name, as `defineAgent` checks it. */
 const AGENT_NAME = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
 /** The agents users may pick for a new conversation; also a live setting. */
@@ -96,6 +99,15 @@ export const Config = Type.Object({
    * `agent.directory`); empty: no choice, the router decides. A live setting too.
    */
   agents: Type.Array(Type.String({ pattern: AGENT_NAME, maxLength: 64 }), { default: [], maxItems: 50, uniqueItems: true }),
+  /**
+   * The commands (`agent.command`) users may type in a chat (`/name args`): `"all"`, or their names.
+   * Users may sign themselves up, so by default only those that act on their own things (memory's
+   * `/rules` and `/prefs`, when installed), never an operator's (`/name`, `/new`). A name the App has
+   * no command of is left out; a command not allowed goes to the agent as text.
+   */
+  commands: Type.Union([Type.Literal("all"), Type.Array(Type.String({ pattern: COMMAND_NAME, maxLength: 64 }), { maxItems: 100, uniqueItems: true })], {
+    default: ["rules", "prefs"],
+  }),
   /**
    * How long a session is trusted from its signed cookie, without reading the database: a ban or a
    * removal takes effect within it.
