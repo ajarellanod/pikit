@@ -37,8 +37,9 @@ again. A bundle that names the admin API (`/admin/api`) is refused.
 | Path | What |
 |---|---|
 | `src/app.tsx` | what the App offers and who is signed in, then the screen of the route |
-| `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar with the projects, the conversation and project menus, the tabs, where a page's actions and side panel go), a new chat (the assistant picker), a conversation (the shared `ConversationView`), the conversations (every one, paged, search, archived: the shared `ConversationList`), Settings (`settings.tsx`, a modal) |
-| `src/lib/projects.tsx` | the user's projects (made, renamed, deleted), for the sidebar and the pages |
+| `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar with New chat, Conversations and Projects, the conversation and project menus, the tabs, where a page's actions and side panel go), a new chat (the assistant picker), a conversation (the shared `ConversationView`), the conversations (every one, paged, search, archived: the shared `ConversationList`), the projects (cards: search, order, New project) and each project's chats, Settings (`settings.tsx`, a modal) |
+| `src/lib/projects.tsx` | the user's projects (made, renamed, deleted), for the pages |
+| `src/lib/project-list.ts` | the projects page's search and order (pure) |
 | `src/lib/chat-api.ts` | the chat API's JSON: a copy of channel-web's `api.ts` |
 | `src/lib/client.ts`, `auth.ts` | the API (`fetch`, the session cookie, `x-pikit-chat: 1` on changes) and better-auth's routes |
 | `src/lib/source.ts`, `sse.ts` | a conversation for the shared view (`chatSource`): its transcript, its live events (server-sent events read with `fetch`), a message (checked first: `images.ts`) and a stop; the API's paths |

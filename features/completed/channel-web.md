@@ -279,10 +279,12 @@ A Vite + React + Tailwind v4 project of its own (section 3), built from the shar
   and the conversation's header: rename, archive or restore, delete; the sidebar lists the latest 20,
   Conversations every one and the archived ones), one conversation (messages, the answer as written, the tool running, stop), a new one,
   the composer with images.
-- Projects in the sidebar (under the chats; "New project"; each one's menu: a new chat in it, rename,
-  delete): one opens Conversations showing its chats only (`#/chats?project=<id>`), searched and
-  archived alike; a new chat in it says so over the composer (`#/?project=<id>`); a chat of a project
-  names it in its header and in the list. The commands users may type have the composer's "/" menu;
+- Projects: the sidebar's Projects opens a page of cards (`#/projects`: each a project's name and
+  date, its menu: a new chat in it, rename, delete; a search by name, newest first or by name, "New
+  project"), never a list in the sidebar. A card opens the project's chats (`#/projects/<id>`),
+  searched and archived alike. A chat of a project, and a new chat made in one (`#/?project=<id>`, its
+  × leaves it), shows the project as a badge in its composer (the dashboard's `PromptBar` `badges`, as
+  its web search's); Conversations tags each chat with its project. The commands users may type have the composer's "/" menu;
   what one answered shows as a quiet note in the thread ("Only you see this"), never in the transcript.
 - Settings (a modal from the user's menu at the sidebar's foot, the dashboard's settings dialog's
   frame and rows, `settings-shell`, `settings-rows`): profile (name), password, connected accounts
