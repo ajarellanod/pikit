@@ -91,7 +91,7 @@ import {
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { AgentConfigs, AgentStateDoc, asRecorded, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
 import { createAnswerLog } from "./answers.ts";
-import { AGENT_DELEGATION, createDelegation } from "./delegation.ts";
+import { AGENT_DELEGATION, type ConversationDelegations, createDelegation } from "./delegation.ts";
 import { runContext, toChord } from "./context.ts";
 import { harnessEnv } from "./execution.ts";
 import { checkedParts } from "./parts.ts";
@@ -241,6 +241,16 @@ export interface DurableRuntime extends AgentRuntime {
   compact(conversation: ConversationRef, instructions: string | undefined, ctx: AppContext): Promise<{ compacted: boolean }>;
   /** Whether this worker drives the conversation now: a run going, or a step or an announcement under way. */
   holds(conversation: Pick<ConversationRef, "conversationId">): boolean;
+  /**
+   * Whether a run goes in the conversation (pi-durable's `pi.live`) and how many messages wait for the
+   * next one (its `pi.inbox`): two reads, nothing written.
+   */
+  status(conversation: ConversationRef, ctx: AppContext): Promise<{ running: boolean; waiting: number }>;
+  /**
+   * The background tasks a conversation delegated (`delegation.ts`), outside a tool call: what a slash
+   * command lists and stops. Each call reaches the given conversation's tasks only.
+   */
+  readonly delegations: ConversationDelegations;
   /**
    * Resolves `true` once nothing is driven: no task running, no step or announcement under way (work
    * that only waits for a time does not count; `onIdleWithPendingWork` is told about it). A Harness a
@@ -401,7 +411,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
   // Child conversations of other agents (delegation.ts): their tasks are installed before pi-durable opens,
   // so a restart finds the background ones it must resume.
-  const { delegation, extension: delegationExtension } = createDelegation({
+  const { delegation, tasksOf, extension: delegationExtension } = createDelegation({
     agent: (name) => options.agent(name),
     apply: async (tx, id, ref, agent) => void (await config.apply(tx, id, ref, agent, effectiveState(agent, {}), logger)),
     dispatch: (request, ctx) => runtime.dispatch(request, ctx),
@@ -1130,6 +1140,20 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       // A conversation-owned summary is a write, placed at once when idle, else at the next boundary.
       if (submissionId !== undefined) await (await harness.submission(submissionId, chord))?.wait(chord);
       return { compacted: entryId !== undefined || submissionId !== undefined };
+    },
+
+    async status(conversation: ConversationRef, ctx: AppContext) {
+      const harness = await harnessOf(ctx);
+      const id = conversationIdOf(conversation);
+      const chord = toChord(ctx);
+      const [live, inbox] = await Promise.all([harness.snapshot(LiveDoc, id, chord), harness.snapshot(InboxDoc, id, chord)]);
+      return { running: live?.run !== undefined, waiting: (inbox?.items ?? []).filter((item) => item.mode !== "write").length };
+    },
+
+    delegations: {
+      list: async (conversation, ctx) => tasksOf(await harnessOf(ctx), conversationIdOf(conversation)).list(toChord(ctx)),
+      progress: async (conversation, id, ctx) => tasksOf(await harnessOf(ctx), conversationIdOf(conversation)).progress(id, toChord(ctx)),
+      cancel: async (conversation, id, ctx) => tasksOf(await harnessOf(ctx), conversationIdOf(conversation)).cancel(id, toChord(ctx)),
     },
 
     async resume(conversation: ConversationRef, ctx: AppContext): Promise<void> {

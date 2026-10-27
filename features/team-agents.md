@@ -29,7 +29,7 @@ a project installs, and agents that name what they may use.
 | Routes: which agent answers where | router-basic, router-rules (Routing in the dashboard) | — |
 | Idempotency, per-conversation serialization | built: request ids deduplicated by the runtime, one owner per conversation | [inbound-dedup](inbound-dedup.md) for transports |
 | Rate limits, admission control | none | no note yet |
-| Slash commands, prompt templates | built: commands typed in Google Chat, Telegram and the web chat run the registry's `agent.command` (`/rules`, `/prefs`, `/new`, `/compact`), routed like messages; prompt templates and Pi extensions' commands not | [slash-commands](slash-commands.md) |
+| Slash commands, prompt templates | built: commands typed in Google Chat, Telegram and the web chat run the registry's `agent.command` (`/rules`, `/prefs`, `/new`, `/compact`), routed like messages; team commands for anyone in the chat (`/stop`, `/status`, `/tasks`, `/cancel <id>`, runtime-pi's, scoped to the conversation: a Google Chat thread); prompt templates per agent (agents-folders' `src/agents/<agent>/prompts/<name>.md`, Pi's format, each name a command whose expansion is dispatched as the typed message); Pi extensions' commands not | [slash-commands](slash-commands.md) |
 | Delegation, background tasks | `tool-delegate`: run or start, depth limit, answers to the parent | [subagents](subagents.md) |
 | Who may hand work to an agent (one with a token of its own) | `tool-delegate`: an agent's `from`, checked against every agent of the delegation chain, kept in keys only it makes and checked against the runtime's origin (no laundering through another agent) | [subagents](subagents.md), [agent sandboxes](agent-sandboxes.md) |
 | An orchestrator: assign, list, follow, steer and cancel other agents' tasks, read their transcripts | `tool-delegate`: `delegate` (`wait: false` returns an id), `delegate_tasks`, `delegate_steer`, `delegate_cancel`, on `AgentDelegation`'s `list`, `progress`, `steer`, `cancel`, each conversation its own tasks; a child's progress (its last steps: text, tool calls and how they went) is read with `delegate_tasks({ id })`; its whole transcript is open | [subagents](subagents.md) |
@@ -87,7 +87,8 @@ contracts:
 - **Not threads**: a thread is the channel's, in its key ([threads](threads.md)).
 
 Changes to components, not contracts: channels running `agent.command` (`runAgentCommand`) for a
-team's commands (`/cancel`, `/status`, `/tasks`…); and a halt in `inbound.normalize` (a rate limit)
+team's commands (`/cancel`, `/status`, `/tasks`…, built); one addition to a contract, a command's
+`{ prompt }` answer that its runner dispatches (prompt templates, built); and a halt in `inbound.normalize` (a rate limit)
 that the channel may explain or keep quiet about, where channel-telegram always says "I can't take
 that message."
 

@@ -133,6 +133,12 @@ For the tasks not waited for, name the tools the agent needs (`tools: ["delegate
 
 Each sees only the tasks its own conversation started: another's id is an unknown task.
 
+**The people in the chat** see and stop the same tasks with `/tasks` and `/cancel <id>`, typed in the
+chat (anyone the channel admits there): runtime-pi's commands, not this component's (runtime-pi uses
+every `agent.tool`, so this component cannot use what runtime-pi provides), on the same code path and
+the same scope: the conversation's own tasks, so in Google Chat one thread's (runtime-pi's README,
+"Team commands").
+
 ## How it is built
 
 - **pi-durable has subagents**: a tool call can create a conversation it owns, submit to it and wait,
@@ -200,7 +206,9 @@ Each sees only the tasks its own conversation started: another's id is an unknow
   that asks back which branch (flagged; delegating again with the branch gets it done; its tasks
   arrived framed), and `from`: allowed directly and
   two levels deep (the keys carry the chain), refused directly and through an allowed agent (the
-  restricted agent never runs). The scripted rules match a message whole, so the agents on it read a
+  restricted agent never runs), and runtime-pi's `/tasks` and `/cancel` on those tasks (another
+  conversation's id not found, its task left running; a cancel reported once; a task that ended not
+  stopped). The scripted rules match a message whole, so the agents on it read a
   task without its framing (`unframed.test-support.ts`, also used by the workerd and acceptance tests).
 - `tests/workerd/test/tool-delegate.workerd.ts`: in a real Durable Object, driven by its alarm, both
   ways, a task listed and cancelled, its steps read while it runs and after, the child's key with its chain, and a `from` refusal.

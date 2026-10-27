@@ -15,7 +15,8 @@
  * search when the message does (only of an agent with `WEB_SEARCH_TOOL`), and its images in the
  * request (`AgentRequest.images`). A new conversation is one of the dashboard's own
  * (`dashboard:<uuid>`), with an agent of the App. A slash command (`agent.command`, the App's) runs
- * in a conversation as the other actions do: only in a key's current one (`runAgentCommand`).
+ * in a conversation as the other actions do: only in a key's current one (`runAgentCommand`); the
+ * prompt one answers (a prompt template's) is dispatched as an operator's message, as `send` does.
  * - **`createRemoteBackend`** (`remote.ts`): the Worker's, which reaches each conversation's object by
  *   `actor.mailbox.call` and lists them from the index (`conversation-index.ts`).
  *
@@ -37,6 +38,7 @@ import {
   type CommandLookup,
   type ConversationRef,
   type ConversationRegistry,
+  DASHBOARD_REQUEST_PREFIX,
   isAgentUnavailable,
   type ObservedConversation,
   type PageRequest,
@@ -449,6 +451,8 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       const outcome = await runAgentCommand(commands, name, conversation, args, ctx);
       if (outcome.kind === "unknown") throw refusal("unknown_command", `no command "/${name}" in the App`);
       if (outcome.kind === "failed") throw refusal("command_failed", outcome.message);
+      // A prompt template's expansion: the operator's message to the agent, whose answer is the dashboard's.
+      if (outcome.prompt !== undefined) await dispatch(conversation, { text: outcome.prompt, requestId: `${DASHBOARD_REQUEST_PREFIX}${crypto.randomUUID()}` }, ctx);
       return { key: conversation.key, ...(outcome.text !== undefined && { text: outcome.text }) };
     },
   };

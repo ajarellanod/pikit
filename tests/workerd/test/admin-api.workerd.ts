@@ -267,7 +267,7 @@ it("slash commands in real objects: listed from the index object's App, run in t
   const worker = await workerApp();
   try {
     const commands = (await (await worker.fetch("/admin/api/commands")).json()) as { items: { name: string }[] };
-    expect(commands.items.map((each) => each.name)).toEqual(["compact", "name", "new"]);
+    expect(commands.items.map((each) => each.name)).toEqual(["cancel", "compact", "name", "new", "status", "stop", "tasks"]);
 
     const started = (await (
       await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "scripted", text: "Plan a weekend in Porto" }) })

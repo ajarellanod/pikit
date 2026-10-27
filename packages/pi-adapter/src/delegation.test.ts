@@ -427,6 +427,40 @@ test("another conversation's task is not_found: it lists none, and can neither s
   expect(reported.text).toContain("answer: hold");
 });
 
+test("outside a tool call (runtime.delegations): a conversation lists, reads and stops its own tasks only; another's id is not_found and keeps running; an ended task is not stopped again", async () => {
+  const held = hold();
+  const w = await (await records()).worker({ tools: { delegate, control, hold: held.tool } });
+  const mine = await w.conversation("assistant");
+  const other = await w.conversation("assistant");
+  const id = await startTask(w, mine, "r1");
+  await held.started;
+  const tasks = w.runtime.delegations;
+
+  expect(await tasks.list(other, w.ctx)).toEqual([]);
+  expect(await tasks.progress(other, id, w.ctx)).toBe("not_found");
+  expect(await tasks.cancel(other, id, w.ctx)).toBe("not_found");
+  expect(held.seen.aborted).toBe(false);
+  expect(await tasks.list(mine, w.ctx)).toEqual([{ id, agent: "helper", status: "running" }]);
+  expect(await tasks.progress(mine, id, w.ctx)).toMatchObject({ id, status: "running", steps: [{ kind: "tool", name: "hold", status: "running" }], startedAt: expect.any(Number) });
+
+  expect(await tasks.cancel(mine, id, w.ctx)).toBe("aborted");
+  expect(held.seen.aborted).toBe(true);
+  const reported = await w.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  expect(reported.text).toContain('[The task you delegated to the agent "helper" was stopped before it answered.]');
+  expect(await tasks.cancel(mine, id, w.ctx)).toBe("aborted");
+  expect(reports(w)).toHaveLength(1);
+
+  // A task that ended answered: cancelling it does nothing.
+  const done = hold();
+  done.release();
+  const w2 = await (await records()).worker({ tools: { delegate, control, hold: done.tool } });
+  const third = await w2.conversation("assistant");
+  const finished = await startTask(w2, third, "r1");
+  await w2.resultWhere((each) => each.requestId.startsWith(RESULT_REQUEST_PREFIX));
+  expect(await w2.runtime.delegations.cancel(third, finished, w2.ctx)).toBe("completed");
+  expect(await w2.runtime.delegations.list(third, w2.ctx)).toEqual([{ id: finished, agent: "helper", status: "completed", result: "answer: hold" }]);
+});
+
 test("a child's origin is the conversation its tree descends from, two delegations deep too: its tools and prepare see it, after a restart as well", async () => {
   prepared.length = 0;
   const db = await records();
@@ -609,7 +643,9 @@ test("progress: a running task's last steps (bounded, oldest first, how each cal
     result: "done",
     steps: [echoStep(5, "error"), textStep(6), echoStep(6, "ok"), { kind: "tool", name: "hold", arguments: "{}", status: "ok" }, { kind: "text", text: "done" }],
     updatedAt: expect.any(Number),
+    startedAt: expect.any(Number),
   });
+  expect(before.startedAt ?? Infinity).toBeLessThanOrEqual(before.updatedAt ?? 0);
   // Reading changed nothing: one report, and the task listed as before.
   expect(reports(w)).toHaveLength(1);
   expect(await controlCall(w, conversation, "r6", { op: "list" })).toEqual([{ id, agent: "worker", status: "completed", result: "done" }]);

@@ -9,7 +9,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineApp, defineComponent, type ComponentDefinition, silentLogger } from "@pikit/core";
-import type { AgentDefinition, AgentSkill, ConversationRef } from "@pikit/contracts";
+import { type AgentDefinition, type AgentSkill, type CommandLookup, type ConversationRef, runAgentCommand } from "@pikit/contracts";
 import { doctor } from "./doctor.ts";
 import { command, generated, stale } from "./generate.ts";
 import { channelOfFile, GENERATED, literal, render } from "./index.ts";
@@ -207,4 +207,73 @@ test("the same folders give the same text; channels' files and template literals
     undefined,
   ]);
   expect(literal("a `b` ${c} \\d")).toBe("`a \\`b\\` \\${c} \\\\d`");
+});
+
+/** The slash commands the generated file provides, from a real App (with `others` beside it). */
+async function commandsOf(dir: string, others: ComponentDefinition[] = []): Promise<CommandLookup> {
+  const component = (await import(join(dir, GENERATED))).default as ComponentDefinition;
+  let commands: CommandLookup | undefined;
+  const reader = defineComponent({
+    name: "reader",
+    setup(pikit) {
+      const handle = pikit.useKeyed("agent.command");
+      return { start: () => void (commands = handle) };
+    },
+  });
+  const app = await defineApp({ components: [component, ...others, reader], logger: silentLogger }).create();
+  await app.start();
+  await app.stop();
+  return commands as CommandLookup;
+}
+
+const REVIEW = "---\ndescription: Review a part of the code\nargument-hint: \"<part> [focus]\"\n---\nReview $1, focusing on ${2:-correctness}. All: $@. Rest: ${@:2}. One: ${@:2:1}. Again: $ARGUMENTS\n";
+
+test("a prompt template is a slash command for the chat's users: the conversation's agent's template, Pi's placeholders filled, as the prompt to dispatch", async () => {
+  const dir = project({
+    "src/agents/support/agent.ts": agentText("support"),
+    "src/agents/support/prompts/review.md": REVIEW,
+    "src/agents/support/prompts/notes.txt": "Not a template.",
+    "src/agents/ops/agent.ts": agentText("ops"),
+    "src/agents/ops/prompts/review.md": "Look at `$@` closely.\nThen say what breaks.",
+    "src/agents/ops/prompts/deploy.md": "Deploy ${1:-staging}.",
+  });
+  expect((await run(dir)).problems).toEqual([]);
+  const commands = await commandsOf(dir);
+  const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
+  const support = conversation();
+  const ops = { ...conversation(), agent: "ops" };
+
+  expect(commands.keys().sort()).toEqual(["deploy", "review"]);
+  // One command per name: the first agent's (ops) description, its first line when it has no frontmatter.
+  expect(commands.get("review")).toMatchObject({ description: "Look at `$@` closely.", audience: "user" });
+  expect(commands.get("deploy")?.argumentHint).toBeUndefined();
+
+  expect(await runAgentCommand(commands, "review", support, 'api "error handling" now', ctx)).toEqual({
+    kind: "ran",
+    prompt: "Review api, focusing on error handling. All: api error handling now. Rest: error handling now. One: error handling. Again: api error handling now",
+  });
+  expect(await runAgentCommand(commands, "review", support, "api", ctx)).toEqual({ kind: "ran", prompt: "Review api, focusing on correctness. All: api. Rest: . One: . Again: api" });
+  // The same name, the conversation's agent's own template, its text as written.
+  expect(await runAgentCommand(commands, "review", ops, "the diff", ctx)).toEqual({ kind: "ran", prompt: "Look at `the diff` closely.\nThen say what breaks." });
+  expect(await runAgentCommand(commands, "deploy", support, "", ctx)).toEqual({ kind: "failed", message: 'this agent has no template "deploy"' });
+  expect(await runAgentCommand(commands, "deploy", ops, "", ctx)).toEqual({ kind: "ran", prompt: "Deploy staging." });
+});
+
+test("a template that cannot be a slash command is a problem, and one named as another component's command stops the App", async () => {
+  const bad = project({
+    "src/agents/support/agent.ts": agentText("support"),
+    "src/agents/support/prompts/Review.md": "Review it.",
+    "src/agents/support/prompts/empty.md": "---\ndescription: Nothing\n---\n\n",
+    "src/agents/support/prompts/long.md": `---\ndescription: ${"x".repeat(201)}\n---\nDo it.`,
+  });
+  expect((await run(bad)).problems).toEqual([
+    "src/agents/support/prompts/Review.md: a prompt template is a slash command, /<file name>: \"Review\" is not a command name (lowercase letters, digits, \"-\" and \":\")",
+    "src/agents/support/prompts/empty.md: a prompt template is a slash command, /<file name>: its text is empty",
+    "src/agents/support/prompts/long.md: a prompt template is a slash command, /<file name>: \"long\": its description is one line of at most 200 characters",
+  ]);
+
+  const clash = project({ "src/agents/support/agent.ts": agentText("support"), "src/agents/support/prompts/compact.md": "Compact it." });
+  expect((await run(clash)).problems).toEqual([]);
+  const compact = defineComponent({ name: "runtime-test", setup: (pikit) => pikit.provideKeyed("agent.command", "compact", { description: "Compact", run: async () => undefined }) });
+  await expect(commandsOf(clash, [compact])).rejects.toThrow('capability "agent.command": key "compact" is provided by both');
 });

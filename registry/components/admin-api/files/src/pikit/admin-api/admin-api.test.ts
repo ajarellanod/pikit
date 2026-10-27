@@ -11,7 +11,7 @@ import { ADMIN_CLIENT_HEADER, type AgentCommand, type CompletionRequest, type Co
 import { createAgentCommandConformance } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import Type from "typebox";
-import { MAX_IMAGE_BYTES, OPERATOR_NOTE } from "./api.ts";
+import { MAX_IMAGE_BYTES, OPERATOR_NOTE, operatorPrompt } from "./api.ts";
 import { TITLE_SYSTEM, TITLE_TOKENS } from "./titles.ts";
 import { CSP } from "./assets.ts";
 import { conversationOfAnswer } from "./routes.ts";
@@ -862,6 +862,21 @@ test("POST …/commands/:name runs a command in the conversation, as an action: 
   const behind = await command(s, "c1", "name", { args: "Too late" });
   expect(behind.status).toBe(409);
   expect(await behind.json()).toMatchObject({ error: "not_current" });
+});
+
+test("POST …/commands/:name of a command that answers a prompt (a prompt template): the prompt goes to the agent as the operator's message, its answer the dashboard's", async () => {
+  const review = defineComponent({
+    name: "review-test",
+    setup: (pikit) => pikit.provideKeyed("agent.command", "review", { description: "Review", audience: "user", run: async (_conversation, args) => ({ prompt: `Review ${args}.` }) }),
+  });
+  const s = await started({}, [review]);
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  await s.app.context().emit("agent.dispatched", { conversation: { key: "telegram:1", agent: "assistant", conversationId: "c1" }, admission: { kind: "started", requestId: "m0" } });
+
+  const reviewed = await command(s, "c1", "review", { args: "the API" });
+  expect(reviewed.status).toBe(200);
+  expect(await reviewed.json()).toEqual({});
+  expect(s.runtime.dispatched).toEqual([expect.objectContaining({ requestId: expect.stringMatching(/^dashboard:/), prompt: operatorPrompt("telegram:1", "Review the API."), whenBusy: "followUp" })]);
 });
 
 // admin-api's own commands pass the agent.command suite: /name titles the conversation, /new resets its key.

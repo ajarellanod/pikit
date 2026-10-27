@@ -150,7 +150,7 @@ test("on the real runtime: a dashboard chat is titled by its agent's model after
   expect(titled.title).toBe("Answer: Plan a weekend in Porto");
 
   const commands = (await (await admin("/admin/api/commands")).json()) as { items: { name: string }[] };
-  expect(commands.items.map((each) => each.name)).toEqual(["compact", "name", "new"]);
+  expect(commands.items.map((each) => each.name)).toEqual(["cancel", "compact", "name", "new", "status", "stop", "tasks"]);
 
   const compacted = await admin(`/admin/api/conversations/${id}/commands/compact`, { method: "POST", body: "{}" });
   expect(await compacted.json()).toEqual({ text: "Nothing to compact: the conversation is short enough as it is." });

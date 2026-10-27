@@ -342,6 +342,19 @@ test("admitInbound with commands: a registered /name runs in its conversation wi
   expect(e.dispatched.map((each) => each.prompt)).toEqual(["/unknown x"]);
 });
 
+test("admitInbound with commands: a command's prompt is dispatched as the typed message (its id, its sender); a redelivery is a duplicate", async () => {
+  const command = { description: "Review", run: async (_conversation: ConversationRef, args: string) => ({ prompt: `Review ${args}`, text: "never shown" }) };
+  const commands = { keys: () => ["review"], get: (name: string) => (name === "review" ? command : undefined) };
+  const e = ends();
+  const ctx = await appWith(() => {});
+
+  const outcome = await admitInbound(ctx, { ...message, text: "/review the API" }, { ...e, key: "test:c1", commands });
+  expect(outcome).toMatchObject({ kind: "admitted", admission: { kind: "started" } });
+  expect(e.dispatched).toEqual([{ requestId: "m1", conversation: expect.objectContaining({ key: "test:c1" }) as never, prompt: "Review the API", sender: { channel: "test", id: "someone" } }]);
+  // The platform delivers it again: the command runs again, its prompt is the same request.
+  expect((await admitInbound(ctx, { ...message, text: "/review the API" }, { ...e, key: "test:c1", commands })).kind).toBe("duplicate");
+});
+
 test("admitInbound with commands: a sender the router denies runs no command", async () => {
   let ran = 0;
   const commands = { keys: () => ["rules"], get: () => ({ description: "Rules", run: async () => void ran++ }) };

@@ -896,3 +896,67 @@ test("/compact summarizes the older messages of its conversation with its agent'
     await app.stop();
   }
 }, 30_000);
+
+// /stop, /status, /tasks and /cancel (agent.command, the chat's users'): in a conversation with nothing
+// going, each says so; /cancel refuses an id that is no task of the conversation.
+for (const c of createAgentCommandConformance(() => {
+  const { storage, agents, provider } = testComponents();
+  const seen = observer();
+  return {
+    components: [storage, agents, provider, runtimePi, seen.component],
+    conversation: (app) => oneExchange(seen, "test:users", app.context()),
+    runs: [
+      { name: "stop", check: async (outcome) => expect(outcome.text).toBe("Nothing is running.") },
+      { name: "status", check: async (outcome) => expect(outcome.text).toBe("scripted: idle.") },
+      { name: "tasks", check: async (outcome) => expect(outcome.text).toBe("No background tasks in this conversation.") },
+    ],
+    failures: [
+      { name: "cancel", args: "" },
+      { name: "cancel", args: "999" },
+    ],
+  };
+})) {
+  test(`runtime-pi /stop /status /tasks /cancel ${c.group}: ${c.name}`, () => c.run(), 30_000);
+}
+
+test("/status says a held run and the messages waiting; /stop aborts that run and them, and leaves nothing running", async () => {
+  let reached!: () => void;
+  const held = new Promise<void>((resolve) => (reached = resolve));
+  const hold = holdTool(
+    (context) =>
+      new Promise<string>((_resolve, reject) => {
+        reached();
+        context.abortSignal?.addEventListener("abort", () => reject(context.abortSignal?.reason), { once: true });
+      }),
+  );
+  const { storage, agents, provider } = testComponents({ agents: [scriptedAgent(hold)] });
+  const seen = observer();
+  let commands: { get(name: string): AgentCommand | undefined } | undefined;
+  const reader = defineComponent({
+    name: "commands-reader",
+    setup(pikit) {
+      const handle = pikit.useKeyed("agent.command");
+      return { start: () => void (commands = handle) };
+    },
+  });
+  const app = await defineApp({ components: [storage, agents, provider, runtimePi, seen.component, reader], logger: silentLogger }).create();
+  await app.start();
+  try {
+    const ctx = app.context();
+    const run = async (name: string, conversation: ConversationRef) => (await commands?.get(name)?.run(conversation, "", ctx, { channel: "test", id: "bob" })) as { text?: string };
+    expect(commands?.get("stop")?.audience).toBe("user");
+    const conversation = await seen.conversation("test:stop");
+    await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hold" }, ctx);
+    await held;
+    await seen.runtime().dispatch({ requestId: "r2", conversation, prompt: "after" }, ctx);
+
+    expect(await run("status", conversation)).toEqual({ text: "scripted: running, 1 message waiting." });
+    expect(await run("stop", conversation)).toEqual({ text: "Stopped (and 1 message that waited). Background tasks go on: /tasks lists them." });
+    await until(() => seen.results.some((result) => result.requestId === "r1"), "the stopped run's end");
+    expect(seen.results.find((result) => result.requestId === "r1")?.kind).toBe("aborted");
+    expect(await run("status", conversation)).toEqual({ text: "scripted: idle." });
+    expect(await run("stop", conversation)).toEqual({ text: "Nothing is running." });
+  } finally {
+    await app.stop();
+  }
+}, 30_000);

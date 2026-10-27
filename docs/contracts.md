@@ -287,11 +287,14 @@ channel admits may type it (it acts only on their space's or their own things: m
 `/rules`, `/prefs`); `"operator"` (also when absent), the dashboard's, offered in a chat only when the
 channel's config names it or allows `"all"`. `listAgentCommands` gives each command's audience. `sender` is who typed it in a channel (absent for the
 operator's dashboard): a command acting for a person (their preferences) refuses without one. `run` resolves with `{ text? }`, a note for whoever ran
-it; a thrown `Error` is the reason it failed. `listAgentCommands` and `runAgentCommand` are the
+it, or `{ prompt }`, a message for the agent its runner dispatches in place of the typed one (a prompt
+template's expansion: `admitInbound` with the typed message's id and sender, admin-api as an
+operator's message); a thrown `Error` is the reason it failed. `listAgentCommands` and `runAgentCommand` are the
 helpers a runner uses (`runAgentCommand` never throws); `commandOf(text, commands)` finds a registered
 `/name args` in a chat's message and `allowedCommands(commands, "user" | "all" | names)` cuts them to a
 channel's config. Providers: admin-api (`new`, `name`: operator),
-runtime-pi (`compact`: operator), memory-recall (`rules`, `prefs`: user). Runners: admin-api (the dashboard's "/"), channel-web (`/name` with each
+runtime-pi (`compact`: operator; `stop`, `status`, `tasks`, `cancel`: user), memory-recall (`rules`, `prefs`: user),
+and a project's generated `src/extensions/agents.ts` (agents-folders: one per prompt template's name, user, answering `{ prompt }`). Runners: admin-api (the dashboard's "/"), channel-web (`/name` with each
 title it sets, so the dashboard lists a web conversation by the chat's title and asks no model of its
 own), and the channels that run commands typed in their chats through `admitInbound` (below).
 
@@ -336,7 +339,9 @@ stage decided) or `command`. With `commands` (the App's `agent.command`, cut by 
 channel's config), a message whose text is a registered `/name args` is routed like any other (a
 denied sender runs nothing), runs in its conversation with the message's sender (`runAgentCommand`)
 and is never dispatched: the outcome is `command`, with the `CommandOutcome` the channel tells the
-sender (the type `AdmitOutcome` has it only for callers that may pass `commands`). A command is not
+sender (the type `AdmitOutcome` has it only for callers that may pass `commands`). A command that
+answers a prompt is the exception: the prompt is dispatched as the message (its id, sender and images;
+`beforeDispatch` first), and the outcome is `admitted` or `duplicate`. A command is not
 deduplicated by request id: the channel keeps which messages ran one, or the command is harmless to
 repeat. Channels that run them: channel-google-chat, channel-telegram, channel-telegram-webhook (each
 once per platform message) and channel-web (once per request id), each with a config `commands`:
