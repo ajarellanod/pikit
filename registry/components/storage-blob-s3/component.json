@@ -1,0 +1,53 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "storage-blob-s3",
+  "version": "0.0.1",
+  "description": "Files components keep by key, too large for a row (saved files, snapshots): storage.blob in an S3-compatible bucket (AWS S3, R2, MinIO, rustfs, a celld fleet's), signed with SigV4 over Web Crypto. Both targets.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "capabilities": [
+      "secrets"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "storage.blob"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "S3_ACCESS_KEY_ID",
+      "secret": true,
+      "required": true,
+      "description": "The access key id of the bucket's credentials (an R2 API token's, an IAM user's, MinIO's). Another name: the config's accessKeyIdSecret."
+    },
+    {
+      "name": "S3_SECRET_ACCESS_KEY",
+      "secret": true,
+      "required": true,
+      "description": "The secret access key that goes with S3_ACCESS_KEY_ID; read through secrets at start, only signatures made with it are sent. Another name: the config's secretAccessKeySecret."
+    },
+    {
+      "name": "S3_SESSION_TOKEN",
+      "secret": true,
+      "required": false,
+      "description": "The session token of temporary credentials (STS); leave it unset for a long-lived key."
+    }
+  ]
+}
