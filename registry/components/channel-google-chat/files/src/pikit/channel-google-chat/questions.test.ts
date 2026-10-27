@@ -211,8 +211,13 @@ async function subject(setup: Setup = {}) {
 
   let sessions = 0;
   const pointers = new Map<string, ConversationRef>();
+  /** Each resolve's key and the space it gave. */
+  const resolved: [string, string | undefined][] = [];
   const conversations = {
-    resolve: async (key: string, agent: string) => pointers.get(key) ?? (pointers.set(key, { key, agent, conversationId: `s${++sessions}` }), pointers.get(key)!),
+    resolve: async (key: string, agent: string, place?: { space?: string }) => {
+      resolved.push([key, place?.space]);
+      return pointers.get(key) ?? (pointers.set(key, { key, agent, conversationId: `s${++sessions}` }), pointers.get(key)!);
+    },
     get: async (key: string) => pointers.get(key),
     reset: async () => undefined,
   } as unknown as ConversationRegistry;
@@ -304,7 +309,7 @@ async function subject(setup: Setup = {}) {
     for (const each of asked) await questions.sent({ question: each, message: CARD_MESSAGE, conversationKey, answerKey: ASKED_IN });
     return message;
   };
-  return { ctx, click, handled, dispatched, remembered, updated, read, questions, store, drawn, conversations: pointers, seen, messages };
+  return { ctx, click, handled, dispatched, remembered, updated, read, questions, store, drawn, conversations: pointers, resolved, seen, messages };
 }
 
 const press = (question: QuestionPart, message: ChatMessage | undefined, field: string, value: string, user = PERSON): AddOnEvent =>
@@ -324,8 +329,9 @@ test("a button: the answer admitted once, its text answerText, from the clicker;
   expect(response.hostAppDataAction?.chatDataAction.updateMessageAction?.message.text).toBe("Here is my question.");
   expect(updatedCards(response)).toEqual([message.cardsV2![0]!, answeredCard(confirm, { go: true }, "Ada Lovelace")]);
   expect(await s.questions.get(confirm.id)).toMatchObject({ answered: { by: PERSON.name, name: "Ada Lovelace", at: 1_000, text: answerText(confirm, { go: true }), answer: { go: true } } });
-  // A thread's conversation says its thread: nothing to record.
+  // A thread's conversation says its thread: nothing to record. Its space is the chat's key, as its messages give.
   expect(s.remembered).toEqual([]);
+  expect(s.resolved).toEqual([[THREAD_KEY, `googlechat:${SPACE}`]]);
 
   // Anyone after that is told, and nothing more is admitted.
   const again = await s.click(THREAD_KEY, press(confirm, message, "go", "false", GRACE), s.ctx);

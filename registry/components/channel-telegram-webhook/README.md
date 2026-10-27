@@ -11,7 +11,8 @@ Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each m
   `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv`, `wakeups` and
   `actor.inbox`, where it registers the handler of `telegram.update`. A router (such as
   `router-basic`) picks the agent.
-- **Uses, if installed:** `outbound.queue` (durable sending).
+- **Uses, if installed:** `outbound.queue` (durable sending); in the object's half, `agent.command`
+  (the App's commands, typed in the chat: "Commands" below).
 - **Target:** `durable`. On a server, use `channel-telegram` (long polling, no public URL needed):
   absence, not flags (SPEC §4.1, C6).
 - **Installs to:** `src/pikit/channel-telegram-webhook/`.
@@ -174,10 +175,22 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
   in `channel-telegram`: the runtime answers the second one `duplicate`. A command Telegram delivers
   again is recognised by its message id and not run twice.
 - **Conversations:** each private chat is one conversation, `telegram:<chat id>`, the keys
-  `channel-telegram` makes.
+  `channel-telegram` makes, and its own space (no `AdmitOptions.space`). Group messages, and so
+  forum topics, never reach the object.
 - **Commands:** `/new` (or `/reset`) starts a new conversation; the old one is kept.
   `/start` and `/help` explain. `/login` in a chat that may talk already says so, and never reaches
-  the agent (it may hold the password). Any other command goes to the agent as text.
+  the agent (it may hold the password). These are the channel's own and win over an App command of
+  the same name. Then the App's commands (`agent.command`: admin-api's `/name`, runtime-pi's
+  `/compact`, another component's) that the `commands` config allows: `/name args`, or
+  `/name@your_bot args` (the bot's own username is cut; `/name@another_bot` is no command), is routed
+  like any message (a sender the router denies runs nothing), runs in the chat's conversation with
+  its sender (`{ channel: "telegram", id: "<user id>" }`), never reaches the agent, and the chat is
+  told its note (`/name: done.` when it has none, `/name failed: <why>` when it fails), best effort.
+  Telegram delivering it again runs nothing: the last command handled in the chat is kept by its
+  message id (`command:<conversation>` in `storage.kv`). Any other command (an unknown `/word`, or one
+  `commands` does not allow) goes to the agent as text. The default, `"all"`, suits a bot only its
+  allowed users and logged-in chats may talk to: list names to keep some from the chat. The channel
+  does not set the bot's command menu (`setMyCommands`): @BotFather's `/setcommands` does.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`). When the agent
   will not answer, the chat is told: "I can't take that message." when a stage stops it, "Sorry, I
   can't answer that here." when the router denies it, "This bot is not set up to answer yet." when no
@@ -327,8 +340,9 @@ The secrets reach the Worker as Worker secrets (`deployment-cloudflare` puts the
 "channel-telegram-webhook": {
   apiBase: "https://api.telegram.org", // default; a local Bot API server, or a test double
   accounts: [],                        // more bots besides the default one, by name
+  commands: "all",                     // default; the App's commands users may type, or their names: ["name", "compact"]
 },
-"channel-telegram-webhook-worker": {   // in the Worker's App: the same values
+"channel-telegram-webhook-worker": {   // in the Worker's App: the same apiBase and accounts
   apiBase: "https://api.telegram.org",
   accounts: [],
 },
@@ -372,7 +386,8 @@ secret: no bot, token or network needed. Only tests import it.
   `actor.mailbox`, `wakeups`, `storage.kv` and `agent.submissions`: a bad secret (`401`), strangers,
   groups and messages without text, a message reaching the runtime and its answer delivered,
   "typing…", a redelivered update answered once, a conversation that cannot take a message (`500`),
-  commands, failed runs, long answers split, an answer that ended while no wakeup ran delivered at the
+  commands (the channel's own, and the App's typed in the chat: run once with their sender, denied,
+  another bot's, unknown, not allowed), failed runs, long answers split, an answer that ended while no wakeup ran delivered at the
   next one, a piece found `sending` sent again with `↻ `, a refused send tried again, the outbox,
   several bots, the halves in two Apps as on Cloudflare, the start failures, the lifecycle suite
   for each half, and `registerInbox` reached through the mailbox. The webhook registering itself:

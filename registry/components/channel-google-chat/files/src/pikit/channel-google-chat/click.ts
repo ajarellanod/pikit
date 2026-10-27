@@ -26,6 +26,8 @@
  *   click that fails in between (a capability, a stop) leaves the claim missing, and the next click
  *   finds the message there (`duplicate`), claims it and updates the card, so the question closes.
  *   `denied`, `halted` and `no_route` admit nothing and leave it open, with a notice.
+ * - Its space (`AdmitOptions.space`) is the chat's own key (`<instance>:<space>`), as handler.ts gives
+ *   every message of the chat.
  * - The answer's thread is recorded for a whole chat's conversation (`targets.remember`, awaited in
  *   `beforeDispatch` as handler.ts records a message's: a failure admits nothing and the click
  *   rejects), the card's thread: its answer goes under the question.
@@ -58,7 +60,7 @@ import {
   type QuestionValue,
 } from "@pikit/contracts";
 import { type AddOnEvent, type AddOnResponse, type CardWithId, type ChatMessage, type FormInput, spaceOf } from "./event.ts";
-import { parseConversationKey } from "./instance.ts";
+import { conversationKey, parseConversationKey } from "./instance.ts";
 import { answeredCard, CLICK_PARAMETERS, type ClickStep, questionDialog } from "./question-cards.ts";
 import type { AdmissionDeps, ClickHandler, ClickOutcome, HandledEvent, QuestionAnswered, QuestionRecord, QuestionRecords } from "./types.ts";
 
@@ -159,6 +161,8 @@ export function createClickHandler(deps: ClickDeps): ClickHandler {
         conversations: deps.conversations,
         runtime: deps.runtime,
         key,
+        // The chat's own key, as handler.ts gives every message of the chat.
+        space: conversationKey(deps.instance.instance, space),
         // Before the answer can run, as handler.ts records a message's: a failure admits nothing (the click rejects).
         beforeDispatch: async (conversation: ConversationRef) => {
           if (wholeChat) await deps.targets.remember(answerKey(conversation, answerId), thread);

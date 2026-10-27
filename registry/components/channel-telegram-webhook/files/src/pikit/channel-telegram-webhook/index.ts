@@ -7,7 +7,8 @@
  *   hands each update to the conversation's actor.
  * - **The object's half** (this file, the default export), in the actor that owns the conversation
  *   (on Cloudflare, the Durable Object `idFromName("telegram:<chat>")`):
- *   - the `actor.inbox` handler of `telegram.update` (`inbox.ts`): the commands, then `admitInbound`;
+ *   - the `actor.inbox` handler of `telegram.update` (`inbox.ts`): the commands (the channel's, then
+ *     the App's `agent.command`s the `commands` config allows), then `admitInbound`;
  *     it resolves once the message is durable, and asks for "typing…" and for delivery;
  *   - the `actor.inbox` handler of `telegram.stranger` (`login.ts`), for a bot that takes logins:
  *     a chat that logged in is handled as above, `/login <password>` logs it in, anyone else is told;
@@ -36,7 +37,7 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import { type AgentResult, type AnswerDelivery, type DeliveryPolicy, describeStage, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
+import { type AgentResult, allowedCommands, type AnswerDelivery, COMMAND_NAME, type DeliveryPolicy, describeStage, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
 import { ACCOUNT_NAME, accountsOf } from "./account.ts";
 import { createDescriber } from "./party.ts";
@@ -59,6 +60,11 @@ const Config = Type.Object({
   apiBase: Type.String({ minLength: 1, default: "https://api.telegram.org" }),
   /** More bots, by name, besides the default one: `["ops"]` runs `telegram:ops` with `TELEGRAM_OPS_BOT_TOKEN`. */
   accounts: Type.Array(Type.String({ pattern: ACCOUNT_NAME }), { default: [], uniqueItems: true }),
+  /**
+   * The App's commands (`agent.command`) its users may type (`/name args`): `"all"`, or their names.
+   * Only the allowed or logged-in users reach them, after the router. Another `/name` goes to the agent as text.
+   */
+  commands: Type.Union([Type.Literal("all"), Type.Array(Type.String({ pattern: COMMAND_NAME.source }), { uniqueItems: true })], { default: "all" }),
 });
 
 /**
@@ -91,6 +97,8 @@ export default defineComponent({
     const wakeups = pikit.use("wakeups");
     // Optional: with it, answers are stored before they are sent (@pikit/contracts' outbound.ts).
     const outbound = pikit.useOptional("outbound.queue");
+    // The App's commands, typed in a chat (`/name args`): those the `commands` config allows (inbox.ts).
+    const commands = allowedCommands(pikit.useKeyed("agent.command"), config.commands);
     const accounts = accountsOf(config.accounts);
     let running: Running | undefined;
 
@@ -120,7 +128,7 @@ export default defineComponent({
           await now.delivery.wake(ctx);
         }
       };
-    const depsOf = (bot: Bot) => ({ bot, conversations: conversations.get(), runtime: runtime.get(), store: storage.get().namespace(NAME) });
+    const depsOf = (bot: Bot) => ({ bot, conversations: conversations.get(), runtime: runtime.get(), commands, store: storage.get().namespace(NAME) });
 
     // Registered with actor.inbox in start (`actor-inbox.ts`): the mailbox depends on no handler.
     const inbox = registerInbox(

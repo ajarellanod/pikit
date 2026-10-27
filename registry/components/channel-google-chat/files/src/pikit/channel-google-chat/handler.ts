@@ -13,12 +13,21 @@
  *   - `/new` (alone, after the mention, or as a slash command) resets the conversation
  *     (`conversations.reset(key, undefined, ctx)`) once per message id (`command:<message name>` in
  *     `storage.kv` keeps what it said), and says so in the thread.
+ *   - Then a command typed in the chat (`/name args` after the mention, or the app's slash command of
+ *     that name): one of `EventDeps.commands` (the App's `agent.command`s the `commands` config
+ *     allows; `/new` stays the channel's). Admitted as `/name args` with them (`AdmitOptions.commands`):
+ *     routed like any message (a sender denied runs nothing), run in its conversation with its sender,
+ *     never dispatched. Its outcome (`commandReply`: its note, `done`, or why it failed) is kept under
+ *     `command:<message name>` once it ran and said in the thread: Google repeating the message says it
+ *     again (the same reply ids, the same message) and runs nothing. Nothing is downloaded for it.
  *   - Otherwise an `InboundMessage`: `id` the message's `name`, `channel` the instance,
  *     `conversationId` the space, `actor.id` the sender's `users/…`; its text the quoted message first
  *     (quote.ts), then the message's, after the sender's display name in a space or group chat (not in a
  *     DM), then what its files say (attachments.ts), its images as `images`. Quotes and downloads
  *     happen before admission, within `DOWNLOAD_DEADLINE_MS`. A message with nothing to say is `done`.
- *   - `admitInbound` with the key and `beforeDispatch(conversation)` (awaited, AdmitOptions): a whole
+ *   - `admitInbound` with the key, the space (`AdmitOptions.space`: the chat's own key,
+ *     `<instance>:<space>`, for every message of the chat, a thread's or the whole chat's, so a chat
+ *     switching modes keeps one space) and `beforeDispatch(conversation)` (awaited, AdmitOptions): a whole
  *     chat records the answer's thread (`targets.remember(answerKey(conversation, message.id),
  *     thread)`: none in an unthreaded chat), and other files are written to the conversation's
  *     workspace (attachments.ts `writeFiles`). A write that fails rejects: Google sends it again.
@@ -40,21 +49,21 @@
  */
 
 import type { AppContext } from "@pikit/core";
-import { admitInbound, answerKey, type InboundMessage, type InboundOutcome } from "@pikit/contracts";
-import { readAttachments, writeFiles } from "./attachments.ts";
+import { admitInbound, answerKey, type CommandOutcome, commandOf, type InboundMessage, type InboundOutcome } from "@pikit/contracts";
+import { type ReadAttachments, readAttachments, writeFiles } from "./attachments.ts";
 import { type AddOnEvent, type ChatMessage, type ChatSpace, type ChatUser, eventKind, spaceOf } from "./event.ts";
 import { type PieceIds, pieceIds } from "./ids.ts";
-import { NAME, parseConversationKey } from "./instance.ts";
+import { conversationKey, NAME, parseConversationKey } from "./instance.ts";
 import { createSpaceThreading, threadOf } from "./key.ts";
 import { rememberSpace } from "./party.ts";
 import { quoteOf } from "./quote.ts";
 import { strangerText } from "./route.ts";
-import { type AdmissionDeps, ChatApiError, type EventHandler, type HandledEvent } from "./types.ts";
+import { ChatApiError, type EventDeps, type EventHandler, type HandledEvent } from "./types.ts";
 
 /** How long, in ms, downloads and quotes may take before admission: under Google's 30 s with the route's hand-off. */
 export const DOWNLOAD_DEADLINE_MS = 20_000;
 
-/** Where what `/new` said for a message is kept: it resets once, whatever Google repeats. */
+/** Where what `/new` (or a command typed in the chat) said for a message is kept: it runs once, whatever Google repeats. */
 export const commandSeenKey = (message: string): string => `command:${message}`;
 
 /** What the handler says itself. */
@@ -100,6 +109,26 @@ export function isNewCommand(message: ChatMessage): boolean {
   return /^\/(new|reset)$/i.test(withoutBotMentions(message).trim()) || /^\/(new|reset)$/i.test(textOf(message));
 }
 
+/** What the chat is told of a command it ran: its note, else that it was done; why it failed; or that there is none. */
+export function commandReply(name: string, outcome: CommandOutcome): string {
+  if (outcome.kind === "ran") return outcome.text ?? `/${name}: done.`;
+  if (outcome.kind === "failed") return `/${name} failed: ${outcome.message}`;
+  return `/${name} is not a command here.`;
+}
+
+/**
+ * The command `message` names among `commands`, as `/name args`, or `undefined`: its text after the
+ * mention (`textOf`), else its text without the mentions of bots (an app's slash command, whose
+ * `argumentText` is only its arguments).
+ */
+function typedCommand(message: ChatMessage, commands: EventDeps["commands"]): string | undefined {
+  for (const text of [textOf(message), withoutBotMentions(message).trim()]) {
+    const command = commandOf(text, commands);
+    if (command !== undefined) return command.args === "" ? `/${command.name}` : `/${command.name} ${command.args}`;
+  }
+  return undefined;
+}
+
 /**
  * The ids of the handler's own reply to `seed` (a message's name and what the reply is): a `requestId`
  * (a UUID) and a `messageId` (`client-` and 56 hexadecimal characters), made by ids.ts's `pieceIds`
@@ -118,7 +147,7 @@ function deadline(ms: number, caller: AbortSignal | undefined): AbortSignal {
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** The handler of one instance's events. */
-export function createEventHandler(deps: AdmissionDeps): EventHandler {
+export function createEventHandler(deps: EventDeps): EventHandler {
   const { instance, credentials, api, store } = deps;
   const threading = createSpaceThreading(api, store);
 
@@ -166,14 +195,28 @@ export function createEventHandler(deps: AdmissionDeps): EventHandler {
       return "done";
     }
 
+    // Every conversation of the chat, a thread's or the whole chat's, shares the chat's own key as its space.
+    const chat = conversationKey(instance.instance, space.name);
+    const command = typedCommand(message, deps.commands);
+    if (command !== undefined) {
+      // Ran already (Google repeats the message): said again, run never twice.
+      const told = await store.get<string>(commandSeenKey(id));
+      if (told !== undefined) {
+        await reply(space.name, thread, told, `${id}:command`, ctx);
+        return "done";
+      }
+    }
+
     const signal = deadline(DOWNLOAD_DEADLINE_MS, ctx.abortSignal);
     const canWrite = deps.workspace !== undefined || deps.execution !== undefined;
-    const [quote, attached] = await Promise.all([quoteOf(message, api, signal), readAttachments(message, { api, canWrite }, ctx, signal)]);
+    // A command is its text alone: nothing quoted or attached is read for it.
+    const [quote, attached]: [string | undefined, ReadAttachments] =
+      command !== undefined ? [undefined, { text: "", images: [], files: [] }] : await Promise.all([quoteOf(message, api, signal), readAttachments(message, { api, canWrite }, ctx, signal)]);
     const body = textOf(message);
-    if (body === "" && quote === undefined && attached.text === "" && attached.images.length === 0) return "done";
+    if (command === undefined && body === "" && quote === undefined && attached.text === "" && attached.images.length === 0) return "done";
     const who = sender.displayName?.trim() || sender.name;
     const said = isDirect(space) ? body : body === "" ? `${who}:` : `${who}: ${body}`;
-    const text = [quote, said, attached.text].filter((piece): piece is string => piece !== undefined && piece !== "").join("\n\n");
+    const text = command ?? [quote, said, attached.text].filter((piece): piece is string => piece !== undefined && piece !== "").join("\n\n");
 
     const inbound: InboundMessage = {
       id,
@@ -187,6 +230,9 @@ export function createEventHandler(deps: AdmissionDeps): EventHandler {
       conversations: deps.conversations,
       runtime: deps.runtime,
       key,
+      space: chat,
+      // Only a command's message is matched against the commands: another's text starts with its sender's name.
+      ...(command !== undefined && { commands: deps.commands }),
       beforeDispatch: async (conversation) => {
         // A whole chat's key does not say the thread: kept for the answer (none in an unthreaded chat).
         if (parts.thread === undefined) await deps.targets.remember(answerKey(conversation, id), thread);
@@ -197,6 +243,13 @@ export function createEventHandler(deps: AdmissionDeps): EventHandler {
       case "admitted":
       case "duplicate":
         return outcome.kind;
+      case "command": {
+        const told = commandReply(outcome.name, outcome.outcome);
+        if (outcome.outcome.kind === "failed") ctx.logger.info("channel-google-chat: a command typed in the chat failed", { message: id, command: outcome.name, error: outcome.outcome.message });
+        await store.set(commandSeenKey(id), told);
+        await reply(space.name, thread, told, `${id}:command`, ctx);
+        return "done";
+      }
       case "halted":
         ctx.logger.info("channel-google-chat: a message was stopped before its agent", { message: id, pipeline: outcome.pipeline, stage: outcome.stage, reason: outcome.reason });
         await reply(space.name, thread, REPLIES.halted, `${id}:outcome`, ctx);

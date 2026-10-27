@@ -9,7 +9,9 @@
  * into the answer (answer delivery sending directly, its runs in the object's alarms), draws
  * `ask_user`'s question as a card, whose click the Worker asks the object to answer
  * (`actor.mailbox.call`), and writes a message's file that is not an image (a PDF) to its workspace:
- * execution-do's files, in the conversation's object's own SQLite.
+ * execution-do's files, in the conversation's object's own SQLite. A command typed in the chat (`/where`,
+ * an `agent.command` of the object's App) runs once in its thread's conversation, whose space
+ * conversations-kv recorded in the object (the chat's key), and its note is said in the thread.
  *
  * Google is a fake behind `globalThis.fetch` (the tests and the objects share one isolate): its signing
  * keys, its token endpoint (any signed assertion gets a token), the Chat REST API's messages (a
@@ -221,6 +223,20 @@ it("the Worker verifies and hands each event to its conversation's object, which
     GOOGLE_CHAT_ALLOWED_SPACES: DM,
   };
   const provider = scriptedProvider();
+  // Each run of /where: the conversation conversations-kv gave it (its space recorded with its first resolve) and who typed it.
+  const where: string[] = [];
+  const whereCommand = defineComponent({
+    name: "commands-test",
+    setup: (pikit) =>
+      pikit.provideKeyed("agent.command", "where", {
+        description: "Where this conversation is",
+        async run(conversation, _args, _ctx, sender) {
+          const said = `${conversation.key} in ${conversation.space} for ${sender?.id}`;
+          where.push(said);
+          return { text: said };
+        },
+      }),
+  });
   composeObjects(
     [
       storageDo,
@@ -234,6 +250,7 @@ it("the Worker verifies and hands each event to its conversation's object, which
       routerBasic,
       toolAskUser,
       executionDo,
+      whereCommand,
       channelGoogleChat,
     ],
     { "router-basic": { defaultAgent: "assistant" }, [NAME]: { apiBase: API, jwksUrl: `${ACCOUNTS}/certs` } },
@@ -251,6 +268,12 @@ it("the Worker verifies and hands each event to its conversation's object, which
     const [answer] = inThread("T1");
     expect(google.calls.find((call) => call.method === "POST" && (call.body as Message).text === THINKING)?.path).toBe(`${DM}/messages`);
     expect(google.calls.filter((call) => call.method === "PATCH" && call.path === answer?.name).map((call) => (call.body as Message).text)).toContain("answer: hello");
+
+    // A command typed in the thread, delivered twice: run once in its conversation, whose space is the chat's key; its note said in the thread.
+    const whereSaid = `googlechat:${DM}:threads/T1 in googlechat:${DM} for ${USER.name}`;
+    for (let delivery = 0; delivery < 2; delivery++) expect(await worker.post(messageEvent("M4", "T1", "/where"), await google.bearer())).toEqual({ status: 200, body: {} });
+    expect(where).toEqual([whereSaid]);
+    expect(inThread("T1").map((message) => message.text)).toEqual(["answer: hello", whereSaid]);
 
     // ask_user: the run ends with the question, drawn as a card in its thread.
     const question = { title: "Deploy now?", fields: [{ kind: "confirm", name: "go", label: "Deploy", required: true }] };

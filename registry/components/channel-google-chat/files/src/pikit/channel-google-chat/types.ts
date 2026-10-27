@@ -16,11 +16,11 @@
  * prefix, and only there: `answers-cursor`, `piece:`, `answer:` (startAnswerDelivery's own),
  * `thread:` (key.ts, AnswerTargets), `space:` (key.ts, the threading state cache), `placeholder:` /
  * `placeholders` (placeholder.ts), `question:` (click.ts, QuestionRecords), `command:` (handler.ts, what
- * `/new` said for a message), `attachment:` (attachments.ts, if it needs any).
+ * `/new` or a command typed in the chat said for a message), `attachment:` (attachments.ts, if it needs any).
  */
 
 import type { AppContext, Clock } from "@pikit/core";
-import type { AgentResult, AgentRuntime, ConversationRef, ConversationRegistry, KeyValueStore, QuestionAnswer, QuestionPart } from "@pikit/contracts";
+import type { AgentResult, AgentRuntime, CommandLookup, ConversationRef, ConversationRegistry, KeyValueStore, QuestionAnswer, QuestionPart } from "@pikit/contracts";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import type { AddOnEvent, AddOnResponse, CardWithId, ChatMessage, ChatSpace } from "./event.ts";
 import type { ConversationMode, Credentials, Instance } from "./instance.ts";
@@ -190,6 +190,11 @@ export interface AdmissionDeps {
   workspace: WorkspaceProvider | undefined;
   execution: ExecutionEnv | undefined;
   clock: Clock;
+}
+
+/** What the message handler reads besides: the App's commands its users may type (`agent.command`, cut by the `commands` config). */
+export interface EventDeps extends AdmissionDeps {
+  commands: CommandLookup;
 }
 
 // ---------------------------------------------------------------------------------------------------
