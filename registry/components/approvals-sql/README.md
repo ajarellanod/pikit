@@ -8,8 +8,9 @@ are `contract.ts`, which every component that uses `approvals` carries as an ide
 - **Provides:** `approvals` (declared here).
 - **Requires:** `storage.sql`, `actor.mailbox`, `actor.inbox` (on a server: storage-sqlite and
   mailbox-local).
-- **Targets:** `server`. Every operation already goes through one actor (below), the path a Durable
-  Object would take on Cloudflare, but that is not tested yet.
+- **Targets:** `server` and `durable`. On `durable` the owner (below) is one Durable Object, which
+  every conversation's object reaches by RPC; the Worker's App, which has no `storage.sql`, gets
+  `approvals` from the Worker half (`worker.ts`, `approvals-sql-worker`): the same calls.
 - **Installs to:** `src/pikit/approvals-sql/` (`index.ts`, `contract.ts`, `conformance.ts`, its test).
 
 ## The contract (`contract.ts`)
@@ -45,7 +46,8 @@ Guarantees, each enforced here and checked by the suite (`conformance.ts`):
 - One owner: the actor `approvals-sql:approvals`. Every method is
   `actor.mailbox.call(APPROVALS_KEY, "approvals-sql.<op>", …)`, answered by the handlers it registers
   with `actor.inbox` in `start`; a call that reaches another key is refused (`invalid`). On a server
-  that actor is the App itself.
+  that actor is the App itself; on `durable` it is its Durable Object (every object's App makes the
+  table, only the owner's holds rows).
 - One table, `approvals_sql`, created in `start`: the action, its hash, the approvers, who asked, and
   the state (`pending` → `approved` | `rejected`, `approved` → `claimed` → `executed` | `failed`).
   `idempotency_key` and `claimed_by` are unique columns. Nothing is kept in memory.
@@ -57,4 +59,6 @@ not found, expiry, claims once (same claimant, another claimant, another convers
 arguments, a rejected one, four claimants at once), settle once, a restart, pages and statuses. Plus
 what setup declares, the owner-only key and `isApprover`. Each guarantee was checked to fail on a
 provider broken on purpose (the approvers check, the unclaimed condition) and pass once restored.
-Not covered: a `storage.sql` other than SQLite, and Cloudflare.
+The workerd lane (`tests/workerd/test/approvals.workerd.ts`) runs the suite from an object's App
+against the owner's real Durable Object (emptied before each case, expiry on the case's clock).
+Not covered: a `storage.sql` other than SQLite; celld itself (the workerd lane runs the code it runs).

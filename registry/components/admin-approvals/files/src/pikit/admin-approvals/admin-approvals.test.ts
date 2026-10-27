@@ -6,8 +6,9 @@
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { AgentRuntime, HttpRoute } from "@pikit/contracts";
+import { createMemoryMailbox } from "@pikit/contracts/testing";
 import type { ApprovalStore } from "./contract.ts";
-import adminApprovals from "./index.ts";
+import adminApprovals, { worker } from "./index.ts";
 
 const asked: string[] = [];
 const fakes = defineComponent({
@@ -19,11 +20,17 @@ const fakes = defineComponent({
 });
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
-  const app = await defineApp({ components: [fakes, adminApprovals], logger: silentLogger }).create();
+  const app = await defineApp({ components: [fakes, createMemoryMailbox(), adminApprovals], logger: silentLogger }).create();
+  const half = await defineApp({ components: [fakes, createMemoryMailbox(), worker], logger: silentLogger }).create();
 
   expect(app.describe().components.find((component) => component.name === "admin-approvals")).toMatchObject({
     provides: ["http.route"],
-    requires: ["approvals", "agent.runtime"],
+    requires: ["agent.runtime", "actor.inbox", "approvals", "actor.mailbox"],
+    optional: ["admin.auth"],
+  });
+  expect(half.describe().components.find((component) => component.name === "admin-approvals-worker")).toMatchObject({
+    provides: ["http.route"],
+    requires: ["approvals", "actor.mailbox"],
     optional: ["admin.auth"],
   });
 });
@@ -37,7 +44,7 @@ test("without admin.auth nobody is an operator: 401, and approvals is not asked"
       return { start: () => void (routes = handle) };
     },
   });
-  const app = await defineApp({ components: [fakes, adminApprovals, server], logger: silentLogger }).create();
+  const app = await defineApp({ components: [fakes, createMemoryMailbox(), adminApprovals, server], logger: silentLogger }).create();
   await app.start();
   try {
     const response = await routes?.get("GET /admin/api/approvals")?.(new Request("http://pikit.test/admin/api/approvals"), app.context());

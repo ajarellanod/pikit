@@ -4,7 +4,8 @@
   "version": "0.0.1",
   "description": "Tools in config run only with a person's approval of that exact call: the agent asks with request_approval (a question in the chat), the answer is recorded by code as its channel authenticated the sender, and the approved call runs once.",
   "targets": [
-    "server"
+    "server",
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.1",

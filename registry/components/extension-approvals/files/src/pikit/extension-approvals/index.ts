@@ -29,7 +29,7 @@
  * Name it last among extensions whose hooks block or rewrite calls: a later hook that blocks or
  * rewrites a call this one claimed leaves the approval claimed and unexecuted.
  *
- * Targets: `server` (as approvals-sql); it imports nothing platform-specific.
+ * Targets: `server` and `durable` (as approvals-sql); it imports nothing platform-specific.
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineComponent } from "@pikit/core";

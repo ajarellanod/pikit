@@ -10,21 +10,22 @@
  * the test composed since.
  */
 
-import { type AppDefinition, type ComponentDefinition, defineApp, silentLogger } from "@pikit/core";
+import { type AppDefinition, type Clock, type ComponentDefinition, defineApp, silentLogger, systemClock } from "@pikit/core";
 import { createEntrypoint } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/entrypoint.ts";
 
 /** actors-do's `binding` in these Apps: the class below. */
 export const PLATFORM_BINDING = "PLATFORM_CONVERSATION";
 
-let composed: { components: ComponentDefinition[]; config: Record<string, unknown> } | undefined;
+let composed: { components: ComponentDefinition[]; config: Record<string, unknown>; clock?: Clock } | undefined;
 
 /**
  * What the objects' Apps are made of from now on, with actors-do's `binding` set to this
- * class. An object whose App already started keeps it until `resetObjects`.
+ * class, on `clock` when given (a suite's manual clock, shared with the Apps it starts: the objects
+ * share the tests' isolate). An object whose App already started keeps it until `resetObjects`.
  */
-export function composeObjects(components: ComponentDefinition[], config: Record<string, unknown> = {}): void {
+export function composeObjects(components: ComponentDefinition[], config: Record<string, unknown> = {}, options: { clock?: Clock } = {}): void {
   const platform = (config["actors-do"] ?? {}) as Record<string, unknown>;
-  composed = { components, config: { ...config, "actors-do": { binding: PLATFORM_BINDING, ...platform } } };
+  composed = { components, config: { ...config, "actors-do": { binding: PLATFORM_BINDING, ...platform } }, ...(options.clock !== undefined && { clock: options.clock }) };
 }
 
 /** Forgets the composition: an object that starts before the next `composeObjects` fails to. */
@@ -45,7 +46,13 @@ const objectApp: AppDefinition = {
   get config() {
     return current().config;
   },
-  create: () => defineApp({ components: current().components, config: current().config, target: "durable", logger: silentLogger }).create(),
+  create: () => defineApp({ components: current().components, config: current().config, target: "durable", logger: silentLogger, clock }).create(),
 };
 
-export const platformEntrypoint = createEntrypoint(objectApp, undefined, { logger: silentLogger });
+/** The composition's clock when it has one, else the system's: read on every call, as the entrypoint keeps one for its life. */
+const clock: Clock = {
+  now: () => (composed?.clock ?? systemClock).now(),
+  sleep: (ms) => (composed?.clock ?? systemClock).sleep(ms),
+};
+
+export const platformEntrypoint = createEntrypoint(objectApp, undefined, { logger: silentLogger, clock });

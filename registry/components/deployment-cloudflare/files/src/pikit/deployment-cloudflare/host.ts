@@ -34,6 +34,7 @@ import {
   type AppContext,
   type AppDefinition,
   BACKGROUND_CONTEXT,
+  type Clock,
   type ComponentDefinition,
   type Context,
   consoleLogger,
@@ -73,6 +74,8 @@ export interface HostOptions {
   startDeadlineMs?: number;
   /** Default: `ROLLBACK_DEADLINE_MS`. */
   rollbackDeadlineMs?: number;
+  /** The Apps' clock. Default: the core's `systemClock`; tests pass a manual one. */
+  clock?: Clock;
 }
 
 /** What the host uses of a `DurableObjectStorage` (Cloudflare's type, written structurally): the guard alarm's. */
@@ -161,7 +164,7 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
         onDeliver = undefined;
         onCall = undefined;
         onStream = undefined;
-        const app = await compose(definition, [], logger);
+        const app = await compose(definition, [], logger, options.clock);
         await startWithin(app, withContextValue(WORKERS_HOST, host, BACKGROUND_CONTEXT), options, logger);
         logger.info("pikit: object started", { object: host.object?.id });
       })
@@ -252,7 +255,7 @@ export function createWorkerHost(definition: AppDefinition | undefined, options:
   const boot = (env: WorkersHost["env"], origin: string): Promise<WorkerServer> =>
     (serving ??= (async () => {
       const server = createWorkerServer(logger);
-      const app = await compose(definition, [server.component], logger);
+      const app = await compose(definition, [server.component], logger, options.clock);
       await startWithin(app, withContextValue(WORKERS_HOST, { env, origin }, BACKGROUND_CONTEXT), options, logger);
       const keys = server.keys();
       if (keys === undefined) throw new Error("deployment-cloudflare: the Worker's App started without its server");
@@ -339,12 +342,13 @@ async function startWithin(app: App, parent: Context, options: HostOptions, logg
  * The App as `pikit.config.ts` composes it, recomposed with this deployment's target and logger (as
  * `deployment-docker`'s entrypoint does), plus the entrypoint's own components.
  */
-function compose(definition: AppDefinition | undefined, own: AppDefinition["components"], logger: Logger): Promise<App> {
+function compose(definition: AppDefinition | undefined, own: AppDefinition["components"], logger: Logger, clock?: Clock): Promise<App> {
   return defineApp({
     components: [...(definition?.components ?? []), ...own],
     config: { ...(definition?.config ?? {}) },
     target: "durable",
     logger,
+    ...(clock !== undefined && { clock }),
   }).create();
 }
 

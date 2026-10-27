@@ -5,7 +5,8 @@ the model reading "approved". For the agents that name it (`extensions: ["approv
 
 - **Provides:** `agent.extension`, under the key `approvals`; a stage of `inbound.normalize`.
 - **Requires:** `approvals` (approvals-sql). It carries an identical copy of `contract.ts`.
-- **Targets:** `server` (as approvals-sql); it imports nothing platform-specific.
+- **Targets:** `server` and `durable` (as approvals-sql); it imports nothing platform-specific. On
+  `durable` its stage and hooks run in the conversation's object, the store's calls in approvals-sql's.
 - **Installs to:** `src/pikit/extension-approvals/`.
 
 ## Use it
@@ -61,4 +62,6 @@ runtime-pi, mailbox-local, approvals-sql and the scripted model: refused before 
 yes records nothing; the approver's is recorded, and its redelivery is a duplicate that changes
 nothing; after a restart other arguments are refused, the exact call runs once, the same call again is
 refused; an approval is not usable from another conversation; a tool not listed cannot be asked for.
-Not covered: Cloudflare; a crash between claim and intent (covered by the store's same-claimant case).
+The workerd lane (`tests/workerd/test/approvals.workerd.ts`) runs it in a conversation's Durable Object:
+an operator's approval through the Worker, then the exact call runs once and the same call again is
+refused. Not covered: a crash between claim and intent (covered by the store's same-claimant case).

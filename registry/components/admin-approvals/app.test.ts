@@ -7,12 +7,12 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import type { AdminAuth, AgentRequest, AgentRuntime, HttpRoute } from "@pikit/contracts";
+import type { ActorMailbox, AdminAuth, AgentRequest, AgentRuntime, HttpRoute } from "@pikit/contracts";
 import { createMemoryMailbox } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import approvalsSql from "../approvals-sql/files/src/pikit/approvals-sql/index.ts";
 import type { ApprovalRequest, ApprovalStore } from "./files/src/pikit/admin-approvals/contract.ts";
-import adminApprovals from "./files/src/pikit/admin-approvals/index.ts";
+import adminApprovals, { DECIDED } from "./files/src/pikit/admin-approvals/index.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -23,7 +23,7 @@ const AUTH = { authorization: "Bearer operator" };
 
 async function start() {
   const dispatched: AgentRequest[] = [];
-  let reached: { routes: { get(key: string): HttpRoute | undefined }; store: ApprovalStore } | undefined;
+  let reached: { routes: { get(key: string): HttpRoute | undefined }; store: ApprovalStore; mailbox: ActorMailbox } | undefined;
   const fakes = defineComponent({
     name: "fakes-test",
     setup(pikit) {
@@ -41,14 +41,15 @@ async function start() {
     setup(pikit) {
       const routes = pikit.useKeyed("http.route");
       const approvals = pikit.use("approvals");
-      return { start: () => void (reached = { routes, store: approvals.get() }) };
+      const mailbox = pikit.use("actor.mailbox");
+      return { start: () => void (reached = { routes, store: approvals.get(), mailbox: mailbox.get() }) };
     },
   });
   const app = await defineApp({ components: [sqliteStorage(), createMemoryMailbox(), approvalsSql, fakes, adminApprovals, server], logger: silentLogger }).create();
   await app.start();
   cleanup.push(() => app.stop());
   if (reached === undefined) throw new Error("not started");
-  const { routes, store } = reached;
+  const { routes, store, mailbox } = reached;
   const call = async (method: string, path: string, body?: unknown) => {
     const key = method === "GET" ? "GET /admin/api/approvals" : "POST /admin/api/approvals/:id/decision";
     const response = await routes.get(key)?.(new Request(`http://pikit.test${path}`, { method, headers: AUTH, ...(body !== undefined && { body: JSON.stringify(body) }) }), app.context());
@@ -65,7 +66,7 @@ async function start() {
     };
     return store.propose(request, app.context());
   };
-  return { call, propose, dispatched, store, ctx: () => app.context() };
+  return { call, propose, dispatched, store, mailbox, ctx: () => app.context() };
 }
 
 test("an operator approves as dashboard:<id>; the asking conversation is told once, however often they click", async () => {
@@ -112,4 +113,15 @@ test("bad requests: an unknown approval, a verdict that is neither, a bad status
   expect((await s.call("POST", "/admin/api/approvals/nope/decision", { verdict: "approve" })).status).toBe(404);
   expect((await s.call("POST", "/admin/api/approvals/nope/decision", { verdict: "maybe" })).status).toBe(400);
   expect((await s.call("GET", "/admin/api/approvals?status=lost")).status).toBe(400);
+});
+
+test("a decision message is dispatched only to its own key's conversation, under the request id admin-approvals makes", async () => {
+  const s = await start();
+  const told = { requestId: "approval-decided:a1", conversation: { key: "telegram:1", agent: "assistant", conversationId: "c1" }, prompt: "[approvals] ...", sender: { channel: "dashboard", id: "ops" } };
+
+  await s.mailbox.send("telegram:2", DECIDED, told, s.ctx());
+  await s.mailbox.send("telegram:1", DECIDED, { ...told, requestId: "m1" }, s.ctx());
+  expect(s.dispatched).toEqual([]);
+  await s.mailbox.send("telegram:1", DECIDED, told, s.ctx());
+  expect(s.dispatched.map((d) => d.requestId)).toEqual(["approval-decided:a1"]);
 });

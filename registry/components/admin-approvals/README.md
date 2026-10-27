@@ -6,9 +6,12 @@ gave like anyone (`dashboard:*` lets every operator decide). No view yet: the ro
 view would read.
 
 - **Provides:** `http.route`.
-- **Requires:** `approvals` (approvals-sql), `agent.runtime`; `admin.auth` optional (without it nobody
-  is an operator). It carries an identical copy of `contract.ts`.
-- **Targets:** `server` (as approvals-sql).
+- **Requires:** `approvals` (approvals-sql), `actor.mailbox`, `actor.inbox`, `agent.runtime` (the Worker
+  half: `approvals` and `actor.mailbox`); `admin.auth` optional (without it nobody is an operator). It
+  carries an identical copy of `contract.ts`.
+- **Targets:** `server` and `durable` (as approvals-sql). On `durable` the Worker half (`worker.ts`,
+  `admin-approvals-worker`) serves the routes over approvals-sql's Worker half; the default export,
+  in every object, dispatches the decisions told to its conversation.
 
 ## Routes
 Every route asks `admin.auth` first: `401` otherwise, and `approvals` is not asked.
@@ -26,8 +29,16 @@ request id `approval-decided:<id>`, so a repeated click, or a click after a cras
 and the message, never tells it twice. A decision taken in the chat is not told again (the answer
 was the message). Decisions are logged with the operator.
 
+The message goes through the asking conversation's actor (`actor.mailbox.send` to its key,
+`admin-approvals.decided`), whose App dispatches it: on a server this App, on `durable` the
+conversation's object. That handler dispatches only a decision for its own key's conversation, under an
+`approval-decided:` request id.
+
 ## Tests
 `admin-approvals.test.ts` (copied with it): what setup declares, `401` without an operator. The
 repository's `app.test.ts`, over approvals-sql: listed and approved as `dashboard:ops`, told with a
 stable request id on every click, the other verdict `409`; an operator the approvers do not name
-`403`, nothing recorded or told; a chat decision not told again; `404` and `400`.
+`403`, nothing recorded or told; a chat decision not told again; `404` and `400`; a decision message
+for another key, or under another request id, dispatches nothing (checked against a handler without
+the key check). The workerd lane (`tests/workerd/test/approvals.workerd.ts`): asked in a conversation's
+object, the owner evicted, approved twice through the Worker's routes, told once.

@@ -3,8 +3,9 @@
  * one owner, the actor `approvals-sql:approvals` (`APPROVALS_KEY`): every operation is
  * `actor.mailbox.call(APPROVALS_KEY, "approvals-sql.<op>", …)`, answered by the handlers it registers
  * with `actor.inbox`, which read and write the table of the App they run in. On a server
- * (mailbox-local) that App is this one; the same path would reach one Durable Object on Cloudflare,
- * which is not tested yet, so the target is `server`.
+ * (mailbox-local) that App is this one; on `durable` it is the Durable Object `approvals-sql:approvals`,
+ * reached by RPC from every conversation's object and, through the Worker half (`worker.ts`), from the
+ * Worker's App, which has no `storage.sql`.
  *
  * - **One table**, `approvals_sql`, created in `start`: the action as proposed, its hash, who may
  *   decide, and the state (`pending` → `approved` | `rejected`; `approved` → `claimed` → `executed` |
@@ -16,7 +17,7 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import { ActorCallError, isJsonObject, type JsonValue, type Sender } from "@pikit/contracts";
+import { ActorCallError, type ActorMailbox, isJsonObject, type JsonValue, type Sender } from "@pikit/contracts";
 import { type Approval, type ApprovalRequest, type ApprovalStatus, type ApprovalStore, actionHash, type DecideOutcome } from "./contract.ts";
 
 export const TABLE = "approvals_sql";
@@ -103,6 +104,20 @@ function statusWhere(status: ApprovalStatus, now: number): [string, (string | nu
   return ["status = ?", [status]];
 }
 
+/** `approvals`: every operation a call to the owner (`APPROVALS_KEY`), from any App with a mailbox. */
+export function approvalsOver(mailbox: () => ActorMailbox): ApprovalStore {
+  const call = (type: string, message: unknown, ctx: AppContext) => mailbox().call(APPROVALS_KEY, type, message as JsonValue, ctx);
+  return {
+    propose: async (request, ctx) => (await call(CALL.propose, request, ctx)) as unknown as Approval,
+    list: async (query, ctx) => (await call(CALL.list, query, ctx)) as unknown as Awaited<ReturnType<ApprovalStore["list"]>>,
+    decide: async (id, decision, ctx) => (await call(CALL.decide, { id, ...decision }, ctx)) as unknown as DecideOutcome,
+    claim: async (claim, ctx) => ((await call(CALL.claim, claim, ctx)) ?? undefined) as unknown as Approval | undefined,
+    settle: async (claimant, outcome, ctx) => ((await call(CALL.settle, { claimant, ...outcome }, ctx)) ?? undefined) as unknown as Approval | undefined,
+  };
+}
+
+export { worker } from "./worker.ts";
+
 export default defineComponent({
   name: "approvals-sql",
   setup(pikit) {
@@ -111,15 +126,7 @@ export default defineComponent({
     const inbox = pikit.use("actor.inbox");
     const now = () => pikit.clock.now();
 
-    const call = (type: string, message: unknown, ctx: AppContext) => mailbox.get().call(APPROVALS_KEY, type, message as JsonValue, ctx);
-    const store: ApprovalStore = {
-      propose: async (request, ctx) => (await call(CALL.propose, request, ctx)) as unknown as Approval,
-      list: async (query, ctx) => (await call(CALL.list, query, ctx)) as unknown as Awaited<ReturnType<ApprovalStore["list"]>>,
-      decide: async (id, decision, ctx) => (await call(CALL.decide, { id, ...decision }, ctx)) as unknown as DecideOutcome,
-      claim: async (claim, ctx) => ((await call(CALL.claim, claim, ctx)) ?? undefined) as unknown as Approval | undefined,
-      settle: async (claimant, outcome, ctx) => ((await call(CALL.settle, { claimant, ...outcome }, ctx)) ?? undefined) as unknown as Approval | undefined,
-    };
-    pikit.provide("approvals", store);
+    pikit.provide("approvals", approvalsOver(() => mailbox.get()));
 
     /** Only the owner answers: a call that reached another key is refused. */
     const owned = (key: string, message: JsonValue): Record<string, unknown> => {

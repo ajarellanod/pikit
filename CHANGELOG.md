@@ -41,6 +41,13 @@ line names its area.
   and preferences pending until a person approves them (`/rules`, `/prefs`; `propose_rule`,
   `propose_preference`); FTS5 search with snippets, `read_memory`; structured summaries;
   memory-summaries also on `durable`. Old memories are not migrated.
+- approvals-sql, extension-approvals, admin-approvals: also on `durable`. One Durable Object
+  (`approvals-sql:approvals`) holds the approvals; approvals-sql and admin-approvals have Worker halves;
+  an operator's decision is told through the asking conversation's actor (`admin-approvals.decided`),
+  on a server too.
+- memory-summaries: a summary cut by its wakeup's cancellation (the slice deadline on Cloudflare, a
+  stop) is written at the next run, not `idleMinutes` later.
+- deployment-cloudflare: `createEntrypoint`'s options take the Apps' `clock` (tests).
 - tool-space-files (new, both targets): files saved on purpose for a space (`files_save`,
   `files_list`, `files_get`, `files_delete`, versions), listed in a section, over `storage.blob`.
 - storage-blob-fs (server) and storage-blob-s3 (both targets, any S3 API with SigV4): `storage.blob`.

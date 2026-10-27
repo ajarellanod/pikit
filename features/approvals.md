@@ -6,7 +6,7 @@ chat. Hermes has command approval; OpenClaw approves requests from the chat or i
 **Specified:** partly (moved from the former SPEC §18, whose §4.5 named the `approvals` capability,
 and from the former SPEC §6.2b, the questions from extensions, which was the `interaction` note and is
 merged here: both sections are kept below verbatim). **Built:** approvals of exact actions (below),
-on a server.
+on both targets.
 
 **Needed by:** nothing required directly. Self-improvement needs a human's approval of every
 self-change (SPEC §6); whether that approval is this component or the git host's review is open
@@ -24,7 +24,7 @@ approval is recorded by code, never by the model reading "approved". Three compo
 |---|---|---|---|
 | `approvals-sql` | `approvals` (declared: kind and capability) | `storage.sql`, `actor.mailbox`, `actor.inbox` | the store, its `contract.ts` and its suite (`conformance.ts`) |
 | `extension-approvals` | `agent.extension` `approvals`, an `inbound.normalize` stage | `approvals` | `request_approval`, the `beforeTool` claim, the answer recorded |
-| `admin-approvals` | `http.route` | `approvals`, `agent.runtime`, `admin.auth`? | `/admin/api/approvals`: list, decide as `dashboard:<operator>` |
+| `admin-approvals` | `http.route` | `approvals`, `actor.mailbox`, `actor.inbox`, `agent.runtime`, `admin.auth`? | `/admin/api/approvals`: list, decide as `dashboard:<operator>` |
 
 - **The contract** (`ApprovalStore`, approvals-sql's `contract.ts`, an identical copy in each user;
   [docs/contracts.md](../docs/contracts.md), "A registry's own contracts"): an approval is one
@@ -39,8 +39,10 @@ approval is recorded by code, never by the model reading "approved". Three compo
 - **The gate** is `beforeTool`: the call's hash (name and arguments as they run) is claimed for that
   tool task; pi-durable runs the hook again when a task recovers before its intent is committed, and
   the same claimant gets the same approval. `afterTool` settles it.
-- **One owner**: the actor `approvals-sql:approvals`, so the same code reaches one Durable Object on
-  Cloudflare; not tested there, so the targets are `server`.
+- **One owner**: the actor `approvals-sql:approvals`: on `durable` one Durable Object, reached by RPC
+  from each conversation's object, and from the Worker's routes through the Worker halves of
+  approvals-sql and admin-approvals; an operator's decision is told through the asking conversation's
+  actor (`admin-approvals.decided`). The workerd lane runs it (`tests/workerd/test/approvals.workerd.ts`).
 
 Decided while building: `decide` takes no action hash (the action of an id never changes, so a
 `moved` outcome could never happen); there is no `get` (nothing reads one approval alone yet); the
@@ -48,8 +50,7 @@ claim is scoped to the asking conversation, so one person's approval is never an
 conversation's; `settle` is by claimant (the hook's `afterTool` sees the call's original arguments,
 not the ones that ran).
 
-Still open, besides the questions below: Cloudflare (a workerd run, and admin routes in the Worker's
-App, which has no `storage.sql`); a dashboard view; reminders, escalation and approval by rule or
+Still open, besides the questions below: a dashboard view; reminders, escalation and approval by rule or
 after a veto window (components on this contract); Pi extensions' `ctx.ui` questions; an approval
 claimed by a call that then fails to run (another hook blocks it, a crash after intent) stays
 `claimed`; channel-google-chat takes the first answer of anyone it admits, so a stranger's click

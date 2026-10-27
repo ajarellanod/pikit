@@ -4,14 +4,17 @@
   "version": "0.0.1",
   "description": "The dashboard's routes for approvals: list them, and approve or reject one as an operator, held to the approvers like anyone; the conversation that asked is told once.",
   "targets": [
-    "server"
+    "server",
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.1",
     "contracts": "0.0.1",
     "capabilities": [
+      "agent.runtime",
+      "actor.inbox",
       "approvals",
-      "agent.runtime"
+      "actor.mailbox"
     ]
   },
   "optional": {
@@ -22,6 +25,37 @@
   "provides": [
     "http.route"
   ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "agent.runtime",
+        "actor.inbox",
+        "approvals",
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "approvals",
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth"
+      ]
+    }
+  },
   "dependencies": {
     "@pikit/contracts": "0.0.1"
   },

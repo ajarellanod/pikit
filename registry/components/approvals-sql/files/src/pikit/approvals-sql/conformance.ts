@@ -1,17 +1,18 @@
 /**
  * The `approvals` conformance suite (`contract.ts`): the public behaviour every provider shows, for any
  * test runner. A fixture gives the components of one App that provides `approvals` (the provider and
- * what it needs); `app()` is called again for a restart, and must reach the same storage.
+ * what it needs); `app()` is called again for a restart, and must reach the same storage. It gets the
+ * case's clock: an owner in another App (a Durable Object) must read the same time.
  *
- *   for (const c of createApprovalsConformance(() => fixture())) test(`${c.group}: ${c.name}`, () => c.run());
+ *   for (const c of createApprovalsConformance((clock) => fixture(clock))) test(`${c.group}: ${c.name}`, () => c.run());
  */
 
-import { defineApp, defineComponent, type App, type ComponentDefinition, silentLogger } from "@pikit/core";
+import { defineApp, defineComponent, type App, type ComponentDefinition, silentLogger, type Target } from "@pikit/core";
 import type { Sender } from "@pikit/contracts";
 import { type ConformanceCase, createManualClock, type ManualClock } from "@pikit/core/testing";
 import { type ApprovalRequest, type ApprovalStore, actionHash } from "./contract.ts";
 
-export type ApprovalsFixture = { app: () => ComponentDefinition[] };
+export type ApprovalsFixture = { app: () => ComponentDefinition[]; config?: Record<string, unknown>; target?: Target };
 
 const GROUP = "approvals";
 const HOUR = 3_600_000;
@@ -35,7 +36,7 @@ function check(condition: boolean, message: string): asserts condition {
 const same = (actual: unknown, expected: unknown, what: string) =>
   check(JSON.stringify(actual) === JSON.stringify(expected), `${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 
-export function createApprovalsConformance(fixture: () => ApprovalsFixture): ConformanceCase[] {
+export function createApprovalsConformance(fixture: (clock: ManualClock) => ApprovalsFixture): ConformanceCase[] {
   /** A started App of the fixture on `clock`, its store, and a restart over the same storage. */
   const open = async (f: ApprovalsFixture, clock: ManualClock) => {
     let store: ApprovalStore | undefined;
@@ -46,7 +47,7 @@ export function createApprovalsConformance(fixture: () => ApprovalsFixture): Con
         return { start: () => void (store = approvals.get()) };
       },
     });
-    const app: App = await defineApp({ components: [...f.app(), reader], clock, logger: silentLogger }).create();
+    const app: App = await defineApp({ components: [...f.app(), reader], clock, config: f.config ?? {}, ...(f.target !== undefined && { target: f.target }), logger: silentLogger }).create();
     await app.start();
     if (store === undefined) throw new Error("approvals conformance: the fixture's App provides no approvals");
     return { app, store, ctx: app.context() };
@@ -55,8 +56,8 @@ export function createApprovalsConformance(fixture: () => ApprovalsFixture): Con
     group: GROUP,
     name,
     async run() {
-      const f = fixture();
       const clock = createManualClock();
+      const f = fixture(clock);
       let current = await open(f, clock);
       try {
         await run({
