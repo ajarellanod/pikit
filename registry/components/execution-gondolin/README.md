@@ -99,7 +99,7 @@ chat is the host's alone
 `<root>/.execution-gondolin-tmp` is emptied at start (no VM and no tool refers to an earlier
 process's), and `<root>/.execution-gondolin-image/` holds the images with `packages` (below), whose
 checkpoints of an older Gondolin image are removed when a new one is made: the only things this
-component deletes. Start refuses a `root` that is the working directory, one of its ancestors, or `/`.
+component deletes, unless `retentionDays` is set ("Retention" below). Start refuses a `root` that is the working directory, one of its ancestors, or `/`.
 
 Each directory from `root` down to a sandbox's two (`chats`, `<chat>`, `<agent>`, or `agents`,
 `<agent>`, and their counterparts under `.execution-gondolin-tmp`) must be a directory of its own,
@@ -166,6 +166,42 @@ rebuilt at its next `resolve`, its files untouched.
   files, and pikit reloads nothing from them.
 - `stop()` closes every VM; a command still running then fails.
 
+## Retention
+
+A chat's workspace is ephemeral: what must last is saved on purpose elsewhere. With
+`retentionDays: N`, a chat's sandboxes (`<root>/chats/<chat>/`, every agent's in that chat, with
+their temporary files) are deleted once nothing has worked in them for N days. Absent (the
+default), nothing is ever deleted: deleting what agents wrote must be asked for.
+
+- **What counts as use**: a `resolve` of one of the chat's sandboxes, which the runtime makes for
+  every tool call (a command, a file read or written) and execution-serve for every request. It is
+  noted in memory at once, and in a marker, `<root>/.execution-gondolin-used/<chat>`, holding the
+  time on the app's clock, written at most once an hour per chat. The marker outlives restarts, is
+  out of every guest's reach (a guest can change its own directory's times: `touch /workspace`), and
+  is on the app's clock, not the filesystem's (a restore or a copy that resets file times changes
+  nothing). A chat with no marker (from before `retentionDays` was set) starts its count when a sweep
+  first sees it.
+- **When**: a sweep at start (in the background: start does not wait for it), then every hour.
+  `stop` ends it.
+- **Never in use**: a chat is kept while one of its sandboxes has a VM up (until `idleSeconds` after
+  its last command), a command running, or a file operation in flight, and while this process used
+  it within the period. The check and the retirement's mark are one synchronous step, and so are a
+  `resolve`'s note of its use and its look for a retirement: a `resolve` either comes first (the
+  chat is kept) or waits for the retirement, which renames the directories away, and then works in a
+  new, empty workspace; never in a half-deleted one. The renamed directories are measured and
+  removed in `<root>/.execution-gondolin-tmp/retired/` (emptied at start too, so a crash in the
+  middle leaves nothing).
+- **Never swept**: `workspace: "agent"` sandboxes (`<root>/agents/<agent>/`, an agent's long-lived
+  files across chats) and `default` (`execution`'s).
+- **Logged** at `info` when something was deleted: how many chats, how many bytes; never a chat's
+  key, hash or a file's name. Every sweep logs its counts at `debug`.
+- **Behind execution-serve**, each remote sandbox id is a chat (`execution-serve:<id>`), so
+  `retentionDays` in the sandbox host's config deletes the remote sandboxes nobody used for N days;
+  the client (execution-remote) finds an empty workspace at its next use.
+
+The live state is this process's: two servers sharing a `root` do not see each other's commands,
+only each other's markers (at most an hour late).
+
 ## Machines per agent
 
 Each agent may get its own machine: `agents` maps an agent's name (`ConversationRef.agent`, in the
@@ -179,8 +215,8 @@ above). A secret's name is a variable name, never
 - **Field by field.** A field the profile sets replaces the base's (its `allowedHosts` are not added to
   the base's); a field it leaves out is the base's. What the configuration shows is what the agent gets.
   Its reachable hosts are its `allowedHosts` plus its own secrets' hosts; its packages, its `packages`
-  plus `git` with `proposals`. `root`, `idleSeconds`, `maxVms` and `queueSeconds` are global only (a
-  profile with one is refused).
+  plus `git` with `proposals`. `root`, `idleSeconds`, `maxVms`, `queueSeconds` and `retentionDays`
+  are global only (a profile with one is refused).
 - **The base for anyone else.** An agent `agents` does not name (a misspelled key too) gets the base:
   with the default base, no secret and no network. It fails closed. `execution`'s own sandbox
   (`default`) always gets the base.
@@ -243,6 +279,7 @@ the rewrite at its next boot.
   packages: [],              // Alpine packages added to the image, once (git comes with `proposals`)
   workspace: "chat",         // default: a sandbox per chat and agent; "agent": one per agent, every chat
   agents: {},                // default: a machine per agent, each field replacing the base's
+  // retentionDays: 30,      // absent by default (kept forever): delete a chat's sandboxes unused this many days
 }
 ```
 
@@ -331,8 +368,9 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   a response (a clone) in memory, at most 64 MB.
 - **A crash leaves QEMU running**: after a `kill -9` of the server, its QEMU processes may outlive it
   (stop closes them; a container restart ends them all).
-- **Disk**: a chat's files stay after its VM closes and after a reset, until you remove them (or
-  `workspace-snapshot` moves them, once built).
+- **Disk**: a chat's files stay after its VM closes and after a reset, until you remove them, until
+  `retentionDays` deletes them ("Retention"), or `workspace-snapshot` moves them, once built. An
+  agent's `workspace: "agent"` files are never deleted.
 - **One sandbox, several conversations at once**: a reset and the conversation before it, a parent and
   its same-agent children, and with `workspace: "agent"` every chat run commands in one VM and one
   `/workspace`, unserialized ("How a sandbox is keyed" says how parallel tasks keep apart).
@@ -370,6 +408,13 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   secret; bad profile keys, global-only fields and secrets named `__proto__`, `constructor` or
   `prototype` refused; the warning for a profile no agent has, only where agents are defined, and no
   cycle with an `agent.directory` provider that uses a tool on `execution.shell`; images of two machines kept side by side (`imageFile`, `staleImages`);
+- retention: at start, a chat unused for `retentionDays` loses every agent's sandbox (counts and
+  bytes logged, no chat), a fresh one, a shared agent's, `default` and one never noted (its count
+  starting) stay, across a restart; without it nothing is noted or deleted, however old; a use
+  refreshes the count, the sweep runs hourly on the app's clock and takes the temporary files; a
+  chat with a command running or a VM up is kept, and goes once neither; a command issued during the
+  start sweep works; a use and a retirement of one chat never overlap (either order); bad values
+  and a profile's `retentionDays` refused;
 - packages (none by default, `git` first with `proposals`, names refused when not Alpine's), the
   proposals wiring (a `path` remote read at each use), the guest's gitconfig, and the proposals host
   answered by `serve` alone; the sync of what the file tools changed, before the next command, once;
