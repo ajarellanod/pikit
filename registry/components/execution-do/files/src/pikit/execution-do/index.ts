@@ -15,6 +15,10 @@
  *   deploy; the credential is sent to that remote alone and never reaches the shell. With nowhere to
  *   go (no proposals provider, or not connected): clones are public and read-only, and a push says so.
  *
+ * With `retentionDays`, the workspace is deleted once nothing worked in it for that many days, by a
+ * `wakeups` request in the object, never while a call runs in it (`retention.ts`). Without it (the
+ * default), nothing is ever deleted.
+ *
  * It refuses to start outside a Durable Object's App, or on an object without SQLite. It reads the
  * object from `WORKERS_HOST`, which `deployment-cloudflare` puts in the start context; it imports
  * nothing from `cloudflare:*`. Its dependencies use Node's `Buffer`: the Worker needs the
@@ -29,6 +33,7 @@ import Type from "typebox";
 import { createDurableExecutionEnv } from "./env.ts";
 import { createFiles, type DurableObjectFilesStorage } from "./files.ts";
 import { createGit } from "./git.ts";
+import { createRetention } from "./retention.ts";
 import { createShell } from "./shell.ts";
 import { createShellFs } from "./shell-fs.ts";
 
@@ -57,6 +62,12 @@ const Config = Type.Object({
     },
     { default: {} },
   ),
+  /**
+   * Deletes the workspace (every file of the object: it is the chat's) once nothing has worked in it
+   * for this many days: no command, no file read or written. Never while a call runs. Needs `wakeups`
+   * (actors-do). Absent (the default): kept forever.
+   */
+  retentionDays: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
 function isFilesStorage(storage: unknown): storage is DurableObjectFilesStorage {
@@ -75,6 +86,8 @@ export default defineComponent({
   setup(pikit, config) {
     // Where proposals go (proposals-github): the only remote `git push` reaches, and its credential.
     const proposals = pikit.useOptional("proposals");
+    // Only with retentionDays: the object's alarm, to delete the workspace once it expires.
+    const wakeups = pikit.useOptional("wakeups");
     // A context of its own for asking `proposals` from a command: never start's.
     let background: AppContext | undefined;
     const remote = async () => {
@@ -101,11 +114,31 @@ export default defineComponent({
     // object (pi-durable serializes `edit` and `write` on a file by namespace and path), known at start.
     let objectId: string | undefined;
     const env = createDurableExecutionEnv(files, shell, config.root, { id: () => `execution-do:${objectId ?? "unstarted"}` });
-    pikit.provide("execution", env);
-    pikit.provide("execution.shell", env);
+    const retention =
+      config.retentionDays === undefined
+        ? undefined
+        : createRetention({
+            files,
+            storage: () => {
+              if (storage === undefined) throw new Error("execution-do: the workspace was used while the app is not running");
+              return storage;
+            },
+            root: config.root,
+            days: config.retentionDays,
+            clock: pikit.clock,
+            wakeups: () => {
+              const provider = wakeups.get();
+              if (provider === undefined) throw new Error("execution-do: retentionDays needs wakeups (actors-do)");
+              return provider;
+            },
+            log: pikit.logger,
+          });
+    const provided = retention === undefined ? env : retention.track(env);
+    pikit.provide("execution", provided);
+    pikit.provide("execution.shell", provided);
 
     return {
-      start(ctx) {
+      async start(ctx) {
         const host = ctx.value(WORKERS_HOST);
         if (host?.object === undefined) {
           throw new Error(
@@ -123,8 +156,15 @@ export default defineComponent({
         files.migrate();
         files.mkdirp(config.root);
         background = ctx.derive(() => BACKGROUND_CONTEXT);
+        if (retention !== undefined) {
+          if (wakeups.get() === undefined) {
+            throw new Error("execution-do: retentionDays needs `wakeups` in the object's App, to wake it when the workspace expires: install actors-do");
+          }
+          await retention.start(background);
+        }
       },
       stop() {
+        retention?.stop();
         // Nothing to close: the files are the object's, and no process outlives a command. A command
         // still running ends with its run, whose context the runtime cancels.
         storage = undefined;
