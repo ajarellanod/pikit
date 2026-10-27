@@ -211,8 +211,29 @@ settings-store do.
 - **Actions**: stop the run (`agent.runtime`'s `abort`, the conversation's current one); archive
   (listed apart, `?archived=1`, until the user restores it or new activity lists it again, as the
   dashboard's archive does); delete from the list (the index only: nothing of the runtime's is
-  deleted). No reset and no slash commands:
-  a new conversation is a new chat id.
+  deleted). No reset: a new conversation is a new chat id. Slash commands: only those the config
+  lets users type (below).
+- **Projects** (added later): each user organizes their chats in projects, their own (another user's
+  project id is `404` on every route, tested on both targets). A chat's project is fixed when it is
+  made (`ChatStartRequest.project`), and so is its space: it is admitted with `AdmitOptions.space` =
+  `web:<user id>:project:<project id>` (`projectSpace`), which `conversations.registry` records with the
+  key's first resolve, so what the App keeps per space (memory, instructions, saved files) is shared by
+  the project's chats; a chat of no project gives none (it is its own space). No moving a chat between
+  projects. A project with chats (archived ones too; deleted ones not) is not deleted (`409
+  not_empty`): the simplest rule that never changes a chat's place behind the user's back. Projects are
+  kept beside the users' index (`channel_web_projects`; on Cloudflare in the accounts actor, the
+  Worker's `channel-web.project*` calls); a chat made in a project deleted at that very moment (the
+  index learns of the chat a moment later) lists with those of no project, its space kept.
+- **Commands typed in the chat** (added later): `commands` (`"all"` or names; default `["rules",
+  "prefs"]`, memory's per-user commands) cut the App's `agent.command`s (`allowedCommands`), given to
+  `admitInbound` (`options.commands`): `/name args` for one of them is routed like any message, runs in
+  its conversation with the user as sender, and is never dispatched nor stored in the transcript; the
+  answer says what came of it (`ChatSendResponse.command`), which the page shows as a quiet note. A
+  request id runs a command at most once: the conversation claims it before it runs
+  (`channel_web_commands`, in the conversation's object on Cloudflare), and the same id again answers
+  `duplicate` with the outcome (`unfinished` while it runs or when it never finished). A first message
+  that is a command makes the chat, empty (titled `New conversation`): the command ran there, in its
+  project's space.
 - **Contract change, `agent.observe`**: from "read-only, for operators" to "read-only, for a reader the
   consumer authorized for that conversation: an operator (`admin.auth`), or a user of a channel for
   their own conversation; a consumer that shows it to a non-operator projects what that user may
@@ -228,18 +249,22 @@ cannot send it without CORS, which nothing allows).
 
 | Route | Answer |
 |---|---|
-| `GET /chat/api/config` | `ChatConfig`: the assistant's name, sign-in methods (password, magic link, providers with display names), whether one may sign up, `visibility` (`{ thinking, tools: "none" \| "names" \| "full", context }`), `agents` (`{ name, description? }[]`, the ones users may pick) (chat-parity.md) |
+| `GET /chat/api/config` | `ChatConfig`: the assistant's name, sign-in methods (password, magic link, providers with display names), whether one may sign up, `visibility` (`{ thinking, tools: "none" \| "names" \| "full", context }`), `agents` (`{ name, description? }[]`, the ones users may pick) (chat-parity.md), `commands` (`{ name, description, argumentHint? }[]`, the ones users may type) |
 | `/chat/api/auth/*` | better-auth (sign in, sign up, sign out, OAuth callbacks, verification, reset, link, account linking, sessions) |
 | `GET /chat/api/me` | `ChatMe`: the user (id, name, email, image), their linked methods, and `suggestedAgent?`: the assistant Routing chooses for their new chat (a dry run of `route.resolve`, nothing made; on Cloudflare the accounts actor's, `channel-web.routed`), only when it is one of `ChatConfig.agents` |
-| `GET /chat/api/conversations?limit&cursor&archived&q` | `ChatPage<ChatConversation>`, newest activity first: not archived, or with `archived=1` the archived ones; with `q`, those whose title holds it (any case) |
-| `POST /chat/api/conversations` | `ChatStartRequest` (a `ChatSendRequest` and `agent?`, one of `ChatConfig.agents`, else `400`) → `201 ChatStartResponse` (`{ id, requestId, admission }`) |
-| `GET /chat/api/conversations/:id` | `ChatConversation` (`id`, `title`, `busy`, `archived`, `lastActivity`, `createdAt`, `agent?` when one users may pick) |
+| `GET /chat/api/projects` | `ChatPage<ChatProject>` (`{ id, name, createdAt, chats }`), the user's, by name (at most `MAX_PROJECTS`, 100) |
+| `POST /chat/api/projects` | `{ name }` (1 to 60 characters) → `201 ChatProject` (`400` past `MAX_PROJECTS`) |
+| `PATCH /chat/api/projects/:id` | `{ name }` → `200 ChatProject` |
+| `DELETE /chat/api/projects/:id` | `204`; `409 not_empty` while it has chats |
+| `GET /chat/api/conversations?limit&cursor&archived&q&project` | `ChatPage<ChatConversation>`, newest activity first: not archived, or with `archived=1` the archived ones; with `q`, those whose title holds it (any case); with `project`, that project's (`none`: those of no project; another user's `404`) |
+| `POST /chat/api/conversations` | `ChatStartRequest` (a `ChatSendRequest`, `agent?`, one of `ChatConfig.agents`, else `400`, and `project?`, one of the user's, else `404`) → `201 ChatStartResponse` (`{ id, requestId, admission, command? }`; a command makes the chat too) |
+| `GET /chat/api/conversations/:id` | `ChatConversation` (`id`, `title`, `busy`, `archived`, `lastActivity`, `createdAt`, `agent?` when one users may pick, `project?`) |
 | `PATCH /chat/api/conversations/:id` | `{ title }` → `200 ChatConversation` |
 | `POST /chat/api/conversations/:id/archive`, `.../unarchive` | `200 ChatConversation`: listed apart, or back in the list (the owner only; new activity lists an archived one again) |
 | `DELETE /chat/api/conversations/:id` | `204` (the list only: gone for the user) |
 | `GET /chat/api/conversations/:id/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`, newest first: admin-api's `ApiTranscriptEntry` (`{ id, kind, messages }`, pi-ai messages) cut by `visibility`; a user's message (id its request id, `state`: `pending`, `answered`, `failed`, `aborted`; images `{ type: "image", url, mimeType }`, never bytes) and each message its runs wrote (id `<run's request>#<hash>`, the id the live events gave it); at most `PAGE_JSON_MAX` (1 MiB) of stored JSON a page |
 | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | one image's bytes of a user's message: the conversation's owner only, its type, `nosniff`, `cache-control: private, immutable` |
-| `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`{ requestId, admission }`); `429` past `messagesPerMinute` |
+| `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`{ requestId, admission, command? }`: `admission` `command` when it was one of `ChatConfig.commands`, `command` its outcome `{ name, outcome: "ran" \| "failed" \| "unfinished", text? }`); `429` past `messagesPerMinute` |
 | `GET /chat/api/conversations/:id/events` | server-sent `ChatEvent`s, admin-api's `ApiEvent` shapes (`snapshot` first, `run_*`, `message_*`, `tool_execution_*`, `entry_appended`) cut by `visibility`, the user's runs only; heartbeats; ends when the client goes |
 | `POST /chat/api/conversations/:id/abort` | `200` |
 | `GET /chat/*` | the page's files, under a Content-Security-Policy (`default-src 'self'`, images `'self'`, `data:`, `blob:` and the configured built-in providers' avatar hosts only) |
@@ -254,6 +279,11 @@ A Vite + React + Tailwind v4 project of its own (section 3), built from the shar
   and the conversation's header: rename, archive or restore, delete; the sidebar lists the latest 20,
   Conversations every one and the archived ones), one conversation (messages, the answer as written, the tool running, stop), a new one,
   the composer with images.
+- Projects in the sidebar (under the chats; "New project"; each one's menu: a new chat in it, rename,
+  delete): one opens Conversations showing its chats only (`#/chats?project=<id>`), searched and
+  archived alike; a new chat in it says so over the composer (`#/?project=<id>`); a chat of a project
+  names it in its header and in the list. The commands users may type have the composer's "/" menu;
+  what one answered shows as a quiet note in the thread ("Only you see this"), never in the transcript.
 - Settings (a modal from the user's menu at the sidebar's foot, the dashboard's settings dialog's
   frame and rows, `settings-shell`, `settings-rows`): profile (name), password, connected accounts
   (connect Google...), sessions (sign out the others), appearance; sign out from the same menu.
@@ -270,6 +300,15 @@ A Vite + React + Tailwind v4 project of its own (section 3), built from the shar
   ban and removal; cookie names and paths; admin and chat sessions never open each other's routes.
 - Isolation (adversarial): user B with user A's chat id gets `404` on every route, on a server and in
   workerd; an operator's follow-up in a user's conversation never appears in `messages` or `events`.
+  So with user A's project id: rename, delete, the list by project and a new chat in it are `404`,
+  nothing made or dispatched (server, the fake Cloudflare platform, workerd).
+- Projects and spaces: two chats of a project record the same space, another project or user another,
+  a chat of no project none (in workerd, read back from conversations-kv by a `/rules` fixture); the
+  list by project, `none`, search within, archived apart; `409` while a project has chats.
+- Commands: listed in the config (the default `rules`, `prefs`; `"all"`; `[]`), run in the
+  conversation with the user as sender, never dispatched nor in the transcript, once by request id,
+  a failure's message answered, a routing denial running nothing; a first message that is a command
+  making the chat in its project's space.
 - Channel conformance suite (`answers: "pushed"`), lifecycle suite, "what setup declares".
 - Cloudflare: the workerd lane runs sign-up, sign-in, a message and its answer, the live view and the
   isolation cases through the Worker and the objects.

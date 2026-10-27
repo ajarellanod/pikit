@@ -6,7 +6,9 @@ platform, see and continue only their own conversations, watch the answer as it 
 images and stop a run. A conversation reads as the dashboard's (the same JSON: a transcript of
 pi-ai messages and pi-durable's live events), cut to what the operator lets users see (thinking,
 tools, the Context panel); the operator may let them pick an assistant, and they search their
-conversations by title. The operator invites, bans and removes them from the dashboard. The operator's
+conversations by title. They organize their chats in projects, whose chats share what the App keeps
+per space (memory, instructions, saved files), and type the commands the operator lets them
+(`/rules`, `/prefs`). The operator invites, bans and removes them from the dashboard. The operator's
 dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
 
 - **Provides:** `http.route`: the chat API (`/chat/api/*`, `api.ts`), better-auth's routes
@@ -18,7 +20,7 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
   the accounts actor.
 - **Requires:** `secrets`, `conversations.registry`, `agent.runtime`, `agent.observe` (the live
   view), `agent.submissions` (answers, and the states of messages whose run's end no event brought),
-  `storage.kv` (the delivery cursor; whose each title is), `storage.sql` (accounts, conversations, transcripts). A router
+  `storage.kv` (the delivery cursor; whose each title is), `storage.sql` (accounts, conversations, projects, transcripts, the commands typed). A router
   (`router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (answers stored before they are written), `wakeups`
   (delivery on a Durable Object), `settings` (sign-up, visibility and the agents users may pick change
@@ -27,7 +29,7 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
   routes answer `404`), `actor.inbox` / `actor.mailbox` (Cloudflare), `model.complete` (runtime-pi's:
   a model titles each conversation after its first answer; without it, its first message names it),
   `agent.command` (admin-api's `/name`: the dashboard lists a web conversation by the chat's title,
-  "Titles" below).
+  "Titles" below; and the commands users may type, `commands`).
 - **Targets:** `server` and `durable`, from one code (below).
 - **Installs to:** `src/pikit/channel-web/`; with a UI, its view and Settings section to
   `src/dashboard/src/views/channel-web/` and `src/dashboard/src/settings/channel-web/`. Adds the command
@@ -67,6 +69,7 @@ OIDC platform alike).
   visibility: { thinking: false, tools: "names", context: true }, // what users see (below)
   agents: [],                                    // the agents users may pick for a new chat; none: the router decides
   titleModel: "anthropic/claude-haiku-4-5",      // optional: the model that titles conversations; absent, each one's agent's
+  commands: ["rules", "prefs"],                  // the commands users may type in a chat (default); "all", or [] for none
 }
 ```
 
@@ -100,6 +103,15 @@ App's `route.resolve` over a new chat's first message, nothing dispatched or mad
 one offered), else on the first: Routing's rules for `web` pick the assistant offered first, and a user
 may pick another. The dry run assumes `route.resolve`'s stages have no side effects (router-basic's and
 router-rules' read and decide; a project stage that counts what it routes counts it too).
+
+**`commands`**: the App's `agent.command`s users may type in a chat (`/name args`), by name, or
+`"all"`. The default is `["rules", "prefs"]` (memory's commands, when installed: a user's own rules and
+preferences): this chat is for end users, who may sign themselves up, and most commands are an
+operator's (admin-api's `/name`, a reset, a deploy), acting on the conversation or the App with no
+check of who typed them. Allow one only if it is safe for anyone who can sign up; `"all"` only when
+every user is trusted. A name the App has no command of is left out (`ChatConfig.commands` lists those
+there are); a command not allowed goes to the agent as text. Read where the conversations are (on
+Cloudflare the objects' App, the default one).
 
 ## What the operator does
 
@@ -174,6 +186,33 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   makes. Every route builds it from the session's user and the path's chat id, in one function
   (`keyOf`, `chat.ts`): a user can name no other user's conversation. Another user's chat id is `404`
   on every route, as one that never existed (tested adversarially on both targets' code paths).
+- **Projects.** A user's projects are their own: every project route and the list by project build
+  from the session's user, and another user's project id is `404` everywhere (rename, delete, the list,
+  a new chat in it), as one that never existed: nothing made or dispatched (tested adversarially on
+  both targets' code paths). At most `MAX_PROJECTS` (100) a user; a name 1 to 60 characters.
+  `GET /chat/api/conversations?project=<id>` lists one project's (searched and archived alike),
+  `?project=none` those of no project.
+- **A chat's project and space, for good.** A chat is made in a project or in none
+  (`ChatStartRequest.project`) and stays there: no moving. One made in a project is admitted with its
+  space (`AdmitOptions.space` = `web:<user id>:project:<project id>`, `projectSpace`: opaque to all but
+  the channel), which `conversations.registry` records with the key's first resolve: every chat of the
+  project shares what the App keeps per space (memory, instructions, saved files); another project or
+  user is another space. A chat of no project gives none: it is its own space.
+- **Deleting a project** is refused (`409 not_empty`) while it has chats (archived ones too; deleted
+  ones do not count): delete them first. So no chat ever changes place behind its user's back. On
+  Cloudflare the index learns of a new chat a moment after its object made it: a chat made in a
+  project deleted at that very moment lists with those of no project, its space kept.
+- **Commands typed in the chat** (`commands`) go through `admitInbound` with the commands allowed: a
+  `/name args` naming one is routed like any message (a denied user runs nothing: `403`), runs in its
+  conversation with the user as sender (`{ channel: "web", id }`), and is never dispatched: nothing of
+  it is in the transcript or the live view. The answer says what came of it (`ChatSendResponse.command`:
+  `ran` with the command's note, `failed` with why), which the page shows as a quiet note. **At most
+  once by request id**: the conversation claims the request id before the command runs
+  (`channel_web_commands`, in its object on Cloudflare); the same id again is a `duplicate` that answers
+  the outcome kept (`unfinished` while it runs, or when it never finished: a crash, then it is never
+  run again). A refusal drops the claim. A first message that is a command makes the chat, empty and
+  titled `New conversation` (the command ran there, in its project's space); with `model.complete`
+  a model titles it after its first answer. Logs say the command's name and outcome, never its arguments or note.
 - **Sessions.** Every `/chat/api/*` route but `GET /chat/api/config` and `/chat/api/auth/*` needs a
   user's session (`401`). A route that changes something also needs `x-pikit-chat: 1` (`400`): a page
   of another site cannot send it. Cookies `pikit_chat.*`, path `/chat/`, `HttpOnly`, `SameSite=Lax`,
@@ -285,7 +324,7 @@ In `start`, `actor.inbox`'s `scope` says where it runs:
 - **Cloudflare** (`"one"`): the default export goes in each conversation's Durable Object, which
   admits the Worker's messages, answers its calls about this conversation (`calls.ts`), keeps its
   transcript, stores what its runs wrote and tells the users' index (`channel-web.seen`) of each change. One
-  object, `channel-web:accounts`, holds the accounts and the index, and answers the Worker's
+  object, `channel-web:accounts`, holds the accounts and the index (the users' conversations and projects), and answers the Worker's
   `channel-web.auth.*` calls (`wiring.ts`). Every object registers those handlers and the index's
   (one class), but only `channel-web:accounts` answers them: any other refuses (`no_handler`). The Worker's half (`export const worker`, config key
   `channel-web-worker`) serves the routes: a call to the conversation's object, the list one call to
@@ -339,7 +378,14 @@ under an https `PIKIT_PUBLIC_URL`).
   run, the policy as a live setting on history and live events, the agents users may pick (allowed,
   refused, denied by routing, taken away; the one Routing suggests in `/me`, a dry run), the search, stop, duplicates, request ids, images and body
   limits, refusals, the operator's routes, the live `signUp` setting, what setup declares, the
-  lifecycle suite.
+  lifecycle suite. Projects: made, renamed, listed with their chats, at most
+  `MAX_PROJECTS`, refused deletion while they have chats, removed with their user; the list by project
+  (`none`, search within, archived apart); isolation (another user's project id `404` on every route,
+  nothing made or dispatched); the space two chats of a project share (another project's, another
+  user's, none without a project; an agent picked too). Commands: listed in the config (the default,
+  `"all"`, `[]`), run in the conversation with the user as sender, never dispatched nor in the
+  transcript, once by request id, a failure's message, a routing denial running nothing and keeping no
+  claim, a first message that is a command making the chat in its project's space.
 - `visibility.test.ts`: each policy value on messages, entries and live events (a hidden block's
   deltas left out and the next renumbered), and what never shows under the defaults.
 - Security cases: a spoofed `Host` gets no link nor email and `400` (accounts, the operator's routes),
@@ -362,7 +408,10 @@ under an https `PIKIT_PUBLIC_URL`).
   delete, isolation, live events cut in the Worker, entries told live from the object, the policy and
   the agents from the accounts actor's config, an agent picked reaching the object, `/me`'s suggested
   agent from the accounts actor's dry run, the search in the index, image limits, an unreachable object, the index's versions (not busy after a run that ended
-  before its admission returned), removal.
+  before its admission returned), removal. Projects in the accounts actor (one call each), a chat made in one reaching its
+  object with its space, the list by project from the index, `409` then `204`; another user's project id
+  `404` everywhere with no object made; commands listed by the accounts actor's config and run in the
+  conversation's object, once by request id.
 - `accounts-wiring.test.ts`: the real accounts (better-auth) through the routes, on a server and
   forwarded to the accounts actor on Cloudflare (the cookie cache first, its renewal sent back after a
   database read); chat and admin sessions never open each other's routes; every better-auth route the
@@ -387,6 +436,8 @@ under an https `PIKIT_PUBLIC_URL`).
   then, its answer renewing the cache cookie; a foreign `Origin` refused through the forwarder);
   `email.send` in the default App only: the config says so, a magic link signs a new user in, a
   password sign-up verifies first, an invitation is emailed; a model's title (faux/echo) the same in
-  the chat and the dashboard (admin-api's titler never trying), and a rename the dashboard's too.
+  the chat and the dashboard (admin-api's titler never trying), and a rename the dashboard's too. Projects: a chat made in one is in the project's space as conversations-kv records it (a
+  `/rules` fixture says the space it runs in), the same for each chat of it, none without; a command
+  typed runs in its object once; another user's project id `404` everywhere; `409` while it has chats.
 
-Not covered yet: the page, the view and the Settings section in a browser.
+Not covered yet: the page, the view and the Settings section in a browser (the page's projects and command notes are checked by its build and `scripts/chat.test.ts` only).

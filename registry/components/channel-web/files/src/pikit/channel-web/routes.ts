@@ -10,6 +10,9 @@
  * - **The key is the session's.** A route names a conversation by the chat id in its path only, and the
  *   key is `keyOf(user, chat id)`, built in one place (`refOf`): another user's chat id names no
  *   conversation of theirs, and is `404` as one that never existed.
+ * - **A project is the session's user's too**: `/projects/:id`, `?project=` and a new chat's `project`
+ *   name only one of theirs (the index answers by user and id): another user's is `404`, checked before
+ *   any chat is made in it.
  * - **A change needs the page's header** (`x-pikit-chat: 1`, `CHAT_CLIENT_HEADER`): `400` without, so a
  *   page of another site cannot make a signed-in browser send, rename, archive, delete or stop anything.
  * - **Bodies are bounded**: a message at most what its images in base64 and its text need on this
