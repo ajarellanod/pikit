@@ -62,7 +62,8 @@ export const config = {
   transcript before the model reads it and in its answer before it is kept; an answer that still holds
   one (a private key's block) is not kept. Logs never carry a transcript or a summary.
 - **Failures are retried.** A model or store failure is logged, and that conversation is tried again
-  `idleMinutes` later; the others go on. Runs pruned from the feed before it read them (a gap) are
+  `idleMinutes` later; the others go on. A summary cut by the wakeup's cancellation (its slice deadline
+  on Cloudflare, a stop) is no failure: its due time stays and the next run, at once, writes it. Runs pruned from the feed before it read them (a gap) are
   logged once; their conversations are summarized after their next run.
 - **Bounded.** At most 10 conversations per run of the wakeup, the rest at once after.
 
@@ -71,7 +72,7 @@ export const config = {
 - `memory-summaries.test.ts` (copied into your project), with doubles of the runtime's side, a
   registry of each key's space, an in-memory `wakeups` and the test's clock: a quiet conversation
   summarized once into its space, though the wakeup runs again and the App restarts; a restart before
-  it went quiet; a crash after the summary was kept keeps it once; a settled run and a pending request
+  it went quiet; a summary cut mid-call written at the next run; a crash after the summary was kept keeps it once; a settled run and a pending request
   postpone; a run settling while a summary is written is read at once; a later period summarizes only
   what is new; credentials redacted in and out, an answer still holding one not kept; only the
   configured agents; a gap logged once; each summary's owner (the recorded space, the key when none,

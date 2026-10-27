@@ -56,7 +56,7 @@ function world() {
   const kept = new Map<string, { owner: MemoryOwner; memory: Memory }>();
   const spaces = new Map([[ana.key, SPACE]]);
   const warnings: string[] = [];
-  const state = { answer: (prompt: string) => `Summary: ${prompt}`, failRemember: 0, during: undefined as (() => Promise<void>) | undefined };
+  const state = { answer: (prompt: string) => `Summary: ${prompt}`, failRemember: 0, during: undefined as (() => Promise<void>) | undefined, cut: false };
   const storage = sqliteStorage();
   const wakeups = createMemoryWakeups();
 
@@ -74,9 +74,11 @@ function world() {
         },
       } as Partial<AgentObserver> as AgentObserver);
       pikit.provide("model.complete", {
-        complete: async ({ model, prompt }) => {
+        complete: async ({ model, prompt }, ctx) => {
           expect(model).toBe("faux/echo");
           prompts.push(prompt);
+          // The call waits until the wakeup's context is cancelled, and rejects with it, as a real model call does.
+          if (state.cut && !(state.cut = false)) await new Promise((_, reject) => ctx.abortSignal?.addEventListener("abort", () => reject(ctx.abortSignal?.reason), { once: true }));
           const during = state.during;
           state.during = undefined;
           await during?.();
@@ -220,6 +222,22 @@ test("a crash after the summary was kept, before it was recorded, keeps it once:
   expect(w.memories().map((each) => each.memory.id)).toEqual(["summary:c1:e1"]);
   await w.advance(120 * MINUTE);
   expect(w.prompts).toHaveLength(2);
+});
+
+test("a summary cut by the wakeup's cancellation (a slice deadline, a stop) keeps its due time: the next run writes it, not idleMinutes later", async () => {
+  const w = world();
+  w.transcripts.set("c1", [said("e1", "user", "I like tea")]);
+  await w.start();
+  await w.settled(ana, "r1");
+  w.state.cut = true;
+
+  await w.advance(30 * MINUTE);
+  expect(w.prompts).toHaveLength(1);
+  await w.stop(); // cancels the run in the middle of the model call
+  await w.start();
+  expect(w.prompts).toHaveLength(2);
+  expect(w.memories().map((each) => each.memory.id)).toEqual(["summary:c1:e1"]);
+  expect(w.warnings).toEqual([]);
 });
 
 test("new activity postpones the summary: a run settling, or a request still pending", async () => {

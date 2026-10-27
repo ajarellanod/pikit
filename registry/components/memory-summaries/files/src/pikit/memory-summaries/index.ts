@@ -212,6 +212,9 @@ export default defineComponent({
         }
         await sql.get().run(`UPDATE ${CONVERSATIONS} SET summarized_entry = COALESCE(?, summarized_entry), due = NULL WHERE conversation_id = ?`, [read?.newest ?? null, conversationId]);
       } catch (error) {
+        // Cut by the wakeup's cancellation (a slice deadline, a stop): not a failure. Its due time stays, so the
+        // next run (asked for at once below, or by start) takes it again.
+        if (ctx.abortSignal?.aborted === true) return;
         ctx.logger.warn("memory-summaries: a conversation could not be summarized; it is tried again later", { ...fields, error: error instanceof Error ? error.message : String(error) });
         await postpone();
       }
