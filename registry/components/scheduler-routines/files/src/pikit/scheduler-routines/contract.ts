@@ -8,6 +8,10 @@
  * tool may use it (the runtime uses every tool: a tool cannot use `agent.runtime`).
  *
  * What a provider guarantees, checked by `createSchedulerConformance` (conformance.ts):
+ * - **Kept where scheduled.** A job is the App's that scheduled it: that App's `get`, `list` and
+ *   `cancel` see it, and its ticks go to that App's handler. On a server one App holds every job; on
+ *   `durable` each actor (a conversation's object, another component's actor) holds its own, and
+ *   nothing lists across them.
  * - **Never early.** A tick is delivered at or after its time, on the App's clock; maybe late.
  * - **At least once, with its identity.** A tick is done only when the handler resolves. One cut short
  *   or rejected is delivered again, later, with the same `tick`: the handler is idempotent by

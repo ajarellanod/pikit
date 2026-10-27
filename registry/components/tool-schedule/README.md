@@ -12,7 +12,8 @@ tree's conversations list and cancel those jobs, and share `maxPerConversation`.
 
 - **Provides:** `agent.tool`, under `schedule`, `schedule_list` and `schedule_cancel` (replay `safe`).
 - **Uses:** `scheduler` (scheduler-sql).
-- **Targets:** `server`, as scheduler-sql.
+- **Targets:** `server` and `durable`, as scheduler-sql. On `durable` its jobs are the conversation's
+  object's (the key is the object's own), and their ticks local calls.
 - **Installs to:** `src/pikit/tool-schedule/` (`index.ts`, `contract.ts`, `tool-schedule.test.ts`).
 
 ```sh
@@ -50,4 +51,5 @@ in `timezone` (default `UTC`), `missed` `once` (default) or `skip`.
 `tool-schedule.test.ts` (copied with it), over an in-memory `scheduler`: what setup declares; a job in
 the run's conversation under the call's id, the same call again the same job; refusals (no offset,
 `at` and `cron`, neither, over the bound); another conversation's jobs and a routine's neither listed
-nor cancelled. Through runtime-pi with the ticks coming back: scheduler-admit's `app.test.ts`.
+nor cancelled. Through runtime-pi with the ticks coming back: scheduler-admit's `app.test.ts`; on
+Cloudflare, the workerd lane's `scheduler.workerd.ts`.

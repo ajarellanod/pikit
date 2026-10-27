@@ -14,7 +14,8 @@
  *   Cancelling twice is cancelling once; listing only reads.
  * - **Bounded.** At most `maxPerConversation` jobs per key (a tree of delegations shares its origin's).
  *
- * Targets: `server`, as scheduler-sql. It imports nothing platform-specific.
+ * Targets: `server` and `durable`, as scheduler-sql. It imports nothing platform-specific. On `durable` its jobs
+ * are kept by the conversation's own object (the key is the object's), so its ticks are local calls.
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineComponent } from "@pikit/core";

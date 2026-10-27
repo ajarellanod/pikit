@@ -13,16 +13,31 @@
  *   delivers for, so its answers would reach nobody.
  * - A tick routing stops (`denied`, `halted`, `no_route`) is logged and dropped; a failing capability
  *   rejects, and the scheduler delivers the tick again later.
+ * - **Admitted by its key's actor.** The scheduler hands a tick to the App that keeps its job; that App
+ *   sends it to the actor of the job's key (`actor.mailbox.send`, `scheduler-admit.tick`), whose handler
+ *   admits it, and the tick is done once it is admitted. On a server every key's actor is this App; on
+ *   `durable` a job of a conversation's own (tool-schedule) is a local call, a routine's tick an RPC from
+ *   the routines' actor to the conversation's object. The handler takes only a tick for its own key.
  *
- * Targets: `server`, as scheduler-sql.
+ * Targets: `server` and `durable`, as scheduler-sql.
  */
 
 import { defineComponent } from "@pikit/core";
-import { admitInbound, type InboundMessage } from "@pikit/contracts";
+import { admitInbound, type InboundMessage, isJsonObject, type JsonValue } from "@pikit/contracts";
 import type { SchedulerTick } from "./contract.ts";
 
 /** The channel scheduled messages come from, as their sender says. */
 export const SCHEDULER_CHANNEL = "scheduler";
+/** The actor message that carries a tick to its key's actor. */
+export const TICK = "scheduler-admit.tick";
+
+/** The tick in an actor message, checked as it arrives (it crossed as JSON), or `undefined`. */
+export function tickOf(message: JsonValue): SchedulerTick | undefined {
+  if (!isJsonObject(message) || !isJsonObject(message.job) || typeof message.tick !== "number") return undefined;
+  const { id, key, prompt } = message.job;
+  if (typeof id !== "string" || typeof key !== "string" || typeof prompt !== "string") return undefined;
+  return message as unknown as SchedulerTick;
+}
 
 /** The message of one tick: its id is the tick's identity, its sender the job. */
 export function tickMessage({ job, tick }: SchedulerTick): InboundMessage {
@@ -35,9 +50,17 @@ export default defineComponent({
     const scheduler = pikit.use("scheduler");
     const runtime = pikit.use("agent.runtime");
     const conversations = pikit.use("conversations.registry");
+    const mailbox = pikit.use("actor.mailbox");
+    const inbox = pikit.use("actor.inbox");
     return {
       start() {
-        scheduler.get().handle(async (tick, ctx) => {
+        scheduler.get().handle((tick, ctx) => mailbox.get().send(tick.job.key, TICK, tick as unknown as JsonValue, ctx));
+        inbox.get().handle(TICK, async (key, message, ctx) => {
+          const tick = tickOf(message);
+          if (tick === undefined || tick.job.key !== key) {
+            ctx.logger.warn("scheduler-admit: a tick for another key, or not a tick, was ignored", { key });
+            return;
+          }
           const fields = { job: tick.job.id, key: tick.job.key, tick: tick.tick };
           if ((await conversations.get().get(tick.job.key, ctx)) === undefined) {
             ctx.logger.warn("scheduler-admit: no conversation has the job's key yet; the tick is dropped (a scheduled prompt never starts a conversation)", fields);

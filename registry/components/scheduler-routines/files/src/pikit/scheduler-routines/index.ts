@@ -2,23 +2,34 @@
  * scheduler-routines: prompts on a cron schedule, written in `pikit.config.ts` (reviewed and versioned
  * with the project), kept in `scheduler` as jobs of its own (`scheduler-routines:<name>`).
  *
- * At each start it makes the scheduler's jobs match its config: a routine added is scheduled, one
- * changed is scheduled again (its next tick computed anew), one taken out is cancelled. It touches no
- * other job (the agent's, from tool-schedule). A routine the scheduler refuses (a cron that never
- * matches, an unknown zone) stops the start, naming it.
+ * It makes the scheduler's jobs match its config: a routine added is scheduled, one changed is scheduled
+ * again (its next tick computed anew), one taken out is cancelled. It touches no other job (the agent's,
+ * from tool-schedule). A routine the scheduler refuses (a cron that never matches, an unknown zone)
+ * stops the start, naming it.
+ *
+ * The routines live with one actor, `scheduler-routines:routines` (`ROUTINES_KEY`), which syncs them
+ * when asked (`scheduler-routines.sync`), from its own App's config. On a server (`actor.inbox`'s
+ * scope `"all"`) that actor is this App, and its start syncs. On `durable` it is one Durable Object;
+ * the Worker half (`worker.ts`) asks it at each start of the Worker's App, so a deploy syncs before
+ * `/health` answers, and a refused routine fails that start (the deploy rolls back).
  *
  * Taking it out: set `routines` to `[]` and start once (its jobs are cancelled), then remove it;
  * removed first, its jobs stay in the scheduler.
  *
- * Targets: `server`, as scheduler-sql. It imports nothing platform-specific.
+ * Targets: `server` and `durable`, as scheduler-sql. It imports nothing platform-specific.
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
+import { ActorCallError } from "@pikit/contracts";
 import Type, { type Static } from "typebox";
 import type { ScheduledJob, ScheduledJobState, Scheduler } from "./contract.ts";
 
 /** The prefix of every job id it makes. */
 export const JOB_PREFIX = "scheduler-routines:";
+/** The actor that keeps the routines' jobs. */
+export const ROUTINES_KEY = "scheduler-routines:routines";
+/** The call that makes it sync them with its config. */
+export const SYNC = "scheduler-routines.sync";
 
 const Routine = Type.Object({
   /** Its identity: renaming a routine is removing one and adding another. */
@@ -55,7 +66,7 @@ const same = (a: ScheduledJobState, b: ScheduledJob) =>
 /** Makes `scheduler`'s jobs prefixed `JOB_PREFIX` exactly `routines`. */
 export async function syncRoutines(scheduler: Scheduler, routines: RoutinesConfig["routines"], ctx: AppContext): Promise<void> {
   const wanted = new Map(routines.map((routine) => [`${JOB_PREFIX}${routine.name}`, jobOf(routine)]));
-  if (wanted.size !== routines.length) throw new Error("scheduler-routines: two routines have the same name");
+  if (wanted.size !== routines.length) throw new TypeError("scheduler-routines: two routines have the same name");
   let after: string | undefined;
   for (;;) {
     const page = await scheduler.list({ prefix: JOB_PREFIX, limit: 100, ...(after !== undefined && { after }) }, ctx);
@@ -71,16 +82,35 @@ export async function syncRoutines(scheduler: Scheduler, routines: RoutinesConfi
     try {
       await scheduler.schedule(job, ctx);
     } catch (error) {
-      throw new Error(`scheduler-routines: the routine "${job.id.slice(JOB_PREFIX.length)}" cannot be scheduled: ${error instanceof Error ? error.message : String(error)}`);
+      // The scheduler refuses a job as a TypeError; anything else (its storage) is not the routine's.
+      if (!(error instanceof TypeError)) throw error;
+      throw new TypeError(`scheduler-routines: the routine "${job.id.slice(JOB_PREFIX.length)}" cannot be scheduled: ${error.message}`);
     }
   }
 }
+
+export { worker } from "./worker.ts";
 
 export default defineComponent({
   name: "scheduler-routines",
   config: Config,
   setup(pikit, config) {
     const scheduler = pikit.use("scheduler");
-    return { start: (ctx) => syncRoutines(scheduler.get(), config.routines, ctx) };
+    const inbox = pikit.use("actor.inbox");
+    return {
+      async start(ctx) {
+        inbox.get().answer(SYNC, async (key, _message, callCtx) => {
+          if (key !== ROUTINES_KEY) throw new ActorCallError("invalid", `scheduler-routines: ${key} does not keep the routines (${ROUTINES_KEY} does)`);
+          try {
+            await syncRoutines(scheduler.get(), config.routines, callCtx);
+          } catch (error) {
+            if (error instanceof TypeError) throw new ActorCallError("invalid", error.message);
+            throw error;
+          }
+          return null;
+        });
+        if (inbox.get().scope === "all") await syncRoutines(scheduler.get(), config.routines, ctx);
+      },
+    };
   },
 });

@@ -10,13 +10,15 @@
  * A restart is a second App over the fixture's components, whose storage outlives the first.
  */
 
-import { type App, type AppContext, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type App, type AppContext, type ComponentDefinition, defineApp, defineComponent, silentLogger, type Target } from "@pikit/core";
 import { type ConformanceCase, createManualClock, type ManualClock } from "@pikit/core/testing";
 import type { ScheduledJob, Scheduler, SchedulerTick } from "./contract.ts";
 
 export interface SchedulerFixture {
   /** The components providing `scheduler` and what it uses (storage, wakeups), over storage that outlives one App. */
   components: ComponentDefinition[];
+  config?: Record<string, unknown>;
+  target?: Target;
   dispose?(): Promise<void>;
 }
 
@@ -92,7 +94,7 @@ export function createSchedulerConformance(factory: () => SchedulerFixture | Pro
             };
           },
         });
-        const app = await defineApp({ components: [...fixture.components, consumer], logger: silentLogger, clock }).create();
+        const app = await defineApp({ components: [...fixture.components, consumer], config: fixture.config ?? {}, ...(fixture.target !== undefined && { target: fixture.target }), logger: silentLogger, clock }).create();
         await app.start();
         current = app;
         await settle();

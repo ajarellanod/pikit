@@ -24,6 +24,7 @@ import { createMemoryWakeups } from "@pikit/contracts/testing";
 import { createManualClock } from "@pikit/core/testing";
 import { scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import conversationsKv from "../conversations-kv/files/src/pikit/conversations-kv/index.ts";
+import mailboxLocal from "../mailbox-local/files/src/pikit/mailbox-local/index.ts";
 import routerBasic from "../router-basic/files/src/pikit/router-basic/index.ts";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import schedulerRoutines from "../scheduler-routines/files/src/pikit/scheduler-routines/index.ts";
@@ -91,6 +92,7 @@ function world() {
       sqliteStorage(join(dir, "pikit.db")),
       storageKvSql,
       createMemoryWakeups(),
+      mailboxLocal,
       defineComponent({ name: "agents-test", setup: (pikit) => pikit.provideKeyed("agent.definition", "assistant", defineAgent({ name: "assistant", model: "faux/scripted", tools: [SCHEDULE_TOOL, CANCEL_TOOL] })) }),
       defineComponent({ name: "provider-test", setup: (pikit) => pikit.provideKeyed("model.provider", "faux", scriptedProvider()) }),
       runtimePi,

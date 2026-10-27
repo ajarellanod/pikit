@@ -45,6 +45,12 @@ line names its area.
   (`approvals-sql:approvals`) holds the approvals; approvals-sql and admin-approvals have Worker halves;
   an operator's decision is told through the asking conversation's actor (`admin-approvals.decided`),
   on a server too.
+- scheduler-sql, scheduler-admit, scheduler-routines, tool-schedule: also on `durable`. A job lives with
+  the actor that scheduled it (an agent's reminder in its conversation's object; the routines in one
+  object, `scheduler-routines:routines`, synced by the Worker half at each start of the Worker's App: a
+  refused routine fails the deploy); scheduler-admit sends each tick to its key's actor
+  (`scheduler-admit.tick`, on a server too). scheduler-sql delivers 20 ticks per run, and a tick cut by
+  its wakeup's cancellation is delivered again at once, not after the backoff.
 - memory-summaries: a summary cut by its wakeup's cancellation (the slice deadline on Cloudflare, a
   stop) is written at the next run, not `idleMinutes` later.
 - deployment-cloudflare: `createEntrypoint`'s options take the Apps' `clock` (tests).

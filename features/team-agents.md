@@ -38,7 +38,7 @@ a project installs, and agents that name what they may use.
 | Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate (SPEC §6); approvals of exact tool calls by named approvers, in the chat or the dashboard, each run once (approvals-sql, extension-approvals, admin-approvals; both targets); not from a delegated agent yet (open in approvals); no rules, veto window or reminders | [approvals](approvals.md) |
 | Missions: a goal ledger with checkpoints, mirrored in a task tracker | none | no note yet |
 | Memory: summaries, search, rules, preferences | built: per space (shared by its agents) or per agent kept apart, preferences per person; FTS5 search, rules and preferences proposed by the agent and approved by people (`/rules`, `/prefs`), structured summaries; both targets | [memory](memory.md), [spaces](spaces.md) |
-| Routines (cron), followups (one-shot, agent-made) | built: `scheduler-sql` (`scheduler`), `scheduler-admit`, `scheduler-routines` (config), `tool-schedule` (the agent's, its own conversation); server only | [scheduler](scheduler.md) |
+| Routines (cron), followups (one-shot, agent-made) | built: `scheduler-sql` (`scheduler`), `scheduler-admit`, `scheduler-routines` (config), `tool-schedule` (the agent's, its own conversation); both targets | [scheduler](scheduler.md) |
 | Reply context (a terse reply to a routine's message) | none | with [scheduler](scheduler.md) |
 | A persistent JavaScript worker for the agent | none | [codemode](codemode.md) |
 | MCP servers per agent | `tool-mcp` | — |

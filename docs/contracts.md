@@ -38,8 +38,8 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
 | `storage.blob` | single | storage-blob-fs, storage-blob-s3 | tool-space-files | `createBlobConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, settings-store, tool-space-files | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-space-files | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
@@ -1056,7 +1056,9 @@ restarts. Provider: scheduler-sql, its only one (`experimental`). Users: schedul
 each tick admitted into its existing conversation, sender `scheduler`), tool-schedule (the key of
 the conversation's origin: a delegated agent's prompt comes back to the chat, answered by its agent),
 scheduler-routines, each with a copy of `contract.ts`. Suite: `createSchedulerConformance`
-(scheduler-sql's `conformance.ts`). Server only.
+(scheduler-sql's `conformance.ts`). Both targets: a job is kept by the App that scheduled it (on
+`durable` an actor's own: a conversation's object, the routines' actor), and scheduler-admit sends each
+tick to its key's actor through `actor.mailbox`; nothing lists across actors.
 
 The offer resolver uses this extended catalogue too. A declared single capability may set
 `offer: true`: if the target and App have exactly one eligible provider, `add` and `new` offer it

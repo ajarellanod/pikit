@@ -13,8 +13,8 @@
  * - **Cancel** waits for a tick in progress (one lock per App: delivering and cancelling never
  *   interleave), so once it resolves no tick of the job starts.
  *
- * Targets: `server`. On Cloudflare each conversation is a Durable Object with its own `storage.sql`
- * and alarm: see the README.
+ * Targets: `server` and `durable`. On `durable` each actor (a conversation's object) keeps its own jobs in
+ * its own `storage.sql`, woken by its alarm (actors-do's `wakeups`): see the README.
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
@@ -30,8 +30,12 @@ export const GRACE_MS = 5 * 60_000;
 export const KEEP_ENDED_MS = 7 * 24 * 60 * 60_000;
 /** What a job may hold. */
 export const LIMITS = { id: 200, key: 500, prompt: 20_000, list: 100 } as const;
-/** Ticks one wakeup run delivers at most; then it asks for the next run at once. */
-const BATCH = 50;
+/**
+ * Ticks one wakeup run delivers at most; then it asks for the next run at once. On Cloudflare a tick for
+ * another actor's key is one RPC, and an alarm whose slice has nothing else running ends with the run:
+ * 20 keeps one alarm well within the Free plan's 50 subrequests, the next alarm brings its own.
+ */
+const BATCH = 20;
 
 /** The first tick of `when` strictly after `after` (epoch ms), or `undefined` when there is none. Throws on a bad cron or zone. */
 export function nextTick(when: ScheduleWhen, after: number): number | undefined {
@@ -116,6 +120,8 @@ export default defineComponent({
         try {
           await fire(id, ctx);
         } catch (error) {
+          // Cut by the wakeup's cancellation (a slice deadline, a stop): no failure, the next run delivers it again at once.
+          if (ctx.abortSignal?.aborted) break;
           failed.push(id);
           ctx.logger.warn("scheduler-sql: a tick failed; it is delivered again", { job: id, error: error instanceof Error ? error.message : String(error) });
         }

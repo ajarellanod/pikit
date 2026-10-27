@@ -4,7 +4,7 @@
 built-in cron scheduler with delivery to any platform (daily reports, nightly backups, set up in
 natural language).
 
-**Specified:** built on a server (below); the `durable` target is open. The contract is a registry's
+**Specified:** built on both targets (below). The contract is a registry's
 own, declared by `scheduler-sql` (`docs/contracts.md`, "A registry's own contracts").
 
 **Needed by:** nothing required. Decided by the owner: scheduled work is a feature, so neither
@@ -19,9 +19,9 @@ written in `pikit.config.ts`, reviewed and versioned with the project.
 | Component | Provides / uses | What it is |
 |---|---|---|
 | `scheduler-sql` | declares and provides `scheduler`; uses `storage.sql`, `wakeups` | the jobs (a table), one wakeup at the earliest tick, cron by `croner` 10.0.1; the suite `createSchedulerConformance` (`conformance.ts`) |
-| `scheduler-admit` | uses `scheduler`, `agent.runtime`, `conversations.registry` | the tick handler: each tick a message in the job's conversation, through `admitInbound` |
+| `scheduler-admit` | uses `scheduler`, `agent.runtime`, `conversations.registry`, `actor.mailbox`, `actor.inbox` | the tick handler: each tick sent to its key's actor, a message in the job's conversation there, through `admitInbound` |
 | `tool-schedule` | `agent.tool` (`schedule`, `schedule_list`, `schedule_cancel`); uses `scheduler` | the agent schedules, lists and cancels prompts of its own conversation |
-| `scheduler-routines` | uses `scheduler` | routines from its config, made the scheduler's jobs at each start |
+| `scheduler-routines` | uses `scheduler`, `actor.inbox`; its Worker half `actor.mailbox` | routines from its config, made the scheduler's jobs by one actor (`scheduler-routines:routines`): at each start on a server, at each start of the Worker's App on `durable` |
 
 Why four: a tool cannot use `agent.runtime` (the runtime uses every tool: a start-order cycle), so the
 store runs no agent and the admission is its own component; routines are a config block and work over
@@ -56,15 +56,23 @@ Pi's durable runtime has `sleep(until)` inside a task (`pi-durable` 1.3.0, which
 must not build that. A schedule that starts runs across conversations is the host's.
 
 tool-schedule's `at` overlaps with that sleep: it was built because a reminder that is a new message,
-answered when it comes, keeps no run open meanwhile and is listed and cancelled like a routine. If
-pi-durable's sleep covers that (a sleeping task leaves the conversation free, lists and cancels), the
-`at` form goes and tool-schedule keeps cron only.
+answered when it comes, keeps no run open meanwhile and is listed and cancelled like a routine.
+Decided (2026-10-21): `at` stays. A sleep is inside a task, so its run stays open and the agent can
+neither list nor cancel it, and on an evicted host it wakes only with pi-durable's next-wake proposal.
+
+## On `durable` (built, 2026-10-21; the owner's decisions)
+- **A job lives with the actor that scheduled it.** An agent's reminder is its conversation's object's
+  (tool-schedule's key is the object's own: its ticks are local calls); the routines are one actor's,
+  `scheduler-routines:routines`. scheduler-admit sends each tick to its key's object
+  (`actor.mailbox`), which admits it. No index: `list` sees an actor's own jobs, and nothing lists
+  every scheduled prompt (a view of them would add an index, as admin-api's conversation index).
+- **A refused routine fails the deploy.** The Worker half asks the routines' actor to sync at each start
+  of the Worker's App, which a deploy's `/health` starts: `invalid` fails the start, and the deploy
+  rolls back, as a refused routine stops a server's start.
+- **20 ticks per run** of scheduler-sql's wakeup, then a new alarm: one RPC per tick for another key
+  stays within an alarm's 50 subrequests on the Free plan.
 
 ## Open questions
-- **Cloudflare (`durable`).** Each conversation is a Durable Object with its own `storage.sql` and
-  alarm: scheduler-sql would keep each conversation's jobs in its object, which fits tool-schedule
-  (the key is the object's own). A routine from the config would be sent to its key's object
-  (`actor.mailbox`), and listing across keys needs an index. Not built; the components say `server`.
 - **A reset between two deliveries of one tick**: the runtime deduplicates per conversation, so a tick
   delivered again after `/new` moved the key would be admitted again, in the new conversation. Only a
   crash between admitting and moving on, followed by a reset before the restart, reaches it.

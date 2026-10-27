@@ -5,7 +5,8 @@
   "title": "Scheduled prompts: jobs at a time or on a cron schedule, kept in storage.sql",
   "description": "The scheduler: jobs that run a prompt at a time or on a cron schedule (5 fields, in a time zone) in a conversation that exists, kept in storage.sql and woken by wakeups; each tick delivered at least once, with a policy for ticks missed while stopped.",
   "targets": [
-    "server"
+    "server",
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.1",

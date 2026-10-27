@@ -5,19 +5,44 @@
   "title": "Routines: prompts on a cron schedule, written in pikit.config.ts",
   "description": "Routines: prompts on a cron schedule in a conversation, written in the project's config (reviewed and versioned with it), made the scheduler's jobs at each start: added, changed and removed, never touching another component's.",
   "targets": [
-    "server"
+    "server",
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.1",
+    "contracts": "0.0.1",
     "capabilities": [
-      "scheduler"
+      "scheduler",
+      "actor.inbox",
+      "actor.mailbox"
     ]
   },
   "optional": {
     "capabilities": []
   },
   "provides": [],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [],
+      "requires": [
+        "scheduler",
+        "actor.inbox"
+      ],
+      "optional": []
+    },
+    "worker": {
+      "provides": [],
+      "requires": [
+        "actor.mailbox"
+      ],
+      "optional": []
+    }
+  },
   "dependencies": {
+    "@pikit/contracts": "0.0.1",
     "typebox": "1.3.27"
   },
   "files": [
