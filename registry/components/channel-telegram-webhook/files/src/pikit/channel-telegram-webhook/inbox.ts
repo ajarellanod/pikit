@@ -19,7 +19,11 @@
  *    `route.resolve`, the conversation `<instance>:<chat id>`, `dispatch`). The request id is
  *    `<instance>:<chat id>:<message id>`, as channel-telegram's: a message Telegram delivers twice is
  *    one request, and the runtime answers the second `duplicate`. When the agent will not answer, the
- *    chat is told why.
+ *    chat is told why. Its text is the message's (or its caption), then what its file or photo says
+ *    (`attachments.ts`, downloaded here, in the object): a photo is shown to the model, another file
+ *    is written to the conversation's workspace in `beforeDispatch` (with execution-do, the object's
+ *    own SQL) and named by its path. A write that fails rejects: the Worker answers 500, and Telegram
+ *    delivers the update again.
  *
  * It resolves once the message is durable in its conversation (`admitted` or `duplicate`), which is
  * when the Worker answers Telegram 200; the run and its answer come after, from the delivery wakeup
@@ -38,8 +42,10 @@ import {
   type InboundMessage,
   type KeyValueStore,
 } from "@pikit/contracts";
+import { type ExecutionEnv, type WorkspaceProvider, writeAttachments } from "@pikit/pi-adapter";
 import { conversationKeyOf } from "./account.ts";
 import type { TelegramMessage } from "./api.ts";
+import { hasFiles, NO_FILES, readFiles } from "./attachments.ts";
 import { type Bot, TELEGRAM_TIMEOUT_MS, within } from "./bot.ts";
 import { rememberChat } from "./party.ts";
 import { textOf } from "./update.ts";
@@ -52,13 +58,16 @@ export interface InboxDeps {
   commands: CommandLookup;
   /** The channel's namespace of `storage.kv`: the last command handled in each chat, and who each chat is with (`party.ts`). */
   store: KeyValueStore;
+  /** Where a message's files go, when installed: the conversation's workspace, else `execution`, else nowhere (named as not read). */
+  workspace: WorkspaceProvider | undefined;
+  execution: ExecutionEnv | undefined;
 }
 
 /** What became of the update: `dispatched` when its conversation has it, and its answer is to come. */
 export type InboxOutcome = "dispatched" | "answered";
 
-/** The reply to a message with no text. */
-export const NO_TEXT = "I can only read text messages for now.";
+/** The reply to a message with neither text nor a file (a sticker, a voice message). */
+export const NO_TEXT = "I can only read text, photos and files for now.";
 
 /** Where the last command handled in a chat is kept: its message id. */
 export const commandSeenKey = (conversation: string): string => `command:${conversation}`;
@@ -69,9 +78,9 @@ export async function handleMessage(message: TelegramMessage, deps: InboxDeps, c
   const { bot } = deps;
   const chatId = message.chat.id;
   const key = conversationKeyOf(bot.account.instance, chatId);
-  const text = textOf(message);
-  // The Worker sends only messages with text: one without is not this channel's to answer.
-  if (text === undefined || message.from === undefined) throw new Error(`channel-telegram-webhook: message ${message.message_id} of ${key} has no text or no sender`);
+  const text = textOf(message) ?? "";
+  // The Worker sends only messages with text or a file: one without is not this channel's to answer.
+  if ((text === "" && !hasFiles(message)) || message.from === undefined) throw new Error(`channel-telegram-webhook: message ${message.message_id} of ${key} has no text, no file or no sender`);
   // Who the chat is with, for the dashboard: kept from what this message says (party.ts).
   await rememberChat(deps.store, key, message, ctx);
 
@@ -100,14 +109,28 @@ export async function handleMessage(message: TelegramMessage, deps: InboxDeps, c
     if (last !== undefined && message.message_id <= last) return "answered";
   }
 
+  // A command is its text alone: nothing attached is read for it.
+  const attached =
+    typed !== undefined || !hasFiles(message)
+      ? NO_FILES
+      : await within(TELEGRAM_TIMEOUT_MS, ctx.abortSignal, (signal) =>
+          readFiles(message, { api: bot.api, canWrite: deps.workspace !== undefined || deps.execution !== undefined, label: "channel-telegram-webhook" }, ctx, signal),
+        );
   const inbound: InboundMessage = {
     id: `${key}:${message.message_id}`,
     channel: bot.account.instance,
     conversationId: String(chatId),
     actor: { id: String(message.from.id) },
-    text: typed ?? text,
+    text: typed ?? [text, attached.text].filter((piece) => piece !== "").join("\n\n"),
+    ...(attached.images.length > 0 && { images: attached.images }),
   };
-  const outcome = await admitInbound(ctx, inbound, { conversations: deps.conversations, runtime: deps.runtime, key, ...(typed !== undefined && { commands: deps.commands }) });
+  const outcome = await admitInbound(ctx, inbound, {
+    conversations: deps.conversations,
+    runtime: deps.runtime,
+    key,
+    ...(typed !== undefined && { commands: deps.commands }),
+    ...(attached.files.length > 0 && { beforeDispatch: (conversation) => writeAttachments(attached.files, conversation, deps, ctx, "channel-telegram-webhook") }),
+  });
   switch (outcome.kind) {
     case "command":
       // Kept before the reply: a redelivery never runs it again (the reply is best effort).

@@ -26,7 +26,16 @@ export function readUpdate(value: unknown): TelegramUpdate | undefined {
   if (!isObject(message) || !Number.isSafeInteger(message.message_id) || !isObject(message.chat) || !Number.isSafeInteger(message.chat.id)) return undefined;
   if (message.from !== undefined && (!isObject(message.from) || !Number.isSafeInteger(message.from.id))) return undefined;
   for (const field of ["text", "caption"] as const) if (message[field] !== undefined && typeof message[field] !== "string") return undefined;
+  if (message.document !== undefined && !isFile(message.document)) return undefined;
+  if (message.photo !== undefined && !(Array.isArray(message.photo) && message.photo.every((size) => isFile(size) && Number.isSafeInteger(size.width) && Number.isSafeInteger(size.height)))) return undefined;
   return value as unknown as TelegramUpdate;
+}
+
+/** A file as Telegram describes one: its id, and its name, type and size when said. */
+function isFile(value: unknown): value is Record<string, unknown> {
+  if (!isObject(value) || typeof value.file_id !== "string" || value.file_id === "") return false;
+  if (value.file_size !== undefined && !Number.isSafeInteger(value.file_size)) return false;
+  return (value.file_name === undefined || typeof value.file_name === "string") && (value.mime_type === undefined || typeof value.mime_type === "string");
 }
 
 /**
@@ -42,4 +51,9 @@ export function isPrivateMessage(update: TelegramUpdate): update is PrivateUpdat
 export function textOf(message: TelegramMessage): string | undefined {
   const text = message.text ?? message.caption;
   return text === undefined || text.trim() === "" ? undefined : text;
+}
+
+/** Whether the message brings something this channel reads: text (or a caption), a file or a photo. */
+export function hasContent(message: TelegramMessage): boolean {
+  return textOf(message) !== undefined || message.document !== undefined || (message.photo?.length ?? 0) > 0;
 }

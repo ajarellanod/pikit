@@ -10,10 +10,10 @@
  * 1. **The secret.** Telegram sends the webhook's secret (`TELEGRAM_[<NAME>_]WEBHOOK_SECRET`, given to
  *    `setWebhook` after a deploy) in `X-Telegram-Bot-Api-Secret-Token`; anything else is `401`
  *    (`secret.ts`: compared in constant time).
- * 2. **What this channel handles**: a message with text from a person in a private chat. Anything
+ * 2. **What this channel handles**: a message with text, a file or a photo from a person in a private chat. Anything
  *    else (a group, a bot, an edit) is acknowledged with `200` and dropped, as channel-telegram does.
  * 3. **Who may talk**: the ids in `TELEGRAM_[<NAME>_]ALLOWED_USERS`. A stranger is told their id, so
- *    the owner can add it, and nothing reaches the agent. A message with no text gets a hint.
+ *    the owner can add it, and nothing reaches the agent. A message with no text, file or photo gets a hint.
  *    When the bot takes logins (`TELEGRAM_[<NAME>_]PASSWORD` is set, or nobody is listed), the
  *    Worker decides nothing about strangers: it hands their updates to their chat's actor as
  *    `telegram.stranger`, which keeps the logins and answers them (`login.ts`).
@@ -45,7 +45,7 @@ import { TELEGRAM_TIMEOUT_MS, within } from "./bot.ts";
 import { NO_TEXT } from "./inbox.ts";
 import { readPassword, strangerText } from "./login.ts";
 import { type Digest, digest, matches, passwordProblem, SECRET_HEADER, secretProblem } from "./secret.ts";
-import { isPrivateMessage, readUpdate, STRANGER_TYPE, textOf, UPDATE_TYPE } from "./update.ts";
+import { hasContent, isPrivateMessage, readUpdate, STRANGER_TYPE, UPDATE_TYPE } from "./update.ts";
 import { type Registration, registerWebhook } from "./webhook.ts";
 
 export const WORKER_NAME = "channel-telegram-webhook-worker";
@@ -145,7 +145,7 @@ export const worker = defineComponent({
         }
         return ok();
       }
-      if (allowed && textOf(message) === undefined) {
+      if (allowed && !hasContent(message)) {
         await tell(endpoint, chatId, NO_TEXT, ctx);
         return ok();
       }

@@ -115,6 +115,9 @@ export default defineComponent({
     const outbound = pikit.useOptional("outbound.queue");
     // Optional: with it, each bot reports whether it receives messages (@pikit/contracts' health.ts).
     const health = pikit.useOptional("health");
+    // Optional: where a message's files are written (attachments.ts); without either, they are named as not read.
+    const workspace = pikit.useOptional("workspace");
+    const execution = pikit.useOptional("execution");
     // The App's commands, typed in a chat (`/name args`): those the `commands` config allows (inbound.ts).
     const commands = allowedCommands(pikit.useKeyed("agent.command"), config.commands);
 
@@ -223,6 +226,9 @@ export default defineComponent({
         store: storage.get().namespace("channel-telegram"),
         ctx: background,
         refused: new Set(),
+        api,
+        workspace: workspace.get(),
+        execution: execution.get(),
       };
       // It answered getMe and getWebhookInfo: up until a poll says otherwise.
       const reporter = health.get()?.reporter(account.name === undefined ? "channel-telegram" : `channel-telegram:${account.name}`);

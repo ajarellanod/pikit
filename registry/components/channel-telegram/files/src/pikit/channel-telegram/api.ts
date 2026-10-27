@@ -28,6 +28,24 @@ export interface TelegramMessage {
   date: number;
   text?: string;
   caption?: string;
+  /** A file sent as a file (any type). */
+  document?: TelegramDocument;
+  /** A photo, in the sizes Telegram made of it. */
+  photo?: TelegramPhotoSize[];
+}
+
+export interface TelegramDocument {
+  file_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+}
+
+export interface TelegramPhotoSize {
+  file_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
 }
 
 export interface TelegramUpdate {
@@ -58,13 +76,19 @@ export interface TelegramApi {
   /** The message Telegram created: its `message_id` is what an edit or a delete needs. */
   sendMessage(chatId: number, text: string, options?: { html?: boolean }, signal?: AbortSignal): Promise<{ message_id: number }>;
   sendChatAction(chatId: number, action: "typing", signal?: AbortSignal): Promise<void>;
+  /**
+   * The file `fileId` (`getFile`, then its download URL on `apiBase`, `/file/bot<token>/<path>`), as a
+   * response whose body the caller reads (bounded). A failure is a `TelegramError`, never the URL.
+   */
+  downloadFile(fileId: string, signal?: AbortSignal): Promise<Response>;
 }
 
 export function createTelegramApi(token: string, apiBase: string, fetcher: typeof fetch = fetch): TelegramApi {
+  const base = apiBase.replace(/\/+$/, "");
   const call = async <T>(method: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> => {
     let response: Response;
     try {
-      response = await fetcher(`${apiBase.replace(/\/+$/, "")}/bot${token}/${method}`, {
+      response = await fetcher(`${base}/bot${token}/${method}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -94,6 +118,23 @@ export function createTelegramApi(token: string, apiBase: string, fetcher: typeo
     sendMessage: (chatId, text, options = {}, signal) =>
       call<{ message_id: number }>("sendMessage", { chat_id: chatId, text, ...(options.html === true && { parse_mode: "HTML" }), link_preview_options: { is_disabled: true } }, signal),
     sendChatAction: (chatId, action, signal) => call("sendChatAction", { chat_id: chatId, action }, signal),
+    async downloadFile(fileId, signal) {
+      const file = await call<{ file_path?: string }>("getFile", { file_id: fileId }, signal);
+      if (file.file_path === undefined || file.file_path === "") throw new TelegramError("getFile", 404, "no file_path: the file cannot be downloaded");
+      let response: Response;
+      try {
+        response = await fetcher(`${base}/file/bot${token}/${file.file_path}`, { ...(signal !== undefined && { signal }) });
+      } catch (error) {
+        if (signal?.aborted) throw signal.reason ?? error;
+        // A network error's message can quote the URL, which holds the token: never pass it on.
+        throw new TelegramError("file", 0, error instanceof Error ? error.name : "network error");
+      }
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        throw new TelegramError("file", response.status, `HTTP ${response.status}`);
+      }
+      return response;
+    },
   };
 }
 

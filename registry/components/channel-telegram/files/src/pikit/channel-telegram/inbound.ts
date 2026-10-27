@@ -18,7 +18,11 @@
  *    last command handled in the chat, kept in `storage.kv`) and not run twice.
  * 4. Everything else takes the inbound path every channel takes (`admitInbound`: `inbound.normalize`,
  *    `route.resolve`, the conversation `<instance>:<chat id>`, `dispatch`), and the sender is told what
- *    happened when the agent will not answer. The request id is `<instance>:<chat id>:<message id>`: a
+ *    happened when the agent will not answer. Its text is the message's (or its caption), then what its
+ *    file or photo says (`attachments.ts`): a photo is shown to the model, another file is written to
+ *    the conversation's workspace in `beforeDispatch` and named by its path. A write that fails rejects:
+ *    nothing is dispatched, and the update is tried again (`poller.ts`). A message with neither text
+ *    nor a file gets a hint. The request id is `<instance>:<chat id>:<message id>`: a
  *    message Telegram delivers twice is one request. The instance is the bot's account (`account.ts`):
  *    `telegram`, or `telegram:<name>`.
  *
@@ -37,8 +41,10 @@ import {
   type InboundMessage,
   type KeyValueStore,
 } from "@pikit/contracts";
-import type { TelegramUpdate, TelegramUser } from "./api.ts";
+import { type ExecutionEnv, type WorkspaceProvider, writeAttachments } from "@pikit/pi-adapter";
+import type { TelegramApi, TelegramUpdate, TelegramUser } from "./api.ts";
 import { conversationKeyOf } from "./account.ts";
+import { hasFiles, NO_FILES, readFiles } from "./attachments.ts";
 import { rememberChat } from "./party.ts";
 import type { Replies } from "./replies.ts";
 
@@ -58,7 +64,18 @@ export interface InboundDeps {
   ctx: AppContext;
   /** Users already told they are not allowed, so a stranger's spam gets one answer. */
   refused: Set<number>;
+  /** The bot's client, for a message's files. */
+  api: TelegramApi;
+  /** Where a message's files go, when installed: the conversation's workspace, else `execution`, else nowhere (named as not read). */
+  workspace: WorkspaceProvider | undefined;
+  execution: ExecutionEnv | undefined;
 }
+
+/** How long a message's files may take to download. */
+export const DOWNLOAD_DEADLINE_MS = 60_000;
+
+/** The reply to a message with neither text nor a file (a sticker, a voice message). */
+export const NO_TEXT = "I can only read text, photos and files for now.";
 
 const HELP = [
   "Send me a message and I'll answer.",
@@ -96,9 +113,9 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
   // Who the chat is with, for the dashboard: kept from what this message says (party.ts).
   await rememberChat(deps.store, conversationKeyOf(deps.instance, chatId), message, ctx);
 
-  const text = message.text ?? message.caption;
-  if (text === undefined || text.trim() === "") {
-    await delivery.send(chatId, "I can only read text messages for now.");
+  const text = message.text ?? message.caption ?? "";
+  if (text.trim() === "" && !hasFiles(message)) {
+    await delivery.send(chatId, NO_TEXT);
     return;
   }
 
@@ -126,14 +143,26 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
     if (last !== undefined && message.message_id <= last) return;
   }
 
+  // A command is its text alone: nothing attached is read for it.
+  const attached =
+    typed !== undefined || !hasFiles(message)
+      ? NO_FILES
+      : await readFiles(message, { api: deps.api, canWrite: deps.workspace !== undefined || deps.execution !== undefined, label: "channel-telegram" }, ctx, AbortSignal.timeout(DOWNLOAD_DEADLINE_MS));
   const inbound: InboundMessage = {
     id: `${deps.instance}:${chatId}:${message.message_id}`,
     channel: deps.instance,
     conversationId: String(chatId),
     actor: { id: String(from.id) },
-    text: typed ?? text,
+    text: typed ?? [text, attached.text].filter((piece) => piece.trim() !== "").join("\n\n"),
+    ...(attached.images.length > 0 && { images: attached.images }),
   };
-  const outcome = await admitInbound(ctx, inbound, { conversations: deps.conversations, runtime: deps.runtime, key, ...(typed !== undefined && { commands: deps.commands }) });
+  const outcome = await admitInbound(ctx, inbound, {
+    conversations: deps.conversations,
+    runtime: deps.runtime,
+    key,
+    ...(typed !== undefined && { commands: deps.commands }),
+    ...(attached.files.length > 0 && { beforeDispatch: (conversation) => writeAttachments(attached.files, conversation, deps, ctx, "channel-telegram") }),
+  });
   switch (outcome.kind) {
     case "command":
       // Kept before the reply: a crash after it ran never runs it again (the reply may be lost).

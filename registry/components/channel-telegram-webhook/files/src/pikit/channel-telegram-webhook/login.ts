@@ -30,7 +30,7 @@ import { type Account, conversationKeyOf } from "./account.ts";
 import type { TelegramMessage } from "./api.ts";
 import { commandOf, commandSeenKey, handleMessage, type InboxDeps, type InboxOutcome, NO_TEXT, reply } from "./inbox.ts";
 import { type Digest, digest, matches } from "./secret.ts";
-import { textOf } from "./update.ts";
+import { hasContent, textOf } from "./update.ts";
 
 /** Wrong passwords in a row before a chat waits. */
 export const LOGIN_ATTEMPTS = 5;
@@ -96,7 +96,7 @@ export async function handleStranger(message: TelegramMessage, deps: StrangerDep
   const text = textOf(message);
 
   if (await isLoggedIn(deps, conversation, from.id)) {
-    if (text !== undefined) return await handleMessage(message, deps, ctx);
+    if (hasContent(message)) return await handleMessage(message, deps, ctx);
     await reply(bot, message.chat.id, NO_TEXT, ctx);
     return "answered";
   }
