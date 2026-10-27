@@ -44,6 +44,12 @@ export interface InboundMessage {
    * (`RUN_REQUESTS`).
    */
   actor: { id: string };
+  /**
+   * What the message says, as the model reads it. A file it brings never travels in the message: the
+   * channel writes it to the conversation's workspace in `AdmitOptions.beforeDispatch` and names its
+   * path here (or why it was not read): `@pikit/pi-adapter`'s `collectAttachments` and
+   * `writeAttachments`, the one protocol every channel uses.
+   */
   text: string;
   /**
    * Images the message carries, in order (a photo sent in the chat): `admitInbound` dispatches them as
