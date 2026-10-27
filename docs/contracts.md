@@ -37,13 +37,13 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `storage.blob` | single | none | none | `createBlobConformance` |
+| `storage.blob` | single | storage-blob-fs, storage-blob-s3 | none | `createBlobConformance` |
 | `actor.mailbox` | single | actors-do, mailbox-local | admin-api, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, settings-store | `createMailboxConformance` |
 | `actor.inbox` | single | actors-do, mailbox-local | approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-remote, execution-serve, repo-github-app, repo-github-token, tool-websearch-brave, tool-websearch-gemini, execution-gondolin?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-remote, execution-serve, repo-github-app, repo-github-token, storage-blob-s3, tool-websearch-brave, tool-websearch-gemini, execution-gondolin?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, execution-gondolin?, extension-pikit-self? | `createProposalsConformance`, `createProposalsServeConformance` (a `path` remote's `serve`) |
@@ -547,6 +547,41 @@ reuses pruned ids proves the sequence case detects the missing guarantee.
 writer wins), `delete`. Values are JSON and copied; each call is atomic on its own, with no
 transaction across calls. A component opens the namespace named after it (`registry validate` checks it). Provider: storage-kv-sql
 (on `storage.sql`). Suite: `createKeyValueConformance`; double: `createMemoryKeyValueStorage`.
+
+### `storage.blob` ([blob.ts](../packages/contracts/src/blob.ts))
+
+```ts
+interface BlobStorage {
+  readonly maxBytes: number;                 // at least BLOB_MIN_MAX_BYTES (25 MiB)
+  namespace(name: string): BlobStore;        // a component opens the one named after it
+}
+interface BlobStore {
+  put(key, bytes: Uint8Array, options?: { contentType? }): Promise<void>;
+  get(key): Promise<{ bytes: Uint8Array; contentType? } | undefined>;
+  delete(key): Promise<void>;
+  list(prefix, options?: { cursor?; limit? }): Promise<{ entries: { key; size }[]; cursor? }>;
+}
+```
+
+Files a component keeps by key, too large for a row of `storage.sql` or a value of `storage.kv`.
+Keys are 1 to 512 characters of `A-Z a-z 0-9 ! - _ . * ' ( ) /` with no empty, `.` or `..` segment
+(what every bucket and file system takes as it is), case-sensitive, and `a` and `a/b` are two values;
+a namespace's name is 1 to 100 characters of `a-z 0-9 - _ .`. Anything else is refused
+(`BlobKeyError`) before anything is read or written; so are a value that is not a `Uint8Array`, a
+content type that is not 1 to 255 printable ASCII characters with no space at either end, and a value
+over `maxBytes` (`BlobTooLargeError`). `put` replaces a value whole (old bytes or new, never a mix) and
+copies its bytes when called; `get` returns a copy and the content type as it was put. `list` gives the
+keys starting with a prefix in code-unit order, at most `limit` (1 to 1000, default 1000) a page, with
+a cursor when there may be more; a page may hold fewer, even none. Values are whole in memory: no
+streaming. Every provider checks with the same helpers (`checkBlobNamespace`, `checkBlobPut`,
+`checkBlobKey`, `blobListLimit`).
+
+Providers: storage-blob-fs (a directory, one per namespace, atomic rename, server) and
+storage-blob-s3 (any S3-compatible bucket over `fetch` and SigV4, a namespace a key prefix; server
+and durable, the suite run in workerd too). Suite: `createBlobConformance` (bytes, copies, replace,
+concurrent puts, delete, case and nesting, long keys, refused input, namespaces one of whose names
+starts another's, order, paging, `maxBytes` and one byte more, restarts), each of its guarantees
+checked against a broken double; double: `createMemoryBlobStorage`.
 
 ---
 
