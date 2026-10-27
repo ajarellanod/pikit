@@ -10,14 +10,15 @@
  * router decides.
  *
  * In a project (`?project=<id>`, from the project's menu or its page) the chat is made in it, for good:
- * its name shows over the composer (× leaves it), and the chats to go on with are the project's.
+ * its name is a badge in the composer (as web search's in the dashboard; × leaves it), and the chats to
+ * go on with are the project's.
  *
  * The commands the operator lets users type (`ChatConfig.commands`: `/rules`…) have the composer's "/"
  * menu; one typed makes the chat (empty) and runs there, and the conversation opens with what it
  * answered as a quiet note, never in its transcript.
  */
 
-import { ChatBubble, Folder, Xmark } from "iconoir-react";
+import { ChatBubble, Folder } from "iconoir-react";
 import { type CSSProperties, useEffect, useState } from "react";
 import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
@@ -111,26 +112,23 @@ export function NewChatScreen({ agent: asked, project }: { agent?: string | unde
         </h1>
 
         <div className="chat new-chat-reveal relative mt-7" style={revealStyle(stage >= 3)}>
-          {project !== undefined && (
-            <div className="mb-2.5 flex items-center gap-1.5 px-1 text-[13px] text-ink-3">
-              <Folder width={14} height={14} strokeWidth={1.9} aria-hidden />
-              <span>In</span>
-              <a href={`#${projectPath(project)}`} className="min-w-0 truncate font-medium text-ink-2 hover:text-ink">
-                {inProject?.name ?? "a project"}
-              </a>
-              <button
-                type="button"
-                aria-label="Not in a project"
-                title="Not in a project"
-                onClick={() => go(newChatPath({ agent }))}
-                className="flex size-5 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink"
-              >
-                <Xmark width={13} height={13} strokeWidth={2} />
-              </button>
-            </div>
-          )}
           <PromptBar
             autoFocus
+            badges={
+              project === undefined
+                ? []
+                : [
+                    {
+                      key: "project",
+                      label: inProject?.name ?? "A project",
+                      title: `Made in the project ${inProject?.name ?? ""}`,
+                      href: `#${projectPath(project)}`,
+                      icon: <Folder width={12} height={12} strokeWidth={2} aria-hidden />,
+                      onRemove: () => go(newChatPath({ agent })),
+                      removeLabel: "Not in this project",
+                    },
+                  ]
+            }
             commands={config.commands}
             commandsMenu={config.commands.length > 0}
             commandsNote="Runs here, never sent to the assistant"

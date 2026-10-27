@@ -21,7 +21,8 @@ import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../r
 import { base64Bytes, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
 import { INITIAL, type LiveState, reduce } from "../registry/components/channel-web/chat/src/lib/transcript.ts";
 import { type ChatClient, chatSource, conversationsPath, transcriptPath } from "../registry/components/channel-web/chat/src/lib/source.ts";
-import { newChatPath, parseRoute, projectPath, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
+import { newChatPath, parseRoute, PROJECTS_PATH, projectIdOf, projectPath, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
+import { shownProjects } from "../registry/components/channel-web/chat/src/lib/project-list.ts";
 import { readSse, SseParser } from "../registry/components/channel-web/chat/src/lib/sse.ts";
 import { onVisibleAgain } from "../registry/components/channel-web/chat/src/lib/visible.ts";
 import { CHAT, chatBoundaryViolations, chatCopies, staleCopies } from "./chat-shared.ts";
@@ -275,8 +276,25 @@ describe("live events", () => {
     expect(conversationsPath({ limit: 30, project: "none" })).toBe("/conversations?limit=30&project=none");
     // A new chat with an assistant and in a project; a project's chats.
     expect([newChatPath(), newChatPath({ agent: "helper" }), newChatPath({ agent: "helper", project: "p1" }), newChatPath({ project: "p1" })]).toEqual(["/", "/?agent=helper", "/?agent=helper&project=p1", "/?project=p1"]);
-    expect(projectPath("p1")).toBe("/chats?project=p1");
+    expect(projectPath("p1")).toBe("/projects/p1");
+    expect([projectIdOf(projectPath("p1")), projectIdOf(`${projectPath("a b")}/`), projectIdOf(PROJECTS_PATH), projectIdOf("/projects/a/b"), projectIdOf("/projects/%E0"), projectIdOf("/chats")]).toEqual([
+      "p1",
+      "a b",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
     expect(parseRoute(`#${newChatPath({ project: "p1" })}`).query.get("project")).toBe("p1");
+  });
+
+  test("the projects page: found by any part of the name in any case, newest first or by name", () => {
+    const project = (id: string, name: string, createdAt: number) => ({ id, name, createdAt, chats: 0 });
+    const items = [project("a", "Looker Helper", 2), project("b", "software agent", 3), project("c", "Tag Manager Helper", 1)];
+    expect(shownProjects(items, "", "recent").map((each) => each.id)).toEqual(["b", "a", "c"]);
+    expect(shownProjects(items, "", "name").map((each) => each.id)).toEqual(["a", "b", "c"]);
+    expect(shownProjects(items, "  HELPER ", "recent").map((each) => each.id)).toEqual(["a", "c"]);
+    expect(shownProjects(items, "nothing", "name")).toEqual([]);
   });
 
   test("the old conversation code is gone: the page renders the shared view, never its own", () => {

@@ -74,6 +74,12 @@ export type Command = {
   argumentHint?: string;
 };
 
+/**
+ * A pill beside the picker, as web search's: what the message goes with (the chat's project). `onRemove`
+ * gives it a × (`removeLabel` names it); `href` makes its label a link.
+ */
+export type ComposerBadge = { key: string; label: string; icon?: ReactNode; title?: string; href?: string; onRemove?: () => void; removeLabel?: string };
+
 /** "/name args": a command's name and what follows it, when the draft is one. */
 const COMMAND_LINE = /^\/([a-z0-9][a-z0-9:-]*)(?:\s+([\s\S]*))?$/;
 
@@ -114,6 +120,7 @@ export default function PromptBar({
   onCommand,
   commandsNote = "Type to search commands",
   commandsMenu = true,
+  badges = [],
 }: {
   placeholder?: string;
   picker?: Picker;
@@ -138,6 +145,8 @@ export default function PromptBar({
   commandsNote?: string;
   /** the "/" menu at all; `false`: a "/" is only text (a composer with no commands) */
   commandsMenu?: boolean;
+  /** pills beside the picker (`ComposerBadge`), before web search's */
+  badges?: ComposerBadge[];
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -636,6 +645,35 @@ export default function PromptBar({
 
             {/* web search on for the next message, or what was refused */}
             <div className="col-start-3 row-start-2 flex min-w-0 items-center gap-2 self-center pl-1">
+              {badges.map((badge) => (
+                <span
+                  key={badge.key}
+                  title={badge.title ?? badge.label}
+                  className={`flex h-6.5 min-w-0 shrink items-center gap-1.5 rounded-chip bg-accent-tint py-1 pl-1.5 chat-text-11.5 font-medium text-accent-ink ${badge.onRemove === undefined ? "pr-2" : "pr-1"}`}
+                  style={{ animation: "pop-in 200ms cubic-bezier(0.23,1,0.32,1) both" }}
+                >
+                  {badge.icon !== undefined && <span className="flex shrink-0">{badge.icon}</span>}
+                  {badge.href === undefined ? (
+                    <span className="min-w-0 truncate">{badge.label}</span>
+                  ) : (
+                    <a href={badge.href} className="min-w-0 truncate hover:underline">
+                      {badge.label}
+                    </a>
+                  )}
+                  {badge.onRemove !== undefined && (
+                    <button
+                      type="button"
+                      aria-label={badge.removeLabel ?? `Remove ${badge.label}`}
+                      onClick={badge.onRemove}
+                      className="-my-1 flex size-5 shrink-0 items-center justify-center rounded-[5px] transition-colors duration-100 hover:bg-accent-tint"
+                    >
+                      <Icon size={10} strokeWidth={2.5}>
+                        {GLYPHS.close}
+                      </Icon>
+                    </button>
+                  )}
+                </span>
+              ))}
               {webSearchOn && (
                 <span className="flex h-6.5 shrink-0 items-center gap-1.5 rounded-chip bg-accent-tint py-1 pr-1 pl-1.5 chat-text-11.5 font-medium text-accent-ink" style={{ animation: "pop-in 200ms cubic-bezier(0.23,1,0.32,1) both" }}>
                   <Icon size={12}>{GLYPHS.globe}</Icon>

@@ -11,8 +11,8 @@
  * was made with one of `ChatConfig.agents`: a conversation keeps its assistant, so picking another
  * starts a new chat with it.
  *
- * Its project, when it was made in one, is named at the tab bar's end (a link to the project's chats);
- * another assistant picked starts the new chat in the same project. The commands the operator lets
+ * Its project, when it was made in one, is a badge in the composer (as web search's in the dashboard: a
+ * link to the project's page); another assistant picked starts the new chat in the same project. The commands the operator lets
  * users type (`ChatConfig.commands`) have the composer's "/" menu: one runs in this conversation and
  * what it answered shows as a quiet note (`CommandNoteRow`), never in the transcript.
  *
@@ -103,12 +103,6 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
       actions={(contextButton) =>
         conversation !== undefined && (
           <TabActions>
-            {project !== undefined && projectName !== undefined && (
-              <a href={`#${projectPath(project)}`} title={`Project: ${projectName}`} className="flex max-w-[160px] min-w-0 items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[12.5px] font-medium text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink">
-                <Folder width={13} height={13} strokeWidth={1.9} aria-hidden className="shrink-0" />
-                <span className="truncate">{projectName}</span>
-              </a>
-            )}
             {conversation.archived && <Badge>Archived</Badge>}
             {contextButton}
             <ActionsMenu
@@ -122,6 +116,10 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
       side={(panel) => <SidePanel>{panel}</SidePanel>}
       composer={{
         disabled: conversation === undefined,
+        badges:
+          project === undefined || projectName === undefined
+            ? []
+            : [{ key: "project", label: projectName, title: `Project: ${projectName}`, href: `#${projectPath(project)}`, icon: <Folder width={12} height={12} strokeWidth={2} aria-hidden /> }],
         commands: config.commands,
         commandsMenu: config.commands.length > 0,
         commandsNote: "Runs here, never sent to the assistant",

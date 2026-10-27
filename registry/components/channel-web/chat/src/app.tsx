@@ -3,7 +3,7 @@
  * offers (`GET /chat/api/config`) and who is signed in (`GET /chat/api/me`, a `401` when nobody is),
  * then shows the signed-out screens (sign in, make an account, forgot password, an invitation's or a
  * reset's landing, "confirm your email") or the signed-in page (a new chat, a conversation, the
- * conversations; Settings is a modal over it, `#/settings/<section>` opening it). A session that ends meanwhile (a `401`) shows the sign-in again.
+ * conversations, the projects and each project's chats; Settings is a modal over it, `#/settings/<section>` opening it). A session that ends meanwhile (a `401`) shows the sign-in again.
  * Each signed-out screen starts anew on another route (`screenKey`), and while nobody is signed in
  * the config is read again whenever the tab comes back (`onVisibleAgain`): a sign-up mode changed
  * meanwhile shows.
@@ -22,12 +22,13 @@ import { ConversationsProvider } from "@/lib/conversations";
 import { asError, ChatFailure, landingText } from "@/lib/errors";
 import { chatIdOf, go, takeLandingError, useRoute } from "@/lib/location";
 import { ProjectsProvider } from "@/lib/projects";
-import { screenKey, setPasswordOf, settingsSectionOf } from "@/lib/routes";
+import { PROJECTS_PATH, projectIdOf, screenKey, setPasswordOf, settingsSectionOf } from "@/lib/routes";
 import { type ChatSession, SessionContext } from "@/lib/session";
 import { onVisibleAgain } from "@/lib/visible";
 import { ChatsScreen } from "./screens/chats";
 import { ConversationScreen } from "./screens/conversation";
 import { Layout } from "./screens/layout";
+import { ProjectsScreen } from "./screens/projects";
 import { NewChatScreen } from "./screens/new-chat";
 import { SetPasswordScreen, VerifyScreen } from "./screens/set-password";
 import { ForgotScreen, SignInScreen, SignUpScreen } from "./screens/sign-in";
@@ -138,13 +139,18 @@ export function App() {
     },
   };
   const chatId = chatIdOf(route.path);
+  const projectId = projectIdOf(route.path);
   const screen =
     chatId !== undefined ? (
       <ConversationScreen key={chatId} chatId={chatId} />
     ) : route.path === "/" || SIGNED_OUT.has(route.path) || settingsSectionOf(route.path) !== undefined ? (
       <NewChatScreen agent={route.query.get("agent") ?? undefined} project={route.query.get("project") ?? undefined} />
     ) : route.path === "/chats" ? (
-      <ChatsScreen key={route.query.get("project") ?? ""} project={route.query.get("project") ?? undefined} />
+      <ChatsScreen key="all" />
+    ) : route.path === PROJECTS_PATH ? (
+      <ProjectsScreen />
+    ) : projectId !== undefined ? (
+      <ChatsScreen key={projectId} project={projectId} />
     ) : (
       <div className="p-8 text-[13.5px] text-ink-3">
         No page here. <a href="#/" className="font-medium text-ink underline underline-offset-2">Start a new chat</a>

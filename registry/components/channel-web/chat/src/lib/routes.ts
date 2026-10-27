@@ -36,8 +36,22 @@ export function settingsSectionOf(path: string): string | undefined {
   return match === null ? undefined : (match[1] ?? "profile");
 }
 
-/** A project's chats: Conversations showing only them. */
-export const projectPath = (id: string): string => `/chats?project=${encodeURIComponent(id)}`;
+/** The user's projects, as cards (`screens/projects.tsx`). */
+export const PROJECTS_PATH = "/projects";
+
+/** A project's page: its chats. */
+export const projectPath = (id: string): string => `${PROJECTS_PATH}/${encodeURIComponent(id)}`;
+
+/** The project a project's page (`/projects/<id>`) is about; `undefined` for any other path. */
+export function projectIdOf(path: string): string | undefined {
+  const match = /^\/projects\/([^/]+)\/?$/.exec(path);
+  if (match === null) return undefined;
+  try {
+    return decodeURIComponent(match[1] ?? "");
+  } catch {
+    return undefined;
+  }
+}
 
 /** New chat, with an assistant chosen and in a project when given. */
 export function newChatPath({ agent, project }: { agent?: string | undefined; project?: string | undefined } = {}): string {

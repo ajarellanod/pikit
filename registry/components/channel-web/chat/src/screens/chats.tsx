@@ -9,9 +9,9 @@
  * person stops typing; "Archived" lists the archived ones instead (`?archived=1`), searched alike: the
  * only place they are.
  *
- * A project's page (`?project=<id>`, the sidebar's project row) lists only its chats, searched and
- * archived alike, under its name, with its menu (a new chat in it, Rename, Delete); without one, each
- * chat of a project says which, and "Not in a project" lists those of none (`?project=none`).
+ * A project's page (`#/projects/<id>`, a card of Projects) lists only its chats, searched and archived
+ * alike, under its name, with its menu (a new chat in it, Rename, Delete); in Conversations, each chat
+ * of a project says which.
  */
 
 import { Archive, ChatBubble, Folder, Plus, Search } from "iconoir-react";
@@ -25,7 +25,7 @@ import { Page } from "@/components/bui/Page";
 import SearchField from "@/components/bui/SearchField";
 import { Switch } from "@/components/bui/Switch";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { type ChatConversation, type ChatPage, NO_PROJECT, SEARCH_MAX } from "@/lib/chat-api";
+import { type ChatConversation, type ChatPage, SEARCH_MAX } from "@/lib/chat-api";
 import { get } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
 import { asError } from "@/lib/errors";
@@ -50,7 +50,7 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 /**
- * The conversations `q` finds, archived or not, of `project` (an id, `NO_PROJECT`, or any): `undefined`
+ * The conversations `q` finds, archived or not, of `project` (an id, or any): `undefined`
  * items until read; read again when `round` moves. More pages on demand.
  */
 function useFound(q: string, archived: boolean, project: string | undefined, round: number) {
@@ -91,12 +91,11 @@ export function ChatsScreen({ project }: { project?: string | undefined }) {
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [archived, setArchived] = useState(false);
-  const [loose, setLoose] = useState(false);
   const shown = projects.get(project);
   usePageTitle(config.name, project === undefined ? "Conversations" : (shown?.name ?? "Project"));
   const q = useDebounced(query.trim(), DEBOUNCE_MS);
   // Read again when a project's count changes too (a chat made or deleted in it).
-  const found = useFound(q, archived, project ?? (loose ? NO_PROJECT : undefined), conversations.changed);
+  const found = useFound(q, archived, project, conversations.changed);
   const items = found.items;
   const nameOf = (id: string | undefined) => projects.get(id)?.name;
 
@@ -116,12 +115,6 @@ export function ChatsScreen({ project }: { project?: string | undefined }) {
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <SearchField value={query} onChange={(value) => setQuery(value.slice(0, SEARCH_MAX))} placeholder="Search by title" label="Search the conversations" className="min-w-0 flex-1" />
-          {project === undefined && (projects.items?.length ?? 0) > 0 && (
-            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px] text-ink-2">
-              <Switch checked={loose} onChange={setLoose} size="sm" label="Not in a project" />
-              <span aria-hidden>Not in a project</span>
-            </label>
-          )}
           <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px] text-ink-2">
             <Switch checked={archived} onChange={setArchived} size="sm" label="Archived" />
             <span aria-hidden>Archived</span>
