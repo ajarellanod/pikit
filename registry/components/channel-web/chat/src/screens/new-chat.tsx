@@ -38,6 +38,8 @@ import { titleOf } from "./layout";
 const REVEAL_TIMING = [170, 330, 400, 550];
 const REVEAL = { offsetY: 23, blur: 17, duration: 800, easing: "cubic-bezier(0.16, 1, 0.3, 1)" };
 const SUGGESTED = 3;
+/** One "Continue" row's height (px): their room is kept for `SUGGESTED` rows, however many there are, so the composer stays at one height (in a project or not). */
+const SUGGESTION_ROW = 40;
 
 function revealStyle(visible: boolean): CSSProperties {
   return {
@@ -153,12 +155,13 @@ export function NewChatScreen({ agent: asked, project }: { agent?: string | unde
           )}
         </div>
 
-        <div className="new-chat-reveal mt-6 flex flex-col" style={revealStyle(stage >= 4)}>
+        <div className="new-chat-reveal mt-6 flex flex-col" style={{ ...revealStyle(stage >= 4), minHeight: SUGGESTED * SUGGESTION_ROW }}>
           {recent.map((conversation) => (
             <a
               key={conversation.id}
               href={`#${chatPath(conversation.id)}`}
-              className="-mx-2 flex items-center gap-3 rounded-control px-2 py-2.5 text-left text-[14px] text-ink transition-colors duration-150 hover:bg-hover"
+              className="-mx-2 flex shrink-0 items-center gap-3 rounded-control px-2 text-left text-[14px] text-ink transition-colors duration-150 hover:bg-hover"
+              style={{ height: SUGGESTION_ROW }}
             >
               <span className="flex w-[15px] shrink-0 justify-center text-ink-3">
                 <ChatBubble width={15} height={15} strokeWidth={1.9} />
