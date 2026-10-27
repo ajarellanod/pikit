@@ -229,6 +229,7 @@ it("a user signs up and in, talks to the agent and follows it live; another user
     methods: [{ kind: "password" }],
     signUp: "open",
     email: false,
+    files: false,
     visibility: { thinking: false, tools: "names", context: true },
     agents: [],
     commands: [],
@@ -440,7 +441,7 @@ it("email.send in the objects' App only: the config says email is sent and offer
 
   // The Worker has no email.send: it asks the accounts actor, whose App sends.
   const config = await fetch(`${HTTPS}/chat/api/config`);
-  expect(await config.json()).toEqual({ name: "Ada", target: "durable", methods: [{ kind: "password" }, { kind: "magic-link" }], signUp: "open", email: true, visibility: { thinking: false, tools: "names", context: true }, agents: [], commands: [] } satisfies ChatConfig);
+  expect(await config.json()).toEqual({ name: "Ada", target: "durable", methods: [{ kind: "password" }, { kind: "magic-link" }], signUp: "open", email: true, files: false, visibility: { thinking: false, tools: "names", context: true }, agents: [], commands: [] } satisfies ChatConfig);
 
   const linkIn = (message: EmailMessage | undefined) => /https?:\/\/\S+/.exec(message?.text ?? "")?.[0] as string;
   const pathOf = (link: string) => {

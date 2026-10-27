@@ -11,7 +11,7 @@
  *   (`seen`): an upsert that a late or repeated version changes nothing with.
  * - **`channel_web_entries`**: the conversation's transcript, one row per entry (`entries.ts` makes
  *   them `ChatTranscriptEntry`s):
- *   - `user`: a user's message, written once admitted (its images with it, state `pending`); its state
+ *   - `user`: a user's message, written once admitted (its images with it, its files' names alone, state `pending`); its state
  *     moves to `answered`, `failed` or `aborted` when its run ends (`settle`). One admitted while a run
  *     went (`queued`) is `held`: out of the transcript until a run of the conversation ends (`release`),
  *     so that it is never read before the messages of the run it waited behind, which are stored only
@@ -72,7 +72,7 @@ export type ConversationRow = {
 export type MessageState = NonNullable<ChatTranscriptEntry["state"]>;
 
 /** A user's message to store: its images with their bytes, the runtime conversation it went to (to ask `agent.submissions`), whether it is `held`. */
-export type NewUserRow = { id: string; text: string; images?: ChatImage[]; at: number; state: MessageState; conversation: string; held: boolean };
+export type NewUserRow = { id: string; text: string; images?: ChatImage[]; fileNames?: string[]; at: number; state: MessageState; conversation: string; held: boolean };
 
 /** An entry as read: a user's message (its images' types only), or a message a run wrote. */
 export type EntryRow =
@@ -222,6 +222,7 @@ type EntrySqlRow = {
   run: string | null;
   text: string | null;
   image_types: string | null;
+  file_names: string | null;
   message: string | null;
   at: number;
   state: string | null;
@@ -250,10 +251,11 @@ const rowOf = (row: ConversationSqlRow): ConversationRow => ({
   version: Number(row.version),
 });
 
-const userOf = (row: Pick<EntrySqlRow, "id" | "text" | "image_types" | "at" | "state">): UserRow => ({
+const userOf = (row: Pick<EntrySqlRow, "id" | "text" | "image_types" | "file_names" | "at" | "state">): UserRow => ({
   id: row.id,
   text: row.text ?? "",
   ...(row.image_types !== null && { imageTypes: JSON.parse(row.image_types) as string[] }),
+  ...(row.file_names !== null && { fileNames: JSON.parse(row.file_names) as string[] }),
   at: Number(row.at),
   ...(row.state !== null && { state: row.state as MessageState }),
 });
@@ -265,7 +267,7 @@ const entryOf = (row: EntrySqlRow): EntryRow =>
 
 const COLUMNS = "key, user_id, chat_id, agent, project, title, title_search, created_at, last_activity, hidden, archived, busy, version";
 const SELECTED = "key, user_id, chat_id, agent, project, title, created_at, last_activity, hidden, archived, busy, version";
-const ENTRY_COLUMNS = "id, kind, turn, pos, run, text, image_types, message, at, state, conversation, size";
+const ENTRY_COLUMNS = "id, kind, turn, pos, run, text, image_types, file_names, message, at, state, conversation, size";
 /** A title as a search reads it: lowercased here (SQLite's `lower` knows ASCII only). */
 const searchOf = (title: string): string => title.toLowerCase();
 /** `q` as `LIKE` reads it: lowercased, its wildcards escaped. */
@@ -284,7 +286,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       await database.run(`CREATE INDEX IF NOT EXISTS ${CONVERSATIONS}_user ON ${CONVERSATIONS} (user_id, last_activity, chat_id)`);
       await database.run(
         `CREATE TABLE IF NOT EXISTS ${ENTRIES} (key TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, turn BIGINT NOT NULL, pos INTEGER NOT NULL, run TEXT, ` +
-          "text TEXT, images TEXT, image_types TEXT, message TEXT, at BIGINT NOT NULL, state TEXT, conversation TEXT, held INTEGER NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (key, id))",
+          "text TEXT, images TEXT, image_types TEXT, file_names TEXT, message TEXT, at BIGINT NOT NULL, state TEXT, conversation TEXT, held INTEGER NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (key, id))",
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${ENTRIES}_order ON ${ENTRIES} (key, turn, pos, id)`);
       await database.run(`CREATE INDEX IF NOT EXISTS ${ENTRIES}_run ON ${ENTRIES} (key, run)`);
@@ -481,21 +483,23 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
 
     async addUser(key, message) {
       const images = message.images === undefined || message.images.length === 0 ? undefined : message.images;
+      const fileNames = message.fileNames === undefined || message.fileNames.length === 0 ? undefined : message.fileNames;
       // One statement: its turn the next of the key's, whatever else is written meanwhile.
       const { changes } = await (await db()).run(
-        `INSERT INTO ${ENTRIES} (key, id, kind, turn, pos, run, text, images, image_types, message, at, state, conversation, held, size) ` +
-          `SELECT ?, ?, 'user', COALESCE(MAX(turn), 0) + 1, 0, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ? FROM ${ENTRIES} WHERE key = ? ON CONFLICT (key, id) DO NOTHING`,
+        `INSERT INTO ${ENTRIES} (key, id, kind, turn, pos, run, text, images, image_types, file_names, message, at, state, conversation, held, size) ` +
+          `SELECT ?, ?, 'user', COALESCE(MAX(turn), 0) + 1, 0, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ? FROM ${ENTRIES} WHERE key = ? ON CONFLICT (key, id) DO NOTHING`,
         [
           key,
           message.id,
           message.text,
           images === undefined ? null : JSON.stringify(images),
           images === undefined ? null : JSON.stringify(images.map((image) => image.mimeType)),
+          fileNames === undefined ? null : JSON.stringify(fileNames),
           Math.floor(message.at),
           message.state,
           message.conversation,
           message.held ? 1 : 0,
-          message.text.length,
+          message.text.length + (fileNames === undefined ? 0 : JSON.stringify(fileNames).length),
           key,
         ],
       );

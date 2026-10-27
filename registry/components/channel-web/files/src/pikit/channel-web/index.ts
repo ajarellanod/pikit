@@ -118,6 +118,9 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       const sql = pikit.use("storage.sql");
       const wakeups = pikit.useOptional("wakeups");
       const outbound = pikit.useOptional("outbound.queue");
+      // Optional: where a message's files are written (backend.ts); without either, each is named to the agent as not kept.
+      const workspace = pikit.useOptional("workspace");
+      const execution = pikit.useOptional("execution");
       // Where it runs (`scope`); on Cloudflare the index is told through the mailbox.
       const inbox = pikit.useOptional("actor.inbox");
       const mailbox = pikit.useOptional("actor.mailbox");
@@ -214,6 +217,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         changed,
         titles,
         commands: typed,
+        files: () => ({ workspace: workspace.get(), execution: execution.get() }),
         wake: async (ctx) => {
           await delivery?.wake(ctx).catch((error: unknown) => ctx.logger.warn("channel-web: could not ask for answers to be delivered; the next run's end does", { error: String(error) }));
         },
@@ -270,7 +274,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
 
       /** The page's config, as this App's accounts make it (on Cloudflare the accounts actor answers the Worker with it). */
       const chatConfig = (ctx: AppContext) =>
-        chatConfigOf({ config, target: limits, settings: liveSettings, agents: agentsOf, commands: () => listAgentCommands(typed()), email: email.get() !== undefined }, ctx);
+        chatConfigOf({ config, target: limits, settings: liveSettings, agents: agentsOf, commands: () => listAgentCommands(typed()), email: email.get() !== undefined, files: workspace.get() !== undefined || execution.get() !== undefined }, ctx);
 
       provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => limits, rate: async (userId, ctx) => rate.take(userId, ctx.clock.now()), assets });
       provideAdminRoutes(pikit, {

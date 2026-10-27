@@ -44,7 +44,7 @@
  * | `DELETE /chat/api/conversations/:id` | `204`: out of the list, gone for the user (nothing of the runtime's is deleted) |
  * | `GET /chat/api/conversations/:id/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`, newest first, at most `PAGE_JSON_MAX` characters of stored JSON (then fewer than `limit`, and `next`) |
  * | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | the bytes of image `n` of the user's message `messageId` (a user message's image part's `url`), its type, cached privately |
- * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` |
+ * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`413` past a message's bounds: its images, its files) |
  * | `GET /chat/api/conversations/:id/events` | server-sent events, one `ChatEvent` per `data:` line, a `snapshot` first |
  * | `POST /chat/api/conversations/:id/abort` | `200 ChatAbortResponse` |
  */
@@ -61,6 +61,16 @@ export const MAX_IMAGES = 4;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 /** On Cloudflare (`ChatConfig.target` `durable`), the images of one message in all (one Durable Object row). */
 export const MAX_DURABLE_IMAGE_BYTES = 1024 * 1024;
+/**
+ * The other files a user may attach to a message, of any type (`ChatSendRequest.files`): `MAX_FILES` of
+ * `MAX_FILE_BYTES` at most, `MAX_FILES_BYTES` in all. They are written to the conversation's workspace,
+ * never stored with the message.
+ */
+export const MAX_FILES = 10;
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_FILES_BYTES = 25 * 1024 * 1024;
+/** On Cloudflare (`ChatConfig.target` `durable`), a message's files in all: they cross to the conversation's object in one call (at most 32 MiB, in base64). */
+export const MAX_DURABLE_FILES_BYTES = 20 * 1024 * 1024;
 /** The longest message, in characters. */
 export const MAX_TEXT = 32_000;
 /** The longest title, in characters. */
@@ -127,8 +137,10 @@ export interface ChatCommand {
 export interface ChatConfig {
   /** The assistant's name, as the page titles itself. */
   name: string;
-  /** `server` or `durable`: the image limits differ (`MAX_DURABLE_IMAGE_BYTES`). */
+  /** `server` or `durable`: the image and file limits differ (`MAX_DURABLE_IMAGE_BYTES`, `MAX_DURABLE_FILES_BYTES`). */
   target: string;
+  /** Whether a message may carry other files (`ChatSendRequest.files`): the App keeps them in a workspace (`workspace` or `execution` is installed). */
+  files: boolean;
   methods: ChatSignInMethod[];
   /**
    * Whether someone with no account may make one: `invite` none (only an operator's invitation),
@@ -208,6 +220,16 @@ export interface ChatConversation {
   project?: string;
 }
 
+/** A file a message is sent with, of any type: written to the conversation's workspace, its name alone kept with the message. */
+export interface ChatFile {
+  /** Its name, 1 to 255 characters: made safe for its path in the workspace. */
+  name: string;
+  /** Its type, when the browser knows it. */
+  mimeType?: string;
+  /** Its bytes, base64 (standard, padded), without a `data:` prefix. */
+  data: string;
+}
+
 /** An image a message is sent with. */
 export interface ChatImage {
   /** One of `IMAGE_TYPES`. */
@@ -222,7 +244,8 @@ export interface ChatImage {
  *
  * - **A user's message**: its `id` is its request id (`ChatSendResponse.requestId`); one `user` message,
  *   its `content` a text part (when written) then its images, each `{ type: "image", url, mimeType }`
- *   (read its bytes from `url`, with the session; never inline), its `timestamp` when it was sent;
+ *   (read its bytes from `url`, with the session; never inline), then its files, each `{ type: "file", name }`
+ *   (their bytes are the agent's, in its workspace), its `timestamp` when it was sent;
  *   `state` says what became of it. A message sent while a run goes is in the transcript (and announced
  *   live) once that run ended: it is answered after it.
  * - **A run's message** (an answer, a tool round, a tool's result): `<request id of the run>#<its hash>`,
@@ -267,9 +290,16 @@ export interface ChatEvent {
 }
 
 export interface ChatSendRequest {
-  /** May be empty when it has images. At most `MAX_TEXT` characters. */
+  /** May be empty when it has images or files. At most `MAX_TEXT` characters. */
   text: string;
   images?: ChatImage[];
+  /**
+   * Other files (any type, `MAX_FILES` of `MAX_FILE_BYTES`, `MAX_FILES_BYTES` in all, on `durable`
+   * `MAX_DURABLE_FILES_BYTES`): written to the conversation's workspace before the message reaches the
+   * agent, whose text names their paths (`attachments/<request id>/<name>`). Without `ChatConfig.files`
+   * each is named to the agent as not read.
+   */
+  files?: ChatFile[];
   /**
    * Its identity: the same one sent again does not run again. `web:` then 1 to 118 of
    * `A-Z a-z 0-9 . _ ~ : -`. Absent, the server makes one.

@@ -3,7 +3,8 @@
  * transcript route and the live view, so that one entry has one id and one form wherever it is read.
  *
  * - **A user's message**: its id is its request id; one pi-ai `user` message, its text then its images by
- *   URL (`imagePath`), never their bytes.
+ *   URL (`imagePath`), never their bytes, then its files by name (`{ type: "file", name }`): their bytes
+ *   are in the agent's workspace, never here.
  * - **A run's message** (`runEntryId`): `<the run's request id>#<hash of the message>`. The run's request
  *   id is the one that started it (`AgentResult.requestId`, the first of its inputs live). The hash is of
  *   what makes the message itself (its role, its time, its tool call's id, its blocks' text and ids, by
@@ -59,14 +60,15 @@ function hash(text: string): string {
 /** The id of a message a run wrote, the run named by the request that started it. */
 export const runEntryId = (run: string, message: unknown): string => `${run}#${hash(JSON.stringify(identityOf(message)))}`;
 
-/** A user's message as stored (`store.ts`): its images' types only. */
-export type UserRow = { id: string; text: string; imageTypes?: string[]; at: number; state?: ChatTranscriptEntry["state"] };
+/** A user's message as stored (`store.ts`): its images' types and its files' names only. */
+export type UserRow = { id: string; text: string; imageTypes?: string[]; fileNames?: string[]; at: number; state?: ChatTranscriptEntry["state"] };
 
 /** A user's message as an entry of chat `chatId`. */
 export function userEntryOf(chatId: string, row: UserRow): ChatTranscriptEntry {
   const content = [
     ...(row.text === "" ? [] : [{ type: "text", text: row.text }]),
     ...(row.imageTypes ?? []).map((mimeType, i) => ({ type: "image", url: imagePath(chatId, row.id, i), mimeType })),
+    ...(row.fileNames ?? []).map((name) => ({ type: "file", name })),
   ];
   return { id: row.id, kind: "message", messages: [{ role: "user", content, timestamp: row.at }], ...(row.state !== undefined && { state: row.state }) };
 }

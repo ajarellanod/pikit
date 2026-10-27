@@ -108,7 +108,7 @@
     },
     "channel-web": {
       "version": "0.0.1",
-      "description": "A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object.",
+      "description": "A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and files and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object.",
       "targets": [
         "server",
         "durable"

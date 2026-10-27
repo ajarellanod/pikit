@@ -43,7 +43,7 @@ a project installs, and agents that name what they may use.
 | A persistent JavaScript worker for the agent | none | [codemode](codemode.md) |
 | MCP servers per agent | `tool-mcp` | — |
 | Browser (cloud sessions) | none | [browser](browser.md) |
-| Attachments, assets, size limits | built: `InboundMessage.images` (Google Chat's photos, the web chat's and the dashboard's), Google Chat's files written to the conversation's workspace; files kept for a space: `tool-space-files` | [rich-content](rich-content.md) for files in answers |
+| Attachments, assets, size limits | built: `InboundMessage.images` (Google Chat's and Telegram's photos, the web chat's and the dashboard's); files a user sends in Google Chat, Telegram or the web chat written to the conversation's workspace, their paths in the text (`@pikit/pi-adapter`'s `collectAttachments`, 10 MB a file, 25 MB a message); files kept for a space: `tool-space-files` | [rich-content](rich-content.md) for files in answers |
 | Durable outbound delivery | `outbound-durable`, `startAnswerDelivery` | — |
 | Model fallback, provider account failover | built: `provider-failover` (`failover/<chain>`) | — |
 | Tracing (Langfuse, OpenTelemetry) | none; an `agent.extension`'s hooks on model requests and tool calls | no note yet |

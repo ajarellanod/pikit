@@ -52,10 +52,10 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `model.complete` | single | runtime-pi | memory-summaries, admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-do, credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
-| `execution` | single | execution-do, execution-gondolin, execution-local, execution-remote | channel-google-chat?, tool-edit, tool-read, tool-space-files, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
+| `execution` | single | execution-do, execution-gondolin, execution-local, execution-remote | channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, tool-edit, tool-read, tool-space-files, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-gondolin, execution-local, execution-remote | tool-bash | same |
 | `approvals` | single | approvals-sql | admin-approvals, extension-approvals | `createApprovalsConformance` (approvals-sql's `conformance.ts`) |
-| `workspace` | single | execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
+| `workspace` | single | execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
 | `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
 
@@ -351,8 +351,19 @@ the agent routed now and the message goes there, or, when routing names the gone
 `denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text, images? }` (a
 field is added, optional, with the component that reads it); its `id` becomes the request id, and its
 `images` (`AgentImage`, bounded by whoever builds the message: channel-google-chat's are a message's
-photos, 1 MB in all; channel-web's, the page's attachments) the request's `images`, as an `inbound.normalize` stage leaves them (it may drop
+photos, 1 MB in all; channel-telegram's a photo; channel-web's, the page's attachments) the request's `images`, as an `inbound.normalize` stage leaves them (it may drop
 them). See [pipelines.md](pipelines.md).
+
+**A file a message brings never travels in it** (no `InboundMessage` field): the channel writes it to
+the conversation's workspace in `beforeDispatch` and the message's text names its path, or why it was
+not read (no `workspace` or `execution`, past a bound, a download that failed). The protocol is one
+helper, `@pikit/pi-adapter`'s `collectAttachments` and `writeAttachments` ([attachments.ts](../packages/pi-adapter/src/attachments.ts),
+which writes through Pi's `ExecutionEnv`): `attachments/<message id>/<safe name>` (one path segment,
+never `..`; two of one name numbered), so a message delivered again writes the same paths; bounds
+(files per message, bytes each and in all, images and text put inline) are the channel's policy,
+passed in; a write that fails rejects, so nothing is dispatched and the platform delivers the message
+again. Channels that write them: channel-google-chat, channel-telegram, channel-telegram-webhook,
+channel-web.
 
 Authentication is not here: each channel proves its senders its own way.
 

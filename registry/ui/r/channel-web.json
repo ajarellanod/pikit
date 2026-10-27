@@ -3,7 +3,7 @@
   "name": "channel-web",
   "type": "registry:file",
   "title": "channel-web",
-  "description": "channel-web's view: A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object. Its admin API routes come with the component (pikit add channel-web).",
+  "description": "channel-web's view: A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and files and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object. Its admin API routes come with the component (pikit add channel-web).",
   "dependencies": [
     "iconoir-react@7.12.1"
   ],

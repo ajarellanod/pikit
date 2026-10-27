@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 /* ---------------------------------------------------------
  * PROMPT BAR
  * Beautiful UI's hero composer, with real controls: the "+"
- * menu (add images, web search for the next message), the
+ * menu (add images, or files of any type, web search for the next message), the
  * "/" menu (the commands the App registered, filtered as you
  * type; none: a quiet "No commands", and the text is sent as
  * a message; `commandsMenu={false}`: no menu, a "/" is text),
@@ -62,8 +62,14 @@ export type ImageLimits = { types: readonly string[]; count: number; bytes: numb
 /** An image to send: its bytes in base64, without a `data:` prefix. */
 export type ComposerImage = { name: string; mimeType: string; data: string };
 
-/** What is sent: the text, the images, and whether the next message asks for a web search. */
-export type ComposerMessage = { text: string; images: ComposerImage[]; webSearch: boolean };
+/** The other files the composer takes, of any type (`files`): how many, how large each and in all, in bytes. */
+export type FileLimits = { count: number; bytes: number; totalBytes: number };
+
+/** A file to send: its bytes in base64; `mimeType` `""` when the browser does not know it. */
+export type ComposerFile = ComposerImage;
+
+/** What is sent: the text, the images, the other files, and whether the next message asks for a web search. */
+export type ComposerMessage = { text: string; images: ComposerImage[]; files: ComposerFile[]; webSearch: boolean };
 
 /** A "/" command, as the App registered it (`GET /admin/api/commands`). */
 export type Command = {
@@ -83,7 +89,7 @@ export type ComposerBadge = { key: string; label: string; icon?: ReactNode; titl
 /** "/name args": a command's name and what follows it, when the draft is one. */
 const COMMAND_LINE = /^\/([a-z0-9][a-z0-9:-]*)(?:\s+([\s\S]*))?$/;
 
-type Attached = { id: number; file: File; url: string };
+type Attached = { id: number; file: File; url: string; kind: "image" | "file" };
 
 type MenuRow = { key: string; name: string; hint?: string; desc: string; icon?: ReactNode; trailing?: ReactNode; disabled?: boolean; pick: () => void };
 
@@ -102,8 +108,7 @@ function base64Of(file: File): Promise<string> {
 let nextId = 0;
 
 /** The "+" button's name: what its menu offers, and only that. */
-const plusLabel = (images: boolean, webSearch: boolean): string =>
-  images && webSearch ? "Add images or web search" : images ? "Add images" : "Web search";
+const plusLabel = (adds: string | undefined, webSearch: boolean): string => (adds !== undefined && webSearch ? `${adds} or web search` : (adds ?? "Web search"));
 
 export default function PromptBar({
   placeholder,
@@ -115,6 +120,7 @@ export default function PromptBar({
   autoFocus = false,
   compact = false,
   images,
+  files,
   webSearch,
   commands = [],
   onCommand,
@@ -135,6 +141,8 @@ export default function PromptBar({
   compact?: boolean;
   /** "Add image" in the "+" menu; absent, the composer takes text only */
   images?: ImageLimits;
+  /** "Add files" instead: any type; the images among them still by `images` (shown), the others sent as `files` */
+  files?: FileLimits;
   /** "Web search" in the "+" menu: `available` when the assistant has the tool, else `unavailable` says why */
   webSearch?: { available: boolean; unavailable?: string };
   /** the "/" menu: the App's commands, by name */
@@ -228,13 +236,16 @@ export default function PromptBar({
   const rows: MenuRow[] =
     menu === "plus"
       ? [
-          ...(images === undefined
+          ...(images === undefined && files === undefined
             ? []
             : [
                 {
                   key: "image",
-                  name: "Add image",
-                  desc: `${images.types.map((type) => type.replace("image/", "").toUpperCase()).join(", ")}, up to ${megabytes(images.bytes)}`,
+                  name: files !== undefined ? "Add files" : "Add image",
+                  desc:
+                    files !== undefined
+                      ? `Any file, up to ${megabytes(files.bytes)} each`
+                      : `${images?.types.map((type) => type.replace("image/", "").toUpperCase()).join(", ")}, up to ${megabytes(images?.bytes ?? 0)}`,
                   icon: <Icon size={15}>{GLYPHS.image}</Icon>,
                   pick: openPicker,
                 },
@@ -337,19 +348,26 @@ export default function PromptBar({
   /* the thumbnails' object URLs are released with the composer */
   useEffect(() => () => attachedRef.current.forEach((each) => URL.revokeObjectURL(each.url)), []);
 
-  const attach = (files: File[]) => {
-    if (images === undefined || files.length === 0) return;
+  const attach = (picked: File[]) => {
+    if ((images === undefined && files === undefined) || picked.length === 0) return;
     const taken: Attached[] = [];
-    let total = attached.reduce((sum, each) => sum + each.file.size, 0);
+    const sum = (kind: Attached["kind"]) => [...attached, ...taken].filter((each) => each.kind === kind).reduce((total, each) => total + each.file.size, 0);
+    const count = (kind: Attached["kind"]) => [...attached, ...taken].filter((each) => each.kind === kind).length;
     let refused: string | undefined;
-    for (const file of files) {
-      if (attached.length + taken.length >= images.count) refused ??= `At most ${images.count} images a message`;
-      else if (!images.types.includes(file.type)) refused ??= `${file.name}: not a ${images.types.map((type) => type.replace("image/", "").toUpperCase()).join(", ")} image`;
-      else if (file.size > images.bytes) refused ??= `${file.name}: larger than ${megabytes(images.bytes)}`;
-      else if (images.totalBytes !== undefined && total + file.size > images.totalBytes) refused ??= `The images of a message are at most ${megabytes(images.totalBytes)} in all here`;
-      else {
-        total += file.size;
-        taken.push({ id: nextId++, file, url: URL.createObjectURL(file) });
+    for (const file of picked) {
+      // An image the images take is shown; with `files`, any other is a file.
+      const image = images !== undefined && images.types.includes(file.type) && file.size <= images.bytes && (images.totalBytes === undefined || sum("image") + file.size <= images.totalBytes);
+      if (image && count("image") >= images.count) refused ??= `At most ${images.count} images a message`;
+      else if (image) taken.push({ id: nextId++, file, url: URL.createObjectURL(file), kind: "image" });
+      else if (files === undefined && images !== undefined) {
+        if (!images.types.includes(file.type)) refused ??= `${file.name}: not a ${images.types.map((type) => type.replace("image/", "").toUpperCase()).join(", ")} image`;
+        else if (file.size > images.bytes) refused ??= `${file.name}: larger than ${megabytes(images.bytes)}`;
+        else refused ??= `The images of a message are at most ${megabytes(images.totalBytes ?? 0)} in all here`;
+      } else if (files !== undefined) {
+        if (count("file") >= files.count) refused ??= `At most ${files.count} files a message`;
+        else if (file.size > files.bytes) refused ??= `${file.name}: larger than ${megabytes(files.bytes)}`;
+        else if (sum("file") + file.size > files.totalBytes) refused ??= `The files of a message are at most ${megabytes(files.totalBytes)} in all here`;
+        else taken.push({ id: nextId++, file, url: URL.createObjectURL(file), kind: "file" });
       }
     }
     setProblem(refused);
@@ -378,20 +396,21 @@ export default function PromptBar({
     setPlusOpen(false);
     // The message leaves the composer now; it comes back if sending fails.
     const text = draft;
-    const files = attached;
+    const outgoing = attached;
     const search = webSearchOn;
     setDraft("");
     setAttached([]);
     setSearching(false);
     setProblem(undefined);
     try {
-      const read = await Promise.all(files.map(async ({ file }) => ({ name: file.name, mimeType: file.type, data: await base64Of(file) })));
-      await onSend({ text: text.trim(), images: read, webSearch: search });
-      files.forEach((each) => URL.revokeObjectURL(each.url));
+      const read = await Promise.all(outgoing.map(async ({ file, kind }) => ({ kind, name: file.name, mimeType: file.type, data: await base64Of(file) })));
+      const of = (kind: Attached["kind"]) => read.filter((each) => each.kind === kind).map(({ name, mimeType, data }) => ({ name, mimeType, data }));
+      await onSend({ text: text.trim(), images: of("image"), files: of("file"), webSearch: search });
+      outgoing.forEach((each) => URL.revokeObjectURL(each.url));
     } catch {
       // The caller says why; the draft comes back, unless another was begun since.
       setDraft((current) => (current === "" ? text : current));
-      setAttached((current) => [...files, ...current]);
+      setAttached((current) => [...outgoing, ...current]);
       setSearching(search);
     } finally {
       setSending(false);
@@ -406,7 +425,7 @@ export default function PromptBar({
         type="file"
         hidden
         multiple
-        accept={images?.types.join(",")}
+        accept={files !== undefined ? undefined : images?.types.join(",")}
         onChange={(event) => {
           attach([...(event.target.files ?? [])]);
           event.target.value = "";
@@ -523,7 +542,11 @@ export default function PromptBar({
             <div className="flex flex-wrap gap-2 px-1 pt-0.5">
               {attached.map((each) => (
                 <span key={each.id} className="relative" title={each.file.name} style={{ animation: "pop-in 200ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                  <img src={each.url} alt={each.file.name} className="size-14 rounded-[10px] object-cover shadow-hairline" />
+                  {each.kind === "image" ? (
+                    <img src={each.url} alt={each.file.name} className="size-14 rounded-[10px] object-cover shadow-hairline" />
+                  ) : (
+                    <span className="flex h-14 max-w-40 items-center truncate rounded-[10px] bg-field px-3 chat-text-12 text-ink-2 shadow-hairline">{each.file.name}</span>
+                  )}
                   <button
                     type="button"
                     aria-label={`Remove ${each.file.name}`}
@@ -553,10 +576,10 @@ export default function PromptBar({
                 setModelOpen(false);
               }}
               onPaste={(event) => {
-                const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
-                if (files.length === 0 || images === undefined) return;
+                const pasted = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+                if (pasted.length === 0 || images === undefined) return;
                 event.preventDefault();
-                attach(files);
+                attach(pasted);
               }}
               onKeyDown={(event) => {
                 if (menu !== null && rows.length > 0) {
@@ -595,10 +618,10 @@ export default function PromptBar({
             />
 
             {/* "+": images, web search */}
-            {images !== undefined || webSearch !== undefined ? (
+            {images !== undefined || files !== undefined || webSearch !== undefined ? (
               <button
                 type="button"
-                aria-label={plusLabel(images !== undefined, webSearch !== undefined)}
+                aria-label={plusLabel(files !== undefined ? "Add files" : images !== undefined ? "Add images" : undefined, webSearch !== undefined)}
                 aria-expanded={plusOpen}
                 disabled={disabled}
                 onClick={() => {

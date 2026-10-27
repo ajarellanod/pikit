@@ -2,7 +2,7 @@
  * A conversation as the chat API serves it (`/chat/api/conversations/:id/…`, `chat-api.ts`), for the
  * shared view (`components/pikit/conversation.tsx`, features/completed/chat-parity.md): its transcript (entries
  * newest first, paged), its live events (a `snapshot` first, read with `fetch`: `client.ts`'s `follow`),
- * a message (text and images, checked before it goes: `images.ts`) and a stop.
+ * a message (text, images and files, checked before it goes: `images.ts`) and a stop.
  *
  * Pure: the requests go through the `ChatClient` given (`client.ts`'s in the page), so
  * `scripts/chat.test.ts` checks the URLs and bodies without a browser. Relative imports only, for the
@@ -10,7 +10,7 @@
  * it as one: TypeScript checks they agree).
  */
 
-import type { ChatEvent, ChatPage, ChatSendRequest, ChatSendResponse, ChatTranscriptEntry } from "./chat-api.ts";
+import type { ChatEvent, ChatFile, ChatPage, ChatSendRequest, ChatSendResponse, ChatTranscriptEntry } from "./chat-api.ts";
 import { messageProblem } from "./images.ts";
 import type { LiveEvent, TranscriptPage } from "./transcript.ts";
 
@@ -19,8 +19,8 @@ export interface ChatSource {
   readonly id: string;
   transcript(page: { limit: number; cursor?: string }): Promise<TranscriptPage>;
   follow(onEvent: (event: LiveEvent) => void, signal: AbortSignal): Promise<void>;
-  /** The composer's message: its text and images (never a web search: the chat has none). */
-  send(message: { text: string; images: readonly { mimeType: string; data: string }[] }): Promise<ChatSendResponse>;
+  /** The composer's message: its text, images and files (never a web search: the chat has none). */
+  send(message: { text: string; images: readonly { mimeType: string; data: string }[]; files?: readonly { name: string; mimeType: string; data: string }[] }): Promise<ChatSendResponse>;
   abort(): Promise<void>;
 }
 
@@ -57,6 +57,9 @@ export function conversationsPath({
   return `/conversations?${params}`;
 }
 
+/** The composer's files as the chat API takes them: a type only when the browser knew one. */
+export const filesOf = (files: readonly { name: string; mimeType: string; data: string }[]): ChatFile[] => files.map(({ name, mimeType, data }) => ({ name, ...(mimeType !== "" && { mimeType }), data }));
+
 /** Conversation `id` over `client`, for the shared view; `target` is `ChatConfig.target` (the image limits). */
 export function chatSource(id: string, client: ChatClient, target: string): ChatSource {
   const path = conversationPath(id);
@@ -64,11 +67,12 @@ export function chatSource(id: string, client: ChatClient, target: string): Chat
     id,
     transcript: (page) => client.get<ChatPage<ChatTranscriptEntry>>(transcriptPath(id, page)),
     follow: (onEvent, signal) => client.follow(`${path}/events`, onEvent, signal),
-    send: async ({ text, images }) => {
+    send: async ({ text, images, files = [] }) => {
       const sent = images.map(({ mimeType, data }) => ({ mimeType, data }));
-      const problem = messageProblem(text, sent, target);
+      const attached = filesOf(files);
+      const problem = messageProblem(text, sent, target, attached);
       if (problem !== undefined) throw new Error(problem);
-      const body: ChatSendRequest = { text, ...(sent.length > 0 && { images: sent }) };
+      const body: ChatSendRequest = { text, ...(sent.length > 0 && { images: sent }), ...(attached.length > 0 && { files: attached }) };
       return client.post<ChatSendResponse>(`${path}/messages`, body);
     },
     abort: async () => {

@@ -11,8 +11,13 @@
  *   the accounts actor for the list.
  *
  * **A message** goes through `admitInbound` (`inbound.normalize`, `route.resolve`, the conversation,
- * `dispatch`), its sender `{ channel: "web", id: <user id> }`, its images with it. Admitted (or a
- * duplicate: a retry), it is stored as the user's, `pending` (held while a run goes, `store.ts`);
+ * `dispatch`), its sender `{ channel: "web", id: <user id> }`, its images with it. Its other files
+ * (`files`) are written to the conversation's workspace in `beforeDispatch` (`@pikit/pi-adapter`'s
+ * `writeAttachments`, `LocalContracts.files`): `attachments/<request id>/<safe name>`, the same paths
+ * when the page sends it again; the agent's text names them, or says why one was not kept (no
+ * workspace). A write that fails refuses the message (nothing dispatched, nothing stored: `503`, the
+ * page sends it again). Admitted (or a duplicate: a retry), it is stored as the user's, its files'
+ * names alone, `pending` (held while a run goes, `store.ts`);
  * refused, nothing is stored and the refusal is the route's status. A new conversation is made by its
  * first message admitted: one whose first message is refused does not exist. A new conversation with
  * an `agent` (one the user picked, checked by the route) is made with it in the registry before
@@ -36,6 +41,7 @@
  */
 
 import type { AppContext } from "@pikit/core";
+import { type AttachmentTargets, AttachmentTooLarge, collectAttachments, type CollectedAttachments, writeAttachments } from "@pikit/pi-adapter";
 import {
   ActorCallError,
   admitInbound,
@@ -48,8 +54,21 @@ import {
   type ConversationRegistry,
   type InboundOutcome,
 } from "@pikit/contracts";
-import { type ChatCommandResult, type ChatConversation, type ChatEvent, type ChatImage, type ChatPage, type ChatProject, type ChatSendResponse, type ChatTranscriptEntry, MAX_PROJECTS } from "./api.ts";
-import { CHANNEL, firstTitle, imagesProblem, newProjectId, projectSpace } from "./chat.ts";
+import {
+  type ChatCommandResult,
+  type ChatConversation,
+  type ChatEvent,
+  type ChatFile,
+  type ChatImage,
+  type ChatPage,
+  type ChatProject,
+  type ChatSendResponse,
+  type ChatTranscriptEntry,
+  MAX_FILE_BYTES,
+  MAX_FILES,
+  MAX_PROJECTS,
+} from "./api.ts";
+import { base64Bytes, CHANNEL, filesBytesOf, filesProblem, firstTitle, imagesProblem, newProjectId, projectSpace } from "./chat.ts";
 import { userEntryOf } from "./entries.ts";
 import { liveEvents } from "./live.ts";
 import type { ChatStore, ConversationRow, EntryRow, ListQuery, MessageState, ProjectRow } from "./store.ts";
@@ -58,7 +77,7 @@ import type { ChatStore, ConversationRow, EntryRow, ListQuery, MessageState, Pro
 export type ChatRef = { userId: string; chatId: string; key: string };
 
 /** A user's message, checked by the route. JSON. */
-export type NewMessage = { text: string; images?: ChatImage[]; requestId: string };
+export type NewMessage = { text: string; images?: ChatImage[]; files?: ChatFile[]; requestId: string };
 
 /**
  * A conversation's first message, the agent the user picked (one the route allowed) and the project it
@@ -129,6 +148,8 @@ export interface LocalContracts {
   wake(ctx: AppContext): Promise<void>;
   /** The commands users may type in a chat (`agent.command`, cut by the config's `commands`). Absent: none, every message goes to the agent. */
   commands?(): CommandLookup;
+  /** Where a message's files are written (`workspace`, else `execution`). Absent, or neither installed: each is named to the agent as not kept. */
+  files?(): AttachmentTargets;
   /** The titles (`titles.ts`): a new conversation's first title, a user's rename. Absent: the row's title alone. */
   titles?: {
     creating(key: string, title: string): () => void;
@@ -136,6 +157,19 @@ export interface LocalContracts {
     renamed(key: string, title: string, ctx: AppContext): Promise<void>;
   };
 }
+
+/** A file the page sent, as the shared protocol takes it: its bytes are in the message already. */
+const sourceOf = (file: ChatFile) => ({
+  name: file.name,
+  contentType: file.mimeType,
+  async download(most: number) {
+    if (base64Bytes(file.data) > most) throw new AttachmentTooLarge();
+    return { bytes: Uint8Array.from(atob(file.data), (char) => char.charCodeAt(0)), contentType: file.mimeType };
+  },
+});
+
+/** What a message without files (or a command) brings. */
+const NO_FILES: CollectedAttachments = { images: [], text: "", files: [] };
 
 const STATE_OF: Record<string, MessageState> = { completed: "answered", aborted: "aborted", failed: "failed" };
 /** The state a run's end gives the user's messages it took. */
@@ -244,6 +278,9 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     const images = message.images ?? [];
     const wrong = imagesProblem(images, contracts.limits());
     if (wrong !== undefined) throw refusal(wrong.status === 413 ? "too_large" : "invalid_request", wrong.message);
+    const files = message.files ?? [];
+    const wrongFiles = filesProblem(files, contracts.limits());
+    if (wrongFiles !== undefined) throw refusal(wrongFiles.status === 413 ? "too_large" : "invalid_request", wrongFiles.message);
     // Before the admission: what its run writes is always later.
     const at = ctx.clock.now();
     // A command claims its request id first: sent again, it does not run again.
@@ -253,6 +290,22 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
       const prior = (await store.command(ref.key, message.requestId)) ?? { name: typed.name, outcome: "unfinished" };
       return { requestId: message.requestId, admission: "duplicate", command: prior };
     }
+    // Every file written to the workspace, none shown inline: the agent reads them with its tools. A command is its text alone.
+    const targets = contracts.files?.();
+    const attached =
+      typed !== undefined || files.length === 0
+        ? NO_FILES
+        : await collectAttachments(
+            files.map(sourceOf),
+            {
+              messageId: message.requestId,
+              limits: { perMessage: MAX_FILES, bytesEach: MAX_FILE_BYTES, bytesTotal: filesBytesOf(contracts.limits()) },
+              canWrite: targets !== undefined && (targets.workspace !== undefined || targets.execution !== undefined),
+              label: "channel-web",
+            },
+            ctx,
+            ctx.abortSignal ?? new AbortController().signal,
+          );
     const title = firstTitle(message.text, images.length);
     // A new conversation's title is the App's too (`/name`), given while its first message is dispatched.
     const forget = create ? contracts.titles?.creating(ref.key, title) : undefined;
@@ -260,7 +313,14 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     try {
       inbound = await admitInbound(
         ctx,
-        { id: message.requestId, channel: CHANNEL, conversationId: `${ref.userId}:${ref.chatId}`, actor: { id: ref.userId }, text: message.text, ...(images.length > 0 && { images }) },
+        {
+          id: message.requestId,
+          channel: CHANNEL,
+          conversationId: `${ref.userId}:${ref.chatId}`,
+          actor: { id: ref.userId },
+          text: [message.text, attached.text].filter((piece) => piece !== "").join("\n\n"),
+          ...(images.length > 0 && { images }),
+        },
         {
           conversations: contracts.conversations(),
           runtime: contracts.runtime(),
@@ -268,6 +328,7 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
           ...(project !== "" && { space: projectSpace(ref.userId, project) }),
           // Only when this message claimed its id as a command: a stage that made one of another message runs none.
           ...(typed !== undefined && allowed !== undefined && { commands: allowed }),
+          ...(attached.files.length > 0 && targets !== undefined && { beforeDispatch: (conversation) => writeAttachments(attached.files, conversation, targets, ctx, "channel-web") }),
         },
       );
     } catch (error) {
@@ -289,8 +350,11 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     // Waiting behind a run going: out of the transcript until that run's messages are in it.
     const held = admitted && outcome.admission.kind === "queued";
     // A duplicate stores it too: a retry after a crash between the admission and this write.
-    const stored = await store.addUser(ref.key, { id: message.requestId, text: message.text, ...(images.length > 0 && { images }), at, state: "pending", conversation: conversationId, held });
-    if (stored && !held) store.notify(ref.key, { type: "entry", entry: userEntryOf(ref.chatId, { id: message.requestId, text: message.text, imageTypes: images.map((image) => image.mimeType), at, state: "pending" }) });
+    const fileNames = typed === undefined ? files.map((file) => file.name) : [];
+    const stored = await store.addUser(ref.key, { id: message.requestId, text: message.text, ...(images.length > 0 && { images }), ...(fileNames.length > 0 && { fileNames }), at, state: "pending", conversation: conversationId, held });
+    if (stored && !held) {
+      store.notify(ref.key, { type: "entry", entry: userEntryOf(ref.chatId, { id: message.requestId, text: message.text, imageTypes: images.map((image) => image.mimeType), ...(fileNames.length > 0 && { fileNames }), at, state: "pending" }) });
+    }
     if (stored || admitted) {
       // The live view first, before telling the index (on Cloudflare a call to another object, while the
       // run, in this object's alarm, may already go on).

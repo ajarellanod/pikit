@@ -1,7 +1,7 @@
 /**
  * The few Telegram Bot API methods channel-telegram uses (https://core.telegram.org/bots/api), over
- * `fetch`. A thin client of our own rather than a library: five methods, and every byte of it is
- * readable in the project that owns it.
+ * `fetch`. A thin client of our own rather than a library: a handful of methods, and every byte of it
+ * is readable in the project that owns it.
  *
  * The bot token is part of every URL (`/bot<token>/<method>`), so a URL is never logged and an
  * error never quotes one: `TelegramError` carries the method, Telegram's code and description only.
