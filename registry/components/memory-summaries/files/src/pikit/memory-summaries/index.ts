@@ -1,6 +1,9 @@
 /**
- * memory-summaries: a summary of each conversation that went quiet, kept in the memory of its person
- * (`memory`, memory-sql's `contract.ts`, kind `summary`), which memory-recall's section shows.
+ * memory-summaries: a summary of each conversation that went quiet, kept in the memory of its owner
+ * (`memory`, memory-sql's `contract.ts`, kind `summary`): its space's, shared by every agent working
+ * there, or its agent's own for an agent memory-sql keeps apart (`memory.ownerOf`, never decided here;
+ * the space is the one `conversations.registry` recorded for the conversation's key). memory-recall's
+ * section shows the newest briefly, `recall` searches them, `read_memory` reads one whole.
  *
  * - **What starts it is the answers feed**, never an event alone nor `stop` (K3, K6): it reads
  *   `agent.submissions`' `answers` from its own cursor, and marks the conversation of each settled run
@@ -13,7 +16,10 @@
  *   queued) is postponed.
  * - **What is summarized** is what the conversation said since its last summary (`agent.observe`'s
  *   transcript, newest first, back to the last entry summarized): at most `MAX_ENTRIES` entries and the
- *   newest `MAX_INPUT` characters of the person's and the assistant's text. Credentials are redacted
+ *   newest `MAX_INPUT` characters of the people's and the assistant's text. The summary is structured
+ *   for retrieval (`SUMMARY_SYSTEM`: a title, topics, entities, keywords and ids, decisions, action
+ *   items, facts for later, open questions), in the conversation's language, within the store's
+ *   `MEMORY_TEXT_MAX`. Credentials are redacted
  *   from it before the model reads it, and from the model's answer before it is kept (`redact`: each
  *   word with a known credential's shape, `credentialSettingProblem`'s); an answer that still holds one
  *   (a private key's block) is not kept, and logged. Nothing new, nothing kept.
@@ -23,7 +29,9 @@
  *   again `idleMinutes` later; the others go on.
  * - **Logs never carry a transcript or a summary.**
  *
- * Targets: `server`.
+ * Targets: `server` and `durable`: it imports nothing platform-specific. On Cloudflare it runs in each
+ * conversation's Durable Object, over that object's answers feed, transcript, `wakeups` (its alarm) and
+ * storage, and keeps each summary in the owner's object through `memory`.
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
@@ -43,16 +51,29 @@ export const BATCH = 10;
 export const MAX_ENTRIES = 200;
 /** The most characters of conversation one summary reads: the newest. */
 export const MAX_INPUT = 24_000;
-/** The most tokens a summary may take. */
-export const SUMMARY_TOKENS = 600;
+/** The most tokens a summary may take: about the store's `MEMORY_TEXT_MAX` characters. */
+export const SUMMARY_TOKENS = 1_500;
 /** What a redacted credential becomes. */
 export const REDACTED = "[redacted]";
 
-/** What the model is told. */
-export const SUMMARY_SYSTEM =
-  "You summarize a conversation between a person and an assistant, for the assistant's memory of that person. " +
-  "In at most 6 short lines, in the language of the conversation: what the person wanted, what was decided or done, " +
-  "lasting facts about the person, and what is still pending. Never include passwords, keys, tokens or other secrets. Reply with the summary only.";
+/**
+ * What the model is told: a summary later conversations find by search (memory-recall's `recall`)
+ * and recognise by its title (the section shows its first line and an excerpt).
+ */
+export const SUMMARY_SYSTEM = [
+  "You summarize a conversation between people and an assistant, for the memory the assistant keeps of the place it happened in.",
+  "Later conversations find the summary by searching words, so keep exact names, identifiers, error strings and numbers.",
+  `Write in the language of the conversation, in Markdown, at most ${MEMORY_TEXT_MAX - 500} characters, in this shape (leave out a part that would be empty; never invent):`,
+  "# <a short descriptive title>",
+  "Topics: <topic>; <topic>",
+  "Entities: <people, clients, projects, files, services named>",
+  "Keywords: <exact terms, ids, error strings, config keys>",
+  "## Decisions and outcomes",
+  "## Action items",
+  "## Facts for future conversations",
+  "## Open questions",
+  "Never include passwords, keys, tokens or other secrets. Reply with the summary only.",
+].join("\n");
 
 const Config = Type.Object({
   /** `provider/modelId` of the model that writes the summaries (checked at start). */
@@ -100,6 +121,7 @@ export default defineComponent({
     const observe = pikit.use("agent.observe");
     const complete = pikit.use("model.complete");
     const memory = pikit.use("memory");
+    const conversations = pikit.use("conversations.registry");
     const idleMs = config.idleMinutes * 60_000;
 
     let app: AppContext | undefined;
@@ -166,7 +188,7 @@ export default defineComponent({
       return { newest: entries[0]?.id, text: transcriptText(entries.reverse()) };
     };
 
-    /** Summarizes one due conversation into its person's memory, or postpones it. */
+    /** Summarizes one due conversation into its owner's memory, or postpones it. */
     const summarize = async (row: SqlRow, busy: boolean, ctx: AppContext): Promise<void> => {
       const conversationId = String(row.conversation_id);
       // The wakeup's runs never overlap: no run's ingest moves a due time while this one decides.
@@ -181,8 +203,11 @@ export default defineComponent({
           if (text === "") ctx.logger.warn("memory-summaries: the model's summary was empty; nothing kept", fields);
           else if (credentialSettingProblem(text) !== undefined) ctx.logger.warn("memory-summaries: the summary still looked like it held a credential; nothing kept", fields);
           else {
-            const scope = { agent: String(row.agent), person: String(row.conversation_key) };
-            await memory.get().remember(scope, { id: `summary:${conversationId}:${read.newest}`, kind: "summary", text, createdAt: ctx.clock.now() }, ctx);
+            // The space the key's conversations belong to, as the registry recorded it (none: the key is its own).
+            const key = String(row.conversation_key);
+            const space = (await conversations.get().get(key, ctx))?.space;
+            const owner = memory.get().ownerOf({ key, agent: String(row.agent), conversationId, ...(space !== undefined && { space }) });
+            await memory.get().remember(owner, { id: `summary:${conversationId}:${read.newest}`, kind: "summary", status: "active", text, createdAt: ctx.clock.now() }, ctx);
           }
         }
         await sql.get().run(`UPDATE ${CONVERSATIONS} SET summarized_entry = COALESCE(?, summarized_entry), due = NULL WHERE conversation_id = ?`, [read?.newest ?? null, conversationId]);
@@ -227,8 +252,12 @@ export default defineComponent({
         await sql.get().run(`CREATE TABLE IF NOT EXISTS ${CURSOR} (name TEXT PRIMARY KEY, cursor TEXT NOT NULL)`);
         app = ctx.derive(() => BACKGROUND_CONTEXT);
         wakeups.get().handle(WAKEUP, run);
-        // Requests may not survive a restart (wakeups-timers keeps none): read the feed and what is due now.
-        await wakeups.get().at(WAKEUP, ctx.clock.now(), ctx);
+        // Requests may not survive a restart (wakeups-timers keeps none): read the feed and what is due now,
+        // when there is any (on Cloudflare every object's App starts it: one with nothing to do asks for no alarm).
+        const [saved] = await sql.get().query(`SELECT cursor FROM ${CURSOR} WHERE name = 'answers'`);
+        const [due] = await sql.get().query(`SELECT 1 AS due FROM ${CONVERSATIONS} WHERE due IS NOT NULL LIMIT 1`);
+        const unread = await submissions.get().answers.read(saved === undefined ? undefined : String(saved.cursor), 1);
+        if (due !== undefined || unread.items.length > 0 || unread.gap) await wakeups.get().at(WAKEUP, ctx.clock.now(), ctx);
       },
       stop() {
         app = undefined;

@@ -2,7 +2,7 @@
  * memory-summaries' tests, copied with the component. The runtime's side is doubles: the answers feed
  * and pending requests (`createMemorySubmissions`), a transcript per conversation (`agent.observe`), a
  * model that records its prompts (`model.complete`) and a `memory` that keeps by id, as memory-sql
- * does; `wakeups` in memory and the App's clock are the test's (`createManualClock`), and `storage.sql`
+ * does (owners by space, `trader` kept apart), and `conversations.registry` with each key's space; `wakeups` in memory and the App's clock are the test's (`createManualClock`), and `storage.sql`
  * is `sqliteStorage()`, so a second App over it is a restart. The component in a real App (runtime-pi,
  * memory-sql, a faux model) is `app.test.ts` beside `files/` in the registry.
  */
@@ -10,17 +10,32 @@
 import { afterEach, expect, test } from "bun:test";
 import { type App, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import { createManualClock } from "@pikit/core/testing";
-import type { AgentObserver, ConversationRef, TranscriptEntry } from "@pikit/contracts";
+import { type AgentObserver, type ConversationRef, type ConversationRegistry, spaceOf, type TranscriptEntry } from "@pikit/contracts";
 import { createMemorySubmissions, createMemoryWakeups } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import type { Memory, MemoryScope } from "./contract.ts";
-import memorySummaries, { REDACTED, redact, transcriptText } from "./index.ts";
+import type { Memory, MemoryOwner, MemoryStore } from "./contract.ts";
+import memorySummaries, { REDACTED, redact, SUMMARY_SYSTEM, transcriptText } from "./index.ts";
 
 const MINUTE = 60_000;
 const ANTHROPIC_KEY = "sk-ant-api03-summariesfixture0123456789abcd";
 const GITHUB_TOKEN = "ghp_0123456789abcdefghijABCDEFGHIJ0123";
 
-const ana: ConversationRef = { key: "telegram:1", agent: "assistant", conversationId: "c1" };
+const SPACE = "googlechat:spaces/A";
+const ana: ConversationRef = { key: `${SPACE}:threads/1`, agent: "assistant", conversationId: "c1" };
+
+/** `memory` with nothing kept: what a test that keeps nothing provides. */
+const noMemory: MemoryStore = {
+  ownerOf: (conversation) => ({ type: "space", space: spaceOf(conversation) }),
+  list: async () => [],
+  get: async () => undefined,
+  search: async () => [],
+  approve: async () => false,
+  forget: async () => false,
+  remember: async () => {},
+};
+/** The registry's record of each key: its space, as a channel gave it. */
+const registryOf = (spaces: Map<string, string>) =>
+  ({ get: async (key: string) => ({ key, agent: "assistant", conversationId: "x", channel: "googlechat", ...(spaces.has(key) && { space: spaces.get(key) }) }) }) as Partial<ConversationRegistry> as ConversationRegistry;
 const said = (id: string, role: "user" | "assistant", text: string): TranscriptEntry => ({
   id,
   kind: "message",
@@ -38,7 +53,8 @@ function world() {
   const recorded = createMemorySubmissions();
   const transcripts = new Map<string, TranscriptEntry[]>(); // newest first, as `transcript` pages them
   const prompts: string[] = [];
-  const kept = new Map<string, { scope: MemoryScope; memory: Memory }>();
+  const kept = new Map<string, { owner: MemoryOwner; memory: Memory }>();
+  const spaces = new Map([[ana.key, SPACE]]);
   const warnings: string[] = [];
   const state = { answer: (prompt: string) => `Summary: ${prompt}`, failRemember: 0, during: undefined as (() => Promise<void>) | undefined };
   const storage = sqliteStorage();
@@ -67,13 +83,13 @@ function world() {
           return state.answer(prompt);
         },
       });
+      pikit.provide("conversations.registry", registryOf(spaces));
       pikit.provide("memory", {
-        list: async () => [],
-        search: async () => [],
-        forget: async () => {},
-        remember: async (scope, memory) => {
-          const id = `${scope.agent}\0${scope.person}\0${memory.id}`;
-          if (!kept.has(id)) kept.set(id, { scope, memory });
+        ...noMemory,
+        ownerOf: (conversation) => (conversation.agent === "trader" ? { type: "agent", agent: "trader" } : { type: "space", space: spaceOf(conversation) }),
+        remember: async (owner, memory) => {
+          const id = `${JSON.stringify(owner)}\0${memory.id}`;
+          if (!kept.has(id)) kept.set(id, { owner, memory });
           // A crash after the memory was kept, before the component recorded it.
           if (state.failRemember > 0 && state.failRemember--) throw new Error("the process died here");
         },
@@ -91,10 +107,11 @@ function world() {
     warnings,
     state,
     transcripts,
+    spaces,
     recorded,
     memories: () => [...kept.values()],
     async start() {
-      app = await defineApp({ components, logger, clock, config: { "memory-summaries": { model: "faux/echo", agents: ["assistant"], idleMinutes: 30 } } }).create();
+      app = await defineApp({ components, logger, clock, config: { "memory-summaries": { model: "faux/echo", agents: ["assistant", "trader"], idleMinutes: 30 } } }).create();
       await app.start();
       await w.settle();
     },
@@ -132,7 +149,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(described.describe().components.find((component) => component.name === "memory-summaries")).toEqual({
     name: "memory-summaries",
     provides: [],
-    requires: ["storage.sql", "wakeups", "agent.submissions", "agent.observe", "model.complete", "memory"],
+    requires: ["storage.sql", "wakeups", "agent.submissions", "agent.observe", "model.complete", "memory", "conversations.registry"],
     optional: [],
   });
 });
@@ -145,12 +162,13 @@ function memoryProvider() {
       pikit.provide("agent.submissions", createMemorySubmissions().submissions);
       pikit.provide("agent.observe", {} as AgentObserver);
       pikit.provide("model.complete", { complete: async () => "" });
-      pikit.provide("memory", { list: async () => [], search: async () => [], forget: async () => {}, remember: async () => {} });
+      pikit.provide("memory", noMemory);
+      pikit.provide("conversations.registry", registryOf(new Map()));
     },
   });
 }
 
-test("a conversation quiet for idleMinutes is summarized once into its person's memory, though its wakeup runs again and the App restarts", async () => {
+test("a conversation quiet for idleMinutes is summarized once into its space's memory, though its wakeup runs again and the App restarts", async () => {
   const w = world();
   w.transcripts.set("c1", [said("e2", "assistant", "Tea it is."), said("e1", "user", "I like tea")]);
   await w.start();
@@ -162,8 +180,8 @@ test("a conversation quiet for idleMinutes is summarized once into its person's 
   expect(w.prompts).toEqual(["Person: I like tea\nAssistant: Tea it is."]);
   expect(w.memories()).toEqual([
     {
-      scope: { agent: "assistant", person: "telegram:1" },
-      memory: { id: "summary:c1:e2", kind: "summary", text: "Summary: Person: I like tea\nAssistant: Tea it is.", createdAt: w.clock.now() },
+      owner: { type: "space", space: SPACE },
+      memory: { id: "summary:c1:e2", kind: "summary", status: "active", text: "Summary: Person: I like tea\nAssistant: Tea it is.", createdAt: w.clock.now() },
     },
   ]);
 
@@ -311,4 +329,27 @@ test("redact replaces each word shaped like a known credential; prose stays", ()
     `key: ${REDACTED} token ${REDACTED}\nsha 0123456789abcdef0123456789abcdef01234567`,
   );
   expect(transcriptText([said("e1", "user", "hi"), { id: "e2", kind: "message", messages: [{ role: "toolResult", content: [{ type: "text", text: "secret output" }] }] }])).toBe("Person: hi");
+});
+
+test("each summary goes to the owner memory decides: the space the registry recorded for the key, the key when none, an agent kept apart's own", async () => {
+  const w = world();
+  const dm = { key: "googlechat:dm/ana", agent: "assistant", conversationId: "c2" };
+  const trader = { key: `${SPACE}:threads/2`, agent: "trader", conversationId: "c3" };
+  for (const id of ["c1", "c2", "c3"]) w.transcripts.set(id, [said("e1", "user", `hello from ${id}`)]);
+  w.spaces.set(trader.key, SPACE);
+  await w.start();
+  for (const [i, conversation] of [ana, dm, trader].entries()) await w.settled(conversation, `r${i}`);
+  await w.advance(30 * MINUTE);
+
+  expect(w.memories().map(({ owner, memory }) => [owner, memory.id])).toEqual([
+    [{ type: "space", space: SPACE }, "summary:c1:e1"],
+    [{ type: "space", space: "googlechat:dm/ana" }, "summary:c2:e1"],
+    [{ type: "agent", agent: "trader" }, "summary:c3:e1"],
+  ]);
+});
+
+test("the model is asked for a summary made to be found: a title, topics, entities, keywords, decisions, action items, facts, open questions", () => {
+  for (const part of ["# <a short descriptive title>", "Topics:", "Entities:", "Keywords:", "## Decisions and outcomes", "## Action items", "## Facts for future conversations", "## Open questions", "language of the conversation", "Never include passwords"]) {
+    expect(SUMMARY_SYSTEM).toContain(part);
+  }
 });
