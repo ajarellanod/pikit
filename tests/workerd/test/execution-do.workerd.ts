@@ -12,7 +12,10 @@ import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
 import { callTool, createDurableExecutionConformance, createWorkspaceGitConformance } from "@pikit/pi-adapter/execution/testing";
-import { afterEach, expect, it } from "vitest";
+import { env } from "cloudflare:workers";
+import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import executionDo from "../../../registry/components/execution-do/files/src/pikit/execution-do/index.ts";
 import { createFiles, type DurableObjectFilesStorage } from "../../../registry/components/execution-do/files/src/pikit/execution-do/files.ts";
 import { createFakeGitHub } from "../../../registry/components/execution-do/files/src/pikit/execution-do/git-server.test-support.ts";
@@ -20,7 +23,8 @@ import toolBash from "../../../registry/components/tool-bash/files/src/pikit/too
 import toolEdit from "../../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
 import toolRead from "../../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
 import toolWrite from "../../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
-import { inObject, objectHost } from "./host.ts";
+import { composeObjects } from "../src/platform.ts";
+import { inObject, objectHost, resetObjects } from "./host.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const TOKEN = "ghp_workerd-token";
@@ -200,4 +204,82 @@ it("it refuses to start in the Worker's App, which has no object", async () => {
     (thrown: unknown) => thrown,
   );
   expect(String((error as Error).cause)).toContain("WORKERS_HOST has no object");
+});
+
+// Retention on the real class (deployment-cloudflare's `Conversation`, as `PlatformConversation`), with
+// actors-do's `wakeups`: the object's own alarm deletes its workspace once it expires. `Date` (the apps'
+// clock: the tests and the objects share one isolate) is moved ahead; the test fires the alarm.
+describe("execution-do retention on a real object's alarm", () => {
+  const DAY = 24 * 60 * 60 * 1_000;
+  const start = Date.now();
+  /** From now on `Date` is `ms` past the test file's start. */
+  const at = (ms: number) => {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date"], now: start + ms, shouldAdvanceTime: true });
+  };
+  afterEach(async () => {
+    vi.useRealTimers();
+    await resetObjects();
+  });
+
+  /** An object whose App has actors-do, execution-do with `retentionDays: 1`, and a reader of its environment. */
+  const composed = () => {
+    const seen: { env?: ExecutionEnv } = {};
+    const reader = defineComponent({
+      name: "execution-reader",
+      setup(pikit) {
+        const shell = pikit.use("execution.shell");
+        return { start: () => void (seen.env = shell.get()) };
+      },
+    });
+    composeObjects([actorsDo, executionDo, reader], { "execution-do": { retentionDays: 1 } });
+    const stub = env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.newUniqueId());
+    /** Runs `work` in the object once its App started (its `health` RPC starts it). */
+    const inside = <R>(work: (workspace: ExecutionEnv, storage: DurableObjectStorage) => Promise<R>): Promise<R> =>
+      runInDurableObject(stub, async (instance: DurableObject, state) => {
+        await (instance as unknown as { health(): Promise<unknown> }).health();
+        return work(seen.env as ExecutionEnv, state.storage);
+      });
+    return { stub, inside };
+  };
+  /** The files of the object's workspace, read from its SQL (not a use). */
+  const filesOf = (storage: DurableObjectStorage) => storage.sql.exec("SELECT path FROM execution_do_nodes WHERE kind = 'file' ORDER BY path").toArray().map((row) => row.path);
+
+  it("deletes the workspace a day after its last use, by the object's alarm, after an eviction too; root is made again", async () => {
+    at(0);
+    const { stub, inside } = composed();
+    await inside(async (workspace, storage) => {
+      expect((await workspace.writeFile("/work/notes.md", "12345", ctx)).ok).toBe(true);
+      const used = storage.sql.exec("SELECT used_at FROM execution_do_retention").toArray()[0]?.used_at as number;
+      expect(await storage.getAlarm()).toBe(Math.ceil(used + DAY));
+    });
+    // Early: nothing deleted.
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    await inside(async (_workspace, storage) => expect(filesOf(storage)).toEqual(["/work/notes.md"]));
+    // Evicted, then due: the next instance's App deletes it.
+    await evictDurableObject(stub);
+    at(DAY + 60_000);
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    await inside(async (_workspace, storage) => {
+      expect(filesOf(storage)).toEqual([]);
+      expect(storage.sql.exec("SELECT path FROM execution_do_nodes WHERE path = '/work'").toArray()).toHaveLength(1);
+      expect(storage.sql.exec("SELECT used_at FROM execution_do_retention").toArray()).toEqual([]);
+    });
+  });
+
+  it("a use in between moves the expiry, stored across an eviction: the alarm when the first one was due deletes nothing", async () => {
+    at(0);
+    const { stub, inside } = composed();
+    await inside(async (workspace) => expect((await workspace.writeFile("/work/a.txt", "a", ctx)).ok).toBe(true));
+    at(12 * 60 * 60_000);
+    await inside(async (workspace) => expect((await workspace.exec("cat a.txt", undefined, ctx)).ok).toBe(true));
+    // Evicted: only what the object stored counts from here.
+    await evictDurableObject(stub);
+    at(DAY + 60_000);
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    await inside(async (_workspace, storage) => expect(filesOf(storage)).toEqual(["/work/a.txt"]));
+    at(DAY + 12 * 60 * 60_000 + 60_000);
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    await inside(async (_workspace, storage) => expect(filesOf(storage)).toEqual([]));
+  });
 });

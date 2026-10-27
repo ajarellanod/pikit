@@ -72,6 +72,8 @@ export interface Sandbox {
   running: Set<GuestRun>;
   /** Guest directories the file methods changed on the host since the last command (`Guest.sync`). */
   changed: Set<string>;
+  /** File operations and commands in flight: retention never deletes a sandbox with one. */
+  active: number;
 }
 
 const abortedFile = (path?: string) => err<never, FileError>(new FileError("aborted", "aborted", path));
@@ -177,9 +179,14 @@ class GondolinExecutionEnv implements ExecutionEnv {
   ): Promise<Result<T, FileError>> {
     const guest = this.guestPath(path);
     if (context.abortSignal?.aborted === true) return abortedFile(guest);
-    const host = await this.sandbox.mounts.toHost(guest, follow);
-    if (!host.ok) return host;
-    return this.guestResult(await work(host.value, guest));
+    this.sandbox.active++;
+    try {
+      const host = await this.sandbox.mounts.toHost(guest, follow);
+      if (!host.ok) return host;
+      return this.guestResult(await work(host.value, guest));
+    } finally {
+      this.sandbox.active--;
+    }
   }
 
   async absolutePath(path: string): Promise<Result<string, FileError>> {
@@ -364,6 +371,7 @@ class GondolinExecutionEnv implements ExecutionEnv {
       env,
       inheritEnv: options?.inheritEnv ?? true,
     };
+    this.sandbox.active++;
     try {
       const { pool, slot } = this.sandbox;
       return await pool.use(slot, signal, async (guest) => {
@@ -381,6 +389,8 @@ class GondolinExecutionEnv implements ExecutionEnv {
         return err(new ExecutionError(code, error.message, error));
       }
       return err(new ExecutionError("unknown", error instanceof Error ? error.message : String(error)));
+    } finally {
+      this.sandbox.active--;
     }
   }
 

@@ -191,6 +191,15 @@ export function createFiles(open: () => DurableObjectFilesStorage) {
       insertNode(p, "dir", DIR_MODE, 0);
     },
 
+    /** Deletes every file, directory and symlink, in one transaction: the bytes of the files that were there. */
+    clear(): number {
+      return storage.transactionSync(() => {
+        const bytes = Number(sql.exec("SELECT COALESCE(SUM(size), 0) AS bytes FROM execution_do_nodes WHERE kind = 'file'").toArray()[0]?.bytes ?? 0);
+        deleteTree("/");
+        return bytes;
+      });
+    },
+
     /** `path` and its missing parents; nothing when it is already a directory. */
     mkdirp(path: string): void {
       const p = normalize(path);

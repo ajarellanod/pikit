@@ -6,8 +6,8 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import type { Proposals, ProposalsRemote } from "@pikit/contracts";
+import { type AppContext, BACKGROUND_CONTEXT, type Clock, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
+import type { Proposals, ProposalsRemote, WakeupHandler, Wakeups } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
@@ -18,6 +18,7 @@ import { createFiles, type DurableObjectFilesStorage } from "./files.ts";
 import { branchAllowed, githubRepository, remoteKey } from "./git.ts";
 import { createFakeGitHub, type FakeGitHub } from "./git-server.test-support.ts";
 import executionDo from "./index.ts";
+import { DAY, HOUR, RETENTION_TABLE, WAKEUP } from "./retention.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const TOKEN = "ghp_test-token-never-shown";
@@ -112,7 +113,7 @@ for (const c of createLifecycleConformance(() => ({ component: hosted }))) {
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [executionDo], logger: silentLogger }).create();
-  expect(app.describe().components).toEqual([{ name: "execution-do", provides: ["execution", "execution.shell"], requires: [], optional: ["proposals"] }]);
+  expect(app.describe().components).toEqual([{ name: "execution-do", provides: ["execution", "execution.shell"], requires: [], optional: ["proposals", "wakeups"] }]);
 });
 
 /** The reason `app.start` fails with, when the host in its context is `host`. */
@@ -390,4 +391,178 @@ test("git clone: GitHub over HTTPS only, a private repository needs to be the co
   expect(github.requests.slice(before).every((request) => request.authorization === null)).toBe(true);
   await app.stop();
   await connected.app.stop();
+});
+
+// Retention (`retentionDays`): the object's workspace goes once nothing worked in it for that many days.
+
+/** A `wakeups` double: the handlers registered, and the time last asked for each name. */
+function wakeupsDouble() {
+  const handlers = new Map<string, WakeupHandler>();
+  const requests = new Map<string, number>();
+  const wakeups: Wakeups = {
+    handle: (name, handler) => void handlers.set(name, handler),
+    at: async (name, time) => void requests.set(name, time),
+    cancel: async (name) => void requests.delete(name),
+  };
+  return { wakeups, handlers, requests };
+}
+
+/** A clock `offset.ms` ahead of the real one: a test moves time by changing `offset.ms`. */
+function movableClock(): { clock: Clock; offset: { ms: number } } {
+  const offset = { ms: 0 };
+  return { clock: { now: () => Date.now() + offset.ms, sleep: (ms) => Bun.sleep(ms) }, offset };
+}
+
+/** A started app with retention over `storage`, a `wakeups` double unless `withoutWakeups`, and its logs. */
+async function retained(options: { storage?: DurableObjectFilesStorage; config?: Record<string, unknown>; clock?: Clock; wakeups?: ReturnType<typeof wakeupsDouble>; withoutWakeups?: boolean } = {}) {
+  const storage = options.storage ?? fakeDurableObjectStorage();
+  const double = options.wakeups ?? wakeupsDouble();
+  let found: ExecutionEnv | undefined;
+  let context: AppContext | undefined;
+  const reader = defineComponent({
+    name: "execution-reader",
+    setup(pikit) {
+      const shell = pikit.use("execution.shell");
+      return { start: (ctx) => void ((found = shell.get()), (context = ctx)) };
+    },
+  });
+  const provider = defineComponent({ name: "wakeups-test", setup: (pikit) => void (options.withoutWakeups !== true && pikit.provide("wakeups", double.wakeups)) });
+  const logs: { level: string; message: string; fields?: Record<string, unknown> }[] = [];
+  const push = (level: string) => (message: string, fields?: Record<string, unknown>) => void logs.push({ level, message, ...(fields !== undefined && { fields }) });
+  const app = await defineApp({
+    components: [provider, executionDo, reader],
+    config: { "execution-do": options.config ?? { retentionDays: 30 } },
+    logger: { debug: push("debug"), info: push("info"), warn: push("warn"), error: push("error") },
+    ...(options.clock !== undefined && { clock: options.clock }),
+  }).create();
+  await app.start(withContextValue(WORKERS_HOST, fakeObjectHost(storage), ctx));
+  if (found === undefined || context === undefined) throw new Error("execution was not resolved");
+  const handler = context;
+  /** Runs the retention wakeup, as its alarm would. */
+  const wake = async () => {
+    const run = double.handlers.get(WAKEUP);
+    if (run === undefined) throw new Error("no retention handler");
+    await run(handler);
+  };
+  return { app, storage, env: found, logs, requests: double.requests, double, wake };
+}
+
+const usedAt = (storage: DurableObjectFilesStorage) => storage.sql.exec(`SELECT used_at FROM ${RETENTION_TABLE}`).toArray()[0]?.used_at as number | undefined;
+const DELETED = "execution-do: deleted the workspace, unused for 30 days (retentionDays)";
+
+// With retention, the environment is still pi-durable's whole ExecutionEnv (its calls are noted and counted, nothing else).
+for (const c of createDurableExecutionConformance(async () => {
+  const { app, env } = await retained();
+  return { env, dispose: () => app.stop() };
+}, { expect, watch: false })) {
+  test(`execution-do with retention ${c.group}: ${c.name}`, () => c.run());
+}
+
+test("retention: a use is noted with a wakeup at its expiry, at most once an hour; the wakeup deletes everything once due, and root is made again", async () => {
+  const { clock, offset } = movableClock();
+  const s = await retained({ clock });
+  // Nothing used yet: nothing noted, no wakeup.
+  expect(usedAt(s.storage)).toBeUndefined();
+  expect(s.requests.size).toBe(0);
+  expect((await s.env.writeFile("/work/notes.md", "12345", ctx)).ok).toBe(true);
+  expect((await s.env.writeFile("/tmp/spill.log", "abc", ctx)).ok).toBe(true);
+  const first = usedAt(s.storage) as number;
+  expect(first).toBeGreaterThan(Date.now() - 60_000);
+  expect(s.requests.get(WAKEUP)).toBe(first + 30 * DAY);
+  // Within the hour: not noted again.
+  offset.ms = 30 * 60_000;
+  await s.env.readTextFile("/work/notes.md", ctx);
+  expect(usedAt(s.storage)).toBe(first);
+
+  // Due: everything goes, root is made again, the bytes are logged (no file name).
+  offset.ms = 31 * DAY;
+  await s.wake();
+  expect(s.logs).toContainEqual({ level: "info", message: DELETED, fields: { bytes: 8 } });
+  expect(JSON.stringify(s.logs)).not.toContain("notes.md");
+  expect(await s.env.listDir("/work", ctx)).toEqual({ ok: true, value: [] });
+  expect(await s.env.exists("/tmp/spill.log", ctx)).toEqual({ ok: true, value: false });
+  // The listing above was a use: a new count, from now.
+  expect(usedAt(s.storage)).toBeGreaterThan(Date.now() + 30 * DAY);
+  await s.app.stop();
+});
+
+test("retention: woken early, or after a use since, it asks again for the expiry and deletes nothing", async () => {
+  const { clock, offset } = movableClock();
+  const s = await retained({ clock });
+  expect((await s.env.writeFile("/work/a.txt", "a", ctx)).ok).toBe(true);
+  offset.ms = 10 * DAY;
+  await s.wake();
+  expect(s.requests.get(WAKEUP)).toBe((usedAt(s.storage) as number) + 30 * DAY);
+  // A use 20 days in: the expiry moves.
+  offset.ms = 20 * DAY;
+  expect((await run(s.env, "cat a.txt")).output).toBe("a");
+  offset.ms = 31 * DAY;
+  await s.wake();
+  expect(await s.env.readTextFile("/work/a.txt", ctx)).toEqual({ ok: true, value: "a" });
+  expect(s.requests.get(WAKEUP)).toBeGreaterThan(Date.now() + 49 * DAY);
+  await s.app.stop();
+});
+
+test("retention: a command running keeps the workspace (asked again in an hour); once it ended, it goes", async () => {
+  const { clock, offset } = movableClock();
+  const s = await retained({ clock });
+  expect((await s.env.writeFile("/work/a.txt", "a", ctx)).ok).toBe(true);
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  globalThis.fetch = (async () => {
+    await held;
+    return new Response("done");
+  }) as unknown as typeof fetch;
+  const command = run(s.env, "curl -s https://example.test/slow");
+  await Bun.sleep(10);
+  offset.ms = 31 * DAY;
+  await s.wake();
+  expect(s.requests.get(WAKEUP)).toBeLessThanOrEqual(Date.now() + 31 * DAY + HOUR);
+  expect(await s.env.readTextFile("/work/a.txt", ctx)).toEqual({ ok: true, value: "a" });
+  release();
+  expect((await command).output).toBe("done");
+  // The reads above were uses: due again 30 days after them.
+  offset.ms = 62 * DAY;
+  await s.wake();
+  expect(s.logs.some((log) => log.message === DELETED)).toBe(true);
+  await s.app.stop();
+});
+
+test("retention: the last use survives a restart; files from before retention start their count at start", async () => {
+  const { clock, offset } = movableClock();
+  const storage = fakeDurableObjectStorage();
+  // Files written without retention: no row, no wakeup.
+  const plain = await started({ storage });
+  expect((await plain.env.writeFile("/work/old.txt", "old", ctx)).ok).toBe(true);
+  await plain.app.stop();
+
+  const first = await retained({ storage, clock });
+  const noted = usedAt(storage) as number;
+  expect(noted).toBeGreaterThan(Date.now() - 60_000);
+  expect(first.requests.get(WAKEUP)).toBe(noted + 30 * DAY);
+  await first.app.stop();
+
+  // A new instance (an eviction): the row is read again; due, it deletes.
+  offset.ms = 31 * DAY;
+  const second = await retained({ storage, clock });
+  await second.wake();
+  expect(second.logs).toContainEqual({ level: "info", message: DELETED, fields: { bytes: 3 } });
+  expect(usedAt(storage)).toBeUndefined();
+  // Nothing noted since: woken again, nothing to do.
+  await second.wake();
+  expect(second.logs.filter((log) => log.message === DELETED)).toHaveLength(1);
+  await second.app.stop();
+});
+
+test("retention: without retentionDays nothing is noted, no wakeup is asked for, nothing deleted; with it, wakeups is required", async () => {
+  const double = wakeupsDouble();
+  const s = await retained({ config: {}, wakeups: double });
+  expect((await s.env.writeFile("/work/a.txt", "a", ctx)).ok).toBe(true);
+  expect(double.handlers.size).toBe(0);
+  expect(double.requests.size).toBe(0);
+  expect(s.storage.sql.exec(`SELECT name FROM sqlite_master WHERE name = '${RETENTION_TABLE}'`).toArray()).toEqual([]);
+  await s.app.stop();
+  const refused: unknown = await retained({ withoutWakeups: true }).catch((error: unknown) => error);
+  expect(String((refused as { cause?: unknown }).cause)).toContain("retentionDays needs `wakeups`");
+  for (const retentionDays of [0, 1.5]) await expect(retained({ config: { retentionDays } })).rejects.toThrow();
 });

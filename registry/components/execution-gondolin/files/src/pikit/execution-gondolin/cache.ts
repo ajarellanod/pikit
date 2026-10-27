@@ -19,6 +19,11 @@ export class SandboxCache<T> {
     return this.entries.size;
   }
 
+  /** The entries held, by id; their order is unchanged. Every entry that is not idle is among them. */
+  all(): IterableIterator<[string, T]> {
+    return this.entries.entries();
+  }
+
   /** The entry of `id`, made by `make` when there is none, now the most recently used. */
   get(id: string, make: () => T): T {
     const found = this.entries.get(id) ?? make();

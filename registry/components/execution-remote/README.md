@@ -145,7 +145,9 @@ its host's provider, injected outside the sandbox: execution-gondolin does it at
 - **On a server, an environment per chat and agent**, kept for the App's life and never
   forgotten (as it was per key before): small objects (an id, a working directory), but their number
   grows with every chat and agent the App ever resolved, until it restarts. The sandboxes
-  themselves are the host's and stay until its provider removes them.
+  themselves are the host's and stay until its provider removes them: with `retentionDays` in the
+  host's provider (execution-gondolin, workspace-local), a sandbox nobody used for that many days is
+  deleted, and its next use here finds it new and empty (execution-serve's README).
 - **Each request is HTTP**, a round trip to the host: a tool call that reads many files is slower
   than on a local disk. Keep the host near the Workers that use it.
 - Isolation, resources and network policy are the sandbox provider's (execution-gondolin's README).

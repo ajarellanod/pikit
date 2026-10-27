@@ -13,7 +13,8 @@
  * - has its files in `<root>/chats/<hex SHA-256 of the chat>/<agent>/` (or `<root>/agents/<agent>/`)
  *   on the host, `/workspace` in the guest
  *   (a Gondolin VFS mount), and its temporary files in `<root>/.execution-gondolin-tmp/...`,
- *   `/tmp/pikit` in the guest (emptied at start: the one directory this component deletes).
+ *   `/tmp/pikit` in the guest (emptied at start: with image checkpoints and, with `retentionDays`, old
+ *   chats' sandboxes, all this component deletes).
  *   Start refuses a `root` that is the working directory, holds it, or is `/`. The file tools work on the host directories (`env.ts`, `paths.ts`): a
  *   conversation that only reads and writes files never boots a VM. No path, and no link the guest
  *   made, leads them outside these two directories. Each directory from `root` down to them must be
@@ -43,6 +44,10 @@
  * The sandboxes of conversations are held in a bounded cache (`cache.ts`): an idle one is dropped and
  * rebuilt at its next `resolve`, its files untouched.
  *
+ * With `retentionDays`, a chat's sandboxes (every agent's in it) are deleted once nothing worked in
+ * them for that many days, never while one is in use (`retention.ts`); `workspace: "agent"` ones and
+ * `default` never. Without it (the default), nothing a sandbox holds is ever deleted.
+ *
  * Start refuses when QEMU is missing, or when secrets (the base's or a profile's) are configured
  * without a `secrets` provider; it warns when Linux has no KVM (QEMU then emulates, slowly), and, where
  * `agent.definition`s are provided, of a profile none has (a live agent's, `agent.directory`, is not
@@ -64,7 +69,8 @@ import { createSandboxEnv, type Sandbox, TMP, WORKSPACE } from "./env.ts";
 import { gondolinLauncher } from "./gondolin.ts";
 import type { GuestLauncher, GuestProposals, GuestSpec } from "./guest.ts";
 import { Mounts } from "./paths.ts";
-import { Pool, type PoolLog, Slot } from "./pool.ts";
+import { Pool, Slot } from "./pool.ts";
+import { Retention, type RetentionLog } from "./retention.ts";
 
 /**
  * A variable name: a secret's name is the guest's `$NAME` and the name in `secrets`. Never one of
@@ -147,6 +153,12 @@ const Config = Type.Object({
    * (a misspelled key too) gets the base.
    */
   agents: Type.Record(Type.String(), Profile, { default: {}, propertyNames: { pattern: AGENT_NAME, maxLength: 100 } }),
+  /**
+   * Deletes a chat's sandboxes (every agent's in it, `workspace: "chat"`) once nothing has worked in
+   * them for this many days: no command, no file read or written. Never one in use, never a
+   * `workspace: "agent"` one. Absent (the default): kept forever. Global only.
+   */
+  retentionDays: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
 type Profile = Static<typeof Profile>;
@@ -176,6 +188,9 @@ export const TMP_DIR = ".execution-gondolin-tmp";
 
 /** Where the image with `packages` is kept, under `root`: made when needed, its stale checkpoints removed then. */
 export const IMAGE_DIR = ".execution-gondolin-image";
+
+/** Where each chat's last use is noted, under `root`, with `retentionDays` (`retention.ts`). */
+export const USED_DIR = ".execution-gondolin-used";
 
 /** The warning for a profile no `agent.definition` has. */
 export const PROFILE_WARNING =
@@ -231,7 +246,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
       const root = resolve(config.root);
       /** Every secret name, of the base and of every profile: what the pool reads. */
       const secretNames = [...new Set([config.secrets, ...Object.values(config.agents).map((profile) => profile.secrets ?? [])].flat().map((secret) => secret.name))];
-      let log: PoolLog = { info: () => {}, warn: () => {} };
+      let log: RetentionLog = { debug: () => {}, info: () => {}, warn: () => {} };
       let background: AppContext | undefined;
       /** The proposals repository when it is a path on this machine (proposals-local), read at each use. */
       const guestProposals: GuestProposals = {
@@ -298,6 +313,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           slot: new Slot(name, spec),
           running: new Set(),
           changed: new Set(),
+          active: 0,
         };
       }
 
@@ -326,11 +342,27 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
       pikit.provide("execution.shell", defaultEnv);
 
       // By the sandbox's path under `root` (`chats/<chat>/<agent>`, `agents/<agent>`). Bounded: an entry
-      // with a VM or a running command is never dropped, so a sandbox never has two.
-      const conversations = new SandboxCache<{ box: Sandbox; env: ExecutionEnv }>(
-        KEEP_SANDBOXES,
-        ({ box }) => box.slot.guest === undefined && box.slot.busy === 0 && box.running.size === 0,
-      );
+      // with a VM, a running command or a file operation in flight is never dropped, so a sandbox never
+      // has two, and retention sees every sandbox in use among the entries.
+      const idle = (box: Sandbox) => box.slot.guest === undefined && box.slot.busy === 0 && box.running.size === 0 && box.active === 0;
+      const conversations = new SandboxCache<{ box: Sandbox; env: ExecutionEnv }>(KEEP_SANDBOXES, ({ box }) => idle(box));
+      const retention =
+        config.retentionDays === undefined
+          ? undefined
+          : new Retention({
+              chats: join(root, CHATS_DIR),
+              tmp: join(root, TMP_DIR, CHATS_DIR),
+              markers: join(root, USED_DIR),
+              trash: join(root, TMP_DIR, "retired"),
+              days: config.retentionDays,
+              clock: pikit.clock,
+              live: (chat) => {
+                const prefix = join(CHATS_DIR, chat) + sep;
+                for (const [path, { box }] of conversations.all()) if (path.startsWith(prefix) && !idle(box)) return true;
+                return false;
+              },
+              log: { debug: (message, fields) => log.debug(message, fields), info: (message, fields) => log.info(message, fields), warn: (message, fields) => log.warn(message, fields) },
+            });
       const provider: WorkspaceProvider = {
         async resolve(conversation: ConversationRef) {
           const agent = conversation.agent;
@@ -342,6 +374,8 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           let path: string;
           let label: string;
           let whose: string;
+          /** The chat's directory, for retention; none for an agent's one sandbox. */
+          let chatDir: string | undefined;
           if ((profile?.workspace ?? config.workspace) === "agent") {
             path = join(AGENTS_DIR, agent);
             label = `pikit ${agent}`;
@@ -353,6 +387,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
               throw new Error(`execution-gondolin: the conversation's chat (its origin's key) is ${JSON.stringify(chat)}: a sandbox needs a non-empty key`);
             }
             const dir = chatDirectory(chat);
+            chatDir = dir;
             path = join(CHATS_DIR, dir, agent);
             label = `pikit ${agent} ${dir.slice(0, 12)}`;
             whose = `agent ${JSON.stringify(agent)} in chat ${JSON.stringify(chat.slice(0, SHOWN_KEY))}`;
@@ -361,6 +396,8 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
             const box = sandbox(path, path, label, profile);
             return { box, env: createSandboxEnv(box) };
           });
+          // Noted before anything awaits; waits for a retirement of the chat in progress, which leaves no directory.
+          if (chatDir !== undefined) await retention?.use(chatDir);
           // Every call: a directory removed meanwhile is made again, and one made already costs nothing.
           await made(found.box, whose);
           return { env: found.env };
@@ -393,8 +430,11 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           // Temporary files and spilled output of an earlier process: no VM and no tool refers to them now.
           await rm(join(root, TMP_DIR), { recursive: true, force: true });
           await made(fallback, '"default" (execution)');
+          // In the background: a first sweep may have much to delete.
+          retention?.start();
         },
         async stop() {
+          await retention?.stop();
           await pool.stop();
         },
       };

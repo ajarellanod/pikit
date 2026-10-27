@@ -14,7 +14,8 @@
   },
   "optional": {
     "capabilities": [
-      "proposals"
+      "proposals",
+      "wakeups"
     ]
   },
   "provides": [

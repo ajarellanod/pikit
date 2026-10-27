@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHttpHooks, type SecretManager } from "@earendil-works/gondolin";
 import type { ConversationRef } from "@pikit/contracts";
-import { type App, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { type App, type Clock, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger, systemClock } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@pikit/pi-adapter/execution";
@@ -23,8 +23,9 @@ import { FakeLauncher } from "./fake-guest.test-support.ts";
 import { SandboxCache } from "./cache.ts";
 import { GondolinGuest, gitConfig, imageFile, proposalsHook, staleImages } from "./gondolin.ts";
 import { type GuestSpec, PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
-import { createExecutionGondolin, holdsWorkingDirectory, IMAGE_DIR, KEEP_SANDBOXES, PROFILE_WARNING, TMP_DIR } from "./index.ts";
+import { createExecutionGondolin, holdsWorkingDirectory, IMAGE_DIR, KEEP_SANDBOXES, PROFILE_WARNING, TMP_DIR, USED_DIR } from "./index.ts";
 import { qemuBinary, qemuProblem } from "./qemu.ts";
+import { DAY, Retention } from "./retention.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const directories: string[] = [];
@@ -60,9 +61,12 @@ interface Started {
 }
 
 /** A started app with the component over `launcher`, its root in a new directory. */
-async function started(config: Record<string, unknown> = {}, options: { launcher?: FakeLauncher; providers?: ComponentDefinition[] } = {}): Promise<Started> {
+async function started(
+  config: Record<string, unknown> = {},
+  options: { launcher?: FakeLauncher; providers?: ComponentDefinition[]; clock?: Clock; root?: string } = {},
+): Promise<Started> {
   const launcher = options.launcher ?? new FakeLauncher();
-  const root = join(temporaryDir(), "gondolin");
+  const root = options.root ?? join(temporaryDir(), "gondolin");
   let found: Pick<Started, "execution" | "shell" | "workspace"> | undefined;
   const reader = defineComponent({
     name: "execution-reader",
@@ -75,7 +79,7 @@ async function started(config: Record<string, unknown> = {}, options: { launcher
   });
   const logs: Started["logs"] = [];
   const logger: Logger = {
-    debug: () => {},
+    debug: (message, fields) => void logs.push({ level: "debug", message, ...(fields !== undefined && { fields }) }),
     info: (message, fields) => void logs.push({ level: "info", message, ...(fields !== undefined && { fields }) }),
     warn: (message, fields) => void logs.push({ level: "warn", message, ...(fields !== undefined && { fields }) }),
     error: (message, fields) => void logs.push({ level: "error", message, ...(fields !== undefined && { fields }) }),
@@ -84,6 +88,7 @@ async function started(config: Record<string, unknown> = {}, options: { launcher
     components: [...(options.providers ?? []), createExecutionGondolin(launcher), reader],
     config: { "execution-gondolin": { root, ...config } },
     logger,
+    ...(options.clock !== undefined && { clock: options.clock }),
   }).create();
   await app.start();
   if (found === undefined) throw new Error("execution was not resolved");
@@ -1032,4 +1037,195 @@ test("what the file tools change on the host, the next command sees: its directo
   await run(env, "ls");
   expect(guest?.syncs[1]).toEqual(["/workspace", "/workspace/project", "/workspace/project/docs"]);
   await s.app.stop();
+});
+
+// Retention (`retentionDays`): a chat's sandboxes go once nothing worked in them for that many days.
+
+/** A clock `offset.ms` ahead of the real one, with short sleeps: a test moves time by changing `offset.ms`. */
+function movableClock(): { clock: Clock; offset: { ms: number } } {
+  const offset = { ms: 0 };
+  return { clock: { now: () => Date.now() + offset.ms, sleep: (ms) => Bun.sleep(Math.min(ms, 5)) }, offset };
+}
+
+/** How many sweeps retention has run in `s`. */
+const sweeps = (s: Started) => s.logs.filter((log) => log.message === "execution-gondolin: retention swept").length;
+/** The marker noting the last use of chat `test:<id>`. */
+const marker = (root: string, id: string) => join(root, USED_DIR, chat(id));
+const RETIRED = "execution-gondolin: deleted the sandboxes of chats unused for 30 days (retentionDays)";
+
+test("retention: at start, a chat unused for retentionDays loses every agent's sandbox; a fresh one, a shared agent's, default, and one never noted stay", async () => {
+  const root = join(temporaryDir(), "gondolin");
+  const config = { retentionDays: 30, agents: { librarian: { workspace: "agent" } } };
+  const first = await started(config, { root });
+  for (const agent of ["support", "developer"]) {
+    const { env } = await first.workspace.resolve(ref("old", agent), first.app.context());
+    expect((await env.writeFile("notes.md", "12345", ctx)).ok).toBe(true);
+  }
+  expect((await (await first.env("fresh")).writeFile("kept.txt", "kept", ctx)).ok).toBe(true);
+  const { env: shelf } = await first.workspace.resolve(ref("old", "librarian"), first.app.context());
+  expect((await shelf.writeFile("shelf.md", "shelf", ctx)).ok).toBe(true);
+  await first.app.stop();
+  // The markers outlive the process: the old chat was last used 31 days ago (the fresh one, now).
+  expect(Number(readFileSync(marker(root, "fresh"), "utf8"))).toBeGreaterThan(Date.now() - 60_000);
+  writeFileSync(marker(root, "old"), String(Date.now() - 31 * DAY));
+  // A chat from before retention was set: no marker.
+  mkdirSync(join(root, dir("unmarked")), { recursive: true });
+
+  const second = await started(config, { root });
+  await until(() => sweeps(second) === 1);
+  expect(existsSync(join(root, "chats", chat("old")))).toBe(false);
+  expect(existsSync(marker(root, "old"))).toBe(false);
+  expect(readFileSync(join(root, dir("fresh"), "kept.txt"), "utf8")).toBe("kept");
+  expect(readFileSync(join(root, "agents", "librarian", "shelf.md"), "utf8")).toBe("shelf");
+  expect(existsSync(join(root, "default"))).toBe(true);
+  // Its count starts now.
+  expect(existsSync(join(root, dir("unmarked")))).toBe(true);
+  expect(Number(readFileSync(marker(root, "unmarked"), "utf8"))).toBeGreaterThan(Date.now() - 60_000);
+  // Counts and bytes, never a chat.
+  expect(second.logs).toContainEqual({ level: "info", message: RETIRED, fields: { chats: 1, bytes: 10 } });
+  expect(JSON.stringify(second.logs)).not.toContain(chat("old"));
+  expect(JSON.stringify(second.logs)).not.toContain("test:old");
+  expect(readdirSync(join(root, TMP_DIR, "retired"))).toEqual([]);
+  // The chat again: a new, empty workspace.
+  expect(await (await second.env("old")).listDir(".", ctx)).toEqual({ ok: true, value: [] });
+  await second.app.stop();
+});
+
+test("retention: without retentionDays nothing is noted and nothing deleted, however old", async () => {
+  const { clock, offset } = movableClock();
+  const s = await started({}, { clock });
+  expect((await (await s.env("1")).writeFile("a.txt", "a", ctx)).ok).toBe(true);
+  offset.ms = 3650 * DAY;
+  await s.app.stop();
+  const again = await started({}, { clock, root: s.root });
+  expect((await (await again.env("2")).writeFile("b.txt", "b", ctx)).ok).toBe(true);
+  await Bun.sleep(30);
+  expect(readFileSync(join(s.root, dir("1"), "a.txt"), "utf8")).toBe("a");
+  expect(existsSync(join(s.root, USED_DIR))).toBe(false);
+  expect(again.logs.some((log) => log.message.includes("retention"))).toBe(false);
+  await again.app.stop();
+});
+
+test("retention: each use refreshes a chat's count; the sweep runs every hour on the app's clock, temporary files included", async () => {
+  const { clock, offset } = movableClock();
+  const s = await started({ retentionDays: 30 }, { clock });
+  await until(() => sweeps(s) === 1);
+  expect((await (await s.env("active")).writeFile("a.txt", "a", ctx)).ok).toBe(true);
+  const idle = await s.env("idle");
+  expect((await idle.writeFile("b.txt", "b", ctx)).ok).toBe(true);
+  expect((await idle.createTempFile({ prefix: "spill-" }, ctx)).ok).toBe(true);
+  expect(readdirSync(join(s.root, TMP_DIR, dir("idle")))).toHaveLength(1);
+
+  // 29 days later: a sweep (an hour has passed), nothing old enough; the active chat is used again.
+  offset.ms = 29 * DAY;
+  await until(() => sweeps(s) === 2);
+  expect(existsSync(join(s.root, dir("idle")))).toBe(true);
+  await s.env("active");
+  expect(Number(readFileSync(marker(s.root, "active"), "utf8"))).toBeGreaterThan(Date.now() + 28 * DAY);
+
+  // 31 days: the idle chat goes, its temporary files with it; the active one, used 2 days ago, stays.
+  offset.ms = 31 * DAY;
+  await until(() => sweeps(s) === 3);
+  expect(existsSync(join(s.root, "chats", chat("idle")))).toBe(false);
+  expect(existsSync(join(s.root, TMP_DIR, "chats", chat("idle")))).toBe(false);
+  expect(readFileSync(join(s.root, dir("active"), "a.txt"), "utf8")).toBe("a");
+  expect(s.logs).toContainEqual({ level: "info", message: RETIRED, fields: { chats: 1, bytes: 1 } });
+  // Used again, it works in a new, empty directory.
+  const back = await s.env("idle");
+  expect((await back.writeFile("c.txt", "c", ctx)).ok).toBe(true);
+  expect(readdirSync(join(s.root, dir("idle")))).toEqual(["c.txt"]);
+  await s.app.stop();
+});
+
+test("retention: a chat in use is kept however old (a command running, a VM up), and goes once neither is", async () => {
+  const launcher = new FakeLauncher();
+  launcher.respond = (command) => (command.command === "hang" ? { hang: true } : { exitCode: 0 });
+  const { clock, offset } = movableClock();
+  const s = await started({ retentionDays: 1, idleSeconds: 0.5 }, { launcher, clock });
+  await until(() => sweeps(s) === 1);
+  const running = await s.env("running");
+  const command = running.exec("hang", undefined, ctx);
+  await until(() => launcher.guests.some((guest) => guest.running === 1));
+  expect((await run(await s.env("booted"), "true")).result.ok).toBe(true);
+  await s.env("unused");
+
+  offset.ms = 2 * DAY;
+  await until(() => sweeps(s) === 2);
+  expect(existsSync(join(s.root, "chats", chat("unused")))).toBe(false);
+  expect(existsSync(join(s.root, dir("running")))).toBe(true);
+  expect(existsSync(join(s.root, dir("booted")))).toBe(true);
+
+  await running.cleanup(ctx);
+  await command;
+  await until(() => launcher.live.length === 0);
+  offset.ms = 2 * DAY + 2 * 3_600_000;
+  await until(() => sweeps(s) === 3);
+  expect(existsSync(join(s.root, "chats", chat("running")))).toBe(false);
+  expect(existsSync(join(s.root, "chats", chat("booted")))).toBe(false);
+  await s.app.stop();
+});
+
+test("retention: a command issued while the start sweep runs works, in its chat's directory kept or made anew", async () => {
+  const root = join(temporaryDir(), "gondolin");
+  const first = await started({ retentionDays: 1 }, { root });
+  expect((await (await first.env("1")).writeFile("old.txt", "old", ctx)).ok).toBe(true);
+  await first.app.stop();
+  writeFileSync(marker(root, "1"), String(Date.now() - 2 * DAY));
+
+  const s = await started({ retentionDays: 1 }, { root });
+  const env = await s.env("1");
+  expect((await env.writeFile("new.txt", "new", ctx)).ok).toBe(true);
+  expect((await run(env, "true")).result.ok).toBe(true);
+  await until(() => sweeps(s) === 1);
+  expect(readFileSync(join(root, dir("1"), "new.txt"), "utf8")).toBe("new");
+  await s.app.stop();
+});
+
+test("retention: a use and a retirement of one chat never overlap: a use first keeps it, a retirement first is waited for", async () => {
+  const root = temporaryDir();
+  const options = {
+    chats: join(root, "chats"),
+    tmp: join(root, "tmp"),
+    markers: join(root, "used"),
+    trash: join(root, "trash"),
+    days: 1,
+    clock: systemClock,
+    live: () => false,
+    log: { debug: () => {}, info: () => {}, warn: () => {} },
+  };
+  const name = chat("x");
+  const workspace = join(root, "chats", name, "support");
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(join(workspace, "old.txt"), "old");
+  const old = Date.now() + 1; // every use before this is old
+
+  // Used first: the retirement that follows keeps it. In use: kept too.
+  const using = new Retention(options);
+  const used = using.use(name);
+  expect(using.retire(name, old - 1000)).toBeUndefined();
+  await used;
+  expect(new Retention({ ...options, live: () => true }).retire(name, old)).toBeUndefined();
+  expect(existsSync(join(workspace, "old.txt"))).toBe(true);
+
+  // Retired first: the use waits until the directory is moved away, then works in a new one.
+  const retention = new Retention(options);
+  const retiring = retention.retire(name, old);
+  expect(retiring).toBeDefined();
+  const waited = retention.use(name).then(() => {
+    expect(existsSync(join(root, "chats", name))).toBe(false);
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(workspace, "new.txt"), "new");
+  });
+  expect(await retiring).toBe(3);
+  await waited;
+  expect(readdirSync(workspace)).toEqual(["new.txt"]);
+  expect(readdirSync(join(root, "trash"))).toEqual([]);
+  // The waiting use noted itself after the retirement removed the old marker.
+  expect(Number(readFileSync(join(root, "used", name), "utf8"))).toBeGreaterThan(Date.now() - 60_000);
+});
+
+test("retention: retentionDays is a whole number of days, at least 1, and global only", async () => {
+  for (const config of [{ retentionDays: 0 }, { retentionDays: 1.5 }, { agents: { developer: { retentionDays: 3 } } }]) {
+    await expect(started(config)).rejects.toThrow();
+  }
 });

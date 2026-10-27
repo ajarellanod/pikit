@@ -7,7 +7,8 @@ with `git`, `node` and `curl`. pi-durable's own `read`, `write`, `edit` and `bas
 - **Provides:** `execution` and `execution.shell` (one pi-durable `ExecutionEnv`, `env.ts`, whose files are the object's own namespace: `execution-do:<object id>`).
 - **Requires:** nothing. **Optional:** `proposals` (proposals-github): where the agent pushes, under
   which prefix, and the credential for it. Without it, or while it is not connected, clones are
-  public and read-only.
+  public and read-only. `wakeups` (actors-do): only with `retentionDays`, which needs it (start
+  refuses without).
 - **Target:** `durable`. On a server, use `execution-local`.
 - **Installs to:** `src/pikit/execution-do/`.
 - **npm dependencies:** `just-bash` 3.4.2, `isomorphic-git` 1.42.3, `quickjs-emscripten-core` and
@@ -50,6 +51,31 @@ context, and refuses to start without it, or on an object without SQLite.
 - **No file watching.** `watch` answers `not_supported`: only the object changes its files. pi-durable's
   `ExecutionEnv` suite passes on everything else, in workerd too.
 
+## Retention
+
+The object is the chat (`idFromName(key)`: a reset keeps the key, delegated children live in it), so
+its files are the chat's workspace, every agent's in it. With `retentionDays: N`, they are deleted
+once nothing has worked in them for N days. Absent (the default), nothing is ever deleted: deleting
+what agents wrote must be asked for.
+
+- **What counts as use**: any call of the environment (a command, a file read or written), noted in
+  memory at once and, at most once an hour, in the object's SQL (`execution_do_retention`, one row)
+  with a `wakeups` request for the day it expires: the object's own alarm wakes it then, once.
+- **Woken**, it checks again: a call running (a command, a file operation) asks again in an hour; a
+  use since asks again for its own expiry; else every file, directory and symlink of the
+  `execution_do_*` tables goes (`/work`, `/tmp`, clones), `root` is made again, and the bytes are
+  logged (never a file's name). The check and the deletion are synchronous, as the object's SQL is:
+  no call starts between them, and one after finds an empty workspace, never a half-deleted one.
+- **Not deleted**: the conversation's own records (its transcript, in other components' tables). Only
+  this component's files.
+- **Files from before**: an object that has files but no row (they predate `retentionDays`) starts
+  its count at its next start (any event: a message, an alarm).
+- **Its limit**: an object is code only while an event runs. One that never wakes after `retentionDays`
+  is set (a chat nobody writes to again) is never looked at: Cloudflare offers no way to list a
+  namespace's objects. Reaching those would need a list kept elsewhere (a registry of object ids
+  with their last use, in another object or D1) and a sweeper that wakes each expired one, which is
+  not built. Removing `retentionDays` later leaves its wakeup's row, which then runs nothing.
+
 ## The fences
 
 They are code, not instructions to the model:
@@ -78,6 +104,7 @@ They are code, not instructions to the model:
   root: "/work",                        // default: the working directory and HOME
   shell: { timeLimitSeconds: 25 },      // default
   node: { interruptBudget: 10_000, heapMegabytes: 32 }, // defaults
+  // retentionDays: 30,                 // absent by default (kept forever); needs wakeups (actors-do)
 }
 ```
 
@@ -124,7 +151,7 @@ Measured on Cloudflare's Free plan (September 2026), or documented:
 
 `pikit remove execution-do` refuses while a component requires `execution` or `execution.shell`
 (the `tool-*` components). The files stay in each object's `execution_do_*` tables until the object is
-deleted: they are your data.
+deleted (or `retentionDays` deletes them): they are your data.
 
 ## Tests
 
@@ -134,8 +161,14 @@ Object's storage (`node:sqlite`) and a fake GitHub reached through `fetch` (no n
 shell, `node` and its limits, `curl`, the `.git` fence, and `git` from clone to push with every fence
 (the proposals' remote only, its credential for it alone, its own prefix, nowhere to go, no
 provider, a remote that is a path), and what real
-git does with `add` and `commit`. The workspace git suite (`createWorkspaceGitConformance`, the one
+git does with `add` and `commit`. Retention, over a `wakeups` double: the `ExecutionEnv` suite with it
+on; a use noted with a wakeup at its expiry, at most once an hour; everything deleted once due, root
+made again, the bytes logged; woken early or after a use since, nothing deleted and the expiry asked
+for again; a command running keeps it (asked again in an hour) until it ended; the last use across a
+restart, files from before retention counted from start; without it nothing noted or asked for; with
+it, `wakeups` required. The workspace git suite (`createWorkspaceGitConformance`, the one
 execution-local passes with the machine's git) runs the steward's steps against the fake GitHub, and
 checks that its token, a marker, appears nowhere the agent can read (variables, outputs, every file
 of the workspace, `.git/config` included). pikit also runs the component in workerd on a real
-SQLite-backed Durable Object, with Pi's own tools through the `tool-*` components (`tests/workerd`).
+SQLite-backed Durable Object, with Pi's own tools through the `tool-*` components, and retention by
+the object's real alarm (actors-do), across evictions (`tests/workerd`).

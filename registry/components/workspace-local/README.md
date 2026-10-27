@@ -28,7 +28,8 @@ Without it, every agent's tools work in `execution`'s one directory. With it, ea
 - Several conversations may work in one directory at once (a reset and the conversation before it, a
   parent and its background tasks): parallel tasks of one agent keep to a subfolder or a git worktree
   each.
-- A directory is made on the agent's calls. Removing the component leaves them on disk; the tools
+- A directory is made on the agent's calls. It stays until you remove it, or `retentionDays`
+  deletes it ("Retention" below). Removing the component leaves them on disk; the tools
   go back to `execution`'s directory. Before `per: "chat"` was the default, the files were in
   `<root>/<agent>/`: they stay there, out of the chats' directories (set `per: "agent"` to keep
   using them; there is no migration).
@@ -69,6 +70,42 @@ With `per: "channel"`, each channel of an agent has a directory of its own insid
   directory.
 - It is still order, not isolation (below): `bash` can `cd ..` into another channel's directory.
 
+## Retention
+
+A chat's directory is ephemeral: what must last is saved on purpose elsewhere. With
+`retentionDays: N`, a chat's directories (`<root>/<agent>/_chats/<chat>/`, every agent's in that chat)
+are deleted once nothing has worked in them for N days. Absent (the default), nothing is ever
+deleted: deleting what agents wrote must be asked for. Everything goes through `execution`'s files.
+
+- **What counts as use**: a `resolve` of the chat's workspace, which the runtime makes for every tool
+  call (a command, a file read or written) and execution-serve for every request. It is noted in
+  memory at once, and in a marker, `<root>/.workspace-local-used/<chat>`, holding the time on the
+  app's clock, written at most once an hour per chat: it outlives restarts, and is the app's clock,
+  not the filesystem's (a restore or a copy that resets file times changes nothing). A chat with no
+  marker (from before `retentionDays` was set) starts its count when a sweep first sees it. Since the
+  marker may lag the last use by up to an hour, a chat whose process restarted meanwhile may go up
+  to an hour before N days have passed.
+- **When**: a sweep at start (in the background: start does not wait for it), then every hour.
+  `stop` ends it.
+- **Never in use**: a chat is kept while a call of an environment this component gave for it runs (a
+  command until it ends, a file operation), and while this process used it within the period. The
+  check and the retirement's mark are one synchronous step, and so are a `resolve`'s note of its use
+  and its look for a retirement: a `resolve` either comes first (the chat is kept) or waits for the
+  retirement, which renames the directories away, and then works in a new, empty directory; never in
+  a half-deleted one. The renamed directories are measured and removed in
+  `<root>/.workspace-local-retired/` (what a crash left there goes at the next sweep).
+- **Never swept**: an agent's own directory (`per: "agent"`) and a channel's (`per: "channel"`):
+  only `_chats/` is looked at, whatever `per` is now (directories left from an earlier `per: "chat"`
+  are chats' too).
+- **Logged** at `info` when something was deleted: how many chats, how many bytes; never a chat's
+  key, hash or a file's name. Every sweep logs its counts at `debug`.
+- **Behind execution-serve** (a sandbox host for a trial), each remote sandbox id is a chat
+  (`execution-serve:<id>`), so `retentionDays` in the host's config deletes the remote sandboxes
+  nobody used for N days.
+
+The live state is this process's: two servers sharing a directory do not see each other's commands,
+only each other's markers (at most an hour late).
+
 ## Order, not isolation
 
 A directory per agent keeps the agents' files apart when they behave. It is not a wall:
@@ -86,6 +123,7 @@ Until then, give `bash` only to the agents that need it, and see `execution-loca
 "workspace-local": {
   root: "agents", // default; relative to execution's working directory, or absolute
   per: "chat",    // default; "agent" for one directory per agent, "channel" for one per channel of each agent
+  // retentionDays: 30, // absent by default (kept forever): delete a chat's directories unused this many days
 }
 ```
 
@@ -107,7 +145,14 @@ directories. It covers:
 - `execution`'s variables in an agent's commands, which run in its directory;
 - in real runs (scripted model), a file agent A writes is in A's directory and not in B's;
 - unsafe agent names refused;
-- the lifecycle conformance suite and the start failure.
+- the lifecycle conformance suite and the start failure;
+- retention: the `execution` suite on a chat's directory with it on; at start, a chat unused for
+  `retentionDays` loses every agent's directory (counts and bytes logged, no chat), a fresh one, an
+  agent's and a channel's own directories and one never noted (its count starting) stay, across a
+  restart; without it nothing is noted or deleted, however old; a use refreshes the count, the sweep
+  runs hourly on the app's clock; a chat with a command running is kept, and goes once it ended; a
+  command issued during the start sweep works; a use and a retirement of one chat never overlap
+  (either order), nor a call in flight and a retirement; bad values refused.
 
 `component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
 the test "what setup declares" pins it.
