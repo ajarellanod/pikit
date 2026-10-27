@@ -28,6 +28,9 @@
  * - Who a chat is with, for the dashboard (its stage of `conversation.describe`, `party.ts`): the
  *   names its allowed user's messages carried (a person's, a group's title), kept in its namespace of
  *   `storage.kv`; never asked of Telegram.
+ * - Commands typed in a chat (`/name args`, `/name@this_bot args`): the App's `agent.command`s the
+ *   `commands` config allows, run in the chat's conversation with its sender, their outcome said in
+ *   the chat, once per message (`inbound.ts`).
  * - Replies of its own (commands, a stranger told their id) and "typing…" go through `replies.ts`.
  *
  * It refuses to start when a bot has no valid token, no allowed user, or a webhook (Telegram
@@ -40,7 +43,18 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type AgentResult, type AnswerDelivery, type ChannelTransport, type DeliveryPolicy, describeStage, isDashboardRequest, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
+import {
+  type AgentResult,
+  allowedCommands,
+  type AnswerDelivery,
+  type ChannelTransport,
+  COMMAND_NAME,
+  type DeliveryPolicy,
+  describeStage,
+  isDashboardRequest,
+  type RunSettlement,
+  startAnswerDelivery,
+} from "@pikit/contracts";
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, chatIn } from "./account.ts";
 import { createDescriber } from "./party.ts";
@@ -61,6 +75,11 @@ const Config = Type.Object({
   pollTimeoutSeconds: Type.Integer({ minimum: 1, maximum: 50, default: 30 }),
   /** More bots, by name, besides the default one: `["ops"]` runs `telegram:ops` with `TELEGRAM_OPS_BOT_TOKEN`. */
   accounts: Type.Array(Type.String({ pattern: ACCOUNT_NAME }), { default: [], uniqueItems: true }),
+  /**
+   * The App's commands (`agent.command`) its users may type (`/name args`): `"all"`, or their names.
+   * Only the allowed users reach them, after the router. Another `/name` goes to the agent as text.
+   */
+  commands: Type.Union([Type.Literal("all"), Type.Array(Type.String({ pattern: COMMAND_NAME.source }), { uniqueItems: true })], { default: "all" }),
 });
 
 /**
@@ -94,6 +113,8 @@ export default defineComponent({
     const outbound = pikit.useOptional("outbound.queue");
     // Optional: with it, each bot reports whether it receives messages (@pikit/contracts' health.ts).
     const health = pikit.useOptional("health");
+    // The App's commands, typed in a chat (`/name args`): those the `commands` config allows (inbound.ts).
+    const commands = allowedCommands(pikit.useKeyed("agent.command"), config.commands);
 
     let running: { bots: RunningBot[]; answers: AnswerDelivery } | undefined;
 
@@ -196,6 +217,7 @@ export default defineComponent({
         delivery: replies,
         conversations: conversations.get(),
         runtime: runtime.get(),
+        commands,
         store: storage.get().namespace("channel-telegram"),
         ctx: background,
         refused: new Set(),

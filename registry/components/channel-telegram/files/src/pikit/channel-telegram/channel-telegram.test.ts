@@ -174,6 +174,8 @@ interface StartOptions {
   logger?: Logger;
   /** Components that start after the runtime and before the channel. */
   before?: ComponentDefinition[];
+  /** More of the channel's config (`commands`). */
+  config?: Record<string, unknown>;
 }
 
 async function started(options: StartOptions = {}): Promise<Subject> {
@@ -194,7 +196,7 @@ async function started(options: StartOptions = {}): Promise<Subject> {
       ...(options.before ?? []),
       channelTelegram,
     ],
-    config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
+    config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1, ...options.config } },
     logger: options.logger ?? silentLogger,
   }).create();
   apps.push(app);
@@ -225,7 +227,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "channel-telegram")).toMatchObject({
     provides: [],
     requires: ["secrets", "conversations.registry", "agent.runtime", "agent.submissions", "storage.kv"],
-    optional: ["outbound.queue", "health"],
+    optional: ["outbound.queue", "health", "agent.command"],
   });
 });
 
@@ -302,6 +304,87 @@ test("/start and /help explain, /new starts the conversation over", async () => 
   expect(s.telegram.sent[2]?.text).toBe("Started a new conversation.");
   expect(s.resets).toEqual([`telegram:${OWNER.id}`]);
   expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello"]);
+});
+
+/** The App's commands, as a component registers them; each run recorded with its conversation, arguments and sender. */
+function recordedCommands() {
+  const ran: { name: string; key: string; args: string; sender: string | undefined }[] = [];
+  const command = (name: string, run: (args: string) => { text?: string } | void) => ({
+    description: `The ${name} command`,
+    async run(conversation: ConversationRef, args: string, _ctx: AppContext, sender?: { channel: string; id: string }) {
+      ran.push({ name, key: conversation.key, args, sender: sender === undefined ? undefined : `${sender.channel}/${sender.id}` });
+      return run(args);
+    },
+  });
+  const component = defineComponent({
+    name: "commands-test",
+    setup(pikit) {
+      pikit.provideKeyed("agent.command", "ping", command("ping", (args) => ({ text: `pong ${args}` })));
+      pikit.provideKeyed("agent.command", "quiet", command("quiet", () => {}));
+      pikit.provideKeyed(
+        "agent.command",
+        "boom",
+        command("boom", () => {
+          throw new Error("no deploys on Fridays");
+        }),
+      );
+      pikit.provideKeyed("agent.command", "secret", command("secret", () => ({ text: "the secret" })));
+      // admin-api's: the channel's own /new wins.
+      pikit.provideKeyed("agent.command", "new", command("new", () => ({ text: "the App's /new" })));
+    },
+  });
+  return { component, ran };
+}
+
+test("commands typed in the chat run in its conversation with their sender, never reach the agent, and say their outcome; a redelivered one runs once", async () => {
+  const commands = recordedCommands();
+  const s = await started({ before: [commands.component], config: { commands: ["ping", "quiet", "boom", "new"] } });
+  const key = `telegram:${OWNER.id}`;
+
+  s.telegram.say(OWNER, "/ping  the build ");
+  s.telegram.say(OWNER, "/ping@pikit_test_bot now");
+  s.telegram.say(OWNER, "/quiet");
+  s.telegram.say(OWNER, "/boom");
+  await s.telegram.sentCount(4);
+  expect(s.telegram.sent.map((m) => m.text)).toEqual(["pong the build", "pong now", "/quiet: done.", "/boom failed: no deploys on Fridays"]);
+  expect(commands.ran).toEqual([
+    { name: "ping", key, args: "the build", sender: `telegram/${OWNER.id}` },
+    { name: "ping", key, args: "now", sender: `telegram/${OWNER.id}` },
+    { name: "quiet", key, args: "", sender: `telegram/${OWNER.id}` },
+    { name: "boom", key, args: "", sender: `telegram/${OWNER.id}` },
+  ]);
+
+  // Telegram delivers them again (a crash before the offset was confirmed): nothing runs twice.
+  s.telegram.redeliver();
+  s.telegram.say(OWNER, "hello");
+  await s.telegram.sentCount(5);
+  expect(commands.ran).toHaveLength(4);
+  expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello"]);
+
+  // Another bot's, an unknown /word and a command `commands` does not allow go to the agent as text; /new stays the channel's.
+  s.telegram.say(OWNER, "/ping@other_bot now");
+  s.telegram.say(OWNER, "/word of mouth");
+  s.telegram.say(OWNER, "/secret");
+  s.telegram.say(OWNER, "/new");
+  await s.telegram.sentCount(9);
+  expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello", "/ping@other_bot now", "/word of mouth", "/secret"]);
+  expect(s.telegram.sent.map((m) => m.text)).toContain("Started a new conversation.");
+  expect(s.resets).toEqual([key]);
+  expect(commands.ran).toHaveLength(4);
+});
+
+test("a command typed by a sender the router denies runs nothing, and is told so", async () => {
+  const commands = recordedCommands();
+  const deny = defineComponent({
+    name: "deny-test",
+    setup: (pikit) => pikit.pipeline("route.resolve", (value) => ({ ...value, decision: { agent: "assistant", access: "deny" as const } })),
+  });
+  const s = await started({ before: [commands.component, deny] });
+
+  s.telegram.say(OWNER, "/ping now");
+  expect((await s.telegram.sentCount(1))[0]?.text).toBe("Sorry, I can't answer that here.");
+  expect(commands.ran).toEqual([]);
+  expect(s.runtime.dispatched).toEqual([]);
 });
 
 test("a failed run is told in the chat, with its error code", async () => {

@@ -21,7 +21,8 @@
   "optional": {
     "capabilities": [
       "outbound.queue",
-      "health"
+      "health",
+      "agent.command"
     ]
   },
   "provides": [],

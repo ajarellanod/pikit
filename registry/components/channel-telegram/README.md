@@ -12,7 +12,8 @@ Talk to your agent in Telegram: send your bot a message, get the answer in the c
   (`storage-kv-sql`, which `pikit add` brings: its place in them). A router (such as
   `router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (answers stored before they are sent, with receipts):
-  "Sending" below; `health` (`health-registry`): "Health" below.
+  "Sending" below; `health` (`health-registry`): "Health" below; `agent.command` (the App's
+  commands, typed in the chat): "Commands" below.
 - **Target:** `server`: it receives messages by long polling, which needs a process that keeps
   running.
 - **Installs to:** `src/pikit/channel-telegram/`.
@@ -46,14 +47,23 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   with tools must not answer strangers. A stranger is told their user id once, so you can add it,
   and nothing reaches the agent. To let someone in, add their id to that line in `.env` and restart.
   It is read through `secrets`, like the token, because it lives in `.env` next to it.
-- **Conversations:** each private chat is one conversation, `telegram:<chat id>`. Group messages
-  are ignored for now.
+- **Conversations:** each private chat is one conversation, `telegram:<chat id>`, and its own space
+  (no `AdmitOptions.space`). Group messages, and so forum topics, are ignored for now.
 - **Messages sent while the agent is working** wait, and its next run answers them together, in one
   reply.
-- **Commands:** `/new` starts a new conversation; the old one is kept. `/start` and
-  `/help` explain. Any other command goes to the agent as text. A command Telegram delivers again
-  after a crash is recognised by its message id (kept in `storage.kv`, `command:<conversation>`)
-  and runs once.
+- **Commands:** `/new` (or `/reset`) starts a new conversation; the old one is kept. `/start` and
+  `/help` explain. These are the channel's own and win over an App command of the same name. Then
+  the App's commands (`agent.command`: admin-api's `/name`, runtime-pi's `/compact`, another
+  component's) that the `commands` config allows: `/name args`, or `/name@your_bot args` (the bot's
+  own username is cut; `/name@another_bot` is no command), is routed like any message (a sender the
+  router denies runs nothing), runs in the chat's conversation with its sender
+  (`{ channel: "telegram", id: "<user id>" }`), never reaches the agent, and the chat is told its
+  note (`/name: done.` when it has none, `/name failed: <why>` when it fails). Any other command (an
+  unknown `/word`, or one `commands` does not allow) goes to the agent as text. The default,
+  `"all"`, suits a bot only `TELEGRAM_ALLOWED_USERS` may talk to: list names to keep some from the
+  chat. A command Telegram delivers again after a crash is recognised by its message id (the last
+  one handled in the chat, kept in `storage.kv`, `command:<conversation>`) and runs once. The
+  channel does not set the bot's command menu (`setMyCommands`): @BotFather's `/setcommands` does.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`: your stages in
   `inbound.normalize`, the router, the conversation). When the agent will not answer, the chat is
   told: "I can't take that message." when a stage stops it (a policy, a routing rule), "Sorry, I
@@ -106,6 +116,7 @@ It refuses to start:
   apiBase: "https://api.telegram.org", // default; a local Bot API server, or a test double
   pollTimeoutSeconds: 30,              // default; how long one getUpdates waits
   accounts: [],                        // more bots besides the default one, by name
+  commands: "all",                     // default; the App's commands users may type, or their names: ["name", "compact"]
 }
 ```
 
@@ -146,7 +157,9 @@ in health-registry's `essential`.
 The tests are copied with the component and run in your project against
 `fake-telegram.test-support.ts`, a local stand-in of the Bot API: no bot, token or network needed.
 Only tests import it.
-- `channel-telegram.test.ts` covers the whole conversation: allowed and refused users, commands,
+- `channel-telegram.test.ts` covers the whole conversation: allowed and refused users, commands
+  (the channel's own, and the App's typed in the chat: run once with their sender, denied, another
+  bot's, unknown, not allowed),
   "typing…", formatting and splitting, retries, a redelivered message answered once, the
   acknowledgement at stop, the lifecycle conformance suite and the start failures; answers from
   the feed, one that ended while the channel was stopped delivered at the next start (and only
