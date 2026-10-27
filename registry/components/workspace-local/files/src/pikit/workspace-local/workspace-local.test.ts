@@ -8,7 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type App, type Clock, defineApp, defineComponent, type Logger, silentLogger, systemClock } from "@pikit/core";
 import { type ConversationRef, defineAgent } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createDurableRuntime, modelsFrom, type WorkspaceProvider } from "@pikit/pi-adapter";
@@ -16,7 +16,9 @@ import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/t
 import { createLocalExecution } from "@pikit/pi-adapter/node";
 import { createWorkspaceConformance, openSqliteDatabase, scriptedProvider } from "@pikit/pi-adapter/testing";
 import { createWriteTool } from "@pikit/pi-adapter/tools";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@pikit/pi-adapter/execution";
 import workspaceLocal from "./index.ts";
+import { DAY, HOUR, RETIRED_DIR, Retention, USED_DIR } from "./retention.ts";
 
 const directories: string[] = [];
 afterAll(() => {
@@ -375,4 +377,226 @@ test("it refuses to start when root cannot be a directory", async () => {
   );
 
   expect(String((error as Error).message)).toContain('"workspace-local" failed to start');
+});
+
+// Retention (`retentionDays`): a chat's directories go once nothing worked in them for that many days.
+
+/** A clock `offset.ms` ahead of the real one, with short sleeps: a test moves time by changing `offset.ms`. */
+function movableClock(): { clock: Clock; offset: { ms: number } } {
+  const offset = { ms: 0 };
+  return { clock: { now: () => Date.now() + offset.ms, sleep: (ms) => Bun.sleep(Math.min(ms, 5)) }, offset };
+}
+
+interface Retained {
+  app: App;
+  workspace: WorkspaceProvider;
+  logs: { level: string; message: string; fields?: Record<string, unknown> }[];
+}
+
+/** A started app over `execution` in `dir` with `config` (retention for 30 days by default), and its logs. */
+async function retained(dir: string, config: Record<string, unknown> = { retentionDays: 30 }, clock?: Clock): Promise<Retained> {
+  let found: WorkspaceProvider | undefined;
+  const reader = defineComponent({
+    name: "workspace-reader",
+    setup(pikit) {
+      const workspace = pikit.use("workspace");
+      return { start: () => void (found = workspace.get()) };
+    },
+  });
+  const logs: Retained["logs"] = [];
+  const push = (level: string) => (message: string, fields?: Record<string, unknown>) => void logs.push({ level, message, ...(fields !== undefined && { fields }) });
+  const logger: Logger = { debug: push("debug"), info: push("info"), warn: push("warn"), error: push("error") };
+  const app = await defineApp({
+    components: [executionAt(dir), workspaceLocal, reader],
+    config: { "workspace-local": config },
+    logger,
+    ...(clock !== undefined && { clock }),
+  }).create();
+  await app.start();
+  if (found === undefined) throw new Error("workspace was not resolved");
+  return { app, workspace: found, logs };
+}
+
+const sweeps = (s: Retained) => s.logs.filter((log) => log.message === "workspace-local: retention swept").length;
+const until = async (condition: () => boolean, ms = 2000) => {
+  const deadline = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting");
+    await Bun.sleep(5);
+  }
+};
+/** The hex SHA-256 of a chat's key: its directory's and its marker's name. */
+const hashOf = (key: string) => chatDir(key).slice("_chats/".length);
+/** The marker noting the last use of chat `key`, under the default root. */
+const markerOf = (dir: string, key: string) => join(dir, "agents", USED_DIR, hashOf(key));
+/** Agent `agent`'s environment in chat `key`. */
+const inChat = async (s: Retained, key: string, agent = "support") => (await s.workspace.resolve({ key, agent, conversationId: `${agent}-${key}` }, s.app.context())).env;
+const RETIRED = "workspace-local: deleted the directories of chats unused for 30 days (retentionDays)";
+
+// An agent's directory with retention is still pi-durable's whole ExecutionEnv (its calls are counted, nothing else).
+for (const c of createDurableExecutionConformance(async () => {
+  const s = await retained(temporaryDir());
+  return { env: await inChat(s, "test:conformance"), dispose: () => s.app.stop() };
+}, { expect })) {
+  test(`workspace-local with retention ${c.group}: ${c.name}`, () => c.run(), c.timeoutMs);
+}
+
+test("retention: at start, a chat unused for retentionDays loses every agent's directory; a fresh one, an agent's and a channel's own, and one never noted stay", async () => {
+  const dir = temporaryDir();
+  const first = await retained(dir);
+  for (const agent of ["support", "ops"]) expect((await (await inChat(first, "test:old", agent)).writeFile("notes.md", "12345", first.app.context())).ok).toBe(true);
+  expect((await (await inChat(first, "test:fresh")).writeFile("kept.txt", "kept", first.app.context())).ok).toBe(true);
+  await first.app.stop();
+  // The markers outlive the process: the old chat was last used 31 days ago (the fresh one, now).
+  expect(Number(readFileSync(markerOf(dir, "test:fresh"), "utf8"))).toBeGreaterThan(Date.now() - 60_000);
+  writeFileSync(markerOf(dir, "test:old"), String(Date.now() - 31 * DAY));
+  // An agent's own directory (per: "agent"), a channel's (per: "channel"), and a chat from before retention was set.
+  writeFileSync(join(dir, "agents", "support", "shared.md"), "shared");
+  mkdirSync(join(dir, "agents", "support", "telegram"));
+  writeFileSync(join(dir, "agents", "support", "telegram", "chan.md"), "chan");
+  mkdirSync(join(dir, "agents", "support", chatDir("test:unmarked")), { recursive: true });
+
+  const second = await retained(dir);
+  await until(() => sweeps(second) === 1);
+  for (const agent of ["support", "ops"]) expect(existsSync(join(dir, "agents", agent, chatDir("test:old")))).toBe(false);
+  expect(existsSync(markerOf(dir, "test:old"))).toBe(false);
+  expect(readFileSync(join(dir, "agents", "support", chatDir("test:fresh"), "kept.txt"), "utf8")).toBe("kept");
+  expect(readFileSync(join(dir, "agents", "support", "shared.md"), "utf8")).toBe("shared");
+  expect(readFileSync(join(dir, "agents", "support", "telegram", "chan.md"), "utf8")).toBe("chan");
+  // Its count starts now.
+  expect(existsSync(join(dir, "agents", "support", chatDir("test:unmarked")))).toBe(true);
+  expect(Number(readFileSync(markerOf(dir, "test:unmarked"), "utf8"))).toBeGreaterThan(Date.now() - 60_000);
+  // Counts and bytes, never a chat.
+  expect(second.logs).toContainEqual({ level: "info", message: RETIRED, fields: { chats: 1, bytes: 10 } });
+  expect(JSON.stringify(second.logs)).not.toContain(hashOf("test:old"));
+  expect(JSON.stringify(second.logs)).not.toContain("test:old");
+  expect(readdirSync(join(dir, "agents", RETIRED_DIR))).toEqual([]);
+  // The chat again: a new, empty directory.
+  expect(await (await inChat(second, "test:old")).listDir(".", second.app.context())).toEqual({ ok: true, value: [] });
+  await second.app.stop();
+});
+
+test("retention: without retentionDays nothing is noted and nothing deleted, however old", async () => {
+  const dir = temporaryDir();
+  const { clock, offset } = movableClock();
+  const s = await retained(dir, {}, clock);
+  expect((await (await inChat(s, "test:1")).writeFile("a.txt", "a", s.app.context())).ok).toBe(true);
+  offset.ms = 3650 * DAY;
+  await s.app.stop();
+  const again = await retained(dir, {}, clock);
+  await inChat(again, "test:2");
+  await Bun.sleep(30);
+  expect(readFileSync(join(dir, "agents", "support", chatDir("test:1"), "a.txt"), "utf8")).toBe("a");
+  expect(existsSync(join(dir, "agents", USED_DIR))).toBe(false);
+  expect(again.logs.some((log) => log.message.includes("retention"))).toBe(false);
+  await again.app.stop();
+});
+
+test("retention: each use refreshes a chat's count; the sweep runs every hour on the app's clock", async () => {
+  const dir = temporaryDir();
+  const { clock, offset } = movableClock();
+  const s = await retained(dir, { retentionDays: 30 }, clock);
+  await until(() => sweeps(s) === 1);
+  expect((await (await inChat(s, "test:active")).writeFile("a.txt", "a", s.app.context())).ok).toBe(true);
+  expect((await (await inChat(s, "test:idle")).writeFile("b.txt", "b", s.app.context())).ok).toBe(true);
+
+  // 29 days later: a sweep (an hour has passed), nothing old enough; the active chat is used again.
+  offset.ms = 29 * DAY;
+  await until(() => sweeps(s) === 2);
+  expect(existsSync(join(dir, "agents", "support", chatDir("test:idle")))).toBe(true);
+  await inChat(s, "test:active");
+  expect(Number(readFileSync(markerOf(dir, "test:active"), "utf8"))).toBeGreaterThan(Date.now() + 28 * DAY);
+
+  // 31 days: the idle chat goes; the active one, used 2 days ago, stays.
+  offset.ms = 31 * DAY;
+  await until(() => sweeps(s) === 3);
+  expect(existsSync(join(dir, "agents", "support", chatDir("test:idle")))).toBe(false);
+  expect(readFileSync(join(dir, "agents", "support", chatDir("test:active"), "a.txt"), "utf8")).toBe("a");
+  expect(s.logs).toContainEqual({ level: "info", message: RETIRED, fields: { chats: 1, bytes: 1 } });
+  // Used again, it works in a new, empty directory.
+  expect((await (await inChat(s, "test:idle")).writeFile("c.txt", "c", s.app.context())).ok).toBe(true);
+  expect(readdirSync(join(dir, "agents", "support", chatDir("test:idle")))).toEqual(["c.txt"]);
+  await s.app.stop();
+});
+
+test("retention: a chat with a command running is kept however old, and goes once it ended", async () => {
+  const dir = temporaryDir();
+  const { clock, offset } = movableClock();
+  const s = await retained(dir, { retentionDays: 1 }, clock);
+  await until(() => sweeps(s) === 1);
+  const controller = new AbortController();
+  const busy = await inChat(s, "test:busy");
+  const command = busy.exec("sleep 30", undefined, withAbortSignal(controller.signal, s.app.context()));
+  await inChat(s, "test:unused");
+
+  offset.ms = 2 * DAY;
+  await until(() => sweeps(s) === 2);
+  expect(existsSync(join(dir, "agents", "support", chatDir("test:unused")))).toBe(false);
+  expect(existsSync(join(dir, "agents", "support", chatDir("test:busy")))).toBe(true);
+
+  controller.abort();
+  await command;
+  offset.ms = 2 * DAY + 2 * HOUR;
+  await until(() => sweeps(s) === 3);
+  expect(existsSync(join(dir, "agents", "support", chatDir("test:busy")))).toBe(false);
+  await s.app.stop();
+});
+
+test("retention: a command issued while the start sweep runs works, in its chat's directory kept or made anew", async () => {
+  const dir = temporaryDir();
+  const first = await retained(dir, { retentionDays: 1 });
+  expect((await (await inChat(first, "test:1")).writeFile("old.txt", "old", first.app.context())).ok).toBe(true);
+  await first.app.stop();
+  writeFileSync(markerOf(dir, "test:1"), String(Date.now() - 2 * DAY));
+
+  const s = await retained(dir, { retentionDays: 1 });
+  const env = await inChat(s, "test:1");
+  expect((await env.writeFile("new.txt", "new", s.app.context())).ok).toBe(true);
+  expect(await env.exec("test -f new.txt", undefined, s.app.context())).toEqual({ ok: true, value: { exitCode: 0 } });
+  await until(() => sweeps(s) === 1);
+  expect(readFileSync(join(dir, "agents", "support", chatDir("test:1"), "new.txt"), "utf8")).toBe("new");
+  await s.app.stop();
+});
+
+test("retention: a use and a retirement of one chat never overlap: a use first keeps it, a retirement first is waited for", async () => {
+  const dir = temporaryDir();
+  const env = createLocalExecution({ cwd: dir, env: {} });
+  const options = { env: () => env, root: "agents", chatsDir: "_chats", days: 1, clock: systemClock, log: silentLogger };
+  const name = hashOf("test:x");
+  const workspace = join(dir, "agents", "support", "_chats", name);
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(join(workspace, "old.txt"), "old");
+  const paths = [`agents/support/_chats/${name}`];
+  const old = Date.now() + 1; // every use before this is old
+
+  // Used first: the retirement that follows keeps it. A call running in it: kept too.
+  const using = new Retention(options);
+  const used = using.use(name);
+  expect(using.retire(name, old - 1000, paths)).toBeUndefined();
+  await used;
+  const running = new Retention(options);
+  const tracked = running.track(name, env);
+  const reading = tracked.readTextFile(`${workspace}/old.txt`, BACKGROUND_CONTEXT);
+  expect(running.retire(name, old, paths)).toBeUndefined();
+  expect(await reading).toEqual({ ok: true, value: "old" });
+
+  // Retired first: the use waits until the directory is moved away, then works in a new one.
+  const retention = new Retention(options);
+  const retiring = retention.retire(name, old, paths);
+  expect(retiring).toBeDefined();
+  const waited = retention.use(name).then(() => {
+    expect(existsSync(workspace)).toBe(false);
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(workspace, "new.txt"), "new");
+  });
+  expect(await retiring).toBe(3);
+  await waited;
+  expect(readdirSync(workspace)).toEqual(["new.txt"]);
+  expect(readdirSync(join(dir, "agents", RETIRED_DIR))).toEqual([]);
+  // The waiting use noted itself after the retirement removed the old marker.
+  expect(Number(readFileSync(join(dir, "agents", USED_DIR, name), "utf8"))).toBeGreaterThan(Date.now() - 60_000);
+});
+
+test("retention: retentionDays is a whole number of days, at least 1", async () => {
+  for (const retentionDays of [0, 1.5, -3]) await expect(retained(temporaryDir(), { retentionDays })).rejects.toThrow();
 });

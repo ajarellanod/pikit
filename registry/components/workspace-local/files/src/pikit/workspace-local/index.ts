@@ -24,6 +24,10 @@
  * variables (`execution-local`'s `variables`), and its `stop`, which kills the commands still running.
  * `root` is relative to `execution`'s working directory (`execution-local`'s `root`), or absolute.
  *
+ * With `retentionDays`, a chat's directories (every agent's `_chats/<chat>/`) are deleted once nothing
+ * worked in them for that many days, never while a call runs in one (`retention.ts`); an agent's or a
+ * channel's directory never. Without it (the default), nothing is ever deleted.
+ *
  * ORDER, NOT ISOLATION. The directory is where an agent's tools start, not a wall. Paths are not
  * confined, and `bash` runs as `execution` runs it (with `execution-local`, as the server's OS user):
  * it can `cd ..`, read another agent's files and this app's `.pikit/credentials.json`. Isolation needs
@@ -38,6 +42,7 @@ import { type ConversationRef, originOf } from "@pikit/contracts";
 import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { atCwd } from "@pikit/pi-adapter/execution";
 import Type from "typebox";
+import { Retention } from "./retention.ts";
 
 const Config = Type.Object({
   /** Where the agents' directories go: relative to `execution`'s working directory, or absolute. Created at start. */
@@ -47,6 +52,12 @@ const Config = Type.Object({
    * every chat (`<root>/<agent>/`), or per channel of each agent (`<root>/<agent>/<channel>/`).
    */
   per: Type.Union([Type.Literal("chat"), Type.Literal("agent"), Type.Literal("channel")], { default: "chat" }),
+  /**
+   * Deletes a chat's directories (every agent's `_chats/<chat>/`) once nothing has worked in them for
+   * this many days: no command, no file read or written. Never one in use, never an agent's or a
+   * channel's directory. Absent (the default): kept forever.
+   */
+  retentionDays: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
 /**
@@ -85,6 +96,17 @@ export default defineComponent({
   setup(pikit, config) {
     const execution = pikit.use("execution");
     const root = config.root.replace(/\/+$/, "");
+    const retention =
+      config.retentionDays === undefined
+        ? undefined
+        : new Retention({
+            env: () => execution.get(),
+            root,
+            chatsDir: CHATS_DIR,
+            days: config.retentionDays,
+            clock: pikit.clock,
+            log: pikit.logger,
+          });
 
     const provider: WorkspaceProvider = {
       async resolve(conversation: ConversationRef, context) {
@@ -93,13 +115,16 @@ export default defineComponent({
           throw new Error(`workspace-local: agent name ${JSON.stringify(agent)} is not a safe directory name (kebab-case)`);
         }
         let directory: string | undefined;
+        /** The chat's directory name, for retention; none for an agent's or a channel's directory. */
+        let chatDir: string | undefined;
         if (config.per === "chat") {
           // The chat: the origin's key, the same through resets and for the agent's delegated children.
           const chat = originOf(conversation).key;
           if (typeof chat !== "string" || chat === "") {
             throw new Error(`workspace-local: the conversation's chat (its origin's key) is ${JSON.stringify(chat)}: a directory needs a non-empty key`);
           }
-          directory = `${CHATS_DIR}/${chatDirectory(chat)}`;
+          chatDir = chatDirectory(chat);
+          directory = `${CHATS_DIR}/${chatDir}`;
         } else if (config.per === "channel" && conversation.channel !== undefined) {
           const channel = conversation.channel;
           directory = channelDirectory(channel);
@@ -107,13 +132,17 @@ export default defineComponent({
             throw new Error(`workspace-local: channel ${JSON.stringify(channel)} is not a safe directory name (lowercase parts, separated by ":")`);
           }
         }
+        // Noted before anything awaits; waits for a retirement of the chat in progress, which leaves no directory.
+        const using = chatDir === undefined ? undefined : retention?.use(chatDir);
         const env = execution.get();
         const ctx = toChord(context);
         const cwd = directory === undefined ? `${root}/${agent}` : `${root}/${agent}/${directory}`;
+        await using;
         // Every call: a directory removed meanwhile is made again, and one made already costs nothing.
         const made = await env.createDir(cwd, { recursive: true }, ctx);
         if (!made.ok) throw made.error;
-        return { env: await atCwd(env, cwd, ctx) };
+        const view = await atCwd(env, cwd, ctx);
+        return { env: chatDir === undefined || retention === undefined ? view : retention.track(chatDir, view) };
       },
     };
     pikit.provide("workspace", provider);
@@ -123,6 +152,11 @@ export default defineComponent({
         // Fail at start: tools with nowhere to work are a broken deployment.
         const made = await execution.get().createDir(root, { recursive: true }, toChord(ctx));
         if (!made.ok) throw made.error;
+        // In the background: a first sweep may have much to delete.
+        retention?.start();
+      },
+      async stop() {
+        await retention?.stop();
       },
     };
   },
