@@ -6,20 +6,29 @@
  * - **A namespace per component.** A component opens the namespace named after it
  *   (`namespace("tool-space-files")`), as it prefixes its SQL tables with its name. Two namespaces
  *   never see each other's keys; a provider keeps them apart however it stores them (a directory, a
- *   key prefix in a bucket).
+ *   key prefix in a bucket). A namespace's name is 1 to 100 characters of `a-z 0-9 - _ .`, not `.`
+ *   or `..` (a component's name is one): one directory or one segment of a key wherever it is kept,
+ *   the same on a file system that ignores case. Any other name is refused (`BlobKeyError`).
  * - **Keys** are 1 to 512 characters of `A-Z a-z 0-9 ! - _ . * ' ( ) /`, with no empty, `.` or `..`
  *   segment between slashes and no leading or trailing slash: the characters every S3-compatible store
  *   and every file system take as they are. Anything else is refused (`BlobKeyError`) and nothing is
- *   read or written. A component that needs other characters hashes or encodes them.
+ *   read or written. A component that needs other characters hashes or encodes them. Keys are
+ *   case-sensitive (`a` and `A` are two keys), and a key and the keys under it (`a`, `a/b`) are
+ *   separate values, as in a bucket.
  * - **`put` replaces** the value at its key, whole: a reader sees the old bytes or the new ones, never
  *   a mix, and once `put` resolves every later `get` (from any process) sees the new ones. There is no
- *   transaction across keys.
+ *   transaction across keys. It takes its own copy of the bytes when called: changing them afterwards,
+ *   even before it resolves, changes nothing stored. Its content type, when given, is 1 to 255
+ *   printable ASCII characters, with no space at either end (an HTTP header's value, which a hop may
+ *   trim: `application/x-tar`); `get` gives it back as it was put, or none when none was put.
  * - **`get` returns a copy**: changing the bytes it gives changes nothing stored. A missing key is
  *   `undefined`. `delete` of a missing key is not an error.
  * - **`list(prefix)`** gives the keys that start with `prefix` (any string, `""` for all), in
- *   ascending code-unit order, with their sizes, `limit` at a time (default and maximum 1000) and a
- *   `cursor` for the next page when there are more. A key put before `list` was called and not deleted
- *   is listed; one put or deleted during a listing may or may not be.
+ *   ascending code-unit order, with their sizes, at most `limit` at a time (an integer from 1; default
+ *   and maximum 1000, a larger one is taken as 1000) and a `cursor` for the next page when there may
+ *   be more. A page may hold fewer than `limit` (a bucket decides its pages), even none, and still
+ *   have a cursor. A key put before `list` was called and not deleted is listed; one put or deleted
+ *   during a listing may or may not be.
  * - **Size.** A provider states its largest value (`maxBytes`, at least 25 MiB); a larger `put` is
  *   refused (`BlobTooLargeError`) and stores nothing. Values are whole `Uint8Array`s: streaming is not
  *   part of the contract yet.
@@ -73,7 +82,24 @@ export const BLOB_MIN_MAX_BYTES = 25 * 1024 * 1024;
 /** The longest key. */
 export const BLOB_MAX_KEY = 512;
 
+/** The most keys one page of `list` gives, and its default. */
+export const BLOB_LIST_LIMIT = 1000;
+
 const KEY_CHARACTERS = /^[A-Za-z0-9!\-_.*'()/]+$/;
+const NAMESPACE = /^[a-z0-9\-_.]{1,100}$/;
+const CONTENT_TYPE = /^[\x21-\x7e]([\x20-\x7e]{0,253}[\x21-\x7e])?$/;
+
+/** What is wrong with `name` as a namespace's name, or `undefined` when it is one. */
+export function blobNamespaceProblem(name: string): string | undefined {
+  if (typeof name !== "string" || !NAMESPACE.test(name) || name === "." || name === "..") return 'a blob namespace is 1 to 100 characters of a-z 0-9 - _ and ., not "." or ".."';
+  return undefined;
+}
+
+/** Throws `BlobKeyError` unless `name` is a namespace's name: what every provider's `namespace` checks first. */
+export function checkBlobNamespace(name: string): void {
+  const problem = blobNamespaceProblem(name);
+  if (problem !== undefined) throw new BlobKeyError(String(name), problem);
+}
 
 /** What is wrong with `key` as a blob key, or `undefined` when it is one. */
 export function blobKeyProblem(key: string): string | undefined {
@@ -108,6 +134,27 @@ export class BlobTooLargeError extends Error {
 export function checkBlobKey(key: string): void {
   const problem = blobKeyProblem(key);
   if (problem !== undefined) throw new BlobKeyError(String(key), problem);
+}
+
+/**
+ * What every provider's `put` checks before it reads or writes anything: the key (`BlobKeyError`),
+ * the bytes (a `Uint8Array`, else `TypeError`), their size against `maxBytes` (`BlobTooLargeError`)
+ * and the content type (`TypeError`).
+ */
+export function checkBlobPut(key: string, bytes: Uint8Array, contentType: string | undefined, maxBytes: number): void {
+  checkBlobKey(key);
+  if (!(bytes instanceof Uint8Array)) throw new TypeError("storage.blob: a value is a Uint8Array");
+  if (bytes.byteLength > maxBytes) throw new BlobTooLargeError(bytes.byteLength, maxBytes);
+  if (contentType !== undefined && (typeof contentType !== "string" || !CONTENT_TYPE.test(contentType))) {
+    throw new TypeError("storage.blob: a content type is 1 to 255 printable ASCII characters, with no space at either end");
+  }
+}
+
+/** The page size `list` uses for `limit`: 1000 when absent, at most 1000; `RangeError` for one that is not an integer from 1. */
+export function blobListLimit(limit: number | undefined): number {
+  if (limit === undefined) return BLOB_LIST_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1) throw new RangeError(`storage.blob: a list's limit is an integer from 1, not ${String(limit)}`);
+  return Math.min(limit, BLOB_LIST_LIMIT);
 }
 
 declare module "@pikit/core" {

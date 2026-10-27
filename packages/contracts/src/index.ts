@@ -91,7 +91,19 @@ export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
 export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
 export type { BlobEntry, BlobPage, BlobStorage, BlobStore, BlobValue } from "./blob.ts";
-export { BLOB_MAX_KEY, BLOB_MIN_MAX_BYTES, BlobKeyError, blobKeyProblem, BlobTooLargeError, checkBlobKey } from "./blob.ts";
+export {
+  BLOB_LIST_LIMIT,
+  BLOB_MAX_KEY,
+  BLOB_MIN_MAX_BYTES,
+  BlobKeyError,
+  blobKeyProblem,
+  blobListLimit,
+  blobNamespaceProblem,
+  BlobTooLargeError,
+  checkBlobKey,
+  checkBlobNamespace,
+  checkBlobPut,
+} from "./blob.ts";
 export type { Feed, FeedItem, FeedPage } from "./feed.ts";
 export type {
   ActorCallErrorCode,
