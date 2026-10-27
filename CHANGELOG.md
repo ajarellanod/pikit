@@ -33,6 +33,12 @@ line names its area.
 
 ### Components
 
+- tool-notify ([features/completed/tool-notify.md](features/completed/tool-notify.md)), new, both
+  targets: `notify({ to, text })` sends a Markdown message to a chat the operator named (a channel
+  instance and a key), send-only; `from` as tool-delegate's (the whole delegation chain), a rate limit
+  per chat (`maxPerHour`), the sending agent's name first (`attribution: false` to drop it); stored in
+  the destination's outbox by its actor (`tool-notify.enqueue`). tool-delegate's `chainOf`, `depthOf`
+  and `callersOf` move to `callers.ts`, tool-notify's twin.
 - Spaces ([features/spaces.md](features/spaces.md)): channel-google-chat gives every thread its chat's
   key as its space; channel-web has projects (create, rename, delete when empty; a chat is made in one
   or none, for good), a chat of a project in that project's space.

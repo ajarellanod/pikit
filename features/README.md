@@ -76,7 +76,6 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [slash-commands](slash-commands.md) | | Commands typed in a chat: built for the registry's (`agent.command`) in Google Chat, Telegram and the web chat (`admitInbound`'s `commands`); Pi extensions' own not | No |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations, in the channel's key (no contract field); replies in their thread | No |
-| [tool-notify](tool-notify.md) | | An agent sends a message to a chat the operator named (`notify({ to, text })`), never reads it nor gets a reply: on `outbound.queue` through the destination's actor; specified, not built | No |
 | [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation; `storage.blob` built (storage-blob-fs, storage-blob-s3) | Open: SPEC §6's git workspace |
 
 Other channels (Signal, iMessage, Matrix, Home Assistant…) get a file when someone needs one.
@@ -96,4 +95,5 @@ how it fits pikit, what Pi already does, where the code and its tests are, and w
 | [expose](completed/expose.md) | A public HTTPS URL for a server project: `pikit expose`, `expose-cloudflare-tunnel`'s command (a Cloudflare Tunnel run beside the app by `deployment-docker`); only the listed paths public, no Cloudflare credential in `.env` |
 | [channel-web](completed/channel-web.md) | A chat page (`/chat/`) for users who are not operators, on both targets: accounts with better-auth (password, a link by email, any OAuth/OIDC provider), each user's own conversations live, the dashboard's UI pieces; with `email.send` (`email-ses`, `email-resend`) and UI projects of a component |
 | [chat-parity](completed/chat-parity.md) | One conversation view for the dashboard and the chat page (shared copies, the same JSON): the chat shows thinking, tools and context as the operator's visibility policy allows, with tabs, an assistant to pick, search; the dashboard's header gets the conversation's menu |
+| [tool-notify](completed/tool-notify.md) | An agent sends a message to a chat the operator named (`notify({ to, text })`), never reads it nor gets a reply: `tool-notify` on `outbound.queue` through the destination's actor, `from` as tool-delegate's, a rate limit per chat, the sending agent's name first; both targets |
 | [tool-component](completed/tool-component.md) | A tool of your own: pi-durable's `defineTool` (from `@pikit/pi-adapter/tools`) in a component providing `agent.tool`, with its `replay`; `tool-fetch` and `tool-websearch-brave` are the references |

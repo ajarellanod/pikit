@@ -49,9 +49,13 @@
  */
 
 import { defineComponent } from "@pikit/core";
-import { CONVERSATION, type ConversationRef, originOf } from "@pikit/contracts";
+import { CONVERSATION } from "@pikit/contracts";
 import { AGENT_DELEGATION, type AgentDelegation, type BackgroundDelegation, type DelegationProgress, type DelegationStep, defineTool, partsNote, type ToolRegistration, withParts } from "@pikit/pi-adapter/tools";
 import Type, { type Static } from "typebox";
+import { CHAIN_SEPARATOR, callersOf, chainOf, DELEGATE_KEY_PREFIX, depthOf } from "./callers.ts";
+
+// The keys' reading is `callers.ts` (tool-notify's twin).
+export { callersOf, chainOf, DELEGATE_KEY_PREFIX, depthOf };
 
 /** The name agents give it, and its key under `agent.tool`. */
 export const DELEGATE_TOOL = "delegate";
@@ -59,15 +63,8 @@ export const DELEGATE_TOOL = "delegate";
 export const TASKS_TOOL = "delegate_tasks";
 export const STEER_TOOL = "delegate_steer";
 export const CANCEL_TOOL = "delegate_cancel";
-/** The prefix of a delegated task's conversation key, which this tool makes and reads. */
-export const DELEGATE_KEY_PREFIX = "delegate:";
 /** The channel of a delegated task's message, as its sender says it. */
 export const DELEGATE_CHANNEL = "delegate";
-
-/** The separator of a key's chain: agent names are kebab-case, so never hold it (nor a `:`). */
-const CHAIN_SEPARATOR = ".";
-/** An agent's name as `defineAgent` takes it; a key's chain holds only such names. */
-const AGENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 /** An agent's name: `start` checks it is an `agent.definition`. */
 const AgentName = Type.String({ minLength: 1 });
@@ -92,44 +89,6 @@ const Config = Type.Object(
 );
 
 export type DelegateConfig = Static<typeof Config>;
-
-/** How deep a conversation is in delegations: 0 for one a person (or a channel) started. */
-export function depthOf(key: string): number {
-  if (!key.startsWith(DELEGATE_KEY_PREFIX)) return 0;
-  const depth = Number(key.slice(DELEGATE_KEY_PREFIX.length).split(":", 1)[0]);
-  return Number.isInteger(depth) && depth > 0 ? depth : 0;
-}
-
-/**
- * The agents above a conversation in its delegation, root first, as its key says: `[]` for one not
- * delegated (its key is not `delegate:`), `undefined` for a `delegate:` key that does not say them
- * (malformed, or a chain written empty because it could not be trusted). As many as its depth.
- */
-export function chainOf(key: string): string[] | undefined {
-  if (!key.startsWith(DELEGATE_KEY_PREFIX)) return [];
-  const rest = key.slice(DELEGATE_KEY_PREFIX.length);
-  const first = rest.indexOf(":");
-  const second = first < 0 ? -1 : rest.indexOf(":", first + 1);
-  // The task id after the chain: a key without one is not this tool's.
-  if (second < 0 || second === rest.length - 1) return undefined;
-  const chain = rest.slice(first + 1, second).split(CHAIN_SEPARATOR);
-  return chain.every((agent) => AGENT_NAME.test(agent)) && chain.length === depthOf(key) ? chain : undefined;
-}
-
-/**
- * The agents a `delegate` call in `conversation` comes from, root first: those above it and its own,
- * or `undefined` when they cannot be trusted. Above it is its key's chain, which only this tool
- * writes, and whose first agent must be its origin's (the runtime fixes the origin, never a ref or the
- * model). A conversation not delegated is its own root, with no origin.
- */
-export function callersOf(conversation: ConversationRef): string[] | undefined {
-  if (!AGENT_NAME.test(conversation.agent)) return undefined;
-  // Not this tool's key but delegated (an origin): who is above it is unknown.
-  if (!conversation.key.startsWith(DELEGATE_KEY_PREFIX)) return conversation.origin === undefined ? [conversation.agent] : undefined;
-  const chain = chainOf(conversation.key);
-  if (chain === undefined || conversation.origin === undefined || chain[0] !== originOf(conversation).agent) return undefined;
-  return [...chain, conversation.agent];
-}
 
 /** Why `callers` may not delegate to `agent`, or `undefined` when they may. */
 function refusal(agent: DelegateConfig["agents"][number], callers: string[] | undefined): string | undefined {

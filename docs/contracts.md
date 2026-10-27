@@ -26,20 +26,20 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
 | `agent.submissions` | single | runtime-pi | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
 | `agent.observe` | single | runtime-pi | admin-api, channel-web, memory-summaries | `createAgentObserveConformance` |
-| `agent.definition` | keyed | the project | admin-api?, agents-live?, channel-web?, execution-gondolin?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
+| `agent.definition` | keyed | the project | admin-api?, agents-live?, channel-web?, execution-gondolin?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate?, tool-notify? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
-| `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-schedule, tool-websearch-brave, tool-websearch-gemini, tool-write | admin-api?, agents-live?, runtime-pi? | none |
+| `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-notify, tool-read, tool-schedule, tool-websearch-brave, tool-websearch-gemini, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, memory-recall, tool-space-files | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, memory-recall, runtime-pi | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, scheduler-admit | `createConversationRegistryConformance` |
-| `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
+| `outbound.queue` | single | outbound-durable | tool-notify, admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql, tool-space-files | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
-| `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
+| `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, tool-notify, health-registry?, tool-mcp? | `createKeyValueConformance` |
 | `storage.blob` | single | storage-blob-fs, storage-blob-s3 | tool-space-files | `createBlobConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-space-files | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-notify, tool-space-files | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
@@ -448,6 +448,8 @@ interface OutboundQueue {
   `receipts` is the record.
 - Transports attach rather than being a keyed capability, which would be a cycle (the queue would use
   the channels, the channels the queue).
+- Not only a run's answer: tool-notify enqueues an agent's message to a chat the operator named, in
+  that chat's actor, under `answerKey(conversation, "tool-notify:" + callId)`.
 
 A **`ChannelTransport`** is the channel's: `{ idempotent, draws?, split(text), send(piece, signal) }`;
 `draws` lists the kinds of part it draws, which `send` receives on a message's last piece
