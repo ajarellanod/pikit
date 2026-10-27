@@ -75,7 +75,12 @@ What pi-durable does not know is pikit's agents. The runtime adds that layer
   `error`), and when the child last wrote (its newest message's time). Running or ended, and after a
   restart: it is read from the records. It shows the parent what the child's own transcript holds
   (the arguments its tools were called with, a secret it typed there included), which the parent's
-  storage already holds.
+  storage already holds. With it, when the call that started the task first ran (`startedAt`).
+- **The people in the chat see and stop them too**: runtime-pi's `/tasks` and `/cancel <id>`
+  ([slash commands](slash-commands.md), `audience: "user"`) take the same `list`, `progress` and
+  `cancel` outside a tool call (`DurableRuntime.delegations`, through the Harness instead of a call's
+  `api`: one code path, `tasksOf`, scoped to the conversation the command runs in). In Google Chat
+  that is one thread's tasks.
 
 `tool-delegate` is the tool: which agents (each with what it is for, which the model reads), how deep
 (`maxDepth`), `wait` (`run`) or not (`start`), a delegated task always waiting for its own; and

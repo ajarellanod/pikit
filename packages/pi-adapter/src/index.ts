@@ -5,6 +5,7 @@
 export { createDurableRuntime, INBOX_KICK, PARTIAL_EVERY_MS } from "./runtime.ts";
 export { PARTS_DETAIL, withParts } from "./parts.ts";
 export type { DurableRuntime, DurableRuntimeOptions } from "./runtime.ts";
+export type { ConversationDelegations } from "./delegation.ts";
 export { openDurableStorage, type SqliteDatabase, SqliteStorage, splitSqlStatements, sqliteDatabaseFrom } from "./sql.ts";
 export { AgentStateDoc, ConversationDoc, extensionName } from "./agent.ts";
 export type { DurableExtension, DurableModels, DurableTool } from "./agent.ts";

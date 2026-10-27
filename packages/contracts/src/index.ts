@@ -31,14 +31,14 @@ export type {
   Usage,
 } from "./agent.ts";
 export type { AgentSkill } from "./skill.ts";
-export { defineSkill, isSkillName, skillProblem } from "./skill.ts";
+export { defineSkill, isSkillName, parseFrontmatter, skillProblem } from "./skill.ts";
 export type { RunRequest, RunRequests } from "./run-requests.ts";
 export { RUN_REQUESTS } from "./run-requests.ts";
 
 export type { AgentDirectory, DirectoryAgent } from "./agent-directory.ts";
 
 export type { AgentCommand, CommandAudience, CommandInfo, CommandLookup, CommandOutcome, CommandsAllowed } from "./command.ts";
-export { allowedCommands, audienceOf, COMMAND_NAME, commandOf, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
+export { allowedCommands, audienceOf, COMMAND_NAME, commandOf, commandProblem, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
 export type { CompletionRequest, ModelComplete } from "./model.ts";
 export type { ConversationDescriber, ConversationParty, DescribedConversation, PartyId } from "./conversation-describe.ts";
 export { channelKindOf, cleanParty, describeConversation, describeStage, PARTY_LIMITS } from "./conversation-describe.ts";

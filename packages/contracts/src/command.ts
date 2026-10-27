@@ -27,6 +27,11 @@
  *   operator, quietly, and sends it to no channel), or nothing. It writes in the transcript only by
  *   what it does (a message it dispatches). A command that cannot do what it was asked throws an
  *   `Error` whose message says why, for the operator: `runAgentCommand` reports it, never throws it.
+ * - **Or a message for the agent:** `{ prompt }`, the text the command made of what was typed (Pi's
+ *   prompt templates: the template, its arguments expanded). Whoever ran it dispatches that prompt to
+ *   the conversation as the message that typed the command: a channel's `admitInbound`, with that
+ *   message's id as the request id (a platform's redelivery is a duplicate: one run) and its sender;
+ *   the dashboard (admin-api), as an operator's message. Such a command has no note.
  */
 
 import type { AppContext } from "@pikit/core";
@@ -59,7 +64,7 @@ export interface AgentCommand {
    * request's sender), after the channel's own authentication and routing; absent when the operator
    * runs it from the dashboard. A command that acts for a person (their preferences) refuses without one.
    */
-  run(conversation: ConversationRef, args: string, ctx: AppContext, sender?: Sender): Promise<{ text?: string } | void>;
+  run(conversation: ConversationRef, args: string, ctx: AppContext, sender?: Sender): Promise<{ text?: string; prompt?: string } | void>;
 }
 
 /** Who a command is for (`AgentCommand.audience`). */
@@ -109,13 +114,17 @@ export function listAgentCommands(commands: CommandLookup): CommandInfo[] {
     });
 }
 
-/** What became of a command: it ran (with its note), it failed (and why), or there is no such command. */
-export type CommandOutcome = { kind: "ran"; text?: string } | { kind: "failed"; message: string } | { kind: "unknown" };
+/**
+ * What became of a command: it ran (with its note, or the prompt its runner dispatches instead), it
+ * failed (and why), or there is no such command.
+ */
+export type CommandOutcome = { kind: "ran"; text?: string; prompt?: string } | { kind: "failed"; message: string } | { kind: "unknown" };
 
 /**
  * Runs the command `name` of `commands` in `conversation` with `args` (trimmed). An unknown or
  * malformed name is `unknown`, and runs nothing; a command that rejects is `failed`, with its message
- * (never thrown); what it answers other than `{ text: string }` or nothing is taken as nothing.
+ * (never thrown); what it answers other than `{ text: string }`, `{ prompt: string }` (not blank: then
+ * without its text) or nothing is taken as nothing.
  */
 export async function runAgentCommand(
   commands: CommandLookup,
@@ -129,7 +138,13 @@ export async function runAgentCommand(
   if (command === undefined || commandProblem(name, command) !== undefined) return { kind: "unknown" };
   try {
     const answer = sender === undefined ? await command.run(conversation, args.trim(), ctx) : await command.run(conversation, args.trim(), ctx, { channel: sender.channel, id: sender.id });
-    const text = typeof answer === "object" && answer !== null && typeof answer.text === "string" && answer.text.trim() !== "" ? answer.text : undefined;
+    const field = (name: "text" | "prompt") => {
+      const value = typeof answer === "object" && answer !== null ? answer[name] : undefined;
+      return typeof value === "string" && value.trim() !== "" ? value : undefined;
+    };
+    const prompt = field("prompt");
+    if (prompt !== undefined) return { kind: "ran", prompt };
+    const text = field("text");
     return { kind: "ran", ...(text !== undefined && { text }) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -144,7 +159,7 @@ export async function runAgentCommand(
  * included, is a message for the agent. A channel that runs commands (typed in its chat) asks this
  * before `admitInbound`, then runs the command with `runAgentCommand` in the App that holds the
  * conversation, with the message's sender, and tells the sender the outcome; the command's message is
- * never dispatched to the agent.
+ * never dispatched to the agent (the prompt a command answers is, in its place: `AgentCommand`).
  */
 export function commandOf(text: string, commands: CommandLookup): { name: string; args: string } | undefined {
   const match = /^\s*\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);

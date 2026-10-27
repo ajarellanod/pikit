@@ -120,6 +120,9 @@ it shows what `GET /admin/api/commands` lists, and nothing else.
   It is logged with the operator, the key and the command's name, never its arguments.
 - **What comes back**: `{ text? }`, which the dashboard shows in the conversation as a quiet note for
   the operator: no channel gets it, and the transcript has only what the command did there.
+- **A command that answers a prompt** (a prompt template's, agents-folders): the prompt is sent to the
+  agent as the operator's message would be (`dashboard:<uuid>`, after the operator's first line), so
+  its answer is the dashboard's; the response is `{}`. Tested in `admin-api.test.ts`.
 
 ### Titles
 

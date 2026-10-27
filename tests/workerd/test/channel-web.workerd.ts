@@ -58,6 +58,14 @@ afterEach(async () => {
   await resetObjects();
 });
 
+/** runtime-pi's commands for the chat's users, which every chat offers. */
+const RUNTIME_COMMANDS = [
+  { name: "cancel", description: "Stop a background task of this conversation", argumentHint: "<id>", audience: "user" as const },
+  { name: "status", description: "What the agent is doing: running or idle, messages waiting", audience: "user" as const },
+  { name: "stop", description: "Stop what the agent is doing now", audience: "user" as const },
+  { name: "tasks", description: "The background tasks of this conversation", audience: "user" as const },
+];
+
 const ADMIN_TOKEN = "workerd-operator-token-0123456789abcdef";
 const OPERATOR = { authorization: `Bearer ${ADMIN_TOKEN}` };
 const SECRETS: Record<string, string> = { CHANNEL_WEB_AUTH_SECRET: "workerd-chat-secret-0123456789abcdefghijklmnop", PIKIT_ADMIN_TOKEN: ADMIN_TOKEN };
@@ -231,7 +239,7 @@ it("a user signs up and in, talks to the agent and follows it live; another user
     email: false,
     visibility: { thinking: false, tools: "names", context: true },
     agents: [],
-    commands: [],
+    commands: RUNTIME_COMMANDS,
   } satisfies ChatConfig);
 
   // Signed up over https: the `__Secure-` cookies, path /chat/, HttpOnly, SameSite=Lax, Secure.
@@ -440,7 +448,7 @@ it("email.send in the objects' App only: the config says email is sent and offer
 
   // The Worker has no email.send: it asks the accounts actor, whose App sends.
   const config = await fetch(`${HTTPS}/chat/api/config`);
-  expect(await config.json()).toEqual({ name: "Ada", target: "durable", methods: [{ kind: "password" }, { kind: "magic-link" }], signUp: "open", email: true, visibility: { thinking: false, tools: "names", context: true }, agents: [], commands: [] } satisfies ChatConfig);
+  expect(await config.json()).toEqual({ name: "Ada", target: "durable", methods: [{ kind: "password" }, { kind: "magic-link" }], signUp: "open", email: true, visibility: { thinking: false, tools: "names", context: true }, agents: [], commands: RUNTIME_COMMANDS } satisfies ChatConfig);
 
   const linkIn = (message: EmailMessage | undefined) => /https?:\/\/\S+/.exec(message?.text ?? "")?.[0] as string;
   const pathOf = (link: string) => {
@@ -550,7 +558,7 @@ it("projects: each user's; a chat made in one is in the project's space (the reg
       }),
   });
   const fetch = compose({ name: "Ada", signUp: { mode: "open" } }, [rules]);
-  expect(((await (await fetch(`${HTTPS}/chat/api/config`)).json()) as ChatConfig).commands).toEqual([{ name: "rules", description: "Your rules", audience: "user" }]);
+  expect(((await (await fetch(`${HTTPS}/chat/api/config`)).json()) as ChatConfig).commands).toEqual([...RUNTIME_COMMANDS.slice(0, 1), { name: "rules", description: "Your rules", audience: "user" }, ...RUNTIME_COMMANDS.slice(1)]);
   const ivy = browser(fetch, HTTPS, "10.4.0.1");
   await signUp(ivy, "ivy@example.com", "Ivy");
   const me = (await meOf(ivy)).user.id;

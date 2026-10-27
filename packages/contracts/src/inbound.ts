@@ -140,6 +140,9 @@ export interface AdmitOptions {
    * typed in its chat: a message whose text (as `inbound.normalize` left it) is `/name args` for one of
    * them (`commandOf`) is routed like any message (a denied sender runs nothing), then runs in its
    * conversation with its sender (`runAgentCommand`) and is never dispatched: the outcome is `command`.
+   * A command that answers a prompt (a prompt template) is the exception: that prompt is dispatched as
+   * this message (its id the request id, its sender, its images), and the outcome is `admitted` or
+   * `duplicate`, as for any message; `beforeDispatch` is called for it.
    * Absent: every message goes to the agent, `/` or not. A command is not deduplicated: a platform's
    * redelivery runs it again, so a command typed in a chat is harmless to repeat (or the channel keeps
    * which messages ran one, as it does for its own `/new`).
@@ -207,11 +210,13 @@ async function admit(ctx: AppContext, message: InboundMessage, options: AdmitOpt
   }
   if (decision.access === "deny") return { kind: "denied", message: normalized, ...(decision.reason !== undefined && { reason: decision.reason }) };
 
+  // A command's prompt (a prompt template's expansion) is dispatched in place of the typed text.
+  let prompt = normalized.text;
   const dispatch = async (conversation: ConversationRef) => {
     await options.beforeDispatch?.(conversation);
     const sender = { channel: normalized.channel, id: normalized.actor.id };
     const images = normalized.images ?? [];
-    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text, ...(images.length > 0 && { images }), sender }, ctx);
+    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt, ...(images.length > 0 && { images }), sender }, ctx);
   };
   const gone = (error: AgentUnavailableError): InboundOutcome => {
     ctx.logger.warn("admitInbound: the message's agent is no agent now, and routing names it: denied", { key: options.key, agent: error.agent });
@@ -224,7 +229,8 @@ async function admit(ctx: AppContext, message: InboundMessage, options: AdmitOpt
   if (command !== undefined && options.commands !== undefined) {
     const sender = { channel: normalized.channel, id: normalized.actor.id };
     const outcome = await runAgentCommand(options.commands, command.name, conversation, command.args, ctx, sender);
-    return { kind: "command", message: normalized, conversation, name: command.name, outcome };
+    if (outcome.kind !== "ran" || outcome.prompt === undefined) return { kind: "command", message: normalized, conversation, name: command.name, outcome };
+    prompt = outcome.prompt;
   }
   let admission: Admission;
   try {

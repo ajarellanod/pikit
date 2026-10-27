@@ -37,6 +37,10 @@
  *   first), so another conversation's id is `not_found`. It shows the parent only what the child's own
  *   transcript holds, which the parent's storage already holds: a tool call's arguments as the child
  *   wrote them (a secret the child typed there too), clipped.
+ * - **Outside a tool call** (a slash command: `/tasks`, `/cancel`), the runtime gives the same `list`,
+ *   `progress` and `cancel` of a conversation it is handed (`DurableRuntime.delegations`,
+ *   `ConversationDelegations`), through its Harness instead of a call's `api`: one code path
+ *   (`tasksOf`), scoped the same way, to that conversation's own `pikit.delegations`.
  *
  * - **The child's origin** (`ConversationRef.origin`) is written in its record when it is created, from
  *   the parent's: the parent's own origin when the parent is delegated too, else the parent. Its tools,
@@ -124,6 +128,8 @@ export interface DelegationProgress extends BackgroundDelegation {
   steps: DelegationStep[];
   /** When the child last wrote to its conversation (its newest message's time, ms since the epoch); absent before it did. */
   updatedAt?: number;
+  /** When the call that started it first ran (pi-durable's record of that call), ms since the epoch; absent without one. */
+  startedAt?: number;
 }
 
 export interface AgentDelegation {
@@ -156,6 +162,25 @@ export interface AgentDelegation {
    */
   cancel(api: ToolExecutionApi, id: string, context: ChordContext): Promise<DelegationStatus | "not_found">;
 }
+
+/**
+ * A conversation's background tasks outside a tool call (a slash command), as `AgentDelegation`'s
+ * `list`, `progress` and `cancel` give them inside one: the tasks of `conversation` only (another's id
+ * is `not_found`). The runtime's (`DurableRuntime.delegations`), in the App that holds the conversation.
+ */
+export interface ConversationDelegations {
+  list(conversation: ConversationRef, ctx: AppContext): Promise<BackgroundDelegation[]>;
+  progress(conversation: ConversationRef, id: string, ctx: AppContext): Promise<DelegationProgress | "not_found">;
+  cancel(conversation: ConversationRef, id: string, ctx: AppContext): Promise<DelegationStatus | "not_found">;
+}
+
+/**
+ * What `list`, `progress` and `cancel` reach a conversation's tasks through: a tool call's `api`, or the
+ * runtime's Harness outside a call.
+ */
+export type DelegationAccess = Pick<ToolExecutionApi, "snapshot" | "commit" | "getTask"> & {
+  conversation(id: ConversationId, context: ChordContext): Promise<{ abort(context: ChordContext): Promise<void> } | undefined>;
+};
 
 /** Where a tool's context carries the runtime's delegation. */
 export const AGENT_DELEGATION: ContextKey<AgentDelegation> = createContextKey<AgentDelegation>("pikit.agent.delegation");
@@ -465,6 +490,42 @@ export function createDelegation(options: DelegationOptions) {
       }, context),
   });
 
+  /**
+   * The background tasks of the conversation `parent`, through `access`: read from and marked in its own
+   * `pikit.delegations` only, so another conversation's id is `not_found`. The one place that scopes them,
+   * for a tool call (`list`, `progress`, `cancel` below) and for the runtime outside one.
+   */
+  const tasksOf = (access: DelegationAccess, parent: ConversationId) => ({
+    async list(context: ChordContext): Promise<BackgroundDelegation[]> {
+      return backgroundOf(Object.entries((await access.snapshot(DelegationsDoc, parent, context)) ?? {}));
+    },
+
+    async progress(id: string, context: ChordContext): Promise<DelegationProgress | "not_found"> {
+      const record = (await access.snapshot(DelegationsDoc, parent, context))?.[id];
+      if (record === undefined) return "not_found";
+      const [listed] = backgroundOf([[id, record]]);
+      // A commit that only reads: it writes nothing.
+      const read = await access.commit((tx) => stepsOf(tx, record.child as ConversationId), context);
+      // The task's id is the id of the call that started it.
+      const startedAt = (await access.getTask(Number(id) as TaskId, context))?.startedAt;
+      return { ...(listed as BackgroundDelegation), ...read, ...(startedAt !== undefined && { startedAt }) };
+    },
+
+    async cancel(id: string, context: ChordContext): Promise<DelegationStatus | "not_found"> {
+      const found = await access.commit(async (tx) => {
+        const record = (await tx.doc(DelegationsDoc, parent))[id];
+        if (record === undefined) return "not_found" as const;
+        if (record.result !== undefined) return record.result.kind;
+        record.cancelled = true;
+        return record.child as ConversationId;
+      }, context);
+      if (typeof found === "string") return found;
+      // Aborted again by a second cancel (an idle child: nothing happens), so a rerun after a crash still stops it.
+      await (await access.conversation(found, context))?.abort(context);
+      return "aborted";
+    },
+  });
+
   /** The definition of `name`, or a refusal the tool reports. */
   const definitionOf = (name: string): AgentDefinition => {
     const agent = options.agent(name);
@@ -522,19 +583,9 @@ export function createDelegation(options: DelegationOptions) {
       return id;
     },
 
-    async list(api, context) {
-      return backgroundOf(Object.entries((await api.snapshot(DelegationsDoc, api.conversationId, context)) ?? {}));
-    },
+    list: (api, context) => tasksOf(api, api.conversationId).list(context),
 
-    async progress(api, id, context) {
-      // As `list`: this conversation's own record, so another's task is not found.
-      const record = (await api.snapshot(DelegationsDoc, api.conversationId, context))?.[id];
-      if (record === undefined) return "not_found";
-      const [listed] = backgroundOf([[id, record]]);
-      // A commit that only reads: it writes nothing.
-      const read = await api.commit((tx) => stepsOf(tx, record.child as ConversationId), context);
-      return { ...(listed as BackgroundDelegation), ...read };
-    },
+    progress: (api, id, context) => tasksOf(api, api.conversationId).progress(id, context),
 
     async steer(api, id, message, context) {
       const requestId = `delegate-steer:${String(api.taskId)}`;
@@ -555,20 +606,8 @@ export function createDelegation(options: DelegationOptions) {
       return "running";
     },
 
-    async cancel(api, id, context) {
-      const found = await api.commit(async (tx) => {
-        const record = (await tx.doc(DelegationsDoc, api.conversationId))[id];
-        if (record === undefined) return "not_found" as const;
-        if (record.result !== undefined) return record.result.kind;
-        record.cancelled = true;
-        return record.child as ConversationId;
-      }, context);
-      if (typeof found === "string") return found;
-      // Aborted again by a second cancel (an idle child: nothing happens), so a rerun after a crash still stops it.
-      await (await api.conversation(found, context))?.abort(context);
-      return "aborted";
-    },
+    cancel: (api, id, context) => tasksOf(api, api.conversationId).cancel(id, context),
   };
 
-  return { delegation, extension: defineExtension({ name: DELEGATION_EXTENSION, tasks: [Anchor, Reporter] }) };
+  return { delegation, tasksOf, extension: defineExtension({ name: DELEGATION_EXTENSION, tasks: [Anchor, Reporter] }) };
 }

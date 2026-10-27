@@ -9,7 +9,8 @@ it into the app.
   `agent.observe` (what an operator sees, read-only from pi-durable's records: conversations, a
   transcript, live events, usage; `createObserver` in the adapter's `observe.ts`). Also
   `model.complete` (a text from one of the models the agents run on, once: admin-api titles
-  conversations with it) and one slash command, `agent.command` `compact` ("/compact" below).
+  conversations with it) and slash commands (`agent.command`): the operator's `compact` ("/compact"
+  below) and the chat's users' `stop`, `status`, `tasks` and `cancel` ("Team commands" below).
 - **Requires:** `storage.sqlite` (not just portable `storage.sql`): pi-durable keeps every conversation there (its transcript, its state,
   its runs and the messages it holds). On a server that is `storage-sqlite`, in a Cloudflare object
   `storage-do`. Its tables are pi-durable's, prefixed like its own (`runtime_pi_conversations`,
@@ -383,7 +384,13 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
 - the start failures above, and a stored credential reaching the provider;
 - an agent's named tools and skills being the installed ones (a skill loaded by name), and the start
   failures for a skill nothing provides or provided under another name;
-- an agent whose `prepare` gives it a tool once another tool moved its state on.
+- an agent whose `prepare` gives it a tool once another tool moved its state on;
+- `/stop`, `/status`, `/tasks`, `/cancel` under the `agent.command` suite (nothing running, no task,
+  an id that is none), and a held run: `/status` says it and the message waiting, `/stop` aborts both,
+  then nothing runs. tool-delegate's `app.test.ts` (a repository test) runs `/tasks` and `/cancel` on
+  real delegations: another conversation's id not found and its task left running, a cancel told once,
+  a task that ended not stopped. The workerd lane (`tests/workerd/test/commands.workerd.ts`) types
+  them in a chat on Cloudflare, `/stop` while the object's alarm drives the run.
 
 `overrides.test.ts` covers the live overrides (with a `settings` double): an override changing the next
 run's system prompt, model and tools, the same agent after a restart, and the definition again once it
@@ -403,6 +410,28 @@ the start failures, and the extension's state across a restart.
 
 `component.json` is generated from `setup` by the CLI (`pikit registry validate`) and is not written
 by hand; the test "what setup declares" pins it.
+
+## Team commands
+
+For anyone the channel admits in that chat (`audience: "user"`: the person in the thread is who sees
+the agent stuck), each acting on the conversation it is typed in only (`commands.ts`):
+- **`/stop`** aborts the run going (`agent.runtime`'s `abort`: running tools see their signal) and the
+  messages waiting for the next one; background tasks go on. Nothing running: "Nothing is running."
+- **`/status`**: the agent, running or idle, how many messages wait, how many background tasks run:
+  pi-durable's `pi.live` and `pi.inbox` (`DurableRuntime.status`) and the tasks' record, read, nothing
+  written.
+- **`/tasks`**: the background tasks this conversation delegated (tool-delegate's `delegate` with
+  `wait: false`): id, agent, status, and for a running one when it started and its latest step.
+- **`/cancel <id>`**: stops one, as the agent's `delegate_cancel` does (reported to the conversation as
+  stopped, once; a task that ended is left as it is). An id another conversation started is not found.
+
+The tasks are `DurableRuntime.delegations` (the adapter's `delegation.ts`): the code path the
+delegation tools take, through the Harness instead of a tool call's `api`, scoped to the conversation
+given. They live here, not in tool-delegate: this component uses every `agent.tool`, so a tool's
+component cannot use what this one provides (a dependency cycle the kernel refuses). The scope is the
+conversation: in Google Chat each thread is one, so `/tasks` lists that thread's tasks only (a
+space-wide view would need an index: open). On Cloudflare they run in the conversation's object,
+where its runtime is; after `/cancel` a wakeup is asked for, so the stopped task's report is driven.
 
 ## /compact and model.complete
 

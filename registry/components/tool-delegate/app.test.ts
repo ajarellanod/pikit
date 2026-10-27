@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDefinition, type AgentRuntime, type AgentTool, CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest } from "@pikit/contracts";
+import { type AgentDefinition, type AgentRuntime, type AgentTool, type CommandLookup, CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest, runAgentCommand } from "@pikit/contracts";
 import { fauxAssistantMessage, fauxProvider, type FauxResponseFactory } from "@pikit/pi-adapter/providers/faux";
 import { holdTool, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import { defineTool } from "@pikit/pi-adapter/tools";
@@ -63,7 +63,7 @@ const agents = (helperTools: AgentDefinition["tools"] = []) => [
 /** An App over the database in `dir`; a second one over the same `dir` is the next worker. */
 async function start(dir: string, list: AgentDefinition[], delegateConfig: Record<string, unknown> = {}, providers: Provider[] = []) {
   const results: Result[] = [];
-  let reached: { runtime: AgentRuntime; create: () => Promise<string> } | undefined;
+  let reached: { runtime: AgentRuntime; create: () => Promise<string>; commands: CommandLookup } | undefined;
   const components = [
     sqliteStorage(join(dir, "pikit.db")),
     defineComponent({ name: "agents-test", setup: (pikit) => list.forEach((agent) => pikit.provideKeyed("agent.definition", agent.name, agent)) }),
@@ -75,9 +75,10 @@ async function start(dir: string, list: AgentDefinition[], delegateConfig: Recor
       setup(pikit) {
         const runtime = pikit.use("agent.runtime");
         const conversations = pikit.use("agent.conversations");
+        const commands = pikit.useKeyed("agent.command");
         pikit.on("agent.settled", (result) => void results.push(result));
         pikit.on("agent.failed", (result) => void results.push(result));
-        return { start: (ctx) => void (reached = { runtime: runtime.get(), create: () => conversations.get().create(ctx) }) };
+        return { start: (ctx) => void (reached = { runtime: runtime.get(), create: () => conversations.get().create(ctx), commands }) };
       },
     }),
   ];
@@ -105,6 +106,8 @@ async function start(dir: string, list: AgentDefinition[], delegateConfig: Recor
     app,
     stop,
     runtime: () => live().runtime,
+    /** Runs the slash command `name` in `conversation`, typed by bob. */
+    command: (name: string, conversation: ConversationRef, args = "") => runAgentCommand(live().commands, name, conversation, args, app.context(), { channel: "test", id: "bob" }),
     async ask(key: string, prompt: string, requestId = `${key}:1`, agent = "assistant"): Promise<ConversationRef> {
       const conversation = { key, agent, conversationId: await live().create() };
       await live().runtime.dispatch({ requestId, conversation, prompt, sender: { channel: "test", id: "alice" } }, app.context());
@@ -348,4 +351,32 @@ test("from: another agent is refused, directly or through an allowed agent, and 
   expect(toolResults(await s.result("test:10:1"))[0]).toStartWith('The agent "orchestrator" answered:');
 
   expect(held.keys).toEqual([]);
+});
+
+test("/tasks and /cancel (runtime-pi's commands, typed in a chat): a conversation's own background tasks, listed and stopped once; another's id is not found and keeps running; an ended task is not stopped", async () => {
+  const held = hold();
+  const s = await start(directory(), agents([held.tool as AgentTool]));
+  const mine = await s.ask("test:1", 'call: delegate {"agent":"helper","task":"hold","wait":false}');
+  const id = /^The task "(\d+)"/.exec(toolResults(await s.result("test:1:1"))[0] ?? "")?.[1] ?? "";
+  await held.started;
+  const other = await s.ask("test:2", "hi");
+  await s.result("test:2:1");
+
+  expect(await s.command("tasks", other)).toEqual({ kind: "ran", text: "No background tasks in this conversation." });
+  expect(await s.command("cancel", other, id)).toEqual({ kind: "failed", message: `There is no task "${id}" in this conversation (/tasks lists them).` });
+  expect(await s.command("cancel", mine)).toMatchObject({ kind: "failed" });
+  const listed = await s.command("tasks", mine);
+  expect(listed.kind === "ran" ? listed.text : "").toMatch(new RegExp(`^Background tasks:\\n- ${id}: helper, running, started \\d+ seconds? ago; latest step \\d+ seconds? ago: called hold \\(running\\)$`));
+
+  expect(await s.command("cancel", mine, id)).toEqual({ kind: "ran", text: `The task "${id}" is stopped.` });
+  const reported = await s.resultWhere((r) => r.conversation.key === "test:1" && r.requestId.startsWith("delegate-result:"));
+  expect(reported.text).toContain('[The task you delegated to the agent "helper" was stopped before it answered.]');
+  expect(await s.command("tasks", mine)).toEqual({ kind: "ran", text: `Background tasks:\n- ${id}: helper, aborted` });
+
+  // A task that answered is not stopped: nothing to do.
+  const third = await s.ask("test:3", 'call: delegate {"agent":"helper","task":"quick","wait":false}');
+  const done = /^The task "(\d+)"/.exec(toolResults(await s.result("test:3:1"))[0] ?? "")?.[1] ?? "";
+  await s.resultWhere((r) => r.conversation.key === "test:3" && r.requestId.startsWith("delegate-result:"));
+  expect(await s.command("cancel", third, done)).toEqual({ kind: "ran", text: `The task "${done}" had already ended (completed): nothing to stop.` });
+  expect(s.results().filter((r) => r.requestId.startsWith("delegate-result:"))).toHaveLength(2);
 });

@@ -6,9 +6,10 @@
  * conversation of a new key, or of a reset), and `agent.submissions`: what became of each admitted
  * message, read from pi-durable, and `answers`, the log of every run's end channels deliver from
  * (`runtime_pi_answers`, kept `keepSettledDays`). It also provides `model.complete` (a text from one
- * of the models its agents run on, once: admin-api's conversation titles) and the slash command
- * `/compact` (`agent.command`: pi-durable's manual compaction of the conversation it runs in, with
- * what follows it as the summary's instructions). At start, the conversations holding a message nobody
+ * of the models its agents run on, once: admin-api's conversation titles) and the slash commands
+ * `/compact` (`agent.command`, the operator's: pi-durable's manual compaction of the conversation it
+ * runs in, with what follows it as the summary's instructions), and `/stop`, `/status`, `/tasks` and
+ * `/cancel <id>`, the chat's users' (`commands.ts`). At start, the conversations holding a message nobody
  * answered are resumed in the background (`resume.ts`), or by a wakeup with `wakeups`, with no new
  * message needed. Messages that can never be answered are abandoned, and their senders told: at once
  * when their agent is gone, and after `abandonPendingAfterHours` when resuming them fails.
@@ -93,6 +94,7 @@ import {
   parseModelName,
 } from "@pikit/pi-adapter";
 import Type from "typebox";
+import { userCommands } from "./commands.ts";
 import { type AgentOverrides, overridesOf, overridesSchema, withOverride } from "./overrides.ts";
 import { createReopenBackoff, createReopener, type Reopener } from "./reopen.ts";
 import { resumePending, type ResumeOptions } from "./resume.ts";
@@ -355,6 +357,9 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         },
       };
       pikit.provideKeyed("agent.command", "compact", compact);
+      // /stop, /status, /tasks and /cancel, for the people in the chat (commands.ts).
+      const drive = async (ctx: AppContext) => void (await driver?.wake(ctx.clock.now(), ctx));
+      for (const [name, command] of Object.entries(userCommands(current, drive))) pikit.provideKeyed("agent.command", name, command);
 
       return {
         async start(ctx) {

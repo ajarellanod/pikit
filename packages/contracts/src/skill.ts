@@ -92,6 +92,16 @@ export function defineSkill(markdown: string, options: { location?: string; name
   return skill;
 }
 
+/**
+ * A Markdown file's frontmatter, read as `defineSkill` reads a `SKILL.md`'s (its top-level scalar
+ * fields), and its body; without a frontmatter, no fields and the whole text. Also what agents-folders
+ * reads Pi's prompt templates with (`description`, `argument-hint`).
+ */
+export function parseFrontmatter(markdown: string): { fields: Record<string, string>; body: string } {
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  return { fields: frontmatter === undefined ? {} : readFrontmatter(frontmatter), body };
+}
+
 function splitFrontmatter(markdown: string): { frontmatter?: string; body: string } {
   const text = markdown.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   if (!text.startsWith("---\n")) return { body: text };

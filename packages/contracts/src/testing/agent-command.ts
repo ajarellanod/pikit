@@ -37,9 +37,10 @@ const GROUP = "agent.command";
 const expect = expecter(GROUP);
 const check = checker(GROUP);
 
-/** The suite's own commands: one answers what it was given, one fails. */
+/** The suite's own commands: one answers what it was given, one fails, one answers a prompt. */
 const ECHO = "conformance-echo";
 const FAILS = "conformance:fails";
+const PROMPT = "conformance-prompt";
 const probes = defineComponent({
   name: "agent-command-conformance-probes",
   setup(pikit) {
@@ -54,8 +55,13 @@ const probes = defineComponent({
         throw new Error("this command cannot run here");
       },
     };
+    const prompt: AgentCommand = {
+      description: "Answers a prompt made of its arguments, and a note",
+      run: async (_conversation, args) => ({ prompt: `Do ${args}`, text: "a note" }),
+    };
     pikit.provideKeyed("agent.command", ECHO, echo);
     pikit.provideKeyed("agent.command", FAILS, fails);
+    pikit.provideKeyed("agent.command", PROMPT, prompt);
   },
 });
 
@@ -98,6 +104,10 @@ export function createAgentCommandConformance(factory: () => AgentCommandFixture
     commandCase("a command runs in the conversation it is given, with its arguments trimmed, and its text comes back", async (commands, conversation, _fixture, _app, ctx) => {
       const outcome = await runAgentCommand(commands, ECHO, conversation, "  two words  ", ctx);
       expect(outcome, { kind: "ran", text: `${conversation.key} ${conversation.conversationId} [two words]` }, "the probe command's outcome");
+    }),
+
+    commandCase("a command's prompt comes back for its runner to dispatch, without its note", async (commands, conversation, _fixture, _app, ctx) => {
+      expect(await runAgentCommand(commands, PROMPT, conversation, " it ", ctx), { kind: "ran", prompt: "Do it" }, "the prompt probe's outcome");
     }),
 
     commandCase("each command of the fixture runs in its conversation, its note a string when it has one", async (commands, conversation, fixture, app, ctx) => {

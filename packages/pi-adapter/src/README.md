@@ -172,7 +172,11 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   runtime builds takes the origin from that record (`asRecorded`), never from a given ref. A completed
   outcome carries the parts of the child's run that answered it (`runParts` over `tx.scanEntries`; the
   task's inputs that share the last one's answer), and the reporter's `dispatch` brings them to the
-  parent (`AgentRequest.parts`).
+  parent (`AgentRequest.parts`). Outside a tool call (a slash command), `DurableRuntime.delegations`
+  (`ConversationDelegations`) gives the same `list`, `progress` and `cancel` of the conversation it is
+  handed, through the Harness instead of a call's `api` (`tasksOf`: one code path, one scope).
+  `progress` also says when the call that started the task first ran (`startedAt`, its task record).
+  `DurableRuntime.status` says whether a run goes and how many messages wait (`pi.live`, `pi.inbox`).
 
 ## Submissions (`submissions.ts`, `answers.ts`)
 

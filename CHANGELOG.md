@@ -39,6 +39,14 @@ line names its area.
   per chat (`maxPerHour`), the sending agent's name first (`attribution: false` to drop it); stored in
   the destination's outbox by its actor (`tool-notify.enqueue`). tool-delegate's `chainOf`, `depthOf`
   and `callersOf` move to `callers.ts`, tool-notify's twin.
+- Team commands and prompt templates ([features/slash-commands.md](features/slash-commands.md)):
+  runtime-pi's `/stop`, `/status`, `/tasks` and `/cancel <id>` for anyone in the chat, each on the
+  conversation it is typed in (a Google Chat thread), the tasks through the adapter's new
+  `DurableRuntime.delegations` (the delegation tools' code path, scoped to the conversation); and
+  agents-folders' `src/agents/<agent>/prompts/<name>.md` (Pi's format: `$1`, `$@`, `${1:-default}`,
+  and the rest), each name a command in the generated file. A command may now answer `{ prompt }`, which
+  `admitInbound` dispatches as the typed message (its id: a redelivery runs once) and admin-api as an
+  operator's message. Run `pikit agents` again after adding templates.
 - Spaces ([features/spaces.md](features/spaces.md)): channel-google-chat gives every thread its chat's
   key as its space; channel-web has projects (create, rename, delete when empty; a chat is made in one
   or none, for good), a chat of a project in that project's space.

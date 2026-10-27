@@ -129,7 +129,12 @@ pikit.provideKeyed("agent.command", "deploy", {
 });
 ```
 
-The kit's own: `/new` and `/name` (admin-api), `/compact` (runtime-pi).
+`audience: "user"` offers it to anyone a channel admits in a chat (absent: the operator's only).
+Returning `{ prompt }` instead of `{ text }` makes the runner dispatch that text to the agent in place
+of the typed message (a prompt template; no `agent.runtime` needed). The kit's own: `/new` and `/name`
+(admin-api), `/compact` (runtime-pi), for the chat's users `/stop`, `/status`, `/tasks`, `/cancel <id>`
+(runtime-pi), `/rules`, `/prefs` (memory-recall), and a project's prompt templates
+(`src/agents/<agent>/prompts/<name>.md`, agents-folders).
 
 A component is a folder:
 

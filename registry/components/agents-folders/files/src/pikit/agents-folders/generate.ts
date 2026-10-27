@@ -6,13 +6,16 @@
  *
  * Every problem is said at once, and nothing is written while there is one: a folder without its
  * agent.ts, a name an agent or a skill cannot have, a SKILL.md `defineSkill` refuses, a channel file
- * that names no channel, a `pikit.config.ts` that does not list the generated file.
+ * that names no channel, a prompt template a slash command cannot be (its name, its description, an
+ * empty text), a `pikit.config.ts` that does not list the generated file. A template named as another
+ * component's command is refused where the App is composed (`pikit doctor`, the start): one key of
+ * `agent.command`, two providers.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { defineSkill, isSkillName } from "@pikit/contracts";
-import { type AgentFolder, channelOfFile, type Folders, GENERATED, render, type SkillFolder } from "./index.ts";
+import { commandProblem, defineSkill, isSkillName, parseFrontmatter } from "@pikit/contracts";
+import { type AgentFolder, channelOfFile, type Folders, GENERATED, type PromptFile, render, type SkillFolder } from "./index.ts";
 
 /** What the CLI gives a command (`component-command.ts`). Components declare the same shape; nothing is imported. */
 export interface CommandIO {
@@ -113,9 +116,36 @@ function agentsOf(projectDir: string, server: boolean, problems: string[]): Agen
       return [{ channel, text: readFileSync(join(dir, "channels", file), "utf8").trim() }];
     });
     const skills = skillsIn(join(dir, "skills"), `${at}/skills`, `../agents/${name}/skills`, server, problems);
-    agents.push({ name, ...(system !== undefined && { system }), channels, skills });
+    const prompts = promptsIn(join(dir, "prompts"), `${at}/prompts`, problems);
+    agents.push({ name, ...(system !== undefined && { system }), channels, skills, prompts });
   }
   return agents;
+}
+
+/**
+ * The prompt templates of `dir`: its `.md` files (not its folders' files, as Pi loads them), each read
+ * as Pi reads one, and checked as the command it becomes (`commandProblem`).
+ */
+function promptsIn(dir: string, at: string, problems: string[]): PromptFile[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((file) => file.endsWith(".md") && statSync(join(dir, file)).isFile())
+    .sort()
+    .flatMap((file) => {
+      const name = file.slice(0, -".md".length);
+      const { fields, body } = parseFrontmatter(readFileSync(join(dir, file), "utf8"));
+      const text = body.trim();
+      const first = text.split("\n").find((line) => line.trim() !== "") ?? "";
+      const description = fields.description?.trim() || (first.length > 60 ? `${first.slice(0, 60)}...` : first);
+      const argumentHint = fields["argument-hint"]?.trim() || undefined;
+      const problem =
+        text === "" ? "its text is empty" : commandProblem(name, { description, ...(argumentHint !== undefined && { argumentHint }), run: async () => undefined });
+      if (problem !== undefined) {
+        problems.push(`${at}/${file}: a prompt template is a slash command, /<file name>: ${problem}`);
+        return [];
+      }
+      return [{ name, description, ...(argumentHint !== undefined && { argumentHint }), text }];
+    });
 }
 
 /**
