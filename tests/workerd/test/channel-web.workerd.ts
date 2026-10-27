@@ -545,11 +545,12 @@ it("projects: each user's; a chat made in one is in the project's space (the reg
     setup: (pikit) =>
       pikit.provideKeyed("agent.command", "rules", {
         description: "Your rules",
+        audience: "user",
         run: async (conversation, args, _ctx, sender) => ({ text: `${args} space=${conversation.space ?? "none"} sender=${sender?.id ?? "none"}` }),
       }),
   });
   const fetch = compose({ name: "Ada", signUp: { mode: "open" } }, [rules]);
-  expect(((await (await fetch(`${HTTPS}/chat/api/config`)).json()) as ChatConfig).commands).toEqual([{ name: "rules", description: "Your rules" }]);
+  expect(((await (await fetch(`${HTTPS}/chat/api/config`)).json()) as ChatConfig).commands).toEqual([{ name: "rules", description: "Your rules", audience: "user" }]);
   const ivy = browser(fetch, HTTPS, "10.4.0.1");
   await signUp(ivy, "ivy@example.com", "Ivy");
   const me = (await meOf(ivy)).user.id;

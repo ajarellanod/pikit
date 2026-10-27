@@ -117,16 +117,38 @@ test("commandOf: a registered command's name and its arguments; anything else is
   expect(commandOf("/", lookup)).toBeUndefined();
 });
 
-test("allowedCommands: only the names allowed are found or listed; all keeps every one", () => {
-  const command: AgentCommand = { description: "C", run: async () => undefined };
-  const all = new Map<string, AgentCommand>([["rules", command], ["new", command]]);
+test("allowedCommands: user keeps the commands for users (none given is the operator's); names allow whatever their audience; all keeps every one", () => {
+  const forUser: AgentCommand = { description: "Rules", audience: "user", run: async () => undefined };
+  const forOperator: AgentCommand = { description: "New", audience: "operator", run: async () => undefined };
+  const unsaid: AgentCommand = { description: "Compact", run: async () => undefined };
+  const all = new Map<string, AgentCommand>([["rules", forUser], ["new", forOperator], ["compact", unsaid]]);
   const lookup = { keys: () => [...all.keys()], get: (name: string) => all.get(name) };
 
-  const some = allowedCommands(lookup, ["rules"]);
-  expect(some.keys()).toEqual(["rules"]);
-  expect(some.get("new")).toBeUndefined();
-  expect(commandOf("/new", some)).toBeUndefined();
-  expect(commandOf("/rules", some)).toEqual({ name: "rules", args: "" });
-  expect(allowedCommands(lookup, "all").keys()).toEqual(["rules", "new"]);
+  const users = allowedCommands(lookup, "user");
+  expect(users.keys()).toEqual(["rules"]);
+  expect(users.get("new")).toBeUndefined();
+  expect(users.get("compact")).toBeUndefined();
+  expect(commandOf("/new", users)).toBeUndefined();
+  expect(commandOf("/rules add x", users)).toEqual({ name: "rules", args: "add x" });
+
+  const named = allowedCommands(lookup, ["new"]);
+  expect(named.keys()).toEqual(["new"]);
+  expect(named.get("rules")).toBeUndefined();
+  expect(allowedCommands(lookup, "all").keys()).toEqual(["rules", "new", "compact"]);
   expect(allowedCommands(lookup, []).keys()).toEqual([]);
+});
+
+test("audience: listed with every command, operator when none; any other value is a malformed command", () => {
+  const all = new Map<string, AgentCommand>([
+    ["rules", { description: "Rules", audience: "user", run: async () => undefined }],
+    ["compact", { description: "Compact", run: async () => undefined }],
+    ["odd", { description: "Odd", audience: "everyone" as never, run: async () => undefined }],
+  ]);
+  const lookup = { keys: () => [...all.keys()], get: (name: string) => all.get(name) };
+
+  expect(listAgentCommands(lookup)).toEqual([
+    { name: "compact", description: "Compact", audience: "operator" },
+    { name: "rules", description: "Rules", audience: "user" },
+  ]);
+  expect(allowedCommands(lookup, "user").keys()).toEqual(["rules"]);
 });

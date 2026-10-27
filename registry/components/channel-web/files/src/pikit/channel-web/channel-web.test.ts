@@ -1211,7 +1211,7 @@ test("SPACE: a chat made in a project is admitted with the project's space, the 
   expect(parseKey(`web:ana:project:${work.id}`)).toBeUndefined();
 });
 
-/** Commands of the App: `/rules` (a note, or a failure), `/prefs`, and admin-api's `/name`; who ran each. */
+/** Commands of the App: `/rules` (a note, or a failure) and `/prefs`, for users, and an operator's `/name`; who ran each. */
 function commandsOf() {
   const ran: { name: string; key: string; space?: string; args: string; sender?: { channel: string; id: string } }[] = [];
   const component = defineComponent({
@@ -1221,6 +1221,7 @@ function commandsOf() {
         pikit.provideKeyed("agent.command", name, {
           description: `The ${name}`,
           ...(name === "rules" && { argumentHint: "<rule>" }),
+          audience: name === "name" ? "operator" : "user",
           async run(conversation, args, _ctx, sender) {
             ran.push({ name, key: conversation.key, ...(conversation.space !== undefined && { space: conversation.space }), args, ...(sender !== undefined && { sender }) });
             if (args === "fail") throw new Error("that rule cannot be kept");
@@ -1233,13 +1234,13 @@ function commandsOf() {
   return { ran, component, typed: () => ran.filter((each) => each.sender !== undefined) };
 }
 
-test("COMMANDS: the config's (rules and prefs by default) are listed in the config and run in their conversation with the user as sender, never dispatched nor in the transcript; their outcome answered; the same request id runs once; another /word goes to the agent", async () => {
+test("COMMANDS: those for users (rules and prefs here) are listed by default in the config and run in their conversation with the user as sender, never dispatched nor in the transcript; their outcome answered; the same request id runs once; another /word goes to the agent", async () => {
   const commands = commandsOf();
   const c = await chat({ components: [commands.component] });
   const config = (await (await c.served.fetch(`${API}/config`)).json()) as ChatConfig;
   expect(config.commands).toEqual([
-    { name: "prefs", description: "The prefs" },
-    { name: "rules", description: "The rules", argumentHint: "<rule>" },
+    { name: "prefs", description: "The prefs", audience: "user" },
+    { name: "rules", description: "The rules", argumentHint: "<rule>", audience: "user" },
   ]);
   const work = await project(c, "ana", "Work");
   const first = await start(c, "ana", "hello", { project: work.id });

@@ -345,6 +345,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       // Pi's /compact, in the conversation it is run in (admin-api runs it from the dashboard's "/").
       const compact: AgentCommand = {
         description: "Compact the context: summarize the older messages",
+        audience: "operator",
         argumentHint: "<what the summary keeps>",
         async run(conversation, args, ctx) {
           await refresh(ctx);

@@ -267,6 +267,8 @@ export function createMemoryCommand(managed: Managed, memory: () => MemoryStore)
   return {
     description: kind === "rule" ? "Show this space's rules, or add, approve, reject or remove one" : "Show your preferences, or add, approve, reject or remove one",
     argumentHint: `[add <${kind}> | approve <id> | reject <id> | remove <id>]`,
+    // A chat's users type it: it acts only on their space's rules or their own preferences.
+    audience: "user",
     async run(conversation, args, ctx, sender) {
       const owner = managed.owner(conversation, sender);
       const store = memory();

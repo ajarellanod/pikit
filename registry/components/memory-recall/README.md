@@ -96,8 +96,9 @@ the dashboard's "/" (admin-api):
 
 Each is harmless to repeat, as a platform may redeliver a message: adding the same words twice keeps
 one rule, approving twice approves once, rejecting or removing what is gone says so. **Who may run
-them** is the channel's config (which commands its users may type, `allowedCommands`): any sender the
-channel admits manages the space's rules, and each person their own preferences. Whether a space's
+them** is the channel's config (which commands its users may type, `allowedCommands`). Both say
+`audience: "user"`, so every channel's default (`"user"`) offers them with no name to list: any sender
+the channel admits manages the space's rules, and each person their own preferences. Whether a space's
 rules need an owner's or an admin's approval is open.
 
 Memory is where a prompt injection persists: facts and summaries are presented as data, rules and

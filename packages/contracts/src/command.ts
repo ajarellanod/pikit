@@ -46,6 +46,13 @@ export interface AgentCommand {
   /** What its arguments are, for a menu: `<title>`. Absent: it takes none. */
   argumentHint?: string;
   /**
+   * Who it is for (`CommandAudience`): `"user"`, anyone a channel admits may type it in a chat (it acts
+   * only on what is theirs or their space's: memory-recall's `/rules`, `/prefs`); `"operator"`, the
+   * operator's (the dashboard runs it; a channel offers it only when its config names it). Absent: the
+   * operator's, so a command never reaches a chat's users by default unless it says it is for them.
+   */
+  audience?: CommandAudience;
+  /**
    * Runs it in `conversation` (the key's current one) with `args`, the text after the name, trimmed
    * (`""` when none). Resolves with a note for whoever ran it, or nothing; rejects, with a message for
    * the operator, when it cannot. `sender` is who typed it in a channel (`{ channel, id }`, as a
@@ -55,11 +62,18 @@ export interface AgentCommand {
   run(conversation: ConversationRef, args: string, ctx: AppContext, sender?: Sender): Promise<{ text?: string } | void>;
 }
 
+/** Who a command is for (`AgentCommand.audience`). */
+export type CommandAudience = "operator" | "user";
+
+/** A command's audience, `"operator"` when it gives none. */
+export const audienceOf = (command: AgentCommand): CommandAudience => command.audience ?? "operator";
+
 /** A command as a menu lists it. */
 export interface CommandInfo {
   name: string;
   description: string;
   argumentHint?: string;
+  audience: CommandAudience;
 }
 
 /** Whether `name` is a command's name (`COMMAND_NAME`). */
@@ -73,6 +87,7 @@ export function commandProblem(name: string, command: AgentCommand | undefined):
     return `"${name}": its description is one line of at most ${MAX_DESCRIPTION} characters`;
   }
   if (command.argumentHint !== undefined && (typeof command.argumentHint !== "string" || /[\r\n]/.test(command.argumentHint))) return `"${name}": its argumentHint is one line`;
+  if (command.audience !== undefined && command.audience !== "operator" && command.audience !== "user") return `"${name}": its audience is "operator" or "user"`;
   return undefined;
 }
 
@@ -90,7 +105,7 @@ export function listAgentCommands(commands: CommandLookup): CommandInfo[] {
     .flatMap((name) => {
       const command = commands.get(name);
       if (command === undefined || commandProblem(name, command) !== undefined) return [];
-      return [{ name, description: command.description, ...(command.argumentHint !== undefined && { argumentHint: command.argumentHint }) }];
+      return [{ name, description: command.description, ...(command.argumentHint !== undefined && { argumentHint: command.argumentHint }), audience: audienceOf(command) }];
     });
 }
 
@@ -141,14 +156,26 @@ export function commandOf(text: string, commands: CommandLookup): { name: string
 }
 
 /**
- * `commands` cut to the names a channel lets its users type (`"all"`: every one): what a channel gives
- * `admitInbound` when its config says which commands run from its chat. A name not allowed is unknown
- * there, so `/name` goes to the agent as text.
+ * Which commands a channel lets its users type (its config's `commands`): `"user"`, those whose
+ * audience is `"user"` (every channel's default: no command needs to be named by a channel, and none
+ * of the operator's reaches a chat unless allowed); `"all"`, every one; or the names listed, whatever
+ * their audience (the operator decided).
  */
-export function allowedCommands(commands: CommandLookup, allow: "all" | readonly string[]): CommandLookup {
+export type CommandsAllowed = "user" | "all" | readonly string[];
+
+/**
+ * `commands` cut to the ones a channel lets its users type (`CommandsAllowed`): what a channel gives
+ * `admitInbound`. A command not allowed is unknown there, so `/name` goes to the agent as text.
+ */
+export function allowedCommands(commands: CommandLookup, allow: CommandsAllowed): CommandLookup {
   if (allow === "all") return commands;
-  const names = new Set(allow);
-  return { keys: () => commands.keys().filter((name) => names.has(name)), get: (name) => (names.has(name) ? commands.get(name) : undefined) };
+  const names = allow === "user" ? undefined : new Set(allow);
+  const allowed = (name: string): boolean => {
+    if (names !== undefined) return names.has(name);
+    const command = commands.get(name);
+    return command !== undefined && audienceOf(command) === "user";
+  };
+  return { keys: () => commands.keys().filter(allowed), get: (name) => (allowed(name) ? commands.get(name) : undefined) };
 }
 
 declare module "@pikit/core" {

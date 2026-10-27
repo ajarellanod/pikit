@@ -76,10 +76,12 @@ const Config = Type.Object({
   /** More bots, by name, besides the default one: `["ops"]` runs `telegram:ops` with `TELEGRAM_OPS_BOT_TOKEN`. */
   accounts: Type.Array(Type.String({ pattern: ACCOUNT_NAME }), { default: [], uniqueItems: true }),
   /**
-   * The App's commands (`agent.command`) its users may type (`/name args`): `"all"`, or their names.
+   * The App's commands (`agent.command`) its users may type (`/name args`): `"user"`, those whose audience is
+   * `"user"` (memory-recall's `/rules` and `/prefs`), the default; `"all"`, the operator's too (`/new`,
+   * `/name`, `/compact`); or their names, whatever their audience (`allowedCommands`).
    * Only the allowed users reach them, after the router. Another `/name` goes to the agent as text.
    */
-  commands: Type.Union([Type.Literal("all"), Type.Array(Type.String({ pattern: COMMAND_NAME.source }), { uniqueItems: true })], { default: "all" }),
+  commands: Type.Union([Type.Literal("user"), Type.Literal("all"), Type.Array(Type.String({ pattern: COMMAND_NAME.source }), { uniqueItems: true })], { default: "user" }),
 });
 
 /**

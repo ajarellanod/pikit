@@ -224,8 +224,8 @@ settings-store do.
   kept beside the users' index (`channel_web_projects`; on Cloudflare in the accounts actor, the
   Worker's `channel-web.project*` calls); a chat made in a project deleted at that very moment (the
   index learns of the chat a moment later) lists with those of no project, its space kept.
-- **Commands typed in the chat** (added later): `commands` (`"all"` or names; default `["rules",
-  "prefs"]`, memory's per-user commands) cut the App's `agent.command`s (`allowedCommands`), given to
+- **Commands typed in the chat** (added later): `commands` (`"user"`, `"all"` or names; default
+  `"user"`, the commands whose `audience` is `"user"`: memory's `/rules` and `/prefs`) cut the App's `agent.command`s (`allowedCommands`), given to
   `admitInbound` (`options.commands`): `/name args` for one of them is routed like any message, runs in
   its conversation with the user as sender, and is never dispatched nor stored in the transcript; the
   answer says what came of it (`ChatSendResponse.command`), which the page shows as a quiet note. A

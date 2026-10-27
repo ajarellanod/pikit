@@ -804,16 +804,16 @@ async function until(probe: () => boolean | Promise<boolean>, what: string): Pro
   }
 }
 
-test("GET /admin/api/commands: the App's slash commands by name (admin-api's /new and /name among them), with their hints; a malformed one is left out", async () => {
+test("GET /admin/api/commands: the App's slash commands by name (admin-api's /new and /name among them), with their hints and audience (operator when none); a malformed one is left out", async () => {
   const s = await started({}, [deployCommand([])]);
 
   const response = await s.fetch("/admin/api/commands", { headers: AUTH });
 
   expect(await response.json()).toEqual({
     items: [
-      { name: "deploy", description: "Deploy the current branch", argumentHint: "<environment>" },
-      { name: "name", description: "Set the conversation's title", argumentHint: "<title>" },
-      { name: "new", description: "Start a new conversation: this one is kept, and its key starts again empty" },
+      { name: "deploy", description: "Deploy the current branch", argumentHint: "<environment>", audience: "operator" },
+      { name: "name", description: "Set the conversation's title", argumentHint: "<title>", audience: "operator" },
+      { name: "new", description: "Start a new conversation: this one is kept, and its key starts again empty", audience: "operator" },
     ],
   });
 });

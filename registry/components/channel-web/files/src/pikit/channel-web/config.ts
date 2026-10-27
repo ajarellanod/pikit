@@ -100,13 +100,14 @@ export const Config = Type.Object({
    */
   agents: Type.Array(Type.String({ pattern: AGENT_NAME, maxLength: 64 }), { default: [], maxItems: 50, uniqueItems: true }),
   /**
-   * The commands (`agent.command`) users may type in a chat (`/name args`): `"all"`, or their names.
-   * Users may sign themselves up, so by default only those that act on their own things (memory's
-   * `/rules` and `/prefs`, when installed), never an operator's (`/name`, `/new`). A name the App has
-   * no command of is left out; a command not allowed goes to the agent as text.
+   * The App's commands (`agent.command`) users in a chat may type (`/name args`): `"user"`, those whose audience is
+   * `"user"` (memory-recall's `/rules` and `/prefs`), the default; `"all"`, the operator's too (`/new`,
+   * `/name`, `/compact`); or their names, whatever their audience (`allowedCommands`).
+   * Users may sign themselves up: an operator's command reaches them only when named here or with
+   * `"all"`. A name the App has no command of is left out; a command not allowed goes to the agent as text.
    */
-  commands: Type.Union([Type.Literal("all"), Type.Array(Type.String({ pattern: COMMAND_NAME, maxLength: 64 }), { maxItems: 100, uniqueItems: true })], {
-    default: ["rules", "prefs"],
+  commands: Type.Union([Type.Literal("user"), Type.Literal("all"), Type.Array(Type.String({ pattern: COMMAND_NAME, maxLength: 64 }), { maxItems: 100, uniqueItems: true })], {
+    default: "user",
   }),
   /**
    * How long a session is trusted from its signed cookie, without reading the database: a ban or a

@@ -22,8 +22,10 @@ that conversation.
   the note or why it failed. An unknown or disallowed `/word` goes to the agent as text. Each channel
   runs a command once per platform message (Google Chat keeps what it said under
   `command:<message name>`, Telegram the last command's message id per chat, channel-web the request
-  id). Defaults: `"all"` where the senders are allow-listed (Google Chat, Telegram), `["rules",
-  "prefs"]` in the web chat, whose users may sign themselves up.
+  id). Who a command is for is its own to say (`audience`: `"user"` or `"operator"`, the operator's
+  when absent), so a channel names none: every channel's default, `"user"`, offers the commands for
+  users (memory-recall's `/rules`, `/prefs`) and none of the operator's (`/new`, `/name`, `/compact`);
+  `"all"` or a list of names allows more.
 - pi-durable's own extensions registering commands per conversation would need the runtime to list
   and run those too (a runtime-side addition to the registry, suite first).
 - Platforms that list commands (Telegram `setMyCommands`, Slack and Discord slash commands) are
@@ -34,7 +36,7 @@ that conversation.
 
 ## What is built: the registry, and the dashboard's "/"
 - **The contract**: the keyed capability `agent.command`, one command per name (Pi's rule,
-  `COMMAND_NAME`), `{ description, argumentHint?, run(conversation, args, ctx, sender?) }` answering
+  `COMMAND_NAME`), `{ description, argumentHint?, audience?, run(conversation, args, ctx, sender?) }` answering
   `{ text? }`; `runAgentCommand` and `listAgentCommands` run and list them, the same for every
   runner; `createAgentCommandConformance` is its suite. A command runs in the App that holds the
   conversation (on Cloudflare its object) and acts only through contracts.

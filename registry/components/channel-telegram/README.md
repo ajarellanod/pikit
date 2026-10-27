@@ -56,14 +56,16 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   the App's commands (`agent.command`: admin-api's `/name`, runtime-pi's `/compact`, another
   component's) that the `commands` config allows: `/name args`, or `/name@your_bot args` (the bot's
   own username is cut; `/name@another_bot` is no command), is routed like any message (a sender the
-  router denies runs nothing), runs in the chat's conversation with its sender
-  (`{ channel: "telegram", id: "<user id>" }`), never reaches the agent, and the chat is told its
-  note (`/name: done.` when it has none, `/name failed: <why>` when it fails). Any other command (an
-  unknown `/word`, or one `commands` does not allow) goes to the agent as text. The default,
-  `"all"`, suits a bot only `TELEGRAM_ALLOWED_USERS` may talk to: list names to keep some from the
-  chat. A command Telegram delivers again after a crash is recognised by its message id (the last
-  one handled in the chat, kept in `storage.kv`, `command:<conversation>`) and runs once. The
-  channel does not set the bot's command menu (`setMyCommands`): @BotFather's `/setcommands` does.
+  router denies runs nothing), runs in the chat's conversation with its sender (`{ channel:
+  "telegram", id: "<user id>" }`), never reaches the agent, and the chat is told its note (`/name:
+  done.` when it has none, `/name failed: <why>` when it fails). Any other command (an unknown
+  `/word`, or one `commands` does not allow) goes to the agent as text. The default, `"user"`,
+  allows the commands made for a chat's users (`audience: "user"`: memory-recall's `/rules` and
+  `/prefs`), never an operator's (`/name`, `/compact`, a command that says no audience); `"all"`
+  allows every one, a list of names those named, whatever their audience. A command Telegram
+  delivers again after a crash is recognised by its message id (the last one handled in the chat,
+  kept in `storage.kv`, `command:<conversation>`) and runs once. The channel does not set the bot's
+  command menu (`setMyCommands`): @BotFather's `/setcommands` does.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`: your stages in
   `inbound.normalize`, the router, the conversation). When the agent will not answer, the chat is
   told: "I can't take that message." when a stage stops it (a policy, a routing rule), "Sorry, I
@@ -116,7 +118,7 @@ It refuses to start:
   apiBase: "https://api.telegram.org", // default; a local Bot API server, or a test double
   pollTimeoutSeconds: 30,              // default; how long one getUpdates waits
   accounts: [],                        // more bots besides the default one, by name
-  commands: "all",                     // default; the App's commands users may type, or their names: ["name", "compact"]
+  commands: "user",                    // default: those for users; "all", or their names: ["rules", "compact"]
 }
 ```
 

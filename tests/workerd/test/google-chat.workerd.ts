@@ -230,6 +230,7 @@ it("the Worker verifies and hands each event to its conversation's object, which
     setup: (pikit) =>
       pikit.provideKeyed("agent.command", "where", {
         description: "Where this conversation is",
+        audience: "user",
         async run(conversation, _args, _ctx, sender) {
           const said = `${conversation.key} in ${conversation.space} for ${sender?.id}`;
           where.push(said);

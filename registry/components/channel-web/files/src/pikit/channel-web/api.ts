@@ -119,6 +119,8 @@ export interface ChatCommand {
   description: string;
   /** What its arguments are, for a menu: `<rule>`. */
   argumentHint?: string;
+  /** Who it is for (`AgentCommand.audience`): `user`, or `operator` when the operator allowed one by name or `all`. */
+  audience: "operator" | "user";
 }
 
 /** What the page needs before anyone signed in. */

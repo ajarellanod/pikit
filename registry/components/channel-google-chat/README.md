@@ -204,8 +204,11 @@ missing or unusable required one fails the start, naming it.
   once per message: what it said is kept under `command:<message name>`, and Google delivering the
   message again is told the same, under the same ids. `/new` and `/reset` stay the channel's (they
   win over an App command of that name). An unknown `/word`, or a command `commands` does not allow,
-  goes to the agent as text. The default, `"all"`, suits a channel whose spaces are allow-listed
-  (`GOOGLE_CHAT_ALLOWED_SPACES`) and routed: list names to keep some from the chat.
+  goes to the agent as text. The default, `"user"`, allows the commands made for a chat's users
+  (`audience: "user"`: memory-recall's `/rules` and `/prefs`), never an operator's (`/name`,
+  `/compact`, a command that says no audience); `"all"` allows every one, a list of names those
+  named, whatever their audience (an operator's, when the allowed spaces' people are the operator's
+  team).
 - **Space.** Every conversation of a chat, a thread's or the whole chat's, has the chat's own key as
   its space (`ConversationRef.space`: `googlechat:spaces/AAA`, given to `admitInbound`, recorded with
   the conversation's first message): what the chat's threads share (memory, instructions). In
@@ -287,7 +290,7 @@ config is the setting. A change applies to the next message: a conversation alre
   conversations: { default: "thread", chats: {} }, // the setting's defaults: { "spaces/AAA": "chat" } makes that chat one conversation
   thinkingText: "Thinking…",
   previewEveryMs: 3000,                           // 0 keeps "Thinking…" until the answer
-  commands: "all",                                // the App's commands people may type: "all", or their names (["name", "compact"])
+  commands: "user",                               // the App's commands people may type: "user" (default), "all", or their names (["rules", "compact"])
   apiBase: "https://chat.googleapis.com",         // values, for a test double
   jwksUrl: "https://www.googleapis.com/oauth2/v3/certs",
 },

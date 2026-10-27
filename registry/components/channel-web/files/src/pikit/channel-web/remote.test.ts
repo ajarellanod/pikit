@@ -117,6 +117,7 @@ class Platform {
         pikit.provideKeyed("agent.definition", "helper", { name: "helper", model: "test/model" });
         pikit.provideKeyed("agent.command", "rules", {
           description: "Your rules",
+          audience: "user",
           run: async (conversation, args, _ctx, sender) => {
             this.ran.push({ key: conversation.key, ...(conversation.space !== undefined && { space: conversation.space }), args, ...(sender !== undefined && { sender: sender.id }) });
             return { text: `kept: ${args}` };
@@ -569,7 +570,7 @@ test("PROJECT ISOLATION on the Worker: user B with user A's project id gets 404 
 
 test("COMMANDS on the Worker: listed by the accounts actor's config; typed, it runs in the conversation's object (its space, the user as sender), nothing dispatched; the same request id runs once", async () => {
   const { platform, worker: w } = await cloud();
-  expect(((await (await w.fetch(`${API}/config`)).json()) as ChatConfig).commands).toEqual([{ name: "rules", description: "Your rules" }]);
+  expect(((await (await w.fetch(`${API}/config`)).json()) as ChatConfig).commands).toEqual([{ name: "rules", description: "Your rules", audience: "user" }]);
   const work = (await (await w.fetch(`${API}/projects`, post("ana", { name: "Work" }))).json()) as ProjectJson;
   const first = await w.fetch(`${API}/conversations`, post("ana", { text: "/rules be brief", project: work.id, requestId: "web:c1" }));
   expect(first.status).toBe(201);

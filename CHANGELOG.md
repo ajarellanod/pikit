@@ -45,8 +45,8 @@ line names its area.
   `files_list`, `files_get`, `files_delete`, versions), listed in a section, over `storage.blob`.
 - storage-blob-fs (server) and storage-blob-s3 (both targets, any S3 API with SigV4): `storage.blob`.
 - channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web: commands typed in the
-  chat run the App's `agent.command` (config `commands`, default `"all"`, the web chat's
-  `["rules", "prefs"]`), once per message, the note answered in the chat.
+  chat run the App's `agent.command` (config `commands`: `"user"`, the default, the commands whose
+  audience is `"user"`; `"all"`; or names), once per message, the note answered in the chat.
 - execution-gondolin, workspace-local, execution-do: `retentionDays` deletes a conversation's
   workspace unused for that many days (off by default; shared workspaces never).
 
@@ -123,7 +123,8 @@ line names its area.
   channel (`AdmitOptions.space`), recorded for good by `conversations.registry`, whose `resolve` now
   takes `(key, agent, { channel, space? }, ctx)`, and by the runtime.
 - `storage.blob` (put, get, delete, list by prefix), with its suite `createBlobConformance`.
-- `AgentCommand.run(conversation, args, ctx, sender?)` and `runAgentCommand(..., sender?)`;
+- `AgentCommand.audience` (`"operator"`, the default, or `"user"`; `listAgentCommands` gives it),
+  `AgentCommand.run(conversation, args, ctx, sender?)` and `runAgentCommand(..., sender?)`;
   `commandOf` and `allowedCommands`; `admitInbound`'s `commands` runs a command typed in a chat after
   routing (outcome `command`, typed by `AdmitOutcome`).
 

@@ -171,6 +171,7 @@ export default defineComponent({
     // Pi's built-ins pikit does for real, registered as any component's are.
     const newConversation: AgentCommand = {
       description: "Start a new conversation: this one is kept, and its key starts again empty",
+      audience: "operator",
       async run(conversation, _args, ctx) {
         const reset = await registry.get().reset(conversation.key, undefined, ctx);
         if (reset === undefined) throw new Error("this conversation's key points to no conversation");
@@ -179,6 +180,7 @@ export default defineComponent({
     };
     const nameCommand: AgentCommand = {
       description: "Set the conversation's title",
+      audience: "operator",
       argumentHint: "<title>",
       async run(conversation, args, ctx) {
         const title = cleanTitle(args);

@@ -281,14 +281,17 @@ tools. An agent runs with the ones it names, in order, after its own tools. Name
 ### `agent.command` (keyed, [command.ts](../packages/contracts/src/command.ts))
 
 One slash command per name (`COMMAND_NAME`: lowercase letters, digits, `-`, `:`):
-`{ description, argumentHint?, run(conversation, args, ctx, sender?) }`. It runs in the App that holds the
-conversation and acts only through contracts. `sender` is who typed it in a channel (absent for the
+`{ description, argumentHint?, audience?, run(conversation, args, ctx, sender?) }`. It runs in the App that holds the
+conversation and acts only through contracts. `audience` says who it is for: `"user"`, anyone a
+channel admits may type it (it acts only on their space's or their own things: memory-recall's
+`/rules`, `/prefs`); `"operator"` (also when absent), the dashboard's, offered in a chat only when the
+channel's config names it or allows `"all"`. `listAgentCommands` gives each command's audience. `sender` is who typed it in a channel (absent for the
 operator's dashboard): a command acting for a person (their preferences) refuses without one. `run` resolves with `{ text? }`, a note for whoever ran
 it; a thrown `Error` is the reason it failed. `listAgentCommands` and `runAgentCommand` are the
 helpers a runner uses (`runAgentCommand` never throws); `commandOf(text, commands)` finds a registered
-`/name args` in a chat's message and `allowedCommands(commands, "all" | names)` cuts them to a channel's
-config. Providers: admin-api (`new`, `name`),
-runtime-pi (`compact`). Runners: admin-api (the dashboard's "/"), channel-web (`/name` with each
+`/name args` in a chat's message and `allowedCommands(commands, "user" | "all" | names)` cuts them to a
+channel's config. Providers: admin-api (`new`, `name`: operator),
+runtime-pi (`compact`: operator), memory-recall (`rules`, `prefs`: user). Runners: admin-api (the dashboard's "/"), channel-web (`/name` with each
 title it sets, so the dashboard lists a web conversation by the chat's title and asks no model of its
 own), and the channels that run commands typed in their chats through `admitInbound` (below).
 
@@ -335,10 +338,10 @@ denied sender runs nothing), runs in its conversation with the message's sender 
 and is never dispatched: the outcome is `command`, with the `CommandOutcome` the channel tells the
 sender (the type `AdmitOutcome` has it only for callers that may pass `commands`). A command is not
 deduplicated by request id: the channel keeps which messages ran one, or the command is harmless to
-repeat. Channels that run them: channel-google-chat, channel-telegram, channel-telegram-webhook (config
-`commands`, default `"all"`: their senders are allow-listed; each runs a command once per platform
-message) and channel-web (default `["rules", "prefs"]`: its users may sign themselves up; once per
-request id). Spaces given today: channel-google-chat (the chat's own key for each of its threads) and
+repeat. Channels that run them: channel-google-chat, channel-telegram, channel-telegram-webhook (each
+once per platform message) and channel-web (once per request id), each with a config `commands`:
+`"user"` (the default: the commands whose audience is `"user"`, so no channel names another
+component's commands), `"all"`, or names. Spaces given today: channel-google-chat (the chat's own key for each of its threads) and
 channel-web (`web:<user>:project:<id>` for a chat made in a project). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
 when a capability fails. Identity is captured before either pipeline runs: mutating the original
 object in place or replacing it cannot bypass the check, including the reserved `dashboard:` ids

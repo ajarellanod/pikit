@@ -69,7 +69,7 @@ OIDC platform alike).
   visibility: { thinking: false, tools: "names", context: true }, // what users see (below)
   agents: [],                                    // the agents users may pick for a new chat; none: the router decides
   titleModel: "anthropic/claude-haiku-4-5",      // optional: the model that titles conversations; absent, each one's agent's
-  commands: ["rules", "prefs"],                  // the commands users may type in a chat (default); "all", or [] for none
+  commands: "user",                             // the commands users may type in a chat: "user" (default), "all", names, or [] for none
 }
 ```
 
@@ -104,12 +104,12 @@ one offered), else on the first: Routing's rules for `web` pick the assistant of
 may pick another. The dry run assumes `route.resolve`'s stages have no side effects (router-basic's and
 router-rules' read and decide; a project stage that counts what it routes counts it too).
 
-**`commands`**: the App's `agent.command`s users may type in a chat (`/name args`), by name, or
-`"all"`. The default is `["rules", "prefs"]` (memory's commands, when installed: a user's own rules and
-preferences): this chat is for end users, who may sign themselves up, and most commands are an
-operator's (admin-api's `/name`, a reset, a deploy), acting on the conversation or the App with no
-check of who typed them. Allow one only if it is safe for anyone who can sign up; `"all"` only when
-every user is trusted. A name the App has no command of is left out (`ChatConfig.commands` lists those
+**`commands`**: the App's `agent.command`s users may type in a chat (`/name args`): `"user"`, by name,
+or `"all"`. The default, `"user"`, is the commands made for a chat's users (`audience: "user"`:
+memory-recall's `/rules` and `/prefs`, acting only on the user's space and preferences): this chat is
+for end users, who may sign themselves up, and an operator's command (admin-api's `/name`, a reset, a
+deploy; any that says no audience) acts on the conversation or the App with no check of who typed it.
+Name one only if it is safe for anyone who can sign up; `"all"` only when every user is trusted. A name the App has no command of is left out (`ChatConfig.commands` lists those
 there are); a command not allowed goes to the agent as text. Read where the conversations are (on
 Cloudflare the objects' App, the default one).
 
