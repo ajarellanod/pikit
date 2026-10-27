@@ -33,6 +33,23 @@ line names its area.
 
 ### Components
 
+- Spaces ([features/spaces.md](features/spaces.md)): channel-google-chat gives every thread its chat's
+  key as its space; channel-web has projects (create, rename, delete when empty; a chat is made in one
+  or none, for good), a chat of a project in that project's space.
+- memory-sql, memory-recall, memory-summaries: memory per space, shared by its agents (`agentScope`
+  keeps an agent's own), preferences per person; kinds `fact`, `summary`, `rule`, `preference`, rules
+  and preferences pending until a person approves them (`/rules`, `/prefs`; `propose_rule`,
+  `propose_preference`); FTS5 search with snippets, `read_memory`; structured summaries;
+  memory-summaries also on `durable`. Old memories are not migrated.
+- tool-space-files (new, both targets): files saved on purpose for a space (`files_save`,
+  `files_list`, `files_get`, `files_delete`, versions), listed in a section, over `storage.blob`.
+- storage-blob-fs (server) and storage-blob-s3 (both targets, any S3 API with SigV4): `storage.blob`.
+- channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web: commands typed in the
+  chat run the App's `agent.command` (config `commands`, default `"all"`, the web chat's
+  `["rules", "prefs"]`), once per message, the note answered in the chat.
+- execution-gondolin, workspace-local, execution-do: `retentionDays` deletes a conversation's
+  workspace unused for that many days (off by default; shared workspaces never).
+
 - Breaking: agent tools are named in lowercase snake_case, a family sharing its prefix. tool-ask-user's
   `askUser` is `ask_user`; tool-schedule's `listSchedules` and `cancelSchedule` are `schedule_list`
   and `schedule_cancel`. An agent that names the old ones names the new ones in its `tools`.
@@ -101,6 +118,14 @@ line names its area.
   `_<sandbox>`), so a client's `execution` alone still resolves behind it.
 
 ### Contracts
+
+- `ConversationRef.space` and `spaceOf(ref)`: the place several conversations share, given by the
+  channel (`AdmitOptions.space`), recorded for good by `conversations.registry`, whose `resolve` now
+  takes `(key, agent, { channel, space? }, ctx)`, and by the runtime.
+- `storage.blob` (put, get, delete, list by prefix), with its suite `createBlobConformance`.
+- `AgentCommand.run(conversation, args, ctx, sender?)` and `runAgentCommand(..., sender?)`;
+  `commandOf` and `allowedCommands`; `admitInbound`'s `commands` runs a command typed in a chat after
+  routing (outcome `command`, typed by `AdmitOutcome`).
 
 - `ProposalsRemote`'s `path` variant has `serve(request)`, with its suite
   `createProposalsServeConformance`.

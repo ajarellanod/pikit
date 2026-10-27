@@ -335,7 +335,11 @@ denied sender runs nothing), runs in its conversation with the message's sender 
 and is never dispatched: the outcome is `command`, with the `CommandOutcome` the channel tells the
 sender (the type `AdmitOutcome` has it only for callers that may pass `commands`). A command is not
 deduplicated by request id: the channel keeps which messages ran one, or the command is harmless to
-repeat. It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
+repeat. Channels that run them: channel-google-chat, channel-telegram, channel-telegram-webhook (config
+`commands`, default `"all"`: their senders are allow-listed; each runs a command once per platform
+message) and channel-web (default `["rules", "prefs"]`: its users may sign themselves up; once per
+request id). Spaces given today: channel-google-chat (the chat's own key for each of its threads) and
+channel-web (`web:<user>:project:<id>` for a chat made in a project). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
 when a capability fails. Identity is captured before either pipeline runs: mutating the original
 object in place or replacing it cannot bypass the check, including the reserved `dashboard:` ids
 that channels cannot admit. A dispatch rejected with `AgentUnavailableError` (the conversation's agent
@@ -1004,29 +1008,38 @@ admin-approvals (`/admin/api/approvals`). Suite:
 
 ### `memory` (declared by memory-sql, [contract.ts](../registry/components/memory-sql/files/src/pikit/memory-sql/contract.ts))
 
-What an agent remembers of each person, across that person's conversations
-([features/memory.md](../features/memory.md), the worked example).
+What the agents of a space remember, and what each person prefers
+([features/memory.md](../features/memory.md), the worked example; [features/spaces.md](../features/spaces.md)).
 
 ```ts
-type MemoryScope = { agent: string; person: string };
-type Memory = { id: string; kind: "fact" | "summary"; text: string; createdAt: number };
+type MemoryOwner = { type: "space"; space: string } | { type: "agent"; agent: string } | { type: "person"; channel: string; id: string };
+type Memory = { id: string; kind: "fact" | "summary" | "rule" | "preference"; status: "active" | "pending"; text: string; createdAt: number };
 interface MemoryStore {
-  list(scope, kind, limit, ctx): Promise<Memory[]>;     // the newest `limit` of `kind`, oldest first
-  remember(scope, memory, ctx): Promise<void>;          // idempotent by id
-  forget(scope, id, ctx): Promise<void>;                // an unknown id is fine
-  search(scope, query, limit, ctx): Promise<Memory[]>;  // both kinds, text contains query, newest first
+  ownerOf(conversation): MemoryOwner;                         // its space's (spaceOf), or its agent's own (the provider's config)
+  list(owner, { kinds, status? }, limit, ctx): Promise<Memory[]>;
+  get(owner, id, ctx): Promise<Memory | undefined>;
+  remember(owner, memory, ctx): Promise<void>;                // idempotent by id
+  approve(owner, id, kind, ctx): Promise<boolean>;            // pending -> active
+  forget(owner, id, { kinds, status? }, ctx): Promise<boolean>;
+  search(owner, query, limit, ctx): Promise<MemoryMatch[]>;   // full text (FTS5), ranked, with snippets
 }
 ```
 
-Per agent and person; `remember` idempotent by id; a text with a known credential's shape
-(`credentialSettingProblem`), an empty one or one over 4000 characters refused, keeping nothing and
-never echoed; committed before `remember` resolves. Provider: memory-sql (`storage.sql` of one actor
-per person, `memory:<person>`, reached through `actor.mailbox`; on Cloudflare the person's Durable
-Object). Users: memory-recall (the `memory` extension: a stable section, `remember`, `forget`,
-`recall`; the person is the key of the conversation's origin, so a delegated agent keeps its own
-memory of the person behind the task), memory-summaries (a summary of each quiet conversation, from the answers feed). Suite:
-`createMemoryConformance`, on memory-sql over mailbox-local's double and over storage-do and
-actors-do in the workerd lane. One provider: `experimental`.
+Per owner: a space's memory is shared by every agent working there, an agent kept apart has its own
+across its spaces, a person has their preferences. A space or an agent keeps facts, summaries and
+rules; a person keeps preferences; rules and preferences are `pending` until a person approves them.
+`remember` idempotent by id (a proposal never demotes an active rule); a text with a known
+credential's shape (`credentialSettingProblem`), an empty one or one over 4000 characters refused,
+keeping nothing and never echoed; search over facts and summaries never a syntax error, whatever the
+query; committed before each call resolves. Provider: memory-sql (`storage.sql` of one actor per
+owner, `memory:space:<space>`, `memory:agent:<agent>`, `memory:person:<channel>:<id>`, reached
+through `actor.mailbox`; on Cloudflare the owner's Durable Object), whose config `agentScope` names
+the agents kept apart. Users: memory-recall (the `memory` extension: a stable section with the active
+rules, the run's people's preferences, facts and summaries; `remember`, `forget`, `recall`,
+`read_memory`, `propose_rule`, `propose_preference`; the commands `/rules` and `/prefs`),
+memory-summaries (a structured summary of each quiet conversation into its owner, from the answers
+feed; both targets). Suite: `createMemoryConformance`, on memory-sql over mailbox-local's double and
+over storage-do and actors-do in the workerd lane. One provider: `experimental`.
 
 ### `scheduler` (declared by scheduler-sql, [contract.ts](../registry/components/scheduler-sql/files/src/pikit/scheduler-sql/contract.ts))
 

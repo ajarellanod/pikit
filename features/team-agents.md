@@ -24,32 +24,32 @@ a project installs, and agents that name what they may use.
 | Tools per agent | built: an agent has the tools it names (`tool-*`, `tool-mcp`) | — |
 | Roles: command and path rules | `extension-house-rules` (tools by name, by sender) | [policy-tools](policy-tools.md) |
 | A machine per agent: packages, CLIs, hosts, secrets | built: execution-gondolin's machine profiles per agent, a sandbox per conversation and agent, also behind execution-remote and execution-serve (server, celld, Cloudflare) | [agent sandboxes](agent-sandboxes.md) |
-| A workspace per chat space, with context copied in | `workspace-local`, a directory per chat and agent (its default); `ConversationRef.channel` built | [channel context](channel-context.md), [agent folders](agent-folders.md) |
-| Channels: Google Chat, an HTTP API, Telegram, a task tracker (comments in, comments out) | channel-http, channel-telegram (polling and webhook); Google Chat specified, next | [channel-google-chat](channel-google-chat.md); a task tracker has no note |
+| A workspace per chat, per agent; what a space's chats share | built: a workspace per conversation (a thread, a chat) and agent, ephemeral (`retentionDays`); `ConversationRef.space` for what a space's conversations share: memory, saved files (`tool-space-files`) | [spaces](spaces.md), [agent sandboxes](agent-sandboxes.md), [channel context](channel-context.md) |
+| Channels: Google Chat, an HTTP API, Telegram, a task tracker (comments in, comments out) | channel-google-chat (threads, spaces, cards, `ask_user`; both targets), channel-http, channel-telegram (polling and webhook), channel-web (projects); no task tracker | [channel-google-chat](channel-google-chat.md); a task tracker has no note |
 | Routes: which agent answers where | router-basic, router-rules (Routing in the dashboard) | — |
 | Idempotency, per-conversation serialization | built: request ids deduplicated by the runtime, one owner per conversation | [inbound-dedup](inbound-dedup.md) for transports |
 | Rate limits, admission control | none | no note yet |
-| Slash commands, prompt templates | `/new` in the channels; `agent.command` exists, but only admin-api runs it; Pi extensions' commands not | [slash-commands](slash-commands.md) |
+| Slash commands, prompt templates | built: commands typed in Google Chat, Telegram and the web chat run the registry's `agent.command` (`/rules`, `/prefs`, `/new`, `/compact`), routed like messages; prompt templates and Pi extensions' commands not | [slash-commands](slash-commands.md) |
 | Delegation, background tasks | `tool-delegate`: run or start, depth limit, answers to the parent | [subagents](subagents.md) |
 | Who may hand work to an agent (one with a token of its own) | `tool-delegate`: an agent's `from`, checked against every agent of the delegation chain, kept in keys only it makes and checked against the runtime's origin (no laundering through another agent) | [subagents](subagents.md), [agent sandboxes](agent-sandboxes.md) |
 | An orchestrator: assign, list, follow, steer and cancel other agents' tasks, read their transcripts | `tool-delegate`: `delegate` (`wait: false` returns an id), `delegate_tasks`, `delegate_steer`, `delegate_cancel`, on `AgentDelegation`'s `list`, `progress`, `steer`, `cancel`, each conversation its own tasks; a child's progress (its last steps: text, tool calls and how they went) is read with `delegate_tasks({ id })`; its whole transcript is open | [subagents](subagents.md) |
 | An agent writes to another chat | specified, not built: `tool-notify`, a configured destination by name, enqueued on `outbound.queue` by the destination's actor through the mailbox, send-only | [tool-notify](tool-notify.md) |
-| Questions to the user (`ask_user`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) (`ask_user`) |
+| Questions to the user (`ask_user`: cards, selects, dialogs) | built: `tool-ask-user`, drawn by channel-google-chat (cards) and the other channels | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) |
 | Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate (SPEC §6); approvals of exact tool calls by named approvers, in the chat or the dashboard, each run once (approvals-sql, extension-approvals, admin-approvals; server); not from a delegated agent yet (open in approvals); no rules, veto window or reminders | [approvals](approvals.md) |
 | Missions: a goal ledger with checkpoints, mirrored in a task tracker | none | no note yet |
-| Memory: summaries, search, rules, preferences | `memory-sql`, `memory-recall` (facts, `recall` by `LIKE`), `memory-summaries` (a summary per quiet conversation); per person (a conversation key), no spaces or shared rules | [memory](memory.md) |
+| Memory: summaries, search, rules, preferences | built: per space (shared by its agents) or per agent kept apart, preferences per person; FTS5 search, rules and preferences proposed by the agent and approved by people (`/rules`, `/prefs`), structured summaries; both targets | [memory](memory.md), [spaces](spaces.md) |
 | Routines (cron), followups (one-shot, agent-made) | built: `scheduler-sql` (`scheduler`), `scheduler-admit`, `scheduler-routines` (config), `tool-schedule` (the agent's, its own conversation); server only | [scheduler](scheduler.md) |
 | Reply context (a terse reply to a routine's message) | none | with [scheduler](scheduler.md) |
 | A persistent JavaScript worker for the agent | none | [codemode](codemode.md) |
 | MCP servers per agent | `tool-mcp` | — |
 | Browser (cloud sessions) | none | [browser](browser.md) |
-| Attachments, assets, size limits | images in `AgentRequest`, from the dashboard only | `InboundMessage.images` with [channel-google-chat](channel-google-chat.md); files: [rich-content](rich-content.md) |
+| Attachments, assets, size limits | built: `InboundMessage.images` (Google Chat's photos, the web chat's and the dashboard's), Google Chat's files written to the conversation's workspace; files kept for a space: `tool-space-files` | [rich-content](rich-content.md) for files in answers |
 | Durable outbound delivery | `outbound-durable`, `startAnswerDelivery` | — |
 | Model fallback, provider account failover | built: `provider-failover` (`failover/<chain>`) | — |
 | Tracing (Langfuse, OpenTelemetry) | none; an `agent.extension`'s hooks on model requests and tool calls | no note yet |
 | Dashboard, monitor | the dashboard (`src/dashboard/`, admin-api): chat, agents, settings, proposals | — |
 | Metrics (`/metrics`), observability | `log-events`, health | [health](health.md) |
-| Disk hygiene, retention | none | no note yet |
+| Disk hygiene, retention | conversation workspaces deleted after `retentionDays` unused (execution-gondolin, workspace-local, execution-do; opt-in); nothing else | [agent sandboxes](agent-sandboxes.md) |
 | A developer agent that changes the platform | the steward, a proposal approved in the dashboard (SPEC §6) | [self-improvement](self-improvement.md) |
 
 ## How it fits pikit

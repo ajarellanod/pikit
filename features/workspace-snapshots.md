@@ -36,10 +36,12 @@ works with them as if they never left. It scales a `server` on disk, as
   agent or per channel, each shared by several conversations: it cannot be released while another
   conversation still uses it. `per: "conversation"` adds a directory per conversation id, the unit a
   snapshot saves and restores.
-- **A `storage.blob` contract**: `put`, `get` and `delete` of large objects by key, streamed, with
-  a checksum on `put`. The catalogue has only `storage.sql`, `storage.sqlite` and `storage.kv`.
-  Providers: `storage-blob-s3` (any S3 API: AWS, MinIO, R2), later one over R2's binding on
-  Cloudflare. As the contract rules say, it comes with `workspace-snapshot`, its first consumer.
+- **A `storage.blob` contract**: built (2026-10-21) with its first consumer, `tool-space-files`
+  ([spaces](spaces.md)): `put`, `get`, `delete` and `list` by prefix of whole values (up to the
+  provider's `maxBytes`, at least 25 MiB), no streaming; storage-blob-s3 checks the signed SHA-256 of
+  each `put`. Providers: storage-blob-fs (server) and storage-blob-s3 (both targets; R2 through its S3
+  API); one over R2's binding would be a third. A snapshot larger than `maxBytes` needs streaming or
+  multipart, added to the contract with it.
 
 ### The flow
 ```

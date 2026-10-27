@@ -188,6 +188,16 @@ and execution-serve's own.
   repositories and permissions.
 - The sandbox host's disk holds every workspace, unreplicated
   ([workspace snapshots](workspace-snapshots.md) is not built).
+- **Workspaces are ephemeral** ([spaces](spaces.md)): what must last is saved on purpose
+  (`tool-space-files`, memory). With `retentionDays: N` (execution-gondolin, workspace-local,
+  execution-do; absent, the default, keeps everything), a chat's workspace not used for N days (a
+  command run or a file read or written; marked at most once an hour, on the App's clock) is deleted.
+  A workspace in use is never deleted, and a command that starts during a sweep waits and gets a fresh
+  empty one. Shared workspaces (`workspace: "agent"`, `per: "agent"`) are never swept. Behind
+  execution-serve each sandbox id is a chat, so the host's provider's `retentionDays` applies to
+  remote sandboxes. On a server the sweep runs at start and hourly; execution-do deletes an object's
+  files through a `wakeups` request in the object (actors-do), so an object that never wakes again
+  keeps its files (Cloudflare cannot list a namespace's objects).
 - **Delegation reaching a profile is closed by `from`.** tool-delegate's `agents` (who a task may be
   handed to) is one list for every delegating agent, but an agent in it with `from` takes tasks only
   from the agents it names, and only when every agent of the delegation chain is one of them

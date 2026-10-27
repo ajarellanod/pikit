@@ -12,10 +12,12 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | Apps in `pikit.config.ts` | one (default export) | two: the object's (default) and the Worker's (`worker`) |
 | Requests arrive at | `server-bun` (Hono on `Bun.serve`, port 3000) | the Worker (deployment-cloudflare's host), then RPC to an object |
 | `storage.sql`, `storage.sqlite` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
+| `storage.blob` | `storage-blob-fs`: files under `.pikit/blobs/`; or `storage-blob-s3` | `storage-blob-s3`: any S3 API (R2, S3, a celld fleet's bucket), reached from every object |
 | `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `actors-do`: RPC to `idFromName(key)` (`scope` `"one"`) |
 | `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `actors-do`: rows over the object's one alarm, in slices |
 | `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-workers`: the Worker's `env` |
 | `execution` | `execution-local`: the machine's files and shell; or `execution-gondolin`: a Linux micro-VM per conversation and agent (QEMU), its files on the host | `execution-do`: files in the object's SQL, a simulated shell; or `execution-remote`: a real shell in a sandbox of a host running `execution-serve` (a server, e.g. with execution-gondolin) |
+| Workspace retention (`retentionDays`, opt-in) | execution-gondolin, workspace-local: a sweep at start and hourly, in process | execution-do: a `wakeups` request in each object (actors-do); an object that never wakes again keeps its files |
 | Telegram | `channel-telegram` (long polling) | `channel-telegram-webhook` (two halves) |
 | HTTP API channel | `channel-http` | `channel-http` (two halves: routes in the Worker, the wait in the object) |
 | Model logins | `credentials-file` (OAuth or keys) | `credentials-do` (OAuth or keys, in one object; a login made on your machine, uploaded by `pikit configure --login`), or API keys as Worker secrets |

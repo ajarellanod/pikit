@@ -15,7 +15,8 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | A slash command the operator runs (`/deploy staging` in the dashboard's "/") | `agent.command` under its name (below: "A slash command") |
 | A text from one of the App's models, once (a title, a label) | `model.complete` (runtime-pi's): `complete({ model, system?, prompt, maxTokens? }, ctx)` |
 | Text in every request, a check on tool calls, per-conversation state | `agent.extension` (`extension.md`) |
-| Durable data | `storage.sql` (tables prefixed with your name, `-` as `_`) or `storage.kv` (a namespace named after you); `registry validate` checks both |
+| Durable data | `storage.sql` (tables prefixed with your name, `-` as `_`) or `storage.kv` (a namespace named after you); `registry validate` checks both. Files too large for a row: `storage.blob` (a namespace named after you) |
+| What the conversations of a place share (memory, saved files) | `spaceOf(conversation)` (`ConversationRef.space`, else the conversation's own key), never a key parsed |
 | Routing a message to an agent | a stage of the `route.resolve` pipeline |
 | An HTTP endpoint | `http.route` (`"POST /v1/x"`, `"GET /items/:id"`, a prefix `"GET /admin/*"`) |
 | An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; the composition is `APP_DESCRIPTION`, which only a component named `admin-*` may read (SPEC K13, checked by `registry validate`) |
@@ -261,7 +262,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 ```
 
 From `@pikit/contracts/testing`: `createChannelConformance`, `createHttpRouteConformance`,
-`createSqlDatabaseConformance`, `createKeyValueConformance`, `createConversationRegistryConformance`,
+`createSqlDatabaseConformance`, `createKeyValueConformance`, `createBlobConformance`, `createConversationRegistryConformance`,
 `createAdminAuthConformance`, `createAgentObserveConformance`, `createWakeupsConformance`,
 `createMailboxConformance`, `createSecretStoreConformance`, `createOutboundQueueConformance`,
 `createFeedConformance`, `createHealthConformance`, `createEmailSenderConformance`; doubles: `createMemoryMailbox()`, `createMemoryKeyValueStorage()`,

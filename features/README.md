@@ -37,7 +37,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [cli-features](cli-features.md) | ⭐ | `pikit new` with several channels and a step of features (dashboard, multi-agent, subagents, MCP…); several channels, features and groups of them (agents from the dashboard) built; subagents not | Yes: the launch |
 | [import-from-openclaw-hermes](import-from-openclaw-hermes.md) | ⭐ | `pikit import`: persona, skills, memories, channels from an existing setup | No |
 | [learned-skills](learned-skills.md) | ⭐ | Skills the agent writes from experience, through the self-change gate | No; builds on SPEC §6 |
-| [memory](memory.md) | ⭐ | Memory across conversations and channels: v1 built (`memory-sql`, `memory-recall`, `memory-summaries`); profiles, linking, full-text search not | No |
+| [memory](memory.md) | ⭐ | Memory across conversations and channels, per space (shared by its agents), per agent kept apart, per person (preferences): built (`memory-sql`, `memory-recall`, `memory-summaries`, both targets), with full-text search, rules and preferences approved by people (`/rules`, `/prefs`), structured summaries; profiles and linking not | No |
 | [pairing](pairing.md) | ⭐ | Unknown senders approved by the owner from the chat | No |
 | [rich-content](rich-content.md) | ⭐ | Images, files and buttons; the shape is decided, kept in its file | No |
 | [sandboxed-execution](sandboxed-execution.md) | ⭐ | Commands in a container, VM or remote host | Partly: SPEC §6 requires `execution-cloudflare-sandbox`, specified there |
@@ -50,7 +50,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
 | [channel-google-chat](channel-google-chat.md) | | Google Chat: threads, "Thinking…" edited into the answer, cards, attachments, questions (`ask_user`). Built on both targets and tested against a fake Google (a server first, conformance, workerd); moves to `completed/` once checked live with a real app | No |
 | [agent-folders](agent-folders.md) | | Each agent a folder (`agent.ts`, `SYSTEM.md`, per-channel texts, skills) and the skills catalog as folders: the component `agents-folders`, `pikit agents` writes the one file the App lists | No |
-| [agent-sandboxes](agent-sandboxes.md) | | A machine per agent (packages, hosts, secrets, memory, CPUs) and a sandbox per conversation and agent: execution-gondolin's profiles, also behind execution-remote and execution-serve; specified | No |
+| [agent-sandboxes](agent-sandboxes.md) | | A machine per agent (packages, hosts, secrets, memory, CPUs) and a sandbox per conversation and agent: execution-gondolin's profiles, also behind execution-remote and execution-serve; workspaces deleted after `retentionDays` unused (opt-in); built | No |
 | [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |
 | [channel-context](channel-context.md) | | A directory, a prompt and tools per channel, from `ConversationRef.channel` (built); `prepare` already does prompt and tools | No |
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |
@@ -72,11 +72,12 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |
-| [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
+| [spaces](spaces.md) | | What the conversations of a place share (a Google Chat space's threads, a web chat project's chats): `ConversationRef.space`, memory per space, saved files (`tool-space-files` on `storage.blob`), retention of conversation workspaces; built | No |
+| [slash-commands](slash-commands.md) | | Commands typed in a chat: built for the registry's (`agent.command`) in Google Chat, Telegram and the web chat (`admitInbound`'s `commands`); Pi extensions' own not | No |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations, in the channel's key (no contract field); replies in their thread | No |
 | [tool-notify](tool-notify.md) | | An agent sends a message to a chat the operator named (`notify({ to, text })`), never reads it nor gets a reply: on `outbound.queue` through the destination's actor; specified, not built | No |
-| [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation | Open: SPEC §6's git workspace |
+| [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation; `storage.blob` built (storage-blob-fs, storage-blob-s3) | Open: SPEC §6's git workspace |
 
 Other channels (Signal, iMessage, Matrix, Home Assistant…) get a file when someone needs one.
 

@@ -31,6 +31,8 @@ a contract, added here with its first producer and its first consumer.
 | Webhook verified by Google's ID token | the channel's own authentication (`token.ts`, `route.ts`: not a shared contract) | none |
 | Every answer in the message's thread; a thread as the conversation, or the whole chat | the key the channel builds, its `conversations` setting ([threads](threads.md)) | none |
 | An agent per space | `InboundMessage.conversationId` is the space: one `router-rules` rule | none |
+| What a space's threads share (memory, saved files) | `AdmitOptions.space`: the chat's own key (what the key is in "chat" mode) for every thread, recorded with the first message, so switching modes keeps one space ([spaces](spaces.md)) | `ConversationRef.space` |
+| Commands typed in the chat (`/rules`, `/prefs`) | `admitInbound`'s `commands`, cut by the config `commands` (default `"all"`), run once per message, the note answered in the thread ([slash commands](slash-commands.md)) | none |
 | "Thinking…" placeholder, written as the model writes, edited into the answer | the channel, on `agent.started` and `agent.partial` | **`agent.partial`** |
 | Markdown to Google Chat text, tables and code as cards, 4096-character pieces | the transport's `split` and `send` | none |
 | Markdown images sent as image cards | the transport's `send` | none |

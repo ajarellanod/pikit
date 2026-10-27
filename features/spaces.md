@@ -56,17 +56,24 @@ document is a fact); the rest is deleted after a while (retention, below).
   so a chat switching modes keeps one space.
 - **channel-web**: a chat created in a project is in that user's project's space; a chat with no project
   is its own. A chat's project is fixed when it is made.
-- **Telegram**: a group is one conversation already, so it gives none.
+- **Telegram**: both channels answer private chats only, each its own space, so they give none.
 
 ## What uses it
-- **Memory** ([memory](memory.md)): an actor per owner (a space, an agent that keeps its own, a person
-  for preferences), FTS5 search, rules and preferences proposed by the agent and approved by people
-  (`/rules`, `/prefs`), structured summaries.
-- **Saved files**: `tool-space-files`, an agent extension: `files_save`, `files_list`, `files_get`,
-  `files_delete`, and a section listing the space's files, so every conversation of the space knows
-  they exist. An index actor per space, the bytes in `storage.blob`.
+- **Memory** ([memory](memory.md)): an actor per owner (`memory:space:<space>`; `memory:agent:<agent>`
+  for the agents memory-sql's `agentScope` keeps apart; `memory:person:<channel>:<id>` for a person's
+  preferences), decided in one place (`MemoryStore.ownerOf`). FTS5 search on both targets; rules and
+  preferences the agent proposes (`propose_rule`, `propose_preference`) stay pending until a person
+  approves them (`/rules`, `/prefs`); structured summaries (title, topics, entities, keywords,
+  decisions, action items, facts, open questions) on both targets.
+- **Saved files**: `tool-space-files`, an agent extension (`space-files`): `files_save`,
+  `files_list`, `files_get`, `files_delete`, and a section listing the space's newest files, so every
+  conversation of the space knows they exist. A name saved again is a new version. An index actor per
+  space (`space-files:<space>`), the bytes in `storage.blob` (written first, so the index never points at
+  missing bytes). Limits: 25 MiB a file, 1 GiB and 500 files a space by default. A text file with a
+  credential's shape is refused; a binary one cannot be checked. Every agent of the space sees them.
 - **Commands typed in a chat**: `admitInbound`'s `commands` (routed like any message, run with the
-  sender, never dispatched), so people manage the space's rules from the chat itself.
+  sender, never dispatched), so people manage the space's rules from the chat itself
+  ([slash commands](slash-commands.md)).
 
 ## `storage.blob`
 Files a component keeps by key, in a namespace of its own (`packages/contracts/src/blob.ts`): put,
@@ -76,9 +83,22 @@ AWS, R2, the bucket of a celld fleet; both targets). [Workspace snapshots](works
 proposed it first and can build on it.
 
 ## Retention
-A conversation's workspace not used for `retentionDays` is deleted (execution-gondolin,
-workspace-local, so also a sandbox host behind execution-remote). Off by default: deleting data is opted
-into. Shared workspaces (`workspace: "agent"`, `per: "agent"`) are never swept.
+A conversation's workspace not used for `retentionDays` is deleted (execution-gondolin and
+workspace-local, so also a sandbox host behind execution-remote; execution-do through a wakeup in each
+object). Off by default: deleting data is opted into. A workspace in use is never deleted; shared ones
+(`workspace: "agent"`, `per: "agent"`) are never swept ([agent sandboxes](agent-sandboxes.md)).
+
+## Try it
+```ts
+// pikit.config.ts, with channel-google-chat, memory-sql, memory-recall, tool-space-files and a storage.blob provider
+"memory-sql": { agentScope: [] },                    // every agent shares its space's memory
+"execution-gondolin": { retentionDays: 30 },         // conversation workspaces go after 30 idle days
+// src/agents/trader/agent.ts
+defineAgent({ name: "trader", model: "...", extensions: ["memory", "space-files"] });
+```
+In one thread of a space: "/rules add The conversion that counts is the booking"; in another thread the
+agent has the rule in its prompt, and a file it saved with `files_save` in the first is in the second's
+section.
 
 ## Open questions
 - Shared rooms in the web chat (several people in one chat, live): the next step on the same pieces

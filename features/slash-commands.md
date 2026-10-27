@@ -3,8 +3,9 @@
 **Public appeal:** —
 
 **Specified:** partly built. The registry is: `agent.command` (`packages/contracts/src/command.ts`),
-modelled on Pi's `registerCommand`, listed and run by admin-api for the dashboard's "/". Channels
-running them (`/name args` typed in a chat) is not.
+modelled on Pi's `registerCommand`, listed and run by admin-api for the dashboard's "/", and run
+when typed in a chat by channel-google-chat, channel-telegram, channel-telegram-webhook and
+channel-web (2026-10-21). Pi extensions' own commands are not.
 
 **Needed by:** nothing required.
 
@@ -13,26 +14,35 @@ running them (`/name args` typed in a chat) is not.
 that conversation.
 
 ## How it fits pikit
-- Commands are the channel's today: `channel-telegram` handles its own (`/new` resets), and
-  `packages/contracts/src/inbound.ts` keeps commands out of `admitInbound`.
-- A channel would run them through the same registry (`runAgentCommand`), in the conversation's App;
-  pi-durable's own extensions registering commands per conversation would need the runtime to list
+- A channel's own built-ins come first and stay its own (`/new`, `/reset`, Telegram's `/start`,
+  Google Chat's app commands). Then `admitInbound`'s `commands` (the App's `agent.command`, cut to the
+  channel's config `commands` with `allowedCommands`): a registered `/name args` is routed like any
+  message (a denied sender runs nothing), runs in its conversation with the sender (`run`'s `sender`:
+  memory-recall's `/prefs` acts for that person) and is never dispatched; the channel tells the sender
+  the note or why it failed. An unknown or disallowed `/word` goes to the agent as text. Each channel
+  runs a command once per platform message (Google Chat keeps what it said under
+  `command:<message name>`, Telegram the last command's message id per chat, channel-web the request
+  id). Defaults: `"all"` where the senders are allow-listed (Google Chat, Telegram), `["rules",
+  "prefs"]` in the web chat, whose users may sign themselves up.
+- pi-durable's own extensions registering commands per conversation would need the runtime to list
   and run those too (a runtime-side addition to the registry, suite first).
 - Platforms that list commands (Telegram `setMyCommands`, Slack and Discord slash commands) are
-  told the names by the channel's `configure` step.
+  told the names by the channel's `configure` step: not built (Telegram's menu is set with
+  @BotFather's `/setcommands`).
 - Absent: no extension registers commands. Running Pi coding-agent extensions was dropped with the
   move to pi-durable; pi-durable's own extensions will replace it.
 
 ## What is built: the registry, and the dashboard's "/"
 - **The contract**: the keyed capability `agent.command`, one command per name (Pi's rule,
-  `COMMAND_NAME`), `{ description, argumentHint?, run(conversation, args, ctx) }` answering
+  `COMMAND_NAME`), `{ description, argumentHint?, run(conversation, args, ctx, sender?) }` answering
   `{ text? }`; `runAgentCommand` and `listAgentCommands` run and list them, the same for every
   runner; `createAgentCommandConformance` is its suite. A command runs in the App that holds the
   conversation (on Cloudflare its object) and acts only through contracts.
 - **The built-ins**, registered through it like any component's, are Pi's that pikit does for real:
   `/new` (the key's reset) and `/name <title>` (the conversation's title) in admin-api, `/compact`
   (pi-durable's manual compaction) in runtime-pi. Pi's others are its terminal's (`/model`,
-  `/settings`, `/tree`…) and have no pikit meaning yet.
+  `/settings`, `/tree`…) and have no pikit meaning yet. memory-recall adds `/rules` and `/prefs`
+  ([memory](memory.md)).
 - **The dashboard** lists only these (`GET /admin/api/commands`) and runs one in a conversation
   (`POST /admin/api/conversations/:id/commands/:name`), its answer a quiet note for the operator. Its
   own actions (stop, reset, images, web search, the assistant, the views) are buttons, not commands.
