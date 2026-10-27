@@ -19,7 +19,7 @@
  * And through the conversation a delegated task comes from (`ConversationRef.origin`), what a delegated
  * worker does belongs to the chat it works for: its approval's question reaches the chat with the
  * coordinator's answer (the report carries the worker's parts), is decided there, and is used by the
- * chat's tree only; its memory is of the person in the chat; its scheduled prompt comes back to the chat.
+ * chat's tree only; what it remembers is in the chat's space; its scheduled prompt comes back to the chat.
  *
  * A repository test: it imports the components' files from `registry/`, as their own `app.test.ts`
  * files do; no component's files import another's (SPEC P4).
@@ -366,16 +366,17 @@ test("a delegated worker's approval reaches the chat with the coordinator's answ
   expect(w.ledger).toEqual([PAYMENT]);
 });
 
-test("what a delegated worker remembers is of the person in the chat, and a prompt it schedules comes back to the chat, once", async () => {
+test("what a delegated worker remembers is in the chat's space, and a prompt it schedules comes back to the chat, once", async () => {
   const w = world();
   await w.boot();
   await w.say("alice", "m1", "hello");
   const fact = "Alice pays acme every month";
 
-  // The worker keeps a fact while on a task from the chat: the person is the chat's, the memory the worker's.
+  // The worker keeps a fact while on a task from the chat: a delegated conversation is in its origin's
+  // space (the chat, its own space), whose memory every agent working there shares.
   await w.say("alice", "m2", call("delegate", { agent: "worker", task: call("remember", { fact }) }));
-  const scope = { agent: "worker", person: `test:${CHAT}` };
-  expect(await w.live().memory.list(scope, "fact", 10, w.live().ctx)).toMatchObject([{ text: fact }]);
+  const space = { type: "space", space: `test:${CHAT}` } as const;
+  expect(await w.live().memory.list(space, { kinds: ["fact"] }, 10, w.live().ctx)).toMatchObject([{ text: fact }]);
 
   // A later task from the chat, in a new child conversation, recalls it; a task from another chat does not.
   const before = w.systems.length;
