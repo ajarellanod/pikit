@@ -531,7 +531,8 @@ test("PROJECTS on the Worker: the accounts actor's (one call each); a chat made 
   expect(await (await w.fetch(`${API}/conversations/${started.id}`, as("ana"))).json()).toMatchObject({ project: work.id });
   platform.calls.length = 0;
   const inWork = (await (await w.fetch(`${API}/conversations?project=${work.id}`, as("ana"))).json()) as { items: ChatConversation[] };
-  expect(inWork.items.map((each) => each.title)).toEqual(["Another", "The report"]);
+  // Made in the same millisecond, maybe: their order is the chat ids'.
+  expect(inWork.items.map((each) => each.title).sort()).toEqual(["Another", "The report"]);
   expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`]);
   expect(((await (await w.fetch(`${API}/conversations?project=none`, as("ana"))).json()) as { items: ChatConversation[] }).items.map((each) => each.title)).toEqual(["Loose"]);
   expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toMatchObject({ items: [{ id: work.id, name: "Work", chats: 2 }] });
