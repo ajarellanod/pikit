@@ -299,7 +299,7 @@
     },
     "memory-recall": {
       "version": "0.0.1",
-      "description": "The memory extension for the agents that name it: a stable section with what they kept about the person they talk to, and the tools remember, forget and recall, over memory.",
+      "description": "The memory extension for the agents that name it: a stable section with the space's rules, facts and summaries and the preferences of the people a run answers; the tools remember, forget, recall, read_memory, propose_rule and propose_preference; the commands /rules and /prefs, over memory.",
       "targets": [
         "server",
         "durable"
@@ -308,7 +308,7 @@
     },
     "memory-sql": {
       "version": "0.0.1",
-      "description": "What each agent remembers of each person, across their conversations: one actor per person, its storage.sql. Declares and provides memory.",
+      "description": "What the agents of each space remember (facts, summaries, rules), and what each person prefers: one actor per owner (a space, an agent kept apart, a person), its storage.sql, full-text search. Declares and provides memory.",
       "targets": [
         "server",
         "durable"
@@ -317,9 +317,10 @@
     },
     "memory-summaries": {
       "version": "0.0.1",
-      "description": "Summarizes each conversation that went quiet into the memory of its person, credentials redacted: read from the answers feed with a cursor, woken by wakeups, idempotent across retries and restarts.",
+      "description": "Summarizes each conversation that went quiet into the memory of its space (or of its agent, when memory keeps it apart), structured to be found by search, credentials redacted: read from the answers feed with a cursor, woken by wakeups, idempotent across retries and restarts.",
       "targets": [
-        "server"
+        "server",
+        "durable"
       ],
       "path": "components/memory-summaries"
     },
@@ -503,6 +504,23 @@
       ],
       "path": "components/settings-store"
     },
+    "storage-blob-fs": {
+      "version": "0.0.1",
+      "description": "Files components keep by key, too large for a row (saved files, snapshots): storage.blob in a directory, one per namespace, each value replaced atomically.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/storage-blob-fs"
+    },
+    "storage-blob-s3": {
+      "version": "0.0.1",
+      "description": "Files components keep by key, too large for a row (saved files, snapshots): storage.blob in an S3-compatible bucket (AWS S3, R2, MinIO, rustfs, a celld fleet's), signed with SigV4 over Web Crypto. Both targets.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/storage-blob-s3"
+    },
     "storage-do": {
       "version": "0.0.1",
       "description": "The app's portable SQL (storage.sql) and SQLite (storage.sqlite) database in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",
@@ -598,6 +616,15 @@
         "server"
       ],
       "path": "components/tool-schedule"
+    },
+    "tool-space-files": {
+      "version": "0.0.1",
+      "description": "Files a space keeps on purpose, for the agents that name space-files: files_save, files_list, files_get and files_delete between a conversation's workspace and its space's archive (one actor per space, the bytes in storage.blob), and a stable section listing them.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/tool-space-files"
     },
     "tool-websearch-brave": {
       "version": "0.0.1",
