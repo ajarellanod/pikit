@@ -113,7 +113,7 @@ const parentOf = (path: string): string | undefined => {
 export function textHoldsCredential(bytes: Uint8Array): boolean {
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
   } catch {
     return false;
   }
