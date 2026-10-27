@@ -104,7 +104,12 @@ const parentOf = (path: string): string | undefined => {
   return at <= 0 ? undefined : path.slice(0, at);
 };
 
-/** Whether `bytes` are a text (valid UTF-8) holding a known credential's shape. A binary file cannot be checked: `false`. */
+/**
+ * Whether `bytes` are a text (valid UTF-8) holding a known credential's shape, as a word of it
+ * (`credentialSettingProblem`'s). `=`, quotes and commas separate words too, so a `.env` line
+ * (`API_KEY=sk-...`) or a JSON value (`{"apiKey":"sk-..."}`) is caught. A binary file cannot be
+ * checked: `false`.
+ */
 export function textHoldsCredential(bytes: Uint8Array): boolean {
   let text: string;
   try {
@@ -112,7 +117,7 @@ export function textHoldsCredential(bytes: Uint8Array): boolean {
   } catch {
     return false;
   }
-  return holdsCredential(text);
+  return holdsCredential(text.replace(/[="'`,]/g, " "));
 }
 
 /** A size for people: bytes, KiB or MiB, one decimal. */
