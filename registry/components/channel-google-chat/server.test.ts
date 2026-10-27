@@ -10,6 +10,9 @@
  * - A signed message is admitted; "Thinking…" is created in its thread and edited into the answer.
  * - The `conversations` setting (the config's, no `settings`): a whole chat is one conversation, and
  *   each answer still goes to its message's thread.
+ * - A command typed in the chat that `commands` allows runs with its sender in its conversation, whose
+ *   space conversations-kv recorded (the chat's key), and its note is said in the thread; another goes
+ *   to the model as text.
  * - An image reaches the model's request; a PDF the conversation's workspace.
  * - `ask_user`: the question drawn as a card, clicked, the answer admitted, a new run answers it.
  * - A restart in the middle of an answer's send: the next process delivers it (outbound-durable), with
@@ -99,8 +102,8 @@ interface Server {
   started: AppEvents["agent.started"][];
 }
 
-/** The App over `dataDir`, started, serving on a free port; with `extra` components (mailbox-local). */
-async function serve(dataDir: string, google: FakeGoogleChat, calls: ModelCall[], extra: ComponentDefinition[] = []): Promise<Server> {
+/** The App over `dataDir`, started, serving on a free port; with `extra` components (mailbox-local) and `channel` config. */
+async function serve(dataDir: string, google: FakeGoogleChat, calls: ModelCall[], extra: ComponentDefinition[] = [], channel: Record<string, unknown> = {}): Promise<Server> {
   let listened!: (url: URL) => void;
   const listening = new Promise<URL>((resolve) => (listened = resolve));
   const started: AppEvents["agent.started"][] = [];
@@ -130,7 +133,7 @@ async function serve(dataDir: string, google: FakeGoogleChat, calls: ModelCall[]
       "workspace-local": { root: join(dataDir, "workspaces") },
       "router-basic": { defaultAgent: AGENT },
       "server-bun": { port: 0, hostname: "127.0.0.1" },
-      [NAME]: { apiBase: google.apiBase, jwksUrl: google.jwksUrl, conversations: { default: "thread", chats: { [WHOLE]: "chat" } } },
+      [NAME]: { apiBase: google.apiBase, jwksUrl: google.jwksUrl, conversations: { default: "thread", chats: { [WHOLE]: "chat" } }, ...channel },
     },
     logger: silentLogger,
   }).create();
@@ -145,13 +148,13 @@ async function serve(dataDir: string, google: FakeGoogleChat, calls: ModelCall[]
   return { app, stop, url: await listening, started };
 }
 
-async function setup(extra: ComponentDefinition[] = []) {
+async function setup(extra: ComponentDefinition[] = [], channel: Record<string, unknown> = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "pikit-google-chat-server-"));
   const google = await startFakeGoogleChat();
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }));
   cleanup.push(() => google.stop());
   const calls: ModelCall[] = [];
-  const server = await serve(dataDir, google, calls, extra);
+  const server = await serve(dataDir, google, calls, extra, channel);
   return {
     dataDir,
     google,
@@ -228,6 +231,33 @@ test("the conversations setting: a chat listed as one conversation is one across
   const [third, fourth] = s.server.started.slice(2);
   expect(new Set([third?.conversation.key, fourth?.conversation.key])).toEqual(new Set([`googlechat:${THREADED}:threads/T1`, `googlechat:${THREADED}:threads/T2`]));
   expect(third?.conversation.conversationId).not.toBe(fourth?.conversation.conversationId);
+}, 30_000);
+
+test("a command typed in the chat (one `commands` allows) runs in its thread's conversation with its sender, in the space conversations-kv recorded; its note said in the thread; another goes to the model", async () => {
+  const ran: { key: string; space: string | undefined; args: string; sender: string | undefined }[] = [];
+  const commands = defineComponent({
+    name: "commands-test",
+    setup(pikit) {
+      for (const name of ["ping", "secret"]) {
+        pikit.provideKeyed("agent.command", name, {
+          description: `The ${name} command`,
+          async run(conversation, args, _ctx, sender) {
+            ran.push({ key: conversation.key, space: conversation.space, args, sender: sender?.id });
+            return { text: `pong ${args}` };
+          },
+        });
+      }
+    },
+  });
+  const s = await setup([commands], { commands: ["ping"] });
+  expect(await s.post(messageEvent({ space: THREADED, thread: `${THREADED}/threads/C1`, text: "/ping now" }))).toEqual({ status: 200, body: {} });
+  expect(inThread(s.google, `${THREADED}/threads/C1`).map((message) => message.text)).toEqual(["pong now"]);
+  expect(ran).toEqual([{ key: `googlechat:${THREADED}:threads/C1`, space: `googlechat:${THREADED}`, args: "now", sender: "users/1001" }]);
+
+  await s.post(messageEvent({ space: THREADED, thread: `${THREADED}/threads/C2`, text: "/secret" }));
+  await until(() => (inThread(s.google, `${THREADED}/threads/C2`).some((message) => message.text === "faux: Ada Lovelace: /secret") ? true : undefined), "the model's answer");
+  expect(ran).toHaveLength(1);
+  expect(s.calls.map((call) => call.text)).toEqual(["Ada Lovelace: /secret"]);
 }, 30_000);
 
 test("an image reaches the model's request; a PDF is written to the conversation's workspace and named", async () => {

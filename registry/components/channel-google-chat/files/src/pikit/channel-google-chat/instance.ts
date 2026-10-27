@@ -19,7 +19,7 @@
  */
 
 import type { AppContext, Handle } from "@pikit/core";
-import type { Settings } from "@pikit/contracts";
+import { COMMAND_NAME, type Settings } from "@pikit/contracts";
 import Type, { type Static } from "typebox";
 import type { ModeOf } from "./types.ts";
 
@@ -80,6 +80,11 @@ export const Config = Type.Object({
   thinkingText: Type.String({ minLength: 1, default: "Thinking…" }),
   /** How often, in ms, the placeholder shows the answer as it is written; 0 keeps `thinkingText`. A space takes a message write a second. */
   previewEveryMs: Type.Integer({ minimum: 0, default: 3_000 }),
+  /**
+   * The App's commands (`agent.command`) people may type in a chat (`/name args`): `"all"`, or their
+   * names. Only the allowed spaces' people reach them, after the router. Another `/name` goes to the agent as text.
+   */
+  commands: Type.Union([Type.Literal("all"), Type.Array(Type.String({ pattern: COMMAND_NAME.source }), { uniqueItems: true })], { default: "all" }),
 });
 export type Config = Static<typeof Config>;
 

@@ -10,20 +10,20 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type AppContext, defineApp, defineComponent, halt, silentLogger } from "@pikit/core";
-import type { AgentRequest, AgentRuntime, ConversationRef, ConversationRegistry, KeyValueStore } from "@pikit/contracts";
-import { answerKey } from "@pikit/contracts";
+import type { AgentCommand, AgentRequest, AgentRuntime, CommandLookup, ConversationRef, ConversationRegistry, KeyValueStore, Sender } from "@pikit/contracts";
+import { allowedCommands, answerKey } from "@pikit/contracts";
 import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { ATTACHMENT_LIMITS, base64Of, readAttachments, safeName, writeFiles } from "./attachments.ts";
 import type { AddOnEvent, ChatAttachment, ChatMessage } from "./event.ts";
 import { addedEvent, clickEvent, type FakeGoogleChat, messageEvent, removedEvent, signAssertion, startFakeGoogleChat } from "./fake-google-chat.test-support.ts";
-import { commandSeenKey, createEventHandler, REPLIES, replyIds, textOf } from "./handler.ts";
+import { commandReply, commandSeenKey, createEventHandler, REPLIES, replyIds, textOf } from "./handler.ts";
 import { pieceIds } from "./ids.ts";
 import { type ConversationMode, type Credentials, instancesOf } from "./instance.ts";
 import { createAnswerTargets, createSpaceThreading, eventKey, KEY_PARAMETER } from "./key.ts";
 import { QUOTE_CHARS, quoteOf } from "./quote.ts";
 import { strangerText } from "./route.ts";
-import { type AdmissionDeps, type ChatApi, ChatApiError, type ModeOf } from "./types.ts";
+import { type ChatApi, ChatApiError, type EventDeps, type ModeOf } from "./types.ts";
 
 const fakes: FakeGoogleChat[] = [];
 afterEach(async () => {
@@ -171,14 +171,21 @@ const credentialsFor = (allowed: string[]): Credentials => ({
   allowedSpaces: new Set(allowed),
 });
 
+/** The App's commands as `useKeyed` gives them, from `entries`. */
+const lookupOf = (entries: Record<string, AgentCommand>): CommandLookup => {
+  const commands = new Map(Object.entries(entries));
+  return { keys: () => [...commands.keys()], get: (name) => commands.get(name) };
+};
+
 /** A handler of the default instance over the fake, with `spaces/AAA` (and `spaces/DM1`) allowed. */
-async function handlerSetup(options: { workspace?: WorkspaceProvider; execution?: ExecutionEnv; allowed?: string[] } = {}) {
+async function handlerSetup(options: { workspace?: WorkspaceProvider; execution?: ExecutionEnv; allowed?: string[]; commands?: CommandLookup } = {}) {
   const google = await fake();
   const api = await testApi(google);
   const kv = store();
   const e = ends();
   const targets = createAnswerTargets(kv);
-  const deps: AdmissionDeps = {
+  const deps: EventDeps = {
+    commands: options.commands ?? lookupOf({}),
     instance: main,
     credentials: credentialsFor(options.allowed ?? ["spaces/AAA", "spaces/DM1", "spaces/OLD"]),
     api,
@@ -188,7 +195,7 @@ async function handlerSetup(options: { workspace?: WorkspaceProvider; execution?
     store: kv,
     workspace: options.workspace,
     execution: options.execution,
-    clock: { now: () => Date.now() } as AdmissionDeps["clock"],
+    clock: { now: () => Date.now() } as EventDeps["clock"],
   };
   const handle = createEventHandler(deps);
   const keyOf = (event: AddOnEvent, mode: ConversationMode = "thread") =>
@@ -299,6 +306,27 @@ test("a message in a space: its name the id, the space the conversation id, its 
   expect(created(s.google)).toEqual([]);
 });
 
+test("the space: every message of a chat gives the chat's own key, so two threads of a space share one and a whole chat's key is its space; another space has its own", async () => {
+  const s = await handlerSetup();
+  const spaceOfRequest = (index: number) => s.dispatched[index]?.conversation.space;
+  for (const thread of ["T1", "T2"]) {
+    const event = messageEvent({ text: "hi", thread: `spaces/AAA/threads/${thread}` });
+    await s.handle((await s.keyOf(event))!, event, silentContext);
+  }
+  expect(s.dispatched.map((each) => each.conversation.key)).toEqual(["googlechat:spaces/AAA:threads/T1", "googlechat:spaces/AAA:threads/T2"]);
+  expect([spaceOfRequest(0), spaceOfRequest(1)]).toEqual(["googlechat:spaces/AAA", "googlechat:spaces/AAA"]);
+
+  const dm = messageEvent({ text: "hi", space: "spaces/DM1", spaceType: "DIRECT_MESSAGE" });
+  await s.handle((await s.keyOf(dm))!, dm, silentContext);
+  expect(spaceOfRequest(2)).toBe("googlechat:spaces/DM1");
+
+  // The chat as one conversation: its key is its space, the same its threads had.
+  const whole = messageEvent({ text: "hi", thread: "spaces/AAA/threads/T3" });
+  const wholeKey = (await s.keyOf(whole, "chat"))!;
+  await s.handle(wholeKey, whole, silentContext);
+  expect(s.dispatched[3]?.conversation).toMatchObject({ key: "googlechat:spaces/AAA", space: "googlechat:spaces/AAA" });
+});
+
 test("the mention is cut by its annotation when Google gives no argumentText", () => {
   const event = messageEvent({ text: "hello there" });
   const { argumentText: _, ...rest } = message(event);
@@ -346,6 +374,91 @@ test("/new resets the conversation once per message and says so in its thread on
   expect(replies).toHaveLength(1);
   expect(replies[0]?.thread?.name).toBe("spaces/AAA/threads/T1");
   expect(s.dispatched.map((each) => each.prompt)).toEqual(["Ada Lovelace: hello"]);
+});
+
+/** Commands as an App registers them; each run recorded with its conversation, arguments and sender. */
+function recordedCommands() {
+  const ran: { name: string; key: string; space: string | undefined; args: string; sender: Sender | undefined }[] = [];
+  const command = (name: string, run: (args: string, sender: Sender | undefined) => { text?: string } | void): AgentCommand => ({
+    description: `The ${name} command`,
+    async run(conversation, args, _ctx, sender) {
+      ran.push({ name, key: conversation.key, space: conversation.space, args, sender });
+      return run(args, sender);
+    },
+  });
+  const lookup = lookupOf({
+    ping: command("ping", (args, sender) => ({ text: `pong ${args} for ${sender?.id}` })),
+    quiet: command("quiet", () => {}),
+    boom: command("boom", () => {
+      throw new Error("no deploys on Fridays");
+    }),
+    // admin-api's: the channel's own /new wins.
+    new: command("new", () => ({ text: "the App's /new" })),
+  });
+  return { ran, lookup };
+}
+
+const repliesIn = (google: FakeGoogleChat, thread: string) => [...google.messages.values()].filter((each) => each.thread?.name === thread).map((each) => each.text);
+
+test("a command typed in the chat runs in its conversation with its sender, never reaches the agent, and its note is said in the thread, once however often Google repeats it", async () => {
+  const commands = recordedCommands();
+  const s = await handlerSetup({ commands: commands.lookup });
+  const event = messageEvent({ text: "/ping  the  build ", thread: "spaces/AAA/threads/T1" });
+  const key = (await s.keyOf(event))!;
+  expect(await s.handle(key, event, silentContext)).toBe("done");
+  expect(await s.handle(key, event, silentContext)).toBe("done");
+  s.google.forgetRequests();
+  expect(await s.handle(key, event, silentContext)).toBe("done");
+
+  expect(commands.ran).toEqual([{ name: "ping", key, space: "googlechat:spaces/AAA", args: "the  build", sender: { channel: "googlechat", id: "users/1001" } }]);
+  expect(s.dispatched).toEqual([]);
+  expect(repliesIn(s.google, "spaces/AAA/threads/T1")).toEqual(["pong the  build for users/1001"]);
+  expect(await s.kv.get(commandSeenKey(message(event).name!))).toBe("pong the  build for users/1001");
+
+  // Nothing to say: done; a failure: why. In a DM, without a mention.
+  const quiet = messageEvent({ text: "/quiet", space: "spaces/DM1", spaceType: "DIRECT_MESSAGE", thread: "spaces/DM1/threads/D1" });
+  await s.handle((await s.keyOf(quiet))!, quiet, silentContext);
+  const boom = messageEvent({ text: "/boom now", thread: "spaces/AAA/threads/T2" });
+  await s.handle((await s.keyOf(boom))!, boom, silentContext);
+  expect(repliesIn(s.google, "spaces/DM1/threads/D1")).toEqual(["/quiet: done."]);
+  expect(repliesIn(s.google, "spaces/AAA/threads/T2")).toEqual(["/boom failed: no deploys on Fridays"]);
+  expect(commands.ran.map((each) => each.name)).toEqual(["ping", "quiet", "boom"]);
+  expect(s.dispatched).toEqual([]);
+});
+
+test("a command as the app's slash command: its name read from the text, its arguments from argumentText", async () => {
+  const commands = recordedCommands();
+  const s = await handlerSetup({ commands: commands.lookup });
+  const event = messageEvent({ text: "x", mention: false, thread: "spaces/AAA/threads/S1" });
+  Object.assign(message(event), { text: "/ping deploy", argumentText: "deploy", slashCommand: { commandId: "7" }, annotations: [{ type: "SLASH_COMMAND", startIndex: 0, length: 5 }] });
+  await s.handle((await s.keyOf(event))!, event, silentContext);
+  expect(commands.ran.map((each) => [each.name, each.args])).toEqual([["ping", "deploy"]]);
+  expect(repliesIn(s.google, "spaces/AAA/threads/S1")).toEqual(["pong deploy for users/1001"]);
+});
+
+test("commands: a sender the router denies runs nothing; an unknown /word and a command the config does not allow go to the agent as text; /new stays the channel's", async () => {
+  const commands = recordedCommands();
+  const denying = await contextWith((pikit) => pikit.pipeline("route.resolve", (v) => ({ ...v, decision: { agent: "support", access: "deny" as const } }), { priority: 10 }));
+  const denied = await handlerSetup({ commands: commands.lookup });
+  const event = messageEvent({ text: "/ping", thread: "spaces/AAA/threads/T1" });
+  expect(await denied.handle((await denied.keyOf(event))!, event, denying)).toBe("done");
+  expect(commands.ran).toEqual([]);
+  expect(repliesIn(denied.google, "spaces/AAA/threads/T1")).toEqual([REPLIES.denied]);
+  expect(await denied.kv.get(commandSeenKey(message(event).name!))).toBeUndefined();
+
+  const s = await handlerSetup({ commands: allowedCommands(commands.lookup, ["ping", "new"]) });
+  for (const text of ["/word of mouth", "/boom"]) {
+    const each = messageEvent({ text });
+    expect(await s.handle((await s.keyOf(each))!, each, silentContext)).toBe("admitted");
+  }
+  expect(s.dispatched.map((each) => each.prompt)).toEqual(["Ada Lovelace: /word of mouth", "Ada Lovelace: /boom"]);
+
+  const reset = messageEvent({ text: "/new", thread: "spaces/AAA/threads/T5" });
+  const key = (await s.keyOf(reset))!;
+  await s.handle(key, reset, silentContext);
+  expect(commands.ran).toEqual([]);
+  expect(s.resets).toEqual([key]);
+  expect(commandReply("x", { kind: "unknown" })).toBe("/x is not a command here.");
 });
 
 test("a message stopped, denied or not routed is told so briefly in its thread, once; nothing admitted", async () => {

@@ -28,6 +28,8 @@
  *   has nothing to send. A wakeup at start (`channel-google-chat.sweep`) deletes a crash's leftovers.
  * - Who a conversation is with, for the dashboard (its stage of `conversation.describe`,
  *   party.ts): the space's name, or the person of a direct message, as its messages said.
+ * - Commands typed in a chat (`/name args`): the App's `agent.command`s the `commands` config allows,
+ *   run in the conversation with the message's sender, their outcome said in the thread (handler.ts).
  * - The `conversations` setting is declared in `start`, when `settings` is installed (its dashboard
  *   section: `settings/index.tsx` of the component).
  *
@@ -36,7 +38,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type AgentResult, type ChannelTransport, type DeliveryPolicy, describeStage, isDashboardRequest, type JsonValue, startAnswerDelivery } from "@pikit/contracts";
+import { type AgentResult, allowedCommands, type ChannelTransport, type DeliveryPolicy, describeStage, isDashboardRequest, type JsonValue, startAnswerDelivery } from "@pikit/contracts";
 import { CALL_TIMEOUT_MS } from "./api.ts";
 import { createClickHandler, createQuestionRecords } from "./click.ts";
 import { type AddOnEvent, type AddOnResponse, readEvent } from "./event.ts";
@@ -103,6 +105,8 @@ export default defineComponent({
     const execution = pikit.useOptional("execution");
     const inbox = pikit.useOptional("actor.inbox");
     const mailbox = pikit.useOptional("actor.mailbox");
+    // The App's commands, typed in a chat (`/name args`): those the `commands` config allows (handler.ts).
+    const commands = allowedCommands(pikit.useKeyed("agent.command"), config.commands);
 
     const instances = instancesOf(config.instances);
     const conversations = createConversationSettings(settings, instances, config.conversations);
@@ -216,7 +220,7 @@ export default defineComponent({
           apps.set(instance.instance, {
             instance,
             route: routeOf(connection, { sink, mode: conversations.modeOf(instance.instance) }),
-            handle: createEventHandler(deps),
+            handle: createEventHandler({ ...deps, commands }),
             click: createClickHandler({ ...deps, questions }),
             placeholders: createPlaceholders({
               instance,

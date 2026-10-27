@@ -224,7 +224,7 @@ test("what setup declares, as component.json's halves say", async () => {
   expect(app.describe().components.find((component) => component.name === NAME)).toMatchObject({
     provides: ["http.route"],
     requires: ["secrets", "conversations.registry", "agent.runtime", "agent.submissions", "storage.kv", "wakeups"],
-    optional: ["outbound.queue", "settings", "workspace", "execution", "actor.inbox", "actor.mailbox"],
+    optional: ["outbound.queue", "settings", "workspace", "execution", "actor.inbox", "actor.mailbox", "agent.command"],
   });
 });
 
