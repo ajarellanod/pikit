@@ -12,7 +12,8 @@ Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each m
   `actor.inbox`, where it registers the handler of `telegram.update`. A router (such as
   `router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (durable sending); in the object's half, `agent.command`
-  (the App's commands, typed in the chat: "Commands" below).
+  (the App's commands, typed in the chat: "Commands" below) and `workspace` or `execution` (where a
+  file sent in the chat is written: "Files and photos" below).
 - **Target:** `durable`. On a server, use `channel-telegram` (long polling, no public URL needed):
   absence, not flags (SPEC §4.1, C6).
 - **Installs to:** `src/pikit/channel-telegram-webhook/`.
@@ -157,9 +158,9 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
 - **Receiving messages.** Telegram posts each update to `POST /telegram` with the secret in
   `X-Telegram-Bot-Api-Secret-Token`. A request without it, or with another, is `401` (compared in
   constant time, as SHA-256 digests).
-- **What gets through:** messages with text from people in private chats. Group messages, bots and
-  other updates are acknowledged (`200`) and dropped. A message without text gets "I can only read
-  text messages for now."
+- **What gets through:** messages with text, a file or a photo from people in private chats. Group
+  messages, bots and other updates are acknowledged (`200`) and dropped. A message with none of them
+  (a sticker, a voice message) gets "I can only read text, photos and files for now."
 - **Who may talk** is the list in `TELEGRAM_ALLOWED_USERS`, checked in the Worker, and the chats that
   logged in with the password, kept in their objects ("The password"). A stranger is told their user
   id, so you can add it, and nothing reaches the agent. When the bot takes no logins (no password,
@@ -197,6 +198,19 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
   will not answer, the chat is told: "I can't take that message." when a stage stops it, "Sorry, I
   can't answer that here." when the router denies it, "This bot is not set up to answer yet." when no
   router is installed.
+- **Files and photos** (`attachments.ts`, the same file as channel-telegram's, over
+  `@pikit/pi-adapter`'s `collectAttachments`): in the object, before admission, a message's `document`
+  and `photo` are downloaded through the Bot API (`getFile`, then the file's URL on `apiBase`: two
+  subrequests a file); the caption is the text. A photo (its largest size Telegram says is within
+  1 MB) and an image sent as a file are shown to the model; a text file is put in the text (50,000
+  characters in all); any other file is written to the conversation's workspace (`workspace`, else
+  `execution`) as `attachments/<message id>/<file name>`, and the text names its path. 10 MB a file,
+  25 MB a message. Without `workspace` or `execution`, or past a bound, a file is named as not read,
+  with why. A message Telegram delivers again writes the same paths. A file that cannot be written
+  fails the message: `500`, nothing reaches the agent, Telegram delivers it again. With
+  execution-do the files are in the object's SQL, in 1 MB rows, within the object's storage (1 GB on
+  the Free plan): its simulated shell reads text, but converting a PDF needs a real shell
+  (`execution-remote`). How long files are kept is the workspace's (`retentionDays`).
 - **While the agent works**, the chat shows "typing…", renewed every 4 seconds for at most 10
   minutes per message.
 - **Answers** are channel-telegram's: Markdown converted to Telegram's formatting (plain text if
@@ -371,9 +385,9 @@ An update for a bot the object's half does not run is refused (`500`, and an err
 ## Where its code comes from
 
 Components never import each other, so what both Telegram channels need is copied. `format.ts`,
-`format.test.ts` and `transport.ts` are the same files as `channel-telegram`'s, and a repository
+`format.test.ts`, `transport.ts`, `party.ts` and `attachments.ts` are the same files as `channel-telegram`'s, and a repository
 test (`twins.test.ts`, beside `files/`) keeps them identical. `api.ts` and `account.ts` are copies
-extended: `api.ts` adds `setWebhook`, `deleteWebhook` and the rest of `getWebhookInfo`;
+extended: `api.ts` adds `setWebhook`, `deleteWebhook` and the rest of `getWebhookInfo` (both have `downloadFile`);
 `account.ts` adds each bot's webhook secret, password and path. `configure.ts` is
 `channel-telegram`'s step with the webhook's secret and an existing webhook added. The delivery follows
 the Cloudflare spike that ran in production (September 2026).
@@ -398,7 +412,11 @@ secret: no bot, token or network needed. Only tests import it.
   logged), and `setup-webhook.mjs` run as a build runs it. The password: strangers told `/login` only
   with a password, a login and its redelivery, an allowed chat's `/login`, wrong passwords and the
   cool-down, a login kept across restarts and after the password is removed, and logged out by a new
-  password.
+  password. Files and photos: a document written before the `200`, a failed write `500` with
+  nothing dispatched, the same path when Telegram posts it again, a photo alone shown to the model, a
+  file without a workspace named and never downloaded, a file without `file_id` refused (`400`). Each
+  was checked against a broken channel (no write before dispatch, the Worker dropping a photo without
+  a caption) and failed.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
   channel does with a message (a transient failure of admission answered `500` and posted again
   until taken, `/new` delivered again run once included), and what comes with durability (an answer that ended while stopped or
@@ -409,6 +427,11 @@ secret: no bot, token or network needed. Only tests import it.
   offered on a first setup, checked and saved.
 - `deploy.test.ts` covers `afterDeploy`: every bot's webhook set and checked, and what it reports.
 - `format.test.ts` is `channel-telegram`'s, for the shared `format.ts`.
+- The workerd lane's `tests/workerd/test/telegram-files.workerd.ts` runs the object's half in a real
+  Durable Object with execution-do and tool-read: a document written to the object's SQL before the
+  mailbox's send resolves, the object evicted before its first alarm and between two runs, and the
+  agent's `read` finding the file at the path it was told (checked against an object half that skips
+  the write: it fails).
 
 `component.json` is generated from `setup` by `pikit registry generate`, from both halves; "what
 setup declares" pins them in the tests.

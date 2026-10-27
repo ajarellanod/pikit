@@ -26,6 +26,7 @@ import {
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createConversationDescribeConformance, createMemoryFeed, createMemoryKeyValueStorage, createMemorySubmissions, HOSTILE_NAME, type RecordingSubmissions } from "@pikit/contracts/testing";
+import { base64Of, type ExecutionEnv } from "@pikit/pi-adapter";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.test-support.ts";
 import { type Account, accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { partyKey, partyOf, type SeenChat, seenChatOf } from "./party.ts";
@@ -80,7 +81,7 @@ const router = defineComponent({
  * records admissions and run ends in `submissions`, as runtime-pi does.
  */
 function scriptedRuntime(seen: Set<string> = new Set(), submissions: RecordingSubmissions = createMemorySubmissions().submissions) {
-  const dispatched: { requestId: string; key: string; prompt: string }[] = [];
+  const dispatched: { requestId: string; key: string; prompt: string; images?: unknown[] }[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
   const component = defineComponent({
@@ -88,8 +89,8 @@ function scriptedRuntime(seen: Set<string> = new Set(), submissions: RecordingSu
     setup(pikit) {
       let events: AppContext | undefined;
       const runtime: AgentRuntime = {
-        async dispatch({ requestId, conversation, prompt }) {
-          dispatched.push({ requestId, key: conversation.key, prompt });
+        async dispatch({ requestId, conversation, prompt, images }) {
+          dispatched.push({ requestId, key: conversation.key, prompt, ...(images !== undefined && { images: [...images] }) });
           if (seen.has(requestId)) return { kind: "duplicate", requestId } satisfies Admission;
           seen.add(requestId);
           const ctx = (events ?? BACKGROUND_CONTEXT) as AppContext;
@@ -227,7 +228,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "channel-telegram")).toMatchObject({
     provides: [],
     requires: ["secrets", "conversations.registry", "agent.runtime", "agent.submissions", "storage.kv"],
-    optional: ["outbound.queue", "health", "agent.command"],
+    optional: ["outbound.queue", "health", "workspace", "execution", "agent.command"],
   });
 });
 
@@ -278,7 +279,7 @@ test("a stranger is told their id once, and nothing reaches the agent", async ()
   expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello"]);
 });
 
-test("group messages are ignored, and a message without text gets a hint", async () => {
+test("group messages are ignored, and a message without text or a file gets a hint", async () => {
   const s = await started();
 
   s.telegram.say(OWNER, "in a group", { chat: "group" });
@@ -286,7 +287,7 @@ test("group messages are ignored, and a message without text gets a hint", async
   s.telegram.say(OWNER, undefined, { caption: "a photo caption" });
   await s.telegram.sentCount(2);
 
-  expect(s.telegram.sent[0]).toMatchObject({ text: "I can only read text messages for now." });
+  expect(s.telegram.sent[0]).toMatchObject({ text: "I can only read text, photos and files for now." });
   expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["a photo caption"]);
 });
 
@@ -1021,4 +1022,112 @@ test("a named bot's chats are described with its account; a message of a strange
     instance: "ops",
   });
   expect(await kv.namespace("channel-telegram").get(partyKey(`telegram:${STRANGER.id}`))).toBeUndefined();
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Files and photos (attachments.ts)
+
+/** `execution` keeping files in memory (only what writeAttachments calls); `failWrites` makes every write fail until it is cleared. */
+function memoryExecution(options: { failWrites?: boolean } = {}) {
+  const files = new Map<string, Uint8Array>();
+  let writes = 0;
+  const env = {
+    createDir: async () => ({ ok: true, value: undefined }),
+    writeFile: async (path: string, content: string | Uint8Array) => {
+      writes++;
+      if (options.failWrites) return { ok: false, error: Object.assign(new Error("no space left on device"), { code: "unknown" }) };
+      files.set(path, typeof content === "string" ? new TextEncoder().encode(content) : content);
+      return { ok: true, value: undefined };
+    },
+  } as unknown as ExecutionEnv;
+  return { component: defineComponent({ name: "execution-test", setup: (pikit) => pikit.provide("execution", env) }), files, options, writes: () => writes };
+}
+
+async function dispatchedCount(s: Subject, count: number): Promise<void> {
+  for (let tries = 0; s.runtime.dispatched.length < count; tries++) {
+    if (tries > 250) throw new Error(`${s.runtime.dispatched.length} dispatched, expected ${count}`);
+    await Bun.sleep(20);
+  }
+}
+
+test("a file: written to the conversation's workspace before dispatch, at attachments/<message id>/<name>, its path in the text after the caption; delivered again, the same path", async () => {
+  const execution = memoryExecution();
+  const s = await started({ before: [execution.component] });
+  const pdf = s.telegram.addFile("%PDF", { name: "../report.pdf", type: "application/pdf" });
+
+  s.telegram.say(OWNER, undefined, { caption: "read this", document: pdf });
+  await s.telegram.sentCount(1);
+
+  expect(s.runtime.dispatched).toEqual([
+    {
+      requestId: `telegram:${OWNER.id}:1`,
+      key: `telegram:${OWNER.id}`,
+      prompt: "read this\n\nFiles attached to this message:\n- ../report.pdf (application/pdf, 4 bytes): saved in your workspace at attachments/1/_report.pdf",
+    },
+  ]);
+  expect(new TextDecoder().decode(execution.files.get("attachments/1/_report.pdf"))).toBe("%PDF");
+
+  // Telegram delivers it again (a crash before its offset was confirmed): the same file, the same path; one request.
+  s.telegram.redeliver();
+  await dispatchedCount(s, 2);
+  expect(s.runtime.dispatched[1]?.requestId).toBe(`telegram:${OWNER.id}:1`);
+  expect([...execution.files.keys()]).toEqual(["attachments/1/_report.pdf"]);
+  expect(execution.writes()).toBe(2);
+});
+
+test("a photo is shown to the model: its largest size within 1 MB, never the larger ones", async () => {
+  const s = await started();
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]);
+  const small = s.telegram.addFile("small");
+  const medium = s.telegram.addFile(JPEG);
+  const large = s.telegram.addFile("large");
+
+  // Telegram's sizes, in any order: the one to read is the largest whose size it says is within 1 MB.
+  const sizes = [
+    { file_id: large.file_id, width: 1280, height: 960, file_size: 2_000_000 },
+    { file_id: small.file_id, width: 90, height: 67, file_size: 5 },
+    { file_id: medium.file_id, width: 800, height: 600, file_size: 500_000 },
+  ];
+  s.telegram.say(OWNER, undefined, { photo: sizes });
+  await s.telegram.sentCount(1);
+
+  expect(s.runtime.dispatched[0]).toMatchObject({ prompt: "Files attached to this message:\n- photo.jpg: an image, shown to you", images: [{ mimeType: "image/jpeg", data: base64Of(JPEG) }] });
+  expect([...s.telegram.downloads.keys()]).toEqual([medium.file_id]);
+});
+
+test("without a workspace a file is named as not read and not downloaded; one Telegram cannot give, or past 10 MB, is named too", async () => {
+  const bare = await started();
+  const pdf = bare.telegram.addFile("%PDF", { name: "a.pdf", type: "application/pdf" });
+  bare.telegram.say(OWNER, "here", { document: pdf });
+  await bare.telegram.sentCount(1);
+  expect(bare.runtime.dispatched[0]?.prompt).toBe("here\n\nFiles attached to this message:\n- a.pdf: not read (no workspace is installed to keep files in)");
+  expect(bare.telegram.downloads.size).toBe(0);
+
+  const s = await started({ before: [memoryExecution().component] });
+  s.telegram.say(OWNER, undefined, { document: { file_id: "gone", file_name: "gone.zip" } });
+  s.telegram.say(OWNER, undefined, { document: s.telegram.addFile("x", { name: "huge.zip", size: 11 * 1024 * 1024 }) });
+  await s.telegram.sentCount(2);
+  expect(s.runtime.dispatched.map((each) => each.prompt)).toEqual([
+    "Files attached to this message:\n- gone.zip: not read (it could not be downloaded)",
+    "Files attached to this message:\n- huge.zip: not read (larger than the 10 MB a file may be)",
+  ]);
+  expect(s.telegram.downloads.size).toBe(0);
+});
+
+test("a file that cannot be written: nothing is dispatched and Telegram keeps the update; tried again, it goes once the write succeeds", async () => {
+  const execution = memoryExecution({ failWrites: true });
+  const s = await started({ before: [execution.component] });
+  s.telegram.say(OWNER, "keep this", { document: s.telegram.addFile("data", { name: "a.bin" }) });
+
+  for (let tries = 0; execution.writes() < 2; tries++) {
+    if (tries > 250) throw new Error("the write was not tried again");
+    await Bun.sleep(20);
+  }
+  expect(s.runtime.dispatched).toEqual([]);
+  expect(s.telegram.pending()).toHaveLength(1);
+
+  execution.options.failWrites = false;
+  await s.telegram.sentCount(1);
+  expect(s.runtime.dispatched.map((each) => each.prompt)).toEqual(["keep this\n\nFiles attached to this message:\n- a.bin (a file, 4 bytes): saved in your workspace at attachments/1/a.bin"]);
+  expect([...execution.files.keys()]).toEqual(["attachments/1/a.bin"]);
 });

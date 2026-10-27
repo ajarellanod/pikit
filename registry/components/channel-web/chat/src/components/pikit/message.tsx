@@ -232,12 +232,13 @@ function Steps({ steps, going = false }: { steps: Step[]; going?: boolean }) {
 }
 
 /** A person's message: in one of the dashboard's own words, the operator's note line is folded away. */
-export function userText(message: UserMessage): { text: string; operator: boolean; images: Image[] } {
+export function userText(message: UserMessage): { text: string; operator: boolean; images: Image[]; files: string[] } {
   const text = typeof message.content === "string" ? message.content : message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
   const images = typeof message.content === "string" ? [] : message.content.filter((part): part is Image => part.type === "image");
-  if (!text.startsWith(OPERATOR_NOTE)) return { text, operator: false, images };
+  const files = typeof message.content === "string" ? [] : message.content.flatMap((part) => (part.type === "file" ? [part.name] : []));
+  if (!text.startsWith(OPERATOR_NOTE)) return { text, operator: false, images, files };
   const newline = text.indexOf("\n");
-  return { text: newline === -1 ? "" : text.slice(newline + 1), operator: true, images };
+  return { text: newline === -1 ? "" : text.slice(newline + 1), operator: true, images, files };
 }
 
 /** How long a message's rise lasts (`.rise-in`, index.css). */
@@ -249,7 +250,7 @@ const RISE_MS = 220;
  * sent bubble's place: it goes on from where that one was, never starting again). Read once: a later change never starts it.
  */
 export function UserBubble({ message, risen = 0 }: { message: UserMessage; risen?: number }) {
-  const { text, images } = userText(message);
+  const { text, images, files } = userText(message);
   const [played] = useState(Math.max(0, risen));
   const [viewing, setViewing] = useState<number>();
   const rise = played < RISE_MS;
@@ -262,6 +263,15 @@ export function UserBubble({ message, risen = 0 }: { message: UserMessage; risen
             <ViewableImage key={i} image={image} onOpen={() => setViewing(i)} frameClassName="max-w-[min(100%,320px)] rounded-xl" className="max-h-56 max-w-full rounded-xl object-contain shadow-hairline" />
           ))}
           <ImageViewer images={viewed} index={viewing} onIndex={setViewing} onClose={() => setViewing(undefined)} />
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="flex max-w-full flex-wrap justify-end gap-2">
+          {files.map((name, i) => (
+            <span key={i} className="max-w-60 truncate rounded-xl bg-field px-3 py-1.5 chat-text-12 text-ink-2 shadow-hairline" title={name}>
+              {name}
+            </span>
+          ))}
         </div>
       )}
       {text !== "" && (

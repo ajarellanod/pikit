@@ -47,6 +47,13 @@ line names its area.
   and the rest), each name a command in the generated file. A command may now answer `{ prompt }`, which
   `admitInbound` dispatches as the typed message (its id: a redelivery runs once) and admin-api as an
   operator's message. Run `pikit agents` again after adding templates.
+- Files a user sends: channel-telegram and channel-telegram-webhook read a `document` and a `photo`
+  (the caption is the text), channel-web's page attaches any file ("Add files"; the transcript keeps
+  their names only); each file lands in the conversation's workspace, `attachments/<message id>/<name>`,
+  and the agent is told its path. One protocol for every channel, channel-google-chat's moved into
+  `@pikit/pi-adapter` (`collectAttachments`, `writeAttachments`): 10 MB a file, 25 MB a message (20 MB
+  for the web chat on Cloudflare), a failed write never dispatched; server-bun's default body bound is
+  64 MiB, for a chat message with its files ([features/rich-content.md](features/rich-content.md) "Built: files in").
 - Spaces ([features/spaces.md](features/spaces.md)): channel-google-chat gives every thread its chat's
   key as its space; channel-web has projects (create, rename, delete when empty; a chat is made in one
   or none, for good), a chat of a project in that project's space.

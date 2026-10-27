@@ -16,9 +16,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setPasswordLink } from "../registry/components/channel-web/files/src/pikit/channel-web/accounts/links.ts";
 import { type ChatFiles, createAssets } from "../registry/components/channel-web/files/src/pikit/channel-web/assets.ts";
-import { IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "../registry/components/channel-web/chat/src/lib/chat-api.ts";
+import { IMAGE_TYPES, MAX_DURABLE_FILES_BYTES, MAX_DURABLE_IMAGE_BYTES, MAX_FILE_BYTES, MAX_FILES, MAX_FILES_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "../registry/components/channel-web/chat/src/lib/chat-api.ts";
 import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../registry/components/channel-web/chat/src/lib/errors.ts";
-import { base64Bytes, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
+import { base64Bytes, fileLimits, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
 import { INITIAL, type LiveState, reduce } from "../registry/components/channel-web/chat/src/lib/transcript.ts";
 import { type ChatClient, chatSource, conversationsPath, transcriptPath } from "../registry/components/channel-web/chat/src/lib/source.ts";
 import { newChatPath, parseRoute, PROJECTS_PATH, projectIdOf, projectPath, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
@@ -248,6 +248,7 @@ describe("live events", () => {
     await source.follow(() => {}, new AbortController().signal);
     expect(await source.send(composed({ text: "hi", images: [{ name: "a.png", mimeType: "image/png", data: "iVBORw0KGgo=" }], webSearch: true }))).toEqual({ requestId: "web:x", admission: "queued" });
     await source.send(composed({ text: "only text", images: [], webSearch: false }));
+    await source.send({ text: "", images: [], files: [{ name: "a.pdf", mimeType: "application/pdf", data: "JVBERg==" }, { name: "b", mimeType: "", data: "" }] });
     await source.abort();
     expect(calls).toEqual([
       { method: "GET", path: "/conversations/a%20b%2Fc/transcript?limit=50" },
@@ -256,6 +257,8 @@ describe("live events", () => {
       // Never a web search: the chat has none.
       { method: "POST", path: "/conversations/a%20b%2Fc/messages", body: { text: "hi", images: [{ mimeType: "image/png", data: "iVBORw0KGgo=" }] } },
       { method: "POST", path: "/conversations/a%20b%2Fc/messages", body: { text: "only text" } },
+      // A file's type only when the browser knew one.
+      { method: "POST", path: "/conversations/a%20b%2Fc/messages", body: { text: "", files: [{ name: "a.pdf", mimeType: "application/pdf", data: "JVBERg==" }, { name: "b", data: "" }] } },
       { method: "POST", path: "/conversations/a%20b%2Fc/abort", body: undefined },
     ]);
 
@@ -380,6 +383,8 @@ describe("the composer", () => {
     expect(render({ images, webSearch: { available: true } })).toContain('aria-label="Add images or web search"');
     expect(render({ webSearch: { available: true } })).toContain('aria-label="Web search"');
     expect(render({})).not.toContain("aria-expanded");
+    // With files (an App that keeps them): any file, the images among them still shown.
+    expect(render({ images, files: fileLimits("server") })).toContain('aria-label="Add files"');
   });
 
   // With the default policy (tools: "names") a call's result is withheld: it opened to "(no output)".
@@ -418,6 +423,18 @@ describe("images", () => {
     const two = [image(600 * 1024), image(600 * 1024)];
     expect(messageProblem("", two, "server")).toBeUndefined();
     expect(messageProblem("", two, "durable")).toContain("1 MB in all");
+  });
+
+  test("files: any type, 10 a message, 10 MB each, 25 MB in all (20 MB on Cloudflare)", () => {
+    const file = (bytes: number) => ({ name: "a.bin", data: Buffer.alloc(bytes).toString("base64") });
+    expect(fileLimits("server")).toEqual({ count: MAX_FILES, bytes: MAX_FILE_BYTES, totalBytes: MAX_FILES_BYTES });
+    expect(fileLimits("durable")).toEqual({ count: MAX_FILES, bytes: MAX_FILE_BYTES, totalBytes: MAX_DURABLE_FILES_BYTES });
+    expect(messageProblem("", [], "server", [file(10)])).toBeUndefined();
+    expect(messageProblem("", [], "server", Array.from({ length: MAX_FILES + 1 }, () => file(1)))).toContain(`At most ${MAX_FILES} files`);
+    expect(messageProblem("", [], "server", [file(MAX_FILE_BYTES + 1)])).toContain("larger than 10 MB");
+    const three = [file(8 * 1024 * 1024), file(8 * 1024 * 1024), file(8 * 1024 * 1024)];
+    expect(messageProblem("", [], "server", three)).toBeUndefined();
+    expect(messageProblem("", [], "durable", three)).toContain("20 MB in all");
   });
 });
 

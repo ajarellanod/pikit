@@ -16,10 +16,12 @@ export type Thinking = { type: "thinking"; thinking: string; redacted?: boolean 
 /** An image: its bytes inline (base64), or where to read it (a page that serves its images by URL, as channel-web's chat does). */
 export type Image = { type: "image"; mimeType: string; data: string } | { type: "image"; url: string; mimeType?: string };
 export type ToolCall = { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
+/** A file a person sent, by its name only (channel-web's chat: its bytes are the agent's, in its workspace). */
+export type FileName = { type: "file"; name: string };
 
 export type Message =
   | { role: "system"; content?: unknown; timestamp?: number }
-  | { role: "user"; content: string | (Text | Image)[]; timestamp?: number }
+  | { role: "user"; content: string | (Text | Image | FileName)[]; timestamp?: number }
   | { role: "assistant"; content: (Text | Thinking | ToolCall)[]; stopReason?: string; errorMessage?: string; timestamp?: number }
   | { role: "toolResult"; toolCallId: string; toolName: string; content: (Text | Image)[]; isError?: boolean; timestamp?: number };
 

@@ -3,7 +3,7 @@
   "name": "channel-web",
   "version": "0.0.1",
   "title": "Web chat: your users talk to the assistant from a page of their own (/chat/), with accounts",
-  "description": "A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object.",
+  "description": "A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and files and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object.",
   "targets": [
     "server",
     "durable"
@@ -11,6 +11,7 @@
   "requires": {
     "pikit": "0.0.1",
     "contracts": "0.0.1",
+    "adapter": "0.0.1",
     "capabilities": [
       "secrets",
       "conversations.registry",
@@ -26,6 +27,8 @@
     "capabilities": [
       "wakeups",
       "outbound.queue",
+      "workspace",
+      "execution",
       "actor.inbox",
       "settings",
       "email.send",
@@ -59,6 +62,8 @@
       "optional": [
         "wakeups",
         "outbound.queue",
+        "workspace",
+        "execution",
         "actor.inbox",
         "actor.mailbox",
         "settings",
@@ -100,12 +105,12 @@
   },
   "dependencies": {
     "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
     "better-auth": "1.7.7",
     "typebox": "1.3.27"
   },
   "devDependencies": {
-    "@better-auth/test-utils": "1.7.7",
-    "@pikit/pi-adapter": "0.0.1"
+    "@better-auth/test-utils": "1.7.7"
   },
   "files": [
     {

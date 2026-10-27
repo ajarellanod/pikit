@@ -234,7 +234,10 @@ missing or unusable required one fails the start, naming it.
   (with outbound-durable, within its 24 hours).
 - **Files.** Images (PNG, JPEG, WebP, GIF) go to the model; text files (`text/*`, JSON, CSV) into the
   text; anything else (PDF, Office, archives) is written to the conversation's workspace under
-  `attachments/<message id>/<file name>`, and the text names its path for the agent's tools.
+  `attachments/<message id>/<file name>`, and the text names its path for the agent's tools. The
+  protocol (bounds, safe names, the write, the words) is `@pikit/pi-adapter`'s `collectAttachments`
+  and `writeAttachments`, which channel-telegram and channel-web use too; `attachments.ts` is Google's
+  part (its media, Drive files, `ATTACHMENT_LIMITS`).
 - **Quotes.** A message that quotes another has the quoted one read and put before its text.
 - **Questions** (with tool-ask-user). A question with one `confirm` or `select` field is a card of
   buttons; anything else a card whose button opens a dialog with the form (radio buttons, a dropdown,

@@ -54,6 +54,8 @@ export interface SentMessage {
   id: number;
   text: string;
   images: { mimeType: string; data: string }[];
+  /** The names of the other files it carries, if any. */
+  files?: string[];
   /** Messages of the same text the conversation showed when it was sent: one more is this one. */
   before: number;
   /** It waits for the run going (`admission: "queued"`). */
@@ -284,7 +286,11 @@ function mergedEntries(transcript: TranscriptEntry[], live: TranscriptEntry[]): 
 /** A message sent from here, as the transcript will have it. */
 const sentMessage = (sent: SentMessage): UserMessage => ({
   role: "user",
-  content: [...(sent.text === "" ? [] : [{ type: "text" as const, text: sent.text }]), ...sent.images.map((image) => ({ type: "image" as const, ...image }))],
+  content: [
+    ...(sent.text === "" ? [] : [{ type: "text" as const, text: sent.text }]),
+    ...sent.images.map((image) => ({ type: "image" as const, ...image })),
+    ...(sent.files ?? []).map((name) => ({ type: "file" as const, name })),
+  ],
 });
 
 /** A row of the app's own in the thread: before the first message written after `at`, else at its end. */
@@ -413,8 +419,8 @@ export function ConversationView({ source, sent, composer = {}, closed, context 
   const since = sentShown.at(-1)?.at ?? (answering ? sentAt : [...messages].reverse().find((message) => message.role === "user" && message.timestamp !== undefined)?.timestamp);
 
   const send = async (message: ComposerMessage) => {
-    const { text, images } = message;
-    const sentId = sent.addSent(id, { text, images: images.map(({ mimeType, data }) => ({ mimeType, data })), before: sameText(text) });
+    const { text, images, files } = message;
+    const sentId = sent.addSent(id, { text, images: images.map(({ mimeType, data }) => ({ mimeType, data })), ...(files.length > 0 && { files: files.map((file) => file.name) }), before: sameText(text) });
     // Sending follows the thread to its end, wherever the person had scrolled.
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
     try {

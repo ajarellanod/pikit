@@ -33,11 +33,11 @@ import { Hono } from "hono";
 import Type from "typebox";
 
 /**
- * The default of `maxRequestBodyBytes`: 32 MiB, above the largest message a composer may send (the
- * dashboard's and the chat page's: 4 images of 5 MB in base64 and their text, about 27 MiB). Each
+ * The default of `maxRequestBodyBytes`: 64 MiB, above the largest message a composer may send (the
+ * chat page's: 4 images of 5 MB and 25 MB of files in base64 and their text, about 61 MiB). Each
  * route bounds its own body; this is the server's backstop.
  */
-export const DEFAULT_MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
+export const DEFAULT_MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
 
 const Config = Type.Object({
   port: Type.Integer({ minimum: 0, maximum: 65535, default: 3000 }),

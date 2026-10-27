@@ -1,6 +1,6 @@
 /**
  * The channel's names and checks, each in one place: the conversation key (`keyOf`), chat ids,
- * request ids, a message's images, titles.
+ * request ids, a message's images and files, titles.
  *
  * **Keys.** A user's conversation is `web:<user id>:<chat id>`, the chat id a UUID the server made
  * (`isChatId`: no `:` in it, so a key names one user and one chat). Every route builds the key from the
@@ -8,7 +8,20 @@
  * user's conversation, whatever chat id they send.
  */
 
-import { type ChatImage, CHAT_REQUEST_PREFIX, IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, TITLE_MAX } from "./api.ts";
+import {
+  type ChatFile,
+  type ChatImage,
+  CHAT_REQUEST_PREFIX,
+  IMAGE_TYPES,
+  MAX_DURABLE_FILES_BYTES,
+  MAX_DURABLE_IMAGE_BYTES,
+  MAX_FILE_BYTES,
+  MAX_FILES,
+  MAX_FILES_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGES,
+  TITLE_MAX,
+} from "./api.ts";
 
 /** The channel's name: `InboundMessage.channel`, and the sender's `channel` (`{ channel: "web", id: <user id> }`). */
 export const CHANNEL = "web";
@@ -85,7 +98,7 @@ export const imagePath = (chatId: string, messageId: string, index: number): str
 export const requestIdOf = (given: string | undefined): string => given ?? `${CHAT_REQUEST_PREFIX}${crypto.randomUUID()}`;
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
-const base64Bytes = (data: string): number => Math.floor((data.length * 3) / 4) - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
+export const base64Bytes = (data: string): number => Math.floor((data.length * 3) / 4) - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
 
 /**
  * What is wrong with a message's images, or `undefined`: too many, not one of `IMAGE_TYPES`, or not
@@ -103,6 +116,29 @@ export function imagesProblem(images: readonly ChatImage[], target: string): { s
     total += bytes;
   }
   if (target === "durable" && total > MAX_DURABLE_IMAGE_BYTES) return { status: 413, message: `here the images of a message are at most ${MAX_DURABLE_IMAGE_BYTES / 1024 / 1024} MB in all` };
+  return undefined;
+}
+
+/** The most a message's files may be in all on `target`: on `durable` they cross to the object in one call. */
+export const filesBytesOf = (target: string): number => (target === "durable" ? MAX_DURABLE_FILES_BYTES : MAX_FILES_BYTES);
+
+/**
+ * What is wrong with a message's files, or `undefined`: too many, a name empty or longer than 255
+ * characters, or data not base64 (`400`); one larger than `MAX_FILE_BYTES`, or more than
+ * `filesBytesOf(target)` in all (`413`).
+ */
+export function filesProblem(files: readonly ChatFile[], target: string): { status: 400 | 413; message: string } | undefined {
+  if (files.length > MAX_FILES) return { status: 400, message: `at most ${MAX_FILES} files a message` };
+  let total = 0;
+  for (const [i, file] of files.entries()) {
+    if (file.name.trim() === "" || file.name.length > 255) return { status: 400, message: `file ${i + 1}: a name is 1 to 255 characters` };
+    if (file.data.length % 4 !== 0 || !BASE64.test(file.data)) return { status: 400, message: `file ${i + 1}: its data is not base64` };
+    const bytes = base64Bytes(file.data);
+    if (bytes > MAX_FILE_BYTES) return { status: 413, message: `file ${i + 1}: a file is at most ${MAX_FILE_BYTES / 1024 / 1024} MB` };
+    total += bytes;
+  }
+  const most = filesBytesOf(target);
+  if (total > most) return { status: 413, message: `the files of a message are at most ${most / 1024 / 1024} MB in all here` };
   return undefined;
 }
 

@@ -9,7 +9,7 @@
  *
  * | Type | Message | Answer |
  * |---|---|---|
- * | `channel-web.start` | `{ userId, chatId, text, images?, requestId, agent?, project? }` | `ChatSendResponse`: the conversation made with its first message (with `agent`, the agent the user picked; with `project`, one of the user's projects, its space: the Worker checked both) |
+ * | `channel-web.start` | `{ userId, chatId, text, images?, files?, requestId, agent?, project? }` | `ChatSendResponse`: the conversation made with its first message (with `agent`, the agent the user picked; with `project`, one of the user's projects, its space: the Worker checked both) |
  * | `channel-web.send` | the same | `ChatSendResponse` |
  * | `channel-web.conversation` | `{ userId, chatId }` | `ChatConversation` |
  * | `channel-web.rename` | `{ userId, chatId, title }` | `ChatConversation` |
@@ -47,7 +47,7 @@
 
 import type { AppContext } from "@pikit/core";
 import { ActorCallError, type ActorInbox, type JsonValue } from "@pikit/contracts";
-import { type ChatConfig, type ChatImage, MAX_IMAGES, PROJECT_NAME_MAX, SEARCH_MAX } from "./api.ts";
+import { type ChatConfig, type ChatFile, type ChatImage, MAX_IMAGES, PROJECT_NAME_MAX, SEARCH_MAX } from "./api.ts";
 import { type ChatBackend, type ChatRef, createIndex, type FirstMessage, type NewMessage, refusal } from "./backend.ts";
 import { isChatId, isProjectId, keyOf, REQUEST_ID } from "./chat.ts";
 import type { RateLimiter } from "./rate.ts";
@@ -111,7 +111,7 @@ function pageOf(message: JsonValue): { limit: number; cursor?: string } {
   return { limit, ...(cursor !== undefined && { cursor }) };
 }
 
-/** A user's message, checked again on arrival (the backend checks its images against this target's limits). */
+/** A user's message, checked again on arrival (the backend checks its images and files against this target's limits). */
 function messageOf(message: JsonValue): NewMessage {
   const fields = fieldsOf(message);
   const written = fields.text;
@@ -123,7 +123,14 @@ function messageOf(message: JsonValue): NewMessage {
     throw refusal("invalid_request", 'channel-web: "images" is a list of images');
   }
   const list = ((images ?? []) as ChatImage[]).map(({ mimeType, data }) => ({ mimeType, data }));
-  return { text: written, requestId, ...(list.length > 0 && { images: list }) };
+  const { files } = fields;
+  const isFile = (each: JsonValue): boolean => {
+    const file = fieldsOf(each);
+    return typeof file.name === "string" && typeof file.data === "string" && (file.mimeType === undefined || typeof file.mimeType === "string");
+  };
+  if (files !== undefined && !(Array.isArray(files) && files.every(isFile))) throw refusal("invalid_request", 'channel-web: "files" is a list of files');
+  const kept = ((files ?? []) as ChatFile[]).map(({ name, mimeType, data }) => ({ name, ...(mimeType !== undefined && { mimeType }), data }));
+  return { text: written, requestId, ...(list.length > 0 && { images: list }), ...(kept.length > 0 && { files: kept }) };
 }
 
 /** A project id, or `invalid_request`. */

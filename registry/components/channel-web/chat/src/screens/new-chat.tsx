@@ -22,15 +22,16 @@ import { ChatBubble, Folder } from "iconoir-react";
 import { type CSSProperties, useEffect, useState } from "react";
 import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
-import type { ChatImage, ChatStartRequest, ChatStartResponse } from "@/lib/chat-api";
+import type { ChatFile, ChatImage, ChatStartRequest, ChatStartResponse } from "@/lib/chat-api";
 import { post } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
 import { asError } from "@/lib/errors";
-import { imageLimits, messageProblem } from "@/lib/images";
+import { fileLimits, imageLimits, messageProblem } from "@/lib/images";
 import { chatPath, go } from "@/lib/location";
 import { assistantName } from "@/lib/names";
 import { useProjects } from "@/lib/projects";
 import { newChatPath, projectPath } from "@/lib/routes";
+import { filesOf } from "@/lib/source";
 import { usePageTitle, useSession } from "@/lib/session";
 import { titleOf } from "./layout";
 
@@ -66,26 +67,27 @@ export function NewChatScreen({ agent: asked, project }: { agent?: string | unde
     return () => timers.forEach(clearTimeout);
   }, []);
 
-  const start = async ({ text, images }: ComposerMessage) => {
+  const start = async ({ text, images, files }: ComposerMessage) => {
     const chatImages = images.map(({ mimeType, data }) => ({ mimeType, data }));
-    const problem = messageProblem(text, chatImages, config.target);
+    const chatFiles = filesOf(files);
+    const problem = messageProblem(text, chatImages, config.target, chatFiles);
     if (problem !== undefined) {
       setError(new Error(problem));
       throw new Error(problem);
     }
-    return begin(text, chatImages);
+    return begin(text, chatImages, chatFiles);
   };
 
   /** The chat made with its first message (a command too: it runs there), then opened. */
-  const begin = async (text: string, images: ChatImage[]) => {
+  const begin = async (text: string, images: ChatImage[], files: ChatFile[] = []) => {
     setError(undefined);
     try {
-      const body: ChatStartRequest = { text, ...(images.length > 0 && { images }), ...(agent !== undefined && { agent }), ...(project !== undefined && { project }) };
+      const body: ChatStartRequest = { text, ...(images.length > 0 && { images }), ...(files.length > 0 && { files }), ...(agent !== undefined && { agent }), ...(project !== undefined && { project }) };
       const started = await post<ChatStartResponse>("/conversations", body);
       if (started.command !== undefined) conversations.addNote(started.id, started.command);
       // The conversation shows the message at once, before its transcript is read.
       else if (started.admission !== "duplicate") {
-        const sent = conversations.addSent(started.id, { text, images, before: 0 });
+        const sent = conversations.addSent(started.id, { text, images, ...(files.length > 0 && { files: files.map((file) => file.name) }), before: 0 });
         if (started.admission === "queued") conversations.updateSent(started.id, sent, "queued");
       }
       conversations.reload();
@@ -137,6 +139,7 @@ export function NewChatScreen({ agent: asked, project }: { agent?: string | unde
             onCommand={(name, args) => begin(args === "" ? `/${name}` : `/${name} ${args}`, [])}
             placeholder={`Ask ${agent === undefined ? config.name : assistantName(agent)} anything…`}
             images={imageLimits(config.target)}
+            {...(config.files && { files: fileLimits(config.target) })}
             {...(agent !== undefined && {
               picker: {
                 label: "assistant",

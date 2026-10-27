@@ -3,7 +3,7 @@
 People who are not operators talk to the assistant from a web page, `/chat/`, with accounts of their
 own: they sign in with an email and a password, a link by email, Google, GitHub or any OAuth2/OIDC
 platform, see and continue only their own conversations, watch the answer as it is written, attach
-images and stop a run. A conversation reads as the dashboard's (the same JSON: a transcript of
+images and files and stop a run. A conversation reads as the dashboard's (the same JSON: a transcript of
 pi-ai messages and pi-durable's live events), cut to what the operator lets users see (thinking,
 tools, the Context panel); the operator may let them pick an assistant, and they search their
 conversations by title. They organize their chats in projects, whose chats share what the App keeps
@@ -29,7 +29,8 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
   routes answer `404`), `actor.inbox` / `actor.mailbox` (Cloudflare), `model.complete` (runtime-pi's:
   a model titles each conversation after its first answer; without it, its first message names it),
   `agent.command` (admin-api's `/name`: the dashboard lists a web conversation by the chat's title,
-  "Titles" below; and the commands users may type, `commands`).
+  "Titles" below; and the commands users may type, `commands`), `workspace` or `execution` (where a
+  file a user attaches is written: "Files" below; without either, the page offers images only).
 - **Targets:** `server` and `durable`, from one code (below).
 - **Installs to:** `src/pikit/channel-web/`; with a UI, its view and Settings section to
   `src/dashboard/src/views/channel-web/` and `src/dashboard/src/settings/channel-web/`. Adds the command
@@ -245,8 +246,8 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   (a restart re-announces it) stores it once. The transcript (`GET .../transcript`, newest first,
   paged, at most 1 MiB of stored JSON a page) is the user's messages (`{ type: "image", url, mimeType }`
   for each image: `GET .../messages/:messageId/images/:n`, the owner only, its type, `nosniff`, cached
-  privately; image bytes are read one at a time, never in a page) and those messages, each its own
-  entry.
+  privately; image bytes are read one at a time, never in a page; `{ type: "file", name }` for each
+  other file, its name alone) and those messages, each its own entry.
 - **One id per entry, live or read.** A user's message's id is its request id; a run's message's is
   `<the run's first request>#<hash of the message itself>` (its role, time, tool call id, blocks' text
   and ids: `entries.ts`). The live view announces each message the run writes (`message_end`'s
@@ -275,6 +276,20 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   `pending`, then `answered`, `failed` or `aborted` when its run ends (from `agent.settled` /
   `agent.failed`, and from `agent.submissions` when the page reads a message whose run's end no event
   brought).
+- **Files** (`ChatSendRequest.files`, the page's "Add files", offered when `ChatConfig.files`: a
+  `workspace` or `execution` is installed): any type, at most 10 files of 10 MB, 25 MB in all (20 MB
+  on Cloudflare, where the message crosses to the conversation's object in one call of at most 32 MiB
+  of base64; the body bound `maxBodyOf` counts them), `400`/`413` past a bound. Every one is written
+  to the conversation's workspace before the message is dispatched (`@pikit/pi-adapter`'s
+  `collectAttachments` and `writeAttachments`, the protocol every channel shares), as
+  `attachments/<request id>/<safe name>`, none shown inline; the agent's text names each path (the
+  user's own text is what the transcript keeps). The stored message keeps the files' names only: no
+  bytes in the channel's table, the transcript or the live view. Sent again with the same request id,
+  the same paths are written. A write that fails refuses the message: nothing dispatched or stored,
+  `503`, and the page sends it again. Without a workspace (an API client sending files anyway) each
+  is named to the agent as not kept. With execution-do the files are in the object's SQL (1 MB rows);
+  converting a PDF needs a real shell (`execution-remote`). How long they are kept is the
+  workspace's (`retentionDays`).
 - **Answers also take the channels' path**: `startAnswerDelivery` (with `outbound.queue` when
   installed) writes a completed run's answer into the channel's table only for a run none of whose
   messages are stored (its end never heard here: after waiting a second for it), at least once, stored
@@ -311,8 +326,8 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   better-auth hashes passwords and calls our email sender inside its own, so its multi-step writes run
   one statement at a time (`accounts/adapter.ts`): a crash between two leaves a user who can sign in
   again or be removed, and an invitation whose link was not made yet is sent again.
-- **Logs** carry user ids, chat ids, request ids and operator ids: never a message's text or images,
-  a link or a token.
+- **Logs** carry user ids, chat ids, request ids and operator ids: never a message's text, images or
+  files, a link or a token.
 
 ## Two targets, one code
 
@@ -377,7 +392,11 @@ under an https `PIKIT_PUBLIC_URL`).
   shapes with `message_end`'s entry the transcript's (same id, same messages), a message held behind a
   run, the policy as a live setting on history and live events, the agents users may pick (allowed,
   refused, denied by routing, taken away; the one Routing suggests in `/me`, a dry run), the search, stop, duplicates, request ids, images and body
-  limits, refusals, the operator's routes, the live `signUp` setting, what setup declares, the
+  limits (on Cloudflare under a call's 32 MiB), files (written before dispatch at
+  `attachments/<request id>/`, the same paths again for the same request, names only in the
+  transcript, a failed write `503` with nothing stored or dispatched, the bounds, named as not kept
+  without a workspace; checked against a broken channel: no write, no names kept, a larger total on
+  Cloudflare, each failed), refusals, the operator's routes, the live `signUp` setting, what setup declares, the
   lifecycle suite. Projects: made, renamed, listed with their chats, at most
   `MAX_PROJECTS`, refused deletion while they have chats, removed with their user; the list by project
   (`none`, search within, archived apart); isolation (another user's project id `404` on every route,

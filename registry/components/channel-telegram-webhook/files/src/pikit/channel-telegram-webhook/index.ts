@@ -99,6 +99,9 @@ export default defineComponent({
     const wakeups = pikit.use("wakeups");
     // Optional: with it, answers are stored before they are sent (@pikit/contracts' outbound.ts).
     const outbound = pikit.useOptional("outbound.queue");
+    // Optional: where a message's files are written (attachments.ts); without either, they are named as not read.
+    const workspace = pikit.useOptional("workspace");
+    const execution = pikit.useOptional("execution");
     // The App's commands, typed in a chat (`/name args`): those the `commands` config allows (inbox.ts).
     const commands = allowedCommands(pikit.useKeyed("agent.command"), config.commands);
     const accounts = accountsOf(config.accounts);
@@ -130,7 +133,7 @@ export default defineComponent({
           await now.delivery.wake(ctx);
         }
       };
-    const depsOf = (bot: Bot) => ({ bot, conversations: conversations.get(), runtime: runtime.get(), commands, store: storage.get().namespace(NAME) });
+    const depsOf = (bot: Bot) => ({ bot, conversations: conversations.get(), runtime: runtime.get(), commands, store: storage.get().namespace(NAME), workspace: workspace.get(), execution: execution.get() });
 
     // Registered with actor.inbox in start (`actor-inbox.ts`): the mailbox depends on no handler.
     const inbox = registerInbox(

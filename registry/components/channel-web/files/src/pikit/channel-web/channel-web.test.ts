@@ -11,7 +11,20 @@ import { createLifecycleConformance } from "@pikit/core/testing";
 import { describeConversation } from "@pikit/contracts";
 import { createConversationDescribeConformance, HOSTILE_NAME } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import { type ChatConfig, type ChatConversation, type ChatEvent, type ChatTranscriptEntry, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, PAGE_JSON_MAX, TITLE_MAX } from "./api.ts";
+import {
+  type ChatConfig,
+  type ChatConversation,
+  type ChatEvent,
+  type ChatTranscriptEntry,
+  MAX_DURABLE_FILES_BYTES,
+  MAX_DURABLE_IMAGE_BYTES,
+  MAX_FILE_BYTES,
+  MAX_FILES_BYTES,
+  MAX_IMAGE_BYTES,
+  PAGE_JSON_MAX,
+  TITLE_MAX,
+} from "./api.ts";
+import type { ExecutionEnv } from "@pikit/pi-adapter";
 import { chatIdFor, cleanTitle, keyOf, parseKey } from "./chat.ts";
 import { runEntryId } from "./entries.ts";
 import channelWeb, { createChannelWeb, NAME, usersPagePath } from "./index.ts";
@@ -112,6 +125,7 @@ test("GET /chat/api/config needs no session: the name, the target, the methods t
     methods: [{ kind: "password" }, { kind: "social", id: "google", name: "Google" }, { kind: "social", id: "github", name: "GitHub" }, { kind: "oidc", id: "corp", name: "Corp SSO" }],
     signUp: "allowlist",
     email: false,
+    files: false,
     visibility: { thinking: false, tools: "names", context: true },
     agents: [],
     commands: [],
@@ -893,9 +907,12 @@ test("images and bodies: at most 4, of the image types, base64, 5 MB each (413);
     expect({ status: response.status }).toEqual({ status });
   }
   const max = maxBodyOf("server");
-  // What 4 images of 5 MB in base64 and 32,000 characters each escaped need, and under 4 KiB of JSON around them.
-  expect(max - (4 * Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 32_000 * 6)).toBeLessThan(4 * 1024);
-  expect(maxBodyOf("durable")).toBeLessThan(Math.ceil(MAX_DURABLE_IMAGE_BYTES / 3) * 4 + 32_000 * 6 + 4 * 1024);
+  const base64 = (bytes: number) => Math.ceil(bytes / 3) * 4;
+  // What 4 images of 5 MB and 25 MB of files in base64 and 32,000 characters each escaped need, and under 32 KiB of JSON around them.
+  expect(max - (4 * base64(MAX_IMAGE_BYTES) + base64(MAX_FILES_BYTES) + 32_000 * 6)).toBeLessThan(32 * 1024);
+  // On Cloudflare the whole message crosses to the object in one call: under its 32 MiB.
+  expect(maxBodyOf("durable")).toBeLessThan(base64(MAX_DURABLE_IMAGE_BYTES) + base64(MAX_DURABLE_FILES_BYTES) + 32_000 * 6 + 32 * 1024);
+  expect(maxBodyOf("durable")).toBeLessThan(32 * 1024 * 1024);
   const huge = await c.served.fetch(`${API}/conversations`, as("ana", { method: "POST", headers: { "content-length": String(max + 1) }, body: "{}" }));
   expect(huge.status).toBe(413);
   const streamed = await c.served.fetch(`${API}/conversations`, as("ana", { method: "POST", body: "x".repeat(max + 1) }));
@@ -905,6 +922,84 @@ test("images and bodies: at most 4, of the image types, base64, 5 MB each (413);
   const many = await start(c, "ana", "", { images: Array.from({ length: 4 }, () => imageOf(MAX_DURABLE_IMAGE_BYTES)) });
   expect(many.admission).toBe("started");
   expect(await (await c.served.fetch(`${API}/conversations/${many.id}`, as("ana"))).json()).toMatchObject({ title: "Image" });
+});
+
+/** `execution` keeping files in memory (only what writeAttachments calls); `failWrites` makes every write fail until it is cleared. */
+function memoryExecution(options: { failWrites?: boolean } = {}) {
+  const files = new Map<string, Uint8Array>();
+  const env = {
+    createDir: async () => ({ ok: true, value: undefined }),
+    writeFile: async (path: string, content: string | Uint8Array) => {
+      if (options.failWrites) return { ok: false, error: Object.assign(new Error("no space left on device"), { code: "unknown" }) };
+      files.set(path, typeof content === "string" ? new TextEncoder().encode(content) : content);
+      return { ok: true, value: undefined };
+    },
+  } as unknown as ExecutionEnv;
+  return { component: defineComponent({ name: "execution-test", setup: (pikit) => pikit.provide("execution", env) }), files, options };
+}
+
+const fileOf = (name: string, content: string, mimeType?: string) => ({ name, ...(mimeType !== undefined && { mimeType }), data: Buffer.from(content).toString("base64") });
+
+test("files: written to the conversation's workspace before dispatch, their paths in the agent's text; the transcript keeps their names only; the same request again writes the same paths", async () => {
+  const execution = memoryExecution();
+  const c = await chat({ components: [execution.component] });
+  expect(((await (await c.served.fetch(`${API}/config`)).json()) as ChatConfig).files).toBe(true);
+
+  const body = { requestId: "web:f1", files: [fileOf("../report.pdf", "%PDF", "application/pdf"), fileOf("notes.txt", "hi", "text/plain")] };
+  const first = await start(c, "ana", "read these", body);
+  expect(c.runtime.dispatched[0]?.prompt).toBe(
+    [
+      "read these",
+      [
+        "Files attached to this message:",
+        "- ../report.pdf (application/pdf, 4 bytes): saved in your workspace at attachments/web_f1/_report.pdf",
+        "- notes.txt (text/plain, 2 bytes): saved in your workspace at attachments/web_f1/notes.txt",
+      ].join("\n"),
+    ].join("\n\n"),
+  );
+  expect([...execution.files.keys()]).toEqual(["attachments/web_f1/_report.pdf", "attachments/web_f1/notes.txt"]);
+  expect(new TextDecoder().decode(execution.files.get("attachments/web_f1/_report.pdf"))).toBe("%PDF");
+  // Names only: no bytes, no path, in what the user reads back.
+  const [entry] = await transcriptOf(c, "ana", first.id);
+  expect(JSON.stringify(entry)).not.toContain(body.files[0]?.data ?? "");
+  expect((entry?.messages[0] as { content: unknown }).content).toEqual([
+    { type: "text", text: "read these" },
+    { type: "file", name: "../report.pdf" },
+    { type: "file", name: "notes.txt" },
+  ]);
+
+  // The page sends it again (its answer was lost): the same paths, one request.
+  execution.files.clear();
+  expect((await start(c, "ana", "read these", body)).admission).toBe("duplicate");
+  expect([...execution.files.keys()]).toEqual(["attachments/web_f1/_report.pdf", "attachments/web_f1/notes.txt"]);
+});
+
+test("files: a write that fails refuses the message (503, nothing stored or dispatched); bounds 400 and 413; without a workspace each is named as not kept", async () => {
+  const execution = memoryExecution({ failWrites: true });
+  const c = await chat({ components: [execution.component] });
+  const failed = await c.served.fetch(`${API}/conversations`, post("ana", { text: "x", requestId: "web:f2", files: [fileOf("a.bin", "data")] }));
+  expect(failed.status).toBe(503);
+  expect(c.runtime.dispatched).toEqual([]);
+  expect(((await (await c.served.fetch(`${API}/conversations`, as("ana"))).json()) as { items: unknown[] }).items).toEqual([]);
+  execution.options.failWrites = false;
+  expect((await start(c, "ana", "x", { requestId: "web:f2", files: [fileOf("a.bin", "data")] })).admission).toBe("started");
+  expect([...execution.files.keys()]).toEqual(["attachments/web_f2/a.bin"]);
+
+  const big = { name: "big.bin", data: Buffer.alloc(MAX_FILE_BYTES + 3).toString("base64") };
+  for (const [files, status] of [
+    [Array.from({ length: 11 }, () => fileOf("a", "b")), 400],
+    [[{ name: "", data: "" }], 400],
+    [[{ name: "x", data: "not base64!" }], 400],
+    [[big], 413],
+  ] as const) {
+    const response = await c.served.fetch(`${API}/conversations`, post("ana", { text: "x", files }));
+    expect({ status: response.status }).toEqual({ status });
+  }
+
+  const bare = await chat();
+  expect(((await (await bare.served.fetch(`${API}/config`)).json()) as ChatConfig).files).toBe(false);
+  await start(bare, "ana", "", { files: [fileOf("a.zip", "PK")] });
+  expect(bare.runtime.dispatched[0]?.prompt).toBe("Files attached to this message:\n- a.zip: not read (no workspace is installed to keep files in)");
 });
 
 test("refusals: the router's deny is 403, a stage's halt 422, no router 500; nothing stored, no conversation made; a runtime that cannot take the message is 503, and the same request later is taken once", async () => {
@@ -1022,7 +1117,7 @@ test("what setup declares", async () => {
     name: NAME,
     provides: ["http.route"],
     requires: ["secrets", "conversations.registry", "agent.runtime", "agent.observe", "agent.submissions", "storage.kv", "storage.sql"],
-    optional: ["wakeups", "outbound.queue", "actor.inbox", "actor.mailbox", "settings", "email.send", "admin.auth", "agent.definition", "agent.directory", "model.complete", "agent.command"],
+    optional: ["wakeups", "outbound.queue", "workspace", "execution", "actor.inbox", "actor.mailbox", "settings", "email.send", "admin.auth", "agent.definition", "agent.directory", "model.complete", "agent.command"],
   });
 });
 

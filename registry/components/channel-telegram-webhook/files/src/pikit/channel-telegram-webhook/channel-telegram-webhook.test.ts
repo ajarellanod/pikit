@@ -40,6 +40,7 @@ import {
   type RecordingSubmissions,
 } from "@pikit/contracts/testing";
 import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
+import { base64Of, type ExecutionEnv } from "@pikit/pi-adapter";
 import { accountsOf } from "./account.ts";
 import { registerInbox } from "./actor-inbox.ts";
 import { within } from "./bot.ts";
@@ -103,7 +104,7 @@ const router = defineComponent({
  * `submissions`, as runtime-pi does, and emits the run's events.
  */
 function scriptedRuntime(submissions: RecordingSubmissions, seen: Set<string> = new Set()) {
-  const dispatched: { requestId: string; key: string; prompt: string }[] = [];
+  const dispatched: { requestId: string; key: string; prompt: string; images?: unknown[] }[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
   const component = defineComponent({
@@ -111,10 +112,10 @@ function scriptedRuntime(submissions: RecordingSubmissions, seen: Set<string> = 
     setup(pikit) {
       let events: AppContext | undefined;
       const runtime: AgentRuntime = {
-        async dispatch({ requestId, conversation, prompt }) {
+        async dispatch({ requestId, conversation, prompt, images }) {
           if (prompt === "throw") throw new Error("the session store is down");
           if (prompt === "gone") throw new AgentUnavailableError(conversation.agent, `no agent "${conversation.agent}" now`);
-          dispatched.push({ requestId, key: conversation.key, prompt });
+          dispatched.push({ requestId, key: conversation.key, prompt, ...(images !== undefined && { images: [...images] }) });
           if (seen.has(requestId)) return { kind: "duplicate", requestId };
           seen.add(requestId);
           const ctx = (events ?? BACKGROUND_CONTEXT) as AppContext;
@@ -319,7 +320,7 @@ test("what setup declares: component.json's fields cover both halves", async () 
   expect(described(NAME)).toMatchObject({
     provides: [],
     requires: ["secrets", "conversations.registry", "agent.runtime", "agent.submissions", "storage.kv", "wakeups", "actor.inbox"],
-    optional: ["outbound.queue", "agent.command"],
+    optional: ["outbound.queue", "workspace", "execution", "agent.command"],
   });
   expect(described(WORKER_NAME)).toMatchObject({ provides: ["http.route"], requires: ["secrets", "actor.mailbox"], optional: [] });
 });
@@ -444,7 +445,7 @@ test("a stranger is told their id once, and nothing reaches the agent", async ()
   expect(s.runtime.dispatched).toEqual([]);
 });
 
-test("group messages are acknowledged and ignored; a message without text gets a hint", async () => {
+test("group messages are acknowledged and ignored; a message without text or a file gets a hint", async () => {
   const s = await started();
 
   expect((await s.telegram.write(OWNER, "in a group", { chat: "group" })).status).toBe(200);
@@ -452,7 +453,7 @@ test("group messages are acknowledged and ignored; a message without text gets a
   await s.telegram.write(OWNER, undefined, { caption: "a photo caption" });
   await s.telegram.sentCount(2);
 
-  expect(s.telegram.sent[0]).toMatchObject({ chatId: OWNER.id, text: "I can only read text messages for now." });
+  expect(s.telegram.sent[0]).toMatchObject({ chatId: OWNER.id, text: "I can only read text, photos and files for now." });
   expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["a photo caption"]);
 });
 
@@ -1045,7 +1046,7 @@ test("/login with the right password: the chat talks to the agent, the password 
   await telegram.write(OWNER, "hello");
   expect((await telegram.sentCount(2))[1]).toEqual({ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true });
   await telegram.write(OWNER, undefined);
-  expect((await telegram.sentCount(3))[2]?.text).toBe("I can only read text messages for now.");
+  expect((await telegram.sentCount(3))[2]?.text).toBe("I can only read text, photos and files for now.");
   // /login again is the channel's to answer.
   await telegram.write(OWNER, `/login ${PASSWORD}`);
   expect((await telegram.sentCount(4))[3]?.text).toBe("This chat can talk to me already.");
@@ -1229,3 +1230,68 @@ for (const c of createConversationDescribeConformance(() => {
 })) {
   test(`${c.group}: ${c.name}`, () => c.run(), 10_000);
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Files and photos (attachments.ts), downloaded in the object's half
+
+/** `execution` keeping files in memory (only what writeAttachments calls); `failWrites` makes every write fail until it is cleared. */
+function memoryExecution(options: { failWrites?: boolean } = {}) {
+  const files = new Map<string, Uint8Array>();
+  let writes = 0;
+  const env = {
+    createDir: async () => ({ ok: true, value: undefined }),
+    writeFile: async (path: string, content: string | Uint8Array) => {
+      writes++;
+      if (options.failWrites) return { ok: false, error: Object.assign(new Error("no space left on device"), { code: "unknown" }) };
+      files.set(path, typeof content === "string" ? new TextEncoder().encode(content) : content);
+      return { ok: true, value: undefined };
+    },
+  } as unknown as ExecutionEnv;
+  return { component: defineComponent({ name: "execution-test", setup: (pikit) => pikit.provide("execution", env) }), files, options, writes: () => writes };
+}
+
+test("a file: written to the conversation's workspace before the 200, its path in the text after the caption; a failed write is 500 and nothing dispatched; delivered again, the same path", async () => {
+  const execution = memoryExecution({ failWrites: true });
+  const s = await started({ before: [execution.component] });
+  const pdf = s.telegram.addFile("%PDF", { name: "report.pdf", type: "application/pdf" });
+
+  // The write fails: not acknowledged, so Telegram delivers it again; nothing reached the agent.
+  const { update, status } = await s.telegram.write(OWNER, undefined, { caption: "read this", document: pdf });
+  expect(status).toBe(500);
+  expect(s.runtime.dispatched).toEqual([]);
+
+  execution.options.failWrites = false;
+  expect(await s.telegram.post(update)).toBe(200);
+  expect(s.runtime.dispatched).toEqual([
+    {
+      requestId: `telegram:${OWNER.id}:1`,
+      key: `telegram:${OWNER.id}`,
+      prompt: "read this\n\nFiles attached to this message:\n- report.pdf (application/pdf, 4 bytes): saved in your workspace at attachments/1/report.pdf",
+    },
+  ]);
+  expect(new TextDecoder().decode(execution.files.get("attachments/1/report.pdf"))).toBe("%PDF");
+
+  // Its 200 was lost: the same file, the same path, one request.
+  expect(await s.telegram.post(update)).toBe(200);
+  expect(s.runtime.dispatched.map((each) => each.requestId)).toEqual([`telegram:${OWNER.id}:1`, `telegram:${OWNER.id}:1`]);
+  expect([...execution.files.keys()]).toEqual(["attachments/1/report.pdf"]);
+});
+
+test("a photo alone reaches the object and is shown to the model; without a workspace a file is named as not read and not downloaded", async () => {
+  const s = await started();
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 9]);
+  const photo = s.telegram.addFile(JPEG);
+  expect((await s.telegram.write(OWNER, undefined, { photo: [{ file_id: photo.file_id, width: 90, height: 90, file_size: JPEG.byteLength }] })).status).toBe(200);
+  expect(s.runtime.dispatched[0]).toMatchObject({ prompt: "Files attached to this message:\n- photo.jpg: an image, shown to you", images: [{ mimeType: "image/jpeg", data: base64Of(JPEG) }] });
+
+  await s.telegram.write(OWNER, undefined, { document: s.telegram.addFile("PK", { name: "a.zip" }) });
+  expect(s.runtime.dispatched[1]?.prompt).toBe("Files attached to this message:\n- a.zip: not read (no workspace is installed to keep files in)");
+  expect([...s.telegram.downloads.keys()]).toEqual([photo.file_id]);
+});
+
+test("an update whose file is not one (no file_id) is not a Telegram update: 400", async () => {
+  const s = await started();
+  const update = s.telegram.message(OWNER, undefined, { caption: "x" });
+  expect(await s.telegram.post({ ...update, message: { ...update.message, document: { file_name: "a.pdf" } } } as unknown as typeof update)).toBe(400);
+  expect(s.runtime.dispatched).toEqual([]);
+});

@@ -15,9 +15,9 @@
  *   any chat is made in it.
  * - **A change needs the page's header** (`x-pikit-chat: 1`, `CHAT_CLIENT_HEADER`): `400` without, so a
  *   page of another site cannot make a signed-in browser send, rename, archive, delete or stop anything.
- * - **Bodies are bounded**: a message at most what its images in base64 and its text need on this
- *   target (`maxBodyOf`: `413` before more is read); its images checked (`imagesProblem`: number and
- *   types `400`, size `413`).
+ * - **Bodies are bounded**: a message at most what its images and files in base64 and its text need on
+ *   this target (`maxBodyOf`: `413` before more is read); its images checked (`imagesProblem`: number
+ *   and types `400`, size `413`), and its files (`filesProblem`: number, names `400`, size `413`).
  * - **A user's messages are rated** (`messagesPerMinute`, every conversation together): one too many
  *   is `429 rate_limited` with `retry-after`, before its body is read (`RouteOptions.rate`).
  * - **Images are read one at a time** (`GET .../messages/:messageId/images/:n`), never inline in the
@@ -33,7 +33,7 @@
  *   `too_large` `413`, `denied` `403` (the router refused it), `rejected` `422` (a stage stopped it),
  *   `no_route` `500`. Anything else (the runtime could not take the message for a while, an object
  *   that did not answer) is `503 unavailable`, logged: the page sends the same request again.
- * - **Logs** carry the user's id, the chat id and the request id, never a message's text or images.
+ * - **Logs** carry the user's id, the chat id and the request id, never a message's text, images or files.
  * - **Live events** are server-sent events over a plain streaming response, a comment every
  *   `heartbeatMs`; the stream ends when the client goes away, the events end, or the server stops.
  * - Under `/chat/api/`, a path no route serves is a JSON `404`, never the page.
@@ -62,6 +62,7 @@ import {
   type ChatTranscriptEntry,
   IMAGE_TYPES,
   MAX_DURABLE_IMAGE_BYTES,
+  MAX_FILES,
   MAX_IMAGE_BYTES,
   MAX_IMAGES,
   MAX_TEXT,
@@ -72,7 +73,7 @@ import {
 } from "./api.ts";
 import { type Assets, BASE } from "./assets.ts";
 import type { ChatBackend, ChatRef, NewMessage } from "./backend.ts";
-import { chatIdFor, imagesProblem, isChatId, isProjectId, keyOf, newChatId, REQUEST_ID, requestIdOf } from "./chat.ts";
+import { chatIdFor, filesBytesOf, filesProblem, imagesProblem, isChatId, isProjectId, keyOf, newChatId, REQUEST_ID, requestIdOf } from "./chat.ts";
 import { type ChannelWebConfig, providerName, type SignUpSettings, type VisibilitySettings } from "./config.ts";
 import { routedAgent } from "./routed.ts";
 import { createEventProjector, projectEntry } from "./visibility.ts";
@@ -85,26 +86,32 @@ const DEFAULT_LIMIT = 50;
 const base64Length = (bytes: number): number => Math.ceil(bytes / 3) * 4;
 /** One image's JSON besides its data: `{"mimeType":"…","data":""},`, its type at most 100 characters, each escaped (6 bytes). */
 const IMAGE_JSON = '{"mimeType":"","data":""},'.length + 100 * 6;
-/** A message's JSON besides its text and images (its request id is ASCII), and 1 KiB of whitespace. */
-const MESSAGE_JSON = '{"text":"","images":[],"requestId":""}'.length + 122 + 1024;
+/** One file's JSON besides its data: `{"name":"…","mimeType":"…","data":""},`, its name at most 255 characters and its type 100, each escaped (6 bytes). */
+const FILE_JSON = '{"name":"","mimeType":"","data":""},'.length + 355 * 6;
+/** A message's JSON besides its text, images and files (its request id is ASCII), and 1 KiB of whitespace. */
+const MESSAGE_JSON = '{"text":"","images":[],"files":[],"requestId":""}'.length + 122 + 1024;
 
 /**
  * The largest body a message can be on `target`: its images in base64 (`MAX_IMAGES` of
- * `MAX_IMAGE_BYTES`; on `durable` `MAX_DURABLE_IMAGE_BYTES` in all), its text with every character
- * escaped (`\u0000`, 6 bytes), and the JSON around them.
+ * `MAX_IMAGE_BYTES`; on `durable` `MAX_DURABLE_IMAGE_BYTES` in all), its files in base64
+ * (`filesBytesOf(target)` in all, each padded), its text with every character escaped (`\u0000`, 6
+ * bytes), and the JSON around them.
  */
 export function maxBodyOf(target: string): number {
   const images = target === "durable" ? base64Length(MAX_DURABLE_IMAGE_BYTES + 2 * MAX_IMAGES) : MAX_IMAGES * base64Length(MAX_IMAGE_BYTES);
-  return images + MAX_IMAGES * IMAGE_JSON + MAX_TEXT * 6 + MESSAGE_JSON;
+  const files = base64Length(filesBytesOf(target) + 2 * MAX_FILES);
+  return images + MAX_IMAGES * IMAGE_JSON + files + MAX_FILES * FILE_JSON + MAX_TEXT * 6 + MESSAGE_JSON;
 }
 /** The largest body of any other change (a title). */
 const MAX_SMALL_BODY = 16 * 1024;
 
 const Image = Type.Object({ mimeType: Type.String({ maxLength: 100 }), data: Type.String() }, { additionalProperties: false });
+const File = Type.Object({ name: Type.String({ minLength: 1, maxLength: 255 }), mimeType: Type.Optional(Type.String({ maxLength: 100 })), data: Type.String() }, { additionalProperties: false });
 const SendBody = Type.Object(
   {
     text: Type.String({ maxLength: MAX_TEXT }),
     images: Type.Optional(Type.Array(Image)),
+    files: Type.Optional(Type.Array(File)),
     requestId: Type.Optional(Type.String({ pattern: REQUEST_ID.source })),
   },
   { additionalProperties: false },
@@ -224,12 +231,16 @@ function checked<S extends typeof SendBody | typeof StartBody | typeof RenameBod
 async function messageOf(request: Request, target: string, first = false): Promise<Omit<NewMessage, "requestId"> & { requestId?: string; agent?: string; project?: string }> {
   const body: Static<typeof StartBody> = checked(first ? StartBody : SendBody, await bodyOf(request, maxBodyOf(target)));
   const images = body.images ?? [];
-  if (body.text.trim() === "" && images.length === 0) throw new Refused(400, "invalid_request", "/text: write something, or attach an image");
+  const files = body.files ?? [];
+  if (body.text.trim() === "" && images.length === 0 && files.length === 0) throw new Refused(400, "invalid_request", "/text: write something, or attach an image or a file");
   const wrong = imagesProblem(images, target);
   if (wrong !== undefined) throw new Refused(wrong.status, wrong.status === 413 ? "too_large" : "invalid_request", `/images: ${wrong.message}`);
+  const wrongFiles = filesProblem(files, target);
+  if (wrongFiles !== undefined) throw new Refused(wrongFiles.status, wrongFiles.status === 413 ? "too_large" : "invalid_request", `/files: ${wrongFiles.message}`);
   return {
     text: body.text,
     ...(images.length > 0 && { images }),
+    ...(files.length > 0 && { files }),
     ...(body.requestId !== undefined && { requestId: body.requestId }),
     ...(body.agent !== undefined && { agent: body.agent }),
     ...(body.project !== undefined && { project: body.project }),
@@ -375,6 +386,8 @@ export async function chatConfigOf(
     /** The commands users may type in a chat (`ChatConfig.commands`). */
     commands(): ChatCommand[];
     email: boolean;
+    /** Whether that App keeps a message's files (`ChatConfig.files`). */
+    files: boolean;
   },
   ctx: AppContext,
 ): Promise<ChatConfig> {
@@ -387,6 +400,7 @@ export async function chatConfigOf(
     methods: methodsOf(config, email),
     signUp: live.signUp.mode,
     email,
+    files: options.files,
     visibility: { thinking, tools, context },
     agents: await options.agents(live.agents, ctx),
     commands: options.commands(),
@@ -659,5 +673,8 @@ const heartbeatOf = (options: RouteOptions): number => options.config.heartbeatM
 /** What the log says of a command typed: its name and what came of it, never its arguments or note. */
 const commandFacts = (sent: ChatSendResponse) => (sent.command === undefined ? {} : { command: sent.command.name, outcome: sent.command.outcome });
 
-/** What the log says of a message besides its text: how many images. */
-const facts = (message: { images?: unknown[] | undefined }) => (message.images !== undefined && message.images.length > 0 ? { images: message.images.length } : {});
+/** What the log says of a message besides its text: how many images and files. */
+const facts = (message: { images?: unknown[] | undefined; files?: unknown[] | undefined }) => ({
+  ...(message.images !== undefined && message.images.length > 0 && { images: message.images.length }),
+  ...(message.files !== undefined && message.files.length > 0 && { files: message.files.length }),
+});

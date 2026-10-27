@@ -13,7 +13,8 @@ Talk to your agent in Telegram: send your bot a message, get the answer in the c
   `router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (answers stored before they are sent, with receipts):
   "Sending" below; `health` (`health-registry`): "Health" below; `agent.command` (the App's
-  commands, typed in the chat): "Commands" below.
+  commands, typed in the chat): "Commands" below; `workspace` or `execution` (where a file sent in
+  the chat is written): "Files and photos" below.
 - **Target:** `server`: it receives messages by long polling, which needs a process that keeps
   running.
 - **Installs to:** `src/pikit/channel-telegram/`.
@@ -71,6 +72,19 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   told: "I can't take that message." when a stage stops it (a policy, a routing rule), "Sorry, I
   can't answer that here." when the router denies it, and "This bot is not set up to answer yet."
   when no router is installed.
+- **Files and photos** (`attachments.ts`, the shared protocol of `@pikit/pi-adapter`'s
+  `collectAttachments`): a message's `document` and `photo` are downloaded through the Bot API
+  (`getFile`, then the file's URL on `apiBase`) before admission; the caption is the text. A photo
+  (its largest size Telegram says is within 1 MB) and an image sent as a file are shown to the model;
+  a text file is put in the text (50,000 characters in all); any other file is written to the
+  conversation's workspace (`workspace`, else `execution`) as `attachments/<message id>/<file name>`,
+  and the text names its path for the agent's tools (it converts a PDF itself, if its shell can). A
+  file is at most 10 MB (the Bot API serves bots up to 20 MB), a message 25 MB. Without `workspace` or
+  `execution`, or past a bound, a file is named as not read, with why; one Telegram cannot give is
+  named too. A message Telegram delivers again writes the same paths. A file that cannot be written
+  fails the message: nothing reaches the agent, and it is tried again as any update that failed
+  (below). How long files are kept is the workspace's (`retentionDays`). A sticker or a voice message
+  gets "I can only read text, photos and files for now."
 - **While the agent works**, the chat shows "typing…".
 - **Answers:**
   - Markdown is converted to Telegram's formatting (bold, italics, code, links); if Telegram
@@ -166,7 +180,14 @@ Only tests import it.
   acknowledgement at stop, the lifecycle conformance suite and the start failures; answers from
   the feed, one that ended while the channel was stopped delivered at the next start (and only
   then), a failed enqueue or send tried again, a send the stop aborted sent at the next start,
-  answers of other channels skipped; each bot's health reports, and down after 5 failed polls.
+  answers of other channels skipped; each bot's health reports, and down after 5 failed polls;
+  files and photos: a document written before dispatch at `attachments/<message id>/` and the same
+  path when Telegram delivers it again, a photo's largest size within 1 MB shown to the model, a file
+  named as not read without a workspace (never downloaded), one Telegram cannot give or past 10 MB, a
+  failed write dispatching nothing until it succeeds. Each was checked against a broken channel (no
+  write before dispatch, the smallest or the largest photo size taken) and failed. The helper's own
+  tests are `@pikit/pi-adapter`'s `attachments.test.ts` (safe names, numbering, bounds, no workspace,
+  a failed write), each checked the same way.
 - `poller.test.ts` covers the poller: a failing update tried again without moving past it, and one
   still failing past the time budget skipped, its sender told first.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every

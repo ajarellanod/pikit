@@ -23,6 +23,8 @@ export type { HarnessEnvSources } from "./execution.ts";
 export { loginInteraction } from "./credentials.ts";
 export type { LoginTerminal } from "./credentials.ts";
 export type { Workspace, WorkspaceProvider } from "./types.ts";
+export { ATTACHMENTS_DIR, AttachmentTooLarge, base64Of, collectAttachments, readBounded, safeName, sizeOf, writeAttachments } from "./attachments.ts";
+export type { AttachmentLimits, AttachmentSource, AttachmentTargets, CollectedAttachments, CollectOptions, PendingFile } from "./attachments.ts";
 
 // Pi's types, for components that implement or wire them without importing Pi (only the adapter does).
 export type { Extension, HarnessInspection, ToolRegistration } from "@earendil-works/pi-durable";

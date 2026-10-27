@@ -2,7 +2,7 @@
  * One conversation, live, in the dashboard's shared view (`components/pikit/conversation.tsx`,
  * features/completed/chat-parity.md) over the chat API (`lib/source.ts`): its transcript and live events as the
  * operator lets users see them (`ChatConfig.visibility`: the thinking, the tools, cut by the server),
- * the answer as it is written, a stop while a run goes, and the composer (text and images; no "/"
+ * the answer as it is written, a stop while a run goes, and the composer (text, images and files; no "/"
  * menu, no web search). A message sent shows at once, marked while it waits for the run going.
  *
  * At the tab bar's end (`TabActions`): "Archived" when it is, the Context panel's button when the
@@ -31,7 +31,7 @@ import type { ChatConversation, ChatSendRequest, ChatSendResponse } from "@/lib/
 import { follow, get, post, useGet } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
 import { ChatFailure } from "@/lib/errors";
-import { imageLimits } from "@/lib/images";
+import { fileLimits, imageLimits } from "@/lib/images";
 import { assistantName } from "@/lib/names";
 import { useProjects } from "@/lib/projects";
 import { projectPath } from "@/lib/routes";
@@ -125,6 +125,7 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
         commandsNote: "Runs here, never sent to the assistant",
         onCommand: runCommand,
         images: imageLimits(config.target),
+        ...(config.files && { files: fileLimits(config.target) }),
         placeholder: (busy) => (busy ? "Reply: it runs after the answer going" : "Reply"),
         picker:
           agent === undefined

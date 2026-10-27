@@ -13,8 +13,8 @@ import { type AppContext, defineApp, defineComponent, halt, silentLogger } from 
 import type { AgentCommand, AgentRequest, AgentRuntime, CommandLookup, ConversationRef, ConversationRegistry, KeyValueStore, Sender } from "@pikit/contracts";
 import { allowedCommands, answerKey } from "@pikit/contracts";
 import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
-import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
-import { ATTACHMENT_LIMITS, base64Of, readAttachments, safeName, writeFiles } from "./attachments.ts";
+import { base64Of, type ExecutionEnv, safeName, type WorkspaceProvider } from "@pikit/pi-adapter";
+import { ATTACHMENT_LIMITS, readAttachments, writeFiles } from "./attachments.ts";
 import type { AddOnEvent, ChatAttachment, ChatMessage } from "./event.ts";
 import { addedEvent, clickEvent, type FakeGoogleChat, messageEvent, removedEvent, signAssertion, startFakeGoogleChat } from "./fake-google-chat.test-support.ts";
 import { commandReply, commandSeenKey, createEventHandler, REPLIES, replyIds, textOf } from "./handler.ts";

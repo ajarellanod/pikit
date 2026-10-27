@@ -6,7 +6,7 @@
  * Test support: only tests import it (`*.test-support.ts`), so it never reaches the app.
  */
 
-import type { TelegramUpdate, TelegramUser } from "./api.ts";
+import type { TelegramDocument, TelegramPhotoSize, TelegramUpdate, TelegramUser } from "./api.ts";
 
 export interface SentMessage {
   chatId: number;
@@ -14,13 +14,15 @@ export interface SentMessage {
   html: boolean;
 }
 
+type MessageOptions = { chat?: "private" | "group"; caption?: string; document?: TelegramDocument; photo?: TelegramPhotoSize[] };
+
 export interface FakeTelegram {
   /** The `apiBase` to configure. */
   url: string;
   token: string;
   bot: TelegramUser;
   /** A user sends `text` in their private chat with the bot (chat id = user id). Returns the update id. */
-  say(user: Partial<TelegramUser> & { id: number }, text: string | undefined, options?: { chat?: "private" | "group"; caption?: string }): number;
+  say(user: Partial<TelegramUser> & { id: number }, text: string | undefined, options?: MessageOptions): number;
   sent: SentMessage[];
   actions: { chatId: number; action: string }[];
   /** Offsets asked for, in order: the last one is what Telegram considers confirmed. */
@@ -54,6 +56,13 @@ export interface FakeTelegram {
    * own token, updates and sent messages. `stop()` on any bot stops the server.
    */
   addBot(token: string, bot: TelegramUser): FakeTelegram;
+  /**
+   * A file the bot may download (`getFile`, then `/file/bot<token>/<path>`): the document to send
+   * with a message (`MessageOptions.document`). `size` is what Telegram says of it (absent: none).
+   */
+  addFile(bytes: Uint8Array | string, options?: { name?: string; type?: string; size?: number | null }): TelegramDocument;
+  /** How many times each file was downloaded, by its id. */
+  downloads: Map<string, number>;
   stop(): Promise<void>;
 }
 
@@ -61,12 +70,22 @@ type Handler = (method: string, request: Request) => Promise<Response>;
 
 export function startFakeTelegram(): FakeTelegram {
   const handlers = new Map<string, Handler>();
+  /** Every bot's files, by their path. */
+  const files: Files = new Map();
   const endPolls: (() => void)[] = [];
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
-      const match = /^\/bot([^/]+)\/(\w+)$/.exec(new URL(request.url).pathname);
+      const path = new URL(request.url).pathname;
+      const download = /^\/file\/bot([^/]+)\/(.+)$/.exec(path);
+      if (download !== null) {
+        const found = files.get(download[2] ?? "");
+        if (found === undefined || found.token !== download[1]) return new Response("Not Found", { status: 404 });
+        found.fake.downloads.set(found.id, (found.fake.downloads.get(found.id) ?? 0) + 1);
+        return new Response(found.bytes, { headers: { "content-type": "application/octet-stream" } });
+      }
+      const match = /^\/bot([^/]+)\/(\w+)$/.exec(path);
       if (match === null) return fail(404, "Not Found");
       const [, given = "", method = ""] = match;
       // As the real Bot API: a path that is not a token's shape is not found; a wrong token is refused.
@@ -82,6 +101,7 @@ export function startFakeTelegram(): FakeTelegram {
       for (const end of endPolls) end();
       await server.stop(true);
     },
+    files,
     add(token, bot) {
       const { fake, handle, endPoll } = fakeBot(token, bot, shared);
       handlers.set(token, handle);
@@ -92,8 +112,11 @@ export function startFakeTelegram(): FakeTelegram {
   return shared.add("123456789:fake-token-for-tests", { id: 4242, is_bot: true, first_name: "Test Bot", username: "pikit_test_bot" });
 }
 
+type Files = Map<string, { id: string; token: string; bytes: Uint8Array; fake: FakeTelegram }>;
+
 interface Shared {
   url: string;
+  files: Files;
   stop(): Promise<void>;
   add(token: string, bot: TelegramUser): FakeTelegram;
 }
@@ -108,6 +131,7 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
   const history: TelegramUpdate[] = [];
   let nextUpdate = 1;
   let nextMessage = 1;
+  let nextFile = 0;
   let wake: (() => void) | undefined;
   /** The long poll in progress; a new `getUpdates` ends it with 409, as Telegram does. */
   let polling: ((conflict: Response) => void) | undefined;
@@ -138,6 +162,8 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
           date: Math.floor(Date.now() / 1000),
           ...(text !== undefined && { text }),
           ...(options.caption !== undefined && { caption: options.caption }),
+          ...(options.document !== undefined && { document: options.document }),
+          ...(options.photo !== undefined && { photo: options.photo }),
         },
       };
       updates.push(update);
@@ -163,6 +189,14 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
       wake?.();
     },
     addBot: (otherToken, otherBot) => shared.add(otherToken, otherBot),
+    downloads: new Map(),
+    addFile(content, options = {}) {
+      const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content;
+      const id = `file-${bot.id}-${++nextFile}`;
+      shared.files.set(`documents/${id}`, { id, token, bytes, fake });
+      const size = options.size === undefined ? bytes.byteLength : options.size;
+      return { file_id: id, ...(options.name !== undefined && { file_name: options.name }), ...(options.type !== undefined && { mime_type: options.type }), ...(size !== null && { file_size: size }) };
+    },
     stop: () => shared.stop(),
   };
 
@@ -171,6 +205,12 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
     switch (method) {
       case "getMe":
         return ok(bot);
+      case "getFile": {
+        const id = String(body.file_id);
+        const found = shared.files.get(`documents/${id}`);
+        if (found === undefined || found.token !== token) return fail(400, "Bad Request: invalid file_id");
+        return ok({ file_id: id, file_unique_id: id, file_size: found.bytes.byteLength, file_path: `documents/${id}` });
+      }
       case "getWebhookInfo":
         return ok({ url: fake.webhookUrl, pending_update_count: updates.length });
       case "sendChatAction":
