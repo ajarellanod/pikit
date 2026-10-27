@@ -130,7 +130,7 @@ file saved by one agent is listed, got and deletable by every agent of the space
   the section's text, its bound and its stability; the space's actor on its own (another space's call
   refused, malformed calls, idempotent save, versions, remove once, two saves racing a limit).
 - `app.test.ts` (in the registry only: it imports other components): runtime-pi, mailbox-local,
-  execution-local and workspace-local (a directory per conversation's chat), this component and
+  execution-local and workspace-local (a directory per conversation's chat), storage-blob-fs, this component and
   provider-faux's `faux/scripted` on a SQLite file: a binary file saved in a thread of a space is in
   another thread's section and got there byte for byte; another space has neither; an agent that does
   not name it has no tools nor section; a `.env` refused; versions and delete through the model; the
@@ -138,6 +138,6 @@ file saved by one agent is listed, got and deletable by every agent of the space
 - The workerd lane (`tests/workerd/test/space-files.workerd.ts`): two conversations of one space, each
   in its own Durable Object with its own execution-do workspace, share a file through the space's
   object; another space sees none, and the space's object refuses its call.
-- Not covered yet: the real `storage.blob` providers (storage-blob-fs, storage-blob-s3: the tests use
-  the in-memory double, which follows the contract), a binary file on Cloudflare (the workerd test
-  saves a text file), and a crash between the two writes on workerd.
+- Not covered yet: storage-blob-s3 under this component (the unit and workerd tests use the in-memory
+  double, which follows the contract; the App test runs storage-blob-fs), a binary file on Cloudflare
+  (the workerd test saves a text file), and a crash between the two writes on workerd.

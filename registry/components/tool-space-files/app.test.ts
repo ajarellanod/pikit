@@ -2,8 +2,8 @@
  * tool-space-files in a real App: runtime-pi runs the agents on a SQLite file, mailbox-local is every
  * space's actor, execution-local and workspace-local give each conversation (each chat key) a directory
  * of its own, and the model is provider-faux's `faux/scripted` (`call: <tool> <json>`,
- * `echo-system <section>`, `echo-tools`). `storage.blob` is the component's in-memory double: run with a
- * real provider (storage-blob-fs) once it is in the registry.
+ * `echo-system <section>`, `echo-tools`). `storage.blob` is storage-blob-fs, a real provider on the
+ * test's own directory.
  *
  * A repository test, not copied with the component: a component's files never import another
  * component's (SPEC P4). In a project, the same test is the project's own.
@@ -21,9 +21,9 @@ import executionLocal from "../execution-local/files/src/pikit/execution-local/i
 import mailboxLocal from "../mailbox-local/files/src/pikit/mailbox-local/index.ts";
 import providerFaux from "../provider-faux/files/src/pikit/provider-faux/index.ts";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
+import storageBlobFs from "../storage-blob-fs/files/src/pikit/storage-blob-fs/index.ts";
 import workspaceLocal from "../workspace-local/files/src/pikit/workspace-local/index.ts";
 import toolSpaceFiles from "./files/src/pikit/tool-space-files/index.ts";
-import { createMemoryBlobStorage, memoryBlob } from "./files/src/pikit/tool-space-files/memory-blob.test-support.ts";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -60,7 +60,7 @@ async function start(model: ComponentDefinition = providerFaux) {
   const components = [
     sqliteStorage(join(dir, "pikit.db")),
     mailboxLocal,
-    memoryBlob(createMemoryBlobStorage()),
+    storageBlobFs,
     executionLocal,
     workspaceLocal,
     toolSpaceFiles,
@@ -69,7 +69,7 @@ async function start(model: ComponentDefinition = providerFaux) {
     runtimePi,
     observer,
   ];
-  const app = await defineApp({ components, config: { "execution-local": { root } }, logger: silentLogger }).create();
+  const app = await defineApp({ components, config: { "execution-local": { root }, "storage-blob-fs": { root: join(dir, "blobs") } }, logger: silentLogger }).create();
   await app.start();
   cleanup.push(() => app.stop());
   let n = 0;
