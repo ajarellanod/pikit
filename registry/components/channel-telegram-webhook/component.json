@@ -23,7 +23,8 @@
   },
   "optional": {
     "capabilities": [
-      "outbound.queue"
+      "outbound.queue",
+      "agent.command"
     ]
   },
   "provides": [
@@ -45,7 +46,8 @@
         "actor.inbox"
       ],
       "optional": [
-        "outbound.queue"
+        "outbound.queue",
+        "agent.command"
       ]
     },
     "worker": {
