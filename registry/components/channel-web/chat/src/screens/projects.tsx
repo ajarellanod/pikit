@@ -1,20 +1,23 @@
 /**
- * The user's projects (`#/projects`, the sidebar's Projects): a title, then cards, two a row on a wide
- * screen, each a project's name and when it was made, opening its page (`#/projects/<id>`, its chats)
- * and with its menu (a new chat in it, Rename, Delete: `useProjectMenu`). At the title's right: a search
- * by name (a field the search button opens, on the projects read once: at most 100), the order
- * (newest first, or by name), and "New project" (`useNewProject`: asks a name, makes it, opens it).
+ * The user's projects (`#/projects`, the sidebar's Projects), in the same page as Conversations (`Page`:
+ * its width, its two-tone title, "New project" where Conversations has "New chat"): a search by name
+ * (on the projects read once: at most 100) and the order (newest first, or by name) where
+ * Conversations has its search and "Archived", then cards, two a row on a wide screen, each a
+ * project's name and when it was made, opening its page (`#/projects/<id>`, its chats) and with its
+ * menu (a new chat in it, Rename, Delete: `useProjectMenu`). "New project" (`useNewProject`) asks a
+ * name, makes it and opens it.
  *
  * A project is a place the user's chats share (what the assistant keeps for it: rules, memory, saved
  * files); a chat is made in one or in none, for good.
  */
 
-import { Folder, Plus, Search, Sort, Xmark } from "iconoir-react";
+import { Folder, Plus, Search, Sort } from "iconoir-react";
 import { useState } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
 import EmptyState from "@/components/bui/EmptyState";
 import { LoaderGrid } from "@/components/bui/LoadingState";
+import { Page } from "@/components/bui/Page";
 import SearchField from "@/components/bui/SearchField";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { type ProjectOrder, shownProjects } from "@/lib/project-list";
@@ -25,56 +28,41 @@ import { useNewProject, useProjectMenu } from "./layout";
 
 const DATE = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" });
 
-const TOOL = "flex size-8 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink aria-pressed:bg-hover aria-pressed:text-ink";
-
 export function ProjectsScreen() {
   const { config } = useSession();
   const projects = useProjects();
   const projectMenu = useProjectMenu();
   const newProject = useNewProject();
-  const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [order, setOrder] = useState<ProjectOrder>("recent");
   usePageTitle(config.name, "Projects");
 
   const items = projects.items;
-  const shown = items === undefined ? undefined : shownProjects(items, searching ? query : "", order);
+  const searched = query.trim() !== "";
+  const shown = items === undefined ? undefined : shownProjects(items, query, order);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-[960px] flex-col gap-5 px-5 py-8 sm:px-10 sm:py-10">
-        <header className="flex flex-wrap items-center gap-3">
-          <h1 className="min-w-0 flex-1 text-[24px] font-normal tracking-[-0.02em] text-ink sm:text-[26px]">Projects</h1>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label={searching ? "Close the search" : "Search the projects"}
-              aria-pressed={searching}
-              title="Search"
-              onClick={() => {
-                setSearching((now) => !now);
-                setQuery("");
-              }}
-              className={TOOL}
-            >
-              {searching ? <Xmark width={16} height={16} strokeWidth={1.9} /> : <Search width={16} height={16} strokeWidth={1.9} />}
-            </button>
-            <button
-              type="button"
-              aria-label={order === "recent" ? "Newest first: order by name" : "By name: order newest first"}
-              title={order === "recent" ? "Newest first" : "By name"}
-              onClick={() => setOrder((now) => (now === "recent" ? "name" : "recent"))}
-              className={TOOL}
-            >
-              <Sort width={16} height={16} strokeWidth={1.9} />
-            </button>
-            <Button size="xs" className="ml-1.5" onClick={newProject}>
-              <Plus width={14} height={14} strokeWidth={2} aria-hidden /> New project
-            </Button>
-          </div>
-        </header>
-
-        {searching && <SearchField value={query} onChange={(value) => setQuery(value.slice(0, 120))} placeholder="Search by name" label="Search the projects" />}
+    <Page
+      eyebrow="Projects"
+      title="Your projects"
+      aside={
+        <Button variant="primary" size="xs" onClick={newProject}>
+          <Plus width={14} height={14} strokeWidth={2} aria-hidden /> New project
+        </Button>
+      }
+    >
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <SearchField value={query} onChange={(value) => setQuery(value.slice(0, 120))} placeholder="Search by name" label="Search the projects" className="min-w-0 flex-1" />
+          <Button
+            variant="quiet"
+            size="xs"
+            aria-label={order === "recent" ? "Newest first: order by name" : "By name: order newest first"}
+            onClick={() => setOrder((now) => (now === "recent" ? "name" : "recent"))}
+          >
+            <Sort width={14} height={14} strokeWidth={1.9} aria-hidden /> {order === "recent" ? "Newest first" : "By name"}
+          </Button>
+        </div>
         {projects.error !== undefined && <ErrorNote error={projects.error} title="The projects cannot be read" />}
         {shown === undefined && projects.error === undefined && (
           <div className="flex items-center gap-2.5 text-[13px] text-ink-3">
@@ -83,9 +71,9 @@ export function ProjectsScreen() {
         )}
         {shown !== undefined && shown.length === 0 && (
           <EmptyState
-            icon={searching && query.trim() !== "" ? <Search /> : <Folder />}
-            title={searching && query.trim() !== "" ? `No project named with “${query.trim()}”` : "No projects yet"}
-            hint={searching && query.trim() !== "" ? "Search finds words of a name, in any case." : "A project's chats share what the assistant keeps for it: its rules, its memory, its saved files."}
+            icon={searched ? <Search /> : <Folder />}
+            title={searched ? `No project named with “${query.trim()}”` : "No projects yet"}
+            hint={searched ? "Search finds words of a name, in any case." : "A project's chats share what the assistant keeps for it: its rules, its memory, its saved files."}
           />
         )}
         {shown !== undefined && shown.length > 0 && (
@@ -112,7 +100,7 @@ export function ProjectsScreen() {
             ))}
           </ul>
         )}
-      </div>
-    </div>
+      </section>
+    </Page>
   );
 }
