@@ -135,6 +135,12 @@ open port), or a reverse proxy. The clients' config is then
 - **Commands and readers live in this process.** A restart forgets them (their processes stop with
   it); clients then get an `unknown` error for a command they were reading. The sandboxes' files are
   the provider's, and stay.
+- **Retention is the provider's.** Each request that needs a sandbox resolves it, which is what its
+  provider counts as use, and each sandbox id is a chat of its own (`execution-serve:<id>`). So
+  `retentionDays` in the host's execution-gondolin or workspace-local config deletes a sandbox nobody
+  used for that many days (never one with a command running, so not one a client is still reading);
+  its next request finds it new and empty. A provider's `workspace: "agent"` (`per: "agent"`)
+  sandboxes are never deleted. This component keeps no files of its own.
 
 ## Config
 
