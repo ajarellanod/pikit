@@ -274,6 +274,15 @@
       ],
       "path": "components/extension-pikit-self"
     },
+    "extension-tracing": {
+      "version": "0.0.1",
+      "description": "Traces of the runs of the agents that name it, as OpenTelemetry over OTLP/HTTP JSON (Langfuse or any collector): the run, each model request and each tool call, with tokens, costs and errors; no content unless captureContent, then redacted.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/extension-tracing"
+    },
     "health-registry": {
       "version": "0.0.1",
       "description": "What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process.",

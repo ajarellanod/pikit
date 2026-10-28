@@ -69,6 +69,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [contract-packages](contract-packages.md) | | A contract that is not the kit's is a package of its own, versioned, with its suite, shipped by its registry and vendored; decided, not built | No: built when open registries are, if pikit succeeds and others build registries |
 | [open-registries](open-registries.md) | | Git, HTTP and private registries, and a gallery | No: `pikit upgrade` (P6) merges from the bases in `pikit-bases/`, from the registry as recorded (`builtin`, a path) |
 | [team-agents](team-agents.md) | | A map: a team of work agents' pieces against what the bases give, the notes that build the rest, and what has none | No |
+| [tracing](tracing.md) | | Traces of opted-in agents' runs, model requests and tool calls over OTLP/HTTP JSON (Langfuse or any collector); built as `extension-tracing` on both targets, content off by default | No |
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |

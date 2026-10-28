@@ -1,0 +1,39 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "extension-tracing",
+  "version": "0.0.1",
+  "description": "Traces of the runs of the agents that name it, as OpenTelemetry over OTLP/HTTP JSON (Langfuse or any collector): the run, each model request and each tool call, with tokens, costs and errors; no content unless captureContent, then redacted.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": [
+      "secrets",
+      "health"
+    ]
+  },
+  "provides": [
+    "agent.extension"
+  ],
+  "extensions": [
+    "tracing"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

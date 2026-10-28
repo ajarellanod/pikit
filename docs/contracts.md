@@ -30,7 +30,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-notify, tool-read, tool-schedule, tool-websearch-brave, tool-websearch-gemini, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
-| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, memory-recall, tool-space-files | agents-live?, runtime-pi? | none |
+| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, extension-tracing, memory-recall, tool-space-files | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, memory-recall, runtime-pi | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, scheduler-admit | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | tool-notify, admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
@@ -43,11 +43,11 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-remote, execution-serve, repo-github-app, repo-github-token, storage-blob-s3, tool-websearch-brave, tool-websearch-gemini, execution-gondolin?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-remote, execution-serve, repo-github-app, repo-github-token, storage-blob-s3, tool-websearch-brave, tool-websearch-gemini, execution-gondolin?, extension-tracing?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, execution-gondolin?, extension-pikit-self? | `createProposalsConformance`, `createProposalsServeConformance` (a `path` remote's `serve`) |
-| `health` | single | health-registry | channel-telegram?, outbound-durable?, provider-failover?, server-bun? | `createHealthConformance` |
+| `health` | single | health-registry | channel-telegram?, extension-tracing?, outbound-durable?, provider-failover?, server-bun? | `createHealthConformance` |
 | `email.send` | single | email-resend, email-ses | channel-web? | `createEmailSenderConformance` |
 | `model.complete` | single | runtime-pi | memory-summaries, admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
@@ -276,7 +276,8 @@ suite").
 One pi-durable `Extension` per name (`defineExtension` from `@pikit/pi-adapter/extensions`): system
 prompt sections, hooks on model requests, tool calls and compaction, tool wrappers, durable tasks,
 tools. An agent runs with the ones it names, in order, after its own tools. Names starting with
-`pikit.` are the runtime's. Providers in the registry: extension-house-rules, extension-approvals.
+`pikit.` are the runtime's. Providers in the registry: extension-house-rules, extension-approvals,
+extension-tracing (hooks only: OpenTelemetry spans of each run, with the App's run events).
 
 ### `agent.command` (keyed, [command.ts](../packages/contracts/src/command.ts))
 
@@ -950,7 +951,8 @@ this is not a real image-build or production rollback test.
 listed. Overall: all up is `up`; any degraded or a non-essential down is `degraded`; an essential one
 down past the grace period is `down`. Reporting never throws or waits. Components report through
 `useOptional("health")`. Provider: health-registry (also `GET /admin/api/health-registry` and a
-dashboard view). Users: channel-telegram (each bot), server-bun (`/health` answers its status). Suite:
+dashboard view). Users: channel-telegram (each bot), server-bun (`/health` answers its status),
+extension-tracing (degraded when the collector did not take a batch of spans). Suite:
 `createHealthConformance`.
 
 ### `email.send` ([email.ts](../packages/contracts/src/email.ts))

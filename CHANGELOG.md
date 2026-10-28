@@ -33,6 +33,11 @@ line names its area.
 
 ### Components
 
+- extension-tracing ([features/tracing.md](features/tracing.md)), new on both targets: agents
+  naming `tracing` export their run, model-request and tool-call spans to Langfuse or an OTLP/HTTP
+  JSON collector. Credentials come from named secrets; content is off by default, redacted and capped
+  when enabled. Spans batch per run, retain trace identity across eviction, and collector failures
+  never affect the run.
 - tool-notify ([features/completed/tool-notify.md](features/completed/tool-notify.md)), new, both
   targets: `notify({ to, text })` sends a Markdown message to a chat the operator named (a channel
   instance and a key), send-only; `from` as tool-delegate's (the whole delegation chain), a rate limit
