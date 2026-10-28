@@ -35,6 +35,7 @@
 
 - It happened four more times in the contracts audit, in edit and write text alike (`\u00a7`, `\u2026`): never type a `\u` escape in any tool's text, not even in JSON. Type the character itself (`§`, `…`), or keep the text ASCII ("...", "SPEC 3.3"), and `rg 'u00a7|u20[0-9a-f]{2}'` every file touched before committing.
 
+- The whole `bun test` (about 4,500 tests, 6 to 7 minutes) is not a quick check: turn on `caffeinate` first and bound it (`perl -e 'alarm 2300; exec @ARGV' bun test`). Once a run stalled for over 40 minutes and failed unrelated tests by timeout (982 s on a 5 s test): rerun those files alone before suspecting the code.
 - Bun 1.4.2 quirks met in channel-web's security fixes: `new Request(request, { headers })` keeps the request's own headers when the new `Headers` is empty (a dropped header survives): build from `request.url` with method, headers, body (`duplex: "half"`) and signal (`withClientAddress`). And `expect(obj).toMatchObject({ field: expect.stringMatching(...) })` overwrites `obj.field` with the matcher: match a copy (`{ ...obj }`) when the object is used afterwards.
 
 # Contract rules
