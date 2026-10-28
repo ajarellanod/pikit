@@ -170,6 +170,9 @@ rotating refresh tokens, only the latest access token accepted):
 - the routes: `401` without an operator, `400` for a server not in config or a body of another
   shape (not echoed), the list, a logout; no token or client secret in the list, the errors, the
   logs, the health reasons or the command's output;
+- only the owner's key is answered: a call that reached another actor's app (every app registers the
+  answers) is refused, and that actor's storage holds no login (checked against answers without the
+  key check);
 - on a server (the app is the owner): an app with a server not logged in starts, reports it
   degraded, refuses its token with the command to run; the command against the app's own routes
   logs it in.
@@ -179,10 +182,14 @@ server not logged in, its tools failing with the message and described after the
 after a 401 naming the rejected token, and the starts refused (no `mcp.auth`, one for another URL).
 
 In the pikit repository, the workerd lane (`tests/workerd/test/tool-mcp-oauth.workerd.ts`) runs
-the owner and two conversations as real Durable Objects with tool-mcp and runtime-pi, the login
-uploaded through the Worker's route, the fake servers behind workerd's real `fetch`: both
-conversations share the owner's token, one refresh for both, and a refresh after the owner was
-evicted between two alarms.
+the owner and two conversations as real Durable Objects, each conversation calling the fake MCP
+server through `mcp.auth` behind workerd's real `fetch`: the login made as the command makes it
+(pi-mcp's `authorizeMcp`, the client registered with its `clientName`) and uploaded through the
+Worker's route; both conversations refused at once cause one refresh (checked to fail with the owner
+refreshing whatever token was rejected); the owner evicted, its next instance serves the rotated
+tokens and refreshes once more; `401` without the operator's token, `400` for a body that is no
+login. Not covered: an owner evicted in the middle of a refresh (above: the server then needs a new
+login).
 
 ## Remove it
 
