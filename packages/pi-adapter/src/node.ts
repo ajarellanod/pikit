@@ -1,7 +1,8 @@
 /**
  * @pikit/pi-adapter/node: pi-durable's `NodeExecutionEnv` as the execution environment of a
- * server, for `execution-local` and `workspace-local`. Server only:
- * nothing here runs on Cloudflare (it spawns processes).
+ * server, for `execution-local` and `workspace-local`; and pi-mcp's OAuth callback server, for a
+ * login run on the operator's machine. Server only: nothing here runs on Cloudflare (it spawns
+ * processes, it listens on a port).
  *
  * The same difference from Pi's default as `@pikit/pi-adapter/node`'s `createLocalExecution`:
  * commands start from `env`, the variables the caller chose, never from this process's environment
@@ -18,6 +19,11 @@ import type { ExecutionEnv, ShellExecOptions } from "@earendil-works/pi-durable/
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 
 export { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+/**
+ * pi-mcp's loopback OAuth callback server (`node:http`): where a browser login for an MCP server comes
+ * back, on the operator's machine (`pikit tool-mcp-oauth login`). Never in an App.
+ */
+export { OAuthCallbackServer, type OAuthCallback, type OAuthCallbackServerOptions } from "@earendil-works/pi-mcp/oauth";
 
 export interface LocalExecutionOptions {
   /** Absolute working directory: relative paths and commands start here. */

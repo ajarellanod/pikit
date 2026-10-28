@@ -9,6 +9,10 @@ you want from it; each becomes the agent tool `<server>_<tool>`. Pi's own MCP cl
   from your config.
 - **Uses, if installed:** `secrets`, for a server that needs a bearer token (`secrets-env`,
   `secrets-workers`). A server with a `secret` and no `secrets` provider stops the start.
+  `mcp.auth`, for a server with `auth: "oauth"` (tool-mcp-oauth, which keeps and refreshes its login:
+  `pikit tool-mcp-oauth login <server>`). Such a server with no usable login does not stop the start:
+  its tools fail their calls with "log in again" until someone does, and a login for another URL is
+  refused.
   `storage.kv`, to keep each server's tool listing: a start then reaches no server (below).
 - **Hooks** (`component.json`): `doctor` (`doctor.ts`), its step of `pikit doctor`; `beforeDeploy`
   (`deploy.ts`), which `pikit up` runs before it builds and which writes `seed.ts` (below).

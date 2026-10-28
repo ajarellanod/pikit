@@ -259,6 +259,12 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "One tool per name the model calls it by; an agent gets only the tools it names.",
   },
+  "mcp.auth": {
+    mode: "keyed",
+    definedIn: "@pikit/pi-adapter",
+    stability: "experimental",
+    summary: "One MCP server's OAuth tokens per server name (pi-mcp's AuthProvider, for one URL): refreshed once across the deployment after a 401.",
+  },
   "agent.skill": {
     mode: "keyed",
     definedIn: "@pikit/contracts",

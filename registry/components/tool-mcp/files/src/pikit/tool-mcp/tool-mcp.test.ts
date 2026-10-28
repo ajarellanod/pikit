@@ -11,6 +11,7 @@ import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
 import { createDurableRuntime, modelsFrom } from "@pikit/pi-adapter";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@pikit/pi-adapter/execution";
 import { callTool } from "@pikit/pi-adapter/execution/testing";
+import { McpOAuthAuthorizationRequiredError } from "@pikit/pi-adapter/mcp";
 import { createFakeMcpServer, type FakeMcpServer, type FakeMcpTool } from "@pikit/pi-adapter/mcp/testing";
 import { type ModelRequest, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
 import toolMcp, { type SeedListing } from "./index.ts";
@@ -211,6 +212,94 @@ test("the token is read from the secret the config names and sent as a bearer to
   expect(refused).not.toContain("wrong-token");
   expect(await startError(config, [secretsOf({})])).toContain('the secret WIKI_MCP_TOKEN, the token of the MCP server "wiki", is not set');
   expect(await startError(config)).toContain('the MCP server "wiki" needs the secret WIKI_MCP_TOKEN, but no component provides secrets');
+});
+
+/** What tool-mcp-oauth says when a server has no usable login. */
+class LoginRequired extends McpOAuthAuthorizationRequiredError {
+  constructor(server: string) {
+    super();
+    this.message = `tool-mcp-oauth: the MCP server "${server}" is not logged in (no login yet): log in again: \`pikit tool-mcp-oauth login ${server}\``;
+  }
+}
+
+/**
+ * `mcp.auth` for `server` at `url`, as tool-mcp-oauth provides it: `login.token` is the token (none:
+ * not logged in), and a 401 refreshes it to `login.refreshed` (none: refused, log in again).
+ */
+function oauthOf(server: string, url: string, login: { token?: string; refreshed?: string; rejected: (string | undefined)[] }) {
+  return defineComponent({
+    name: `mcp-auth-test-${server}`,
+    setup: (pikit) =>
+      pikit.provideKeyed("mcp.auth", server, {
+        url,
+        async token() {
+          if (login.token === undefined) throw new LoginRequired(server);
+          return login.token;
+        },
+        async onUnauthorized({ token }) {
+          login.rejected.push(token);
+          if (login.refreshed === undefined) throw new LoginRequired(server);
+          login.token = login.refreshed;
+        },
+      }),
+  });
+}
+
+test("an OAuth server's token comes from mcp.auth, and a 401 asks it to refresh, naming the rejected token; never a secret", async () => {
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS, token: TOKEN });
+  const url = serve(server);
+  const login = { token: "expired-oauth-token", refreshed: TOKEN, rejected: [] as (string | undefined)[] };
+  const s = await installed({ servers: { figma: { url, auth: "oauth", tools: ["ask_question"] } } }, [oauthOf("figma", url, login)]);
+  expect(s.tools.get("figma_ask_question")?.description).toBe("Asks a question about a repository.");
+  expect(login.rejected).toEqual(["expired-oauth-token"]);
+  expect(await textOf(call(s.tools.get("figma_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+  expect(server.requests.filter((r) => r.authorization === `Bearer ${TOKEN}`).length).toBe(server.requests.length - 1);
+});
+
+test("an OAuth server not logged in does not stop the start: its tools fail saying how to log in, the others answer; once logged in, a call describes them", async () => {
+  const wiki = serve(createFakeMcpServer({ tools: WIKI_TOOLS }));
+  const figmaServer = createFakeMcpServer({ tools: WIKI_TOOLS, token: TOKEN });
+  const figma = serve(figmaServer);
+  const login: { token?: string; refreshed?: string; rejected: (string | undefined)[] } = { rejected: [] };
+  const logged: string[] = [];
+  const logger: Logger = { ...silentLogger, warn: (message) => void logged.push(message) };
+  const s = await installed(
+    { servers: { wiki: { url: wiki, tools: ["ask_question"] }, figma: { url: figma, auth: "oauth", tools: ["ask_question"] } } },
+    [oauthOf("figma", figma, login)],
+    logger,
+  );
+  expect(logged).toEqual(['tool-mcp: the MCP server "figma" has no usable OAuth login: its tools fail their calls until it is logged in']);
+  expect(figmaServer.requests).toEqual([]);
+  expect(await textOf(call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+  const failed = await call(s.tools.get("figma_ask_question"), { repoName: "pikit", question: "?" });
+  expect(failed).toEqual({ isError: true, text: 'tool-mcp-oauth: the MCP server "figma" is not logged in (no login yet): log in again: `pikit tool-mcp-oauth login figma`' });
+  expect(s.tools.get("figma_ask_question")?.description).toBe("figma: ask_question (an MCP tool, described when its component starts)");
+
+  login.token = TOKEN;
+  expect(await textOf(call(s.tools.get("figma_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+  expect(s.tools.get("figma_ask_question")?.description).toBe("Asks a question about a repository.");
+
+  // A refresh refused after a 401: the call fails with the same advice, not "could not be reached".
+  login.token = "revoked";
+  figmaServer.expireSessions();
+  const refused = await call(s.tools.get("figma_ask_question"), { repoName: "pikit", question: "?" });
+  expect(refused.text).toStartWith('tool-mcp-oauth: the MCP server "figma" is not logged in');
+});
+
+test("an OAuth server: no mcp.auth for it, or one for another URL, stops the start; logged in but unreachable stops it too; a secret and auth together stop the setup", async () => {
+  const url = serve(createFakeMcpServer({ tools: WIKI_TOOLS, token: TOKEN }));
+  const config = { servers: { figma: { url, auth: "oauth", tools: ["ask_question"] } } };
+  expect(await startError(config)).toContain('the MCP server "figma" logs in with OAuth (auth: "oauth"), but no component provides mcp.auth for it: install tool-mcp-oauth and add "figma" to its servers');
+  const elsewhere = "http://127.0.0.1:9/other";
+  expect(await startError(config, [oauthOf("figma", elsewhere, { token: TOKEN, rejected: [] })])).toContain(
+    `the MCP server "figma" is ${url}, but its OAuth login (mcp.auth) is for ${elsewhere}: its tokens go only to that URL`,
+  );
+  const gone = "http://127.0.0.1:9/mcp";
+  expect(await startError({ servers: { figma: { url: gone, auth: "oauth", tools: ["ask_question"] } } }, [oauthOf("figma", gone, { token: TOKEN, rejected: [] })])).toContain(
+    'the MCP server "figma" could not list its tools',
+  );
+  const both = defineApp({ components: [toolMcp], config: { "tool-mcp": { servers: { figma: { url, auth: "oauth", secret: "FIGMA_TOKEN", tools: ["ask_question"] } } } }, logger: silentLogger });
+  await expect(both.create()).rejects.toThrow('the MCP server "figma" has both a secret and auth "oauth": give it one');
 });
 
 test("headers from config reach the server", async () => {

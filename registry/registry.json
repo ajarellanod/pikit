@@ -615,6 +615,15 @@
       ],
       "path": "components/tool-mcp"
     },
+    "tool-mcp-oauth": {
+      "version": "0.0.1",
+      "description": "OAuth logins for tool-mcp's servers (mcp.auth): `pikit tool-mcp-oauth login <server>` logs in on your machine (dynamic client registration with a client name you choose, PKCE) and uploads the login; one owner keeps it and refreshes each server's token once at a time, for every conversation.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/tool-mcp-oauth"
+    },
     "tool-notify": {
       "version": "0.0.1",
       "description": "The `notify` tool, for the agents that name it: a Markdown message sent to a chat the operator configured by name (a channel instance and a conversation key), restricted by `from`, rate limited per destination, stored in the destination's outbox by its actor; send-only.",

@@ -125,3 +125,17 @@ test("without servers, seed.ts is the empty seed", async () => {
   expect(run.files[SEED_FILE]).toBe(seedModule({}));
   expect(seedModule({})).toEndWith('import type { McpSeed } from "./index.ts";\n\nexport const seed: McpSeed = {};\n');
 });
+
+test("a server that logs in with OAuth is not reached: the seed keeps what it held for its URL and tools, and nothing for another URL", async () => {
+  const url = "http://127.0.0.1:9/mcp";
+  const held: McpSeed = { figma: { url, tools: { whoami: { name: "whoami", inputSchema: { type: "object" } }, other: { name: "other", inputSchema: { type: "object" } } } } };
+  const kept = io({ servers: { figma: { url, auth: "oauth", tools: ["whoami"] } } });
+  expect(await beforeDeploy(kept.io, held)).toEqual([]);
+  expect(kept.files[SEED_FILE]).toBe(seedModule({ figma: { url, tools: { whoami: { name: "whoami", inputSchema: { type: "object" } } } } }));
+  expect(kept.said[0]).toBe('· tool-mcp: the MCP server "figma" logs in with OAuth: not reached from this machine (its login is the deployed app\'s only; `pikit tool-mcp-oauth status` shows it); the seed keeps what it held');
+
+  const moved = io({ servers: { figma: { url: "http://127.0.0.1:9/elsewhere", auth: "oauth", tools: ["whoami"] } } });
+  expect(await beforeDeploy(moved.io, held)).toEqual([]);
+  expect(moved.files[SEED_FILE]).toBe(seedModule({}));
+  expect(moved.said[0]).toEndWith("; the seed holds nothing for it");
+});

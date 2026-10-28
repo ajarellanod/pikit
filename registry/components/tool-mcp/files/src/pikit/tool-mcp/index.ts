@@ -24,11 +24,18 @@
  *     Cloudflare makes no MCP request. The first connection keeps its listing in `storage.kv`.
  *   - with neither, start reaches each server (`initialize`,
  *     `tools/list`), and one that cannot be reached, or lacks a named tool, stops the app (P5): the
- *     model would get a tool with no description or parameters.
+ *     model would get a tool with no description or parameters. One exception: a server that logs in
+ *     with OAuth (`auth: "oauth"`) and has no usable login is logged as a warning, not a stop. Its
+ *     tools keep their placeholder description and fail their calls with "log in again" until
+ *     someone does; the first call after the login describes them. A login is the operator's to
+ *     make, and an App that would not start without it could not be logged in to on Cloudflare.
  * - **Replay**: `"unsafe"`, unless the server marks the tool read-only
  *   (`annotations.readOnlyHint`), then `"safe"`: a run resumed after a crash calls it again.
  * - **Credentials never in config.** `secret` names a secret, read through `secrets` at each request,
  *   holding a bearer token for the server. The model never sees it, nor any error that mentions it.
+ *   Or `auth: "oauth"`: the server's tokens come from `mcp.auth` under the server's name
+ *   (tool-mcp-oauth), which refreshes them after a 401; the start refuses one whose tokens are for
+ *   another URL, so a token goes only where it was obtained for.
  * - **One client per server, in memory**, connected on first use. When the server forgets the session
  *   (it restarted, or it expires idle ones) the call connects again and is sent once more: the server
  *   ran nothing. On Cloudflare a Durable Object may lose its memory at any time; its next call
@@ -43,8 +50,10 @@
 import type { JsonValue, KeyValueStore } from "@pikit/contracts";
 import { type AppContext, defineComponent, type Logger } from "@pikit/core";
 import {
+  type AuthProvider,
   type CallToolResult,
   McpClient,
+  McpOAuthAuthorizationRequiredError,
   McpSessionExpiredError,
   type McpTool,
   mcpTool,
@@ -78,6 +87,11 @@ const Server = Type.Object(
         description: "The name of the secret (read through `secrets`) holding a bearer token for the server. Never the token itself.",
       }),
     ),
+    auth: Type.Optional(
+      Type.Literal("oauth", {
+        description: "Log in with OAuth instead of a secret: the server's tokens come from mcp.auth under this server's name (tool-mcp-oauth, `pikit tool-mcp-oauth login <server>`).",
+      }),
+    ),
     headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Extra request headers. Not for credentials: config is not secret." })),
     timeoutMs: Type.Optional(Type.Integer({ minimum: 1_000, description: `How long one request may take, in ms. Default: ${DEFAULT_TIMEOUT_MS}.` })),
   },
@@ -105,6 +119,8 @@ export default defineComponent({
     const secrets = pikit.useOptional("secrets");
     // Optional: with it, a start reads each server's listing from there instead of the server.
     const storage = pikit.useOptional("storage.kv");
+    // Only a server with `auth: "oauth"` needs one, under its name; start says so when it is missing.
+    const auths = pikit.useKeyed("mcp.auth");
     let cache: KeyValueStore | undefined;
     const servers: ServerEntry[] = [];
     const names = new Map<string, string>();
@@ -114,22 +130,27 @@ export default defineComponent({
         throw new Error(`tool-mcp: the server name "${name}" may hold only letters, digits, "_" and "-": it starts the names of its tools`);
       }
       const secret = settings.secret;
-      const token =
+      if (secret !== undefined && settings.auth !== undefined) throw new Error(`tool-mcp: the MCP server "${name}" has both a secret and auth "${settings.auth}": give it one`);
+      const bearer: AuthProvider | undefined =
         secret === undefined
           ? undefined
-          : async (): Promise<string> => {
-              const value = await secrets.get()?.get(secret);
-              if (value === undefined || value === "") throw new Error(`tool-mcp: the secret ${secret}, the token of the MCP server "${name}", is not set`);
-              return value;
+          : {
+              async token(): Promise<string> {
+                const value = await secrets.get()?.get(secret);
+                if (value === undefined || value === "") throw new Error(`tool-mcp: the secret ${secret}, the token of the MCP server "${name}", is not set`);
+                return value;
+              },
             };
       const server: ServerEntry = {
         name,
         url: settings.url,
         secret,
+        oauth: settings.auth === "oauth",
+        auth: bearer,
         tools: [],
         started: false,
         // Each connection lists the tools: they and the kept listing follow what the server says now.
-        connection: connectionTo(name, settings, token, (listed) => refreshed(server, listed, cache, pikit.logger)),
+        connection: connectionTo(name, settings, () => server.auth, (listed) => refreshed(server, listed, cache, pikit.logger)),
       };
       for (const remote of settings.tools) {
         const agentName = mcpToolName(name, remote);
@@ -150,6 +171,7 @@ export default defineComponent({
         if (missing !== undefined) {
           throw new Error(`tool-mcp: the MCP server "${missing.name}" needs the secret ${missing.secret}, but no component provides secrets (install one: secrets-env, secrets-workers)`);
         }
+        for (const server of servers.filter((each) => each.oauth)) server.auth = oauthOf(server, auths.get(server.name));
         cache = storage.get()?.namespace(NAMESPACE);
         await Promise.all(servers.map((server) => describe(server, cache, ctx)));
         for (const server of servers) server.started = true;
@@ -165,6 +187,10 @@ interface ServerEntry {
   name: string;
   url: string;
   secret: string | undefined;
+  /** Whether it logs in with OAuth: its `auth` is then `mcp.auth`'s, from start on. */
+  oauth: boolean;
+  /** What gives each request its bearer token: the secret's reader, `mcp.auth`'s provider, or none. */
+  auth: AuthProvider | undefined;
   connection: Connection;
   tools: { remote: string; mcp: McpTool }[];
   /** Whether start is over: from then on a listing that lacks a named tool is logged (start throws instead). */
@@ -208,6 +234,23 @@ export interface SeedTool {
 const keyOf = (server: ServerEntry): string => `server/${server.name}`;
 
 /**
+ * The `mcp.auth` of an OAuth server, checked: there is one, and its tokens are for the server's URL
+ * (a token is sent only where it was obtained for). Throws otherwise: the config is wrong.
+ */
+function oauthOf(server: ServerEntry, auth: (AuthProvider & { url: string }) | undefined): AuthProvider {
+  if (auth === undefined) {
+    throw new Error(`tool-mcp: the MCP server "${server.name}" logs in with OAuth (auth: "oauth"), but no component provides mcp.auth for it: install tool-mcp-oauth and add "${server.name}" to its servers`);
+  }
+  if (auth.url !== server.url) {
+    throw new Error(`tool-mcp: the MCP server "${server.name}" is ${server.url}, but its OAuth login (mcp.auth) is for ${auth.url}: its tokens go only to that URL, so make the two the same`);
+  }
+  return auth;
+}
+
+/** Whether `error` says the server has no usable OAuth login (someone must log in again). */
+export const needsLogin = (error: unknown): boolean => error instanceof McpOAuthAuthorizationRequiredError;
+
+/**
  * Describes each tool of `server` at start, from the first listing for its URL that holds every named
  * tool, with no request: its kept listing in `storage.kv` (refreshed on each connection), else the
  * seed bundled at deploy (`seed.ts`). Else from the server (`initialize`, `tools/list`). Throws when
@@ -230,6 +273,11 @@ async function describe(server: ServerEntry, cache: KeyValueStore | undefined, c
   try {
     listed = await server.connection.list(ctx.abortSignal);
   } catch (error) {
+    // Not logged in is not down: its tools fail their calls until someone logs in (the operator's to do).
+    if (server.oauth && needsLogin(error)) {
+      ctx.logger.warn(`tool-mcp: the MCP server "${server.name}" has no usable OAuth login: its tools fail their calls until it is logged in`, { server: server.name, error: messageOf(error) });
+      return;
+    }
     throw new Error(`tool-mcp: the MCP server "${server.name}" could not list its tools: ${messageOf(error)}`);
   }
   // The connection described the tools it found, and kept the listing when it was complete.
@@ -334,7 +382,7 @@ interface Session {
 function connectionTo(
   server: string,
   settings: ServerConfig,
-  token: (() => Promise<string>) | undefined,
+  auth: () => AuthProvider | undefined,
   listed: (tools: Tool[]) => Promise<void>,
 ): Connection {
   /** The session in use, or being opened. */
@@ -347,7 +395,7 @@ function connectionTo(
     const client = new McpClient({ ...CLIENT, requestTimeoutMs: settings.timeoutMs ?? DEFAULT_TIMEOUT_MS });
     clients.add(client);
     client.onClose(() => clients.delete(client));
-    await client.connect(transportTo(settings, token));
+    await client.connect(transportTo(settings, auth()));
     const tools = await client.listTools();
     await listed(tools);
     return { client, tools };
@@ -383,6 +431,8 @@ function connectionTo(
           session = await untilAborted(using, signal);
         } catch (error) {
           if (signal?.aborted === true) throw error;
+          // Its message says how to log in again.
+          if (needsLogin(error)) throw new Error(messageOf(error));
           throw new Error(`tool-mcp: the MCP server "${server}" could not be reached: ${messageOf(error)}`);
         }
         if (!session.tools.some((listedTool) => listedTool.name === tool)) {
@@ -397,6 +447,8 @@ function connectionTo(
             continue;
           }
           if (signal?.aborted === true) throw error;
+          // A refresh refused after a 401: its message says how to log in again.
+          if (needsLogin(error)) throw new Error(messageOf(error));
           throw new Error(`tool-mcp: the MCP server "${server}" failed the call: ${messageOf(error)}`);
         }
       }
@@ -409,13 +461,13 @@ function connectionTo(
   };
 }
 
-/** The Streamable HTTP transport to a server, as `settings` say; `token` is asked before each request. */
-export function transportTo(settings: ServerConfig, token: (() => Promise<string>) | undefined) {
+/** The Streamable HTTP transport to a server, as `settings` say; `auth` is asked for a token before each request. */
+export function transportTo(settings: ServerConfig, auth: AuthProvider | undefined) {
   return mcpHttpTransport({
     url: settings.url,
     ...(settings.headers !== undefined && { headers: { ...settings.headers } }),
-    // Asked before each request: a rotated secret is used at once.
-    ...(token !== undefined && { authProvider: { token } }),
+    // Asked before each request: a rotated secret, a refreshed token, is used at once.
+    ...(auth !== undefined && { authProvider: auth }),
   });
 }
 

@@ -12,11 +12,16 @@
  * `mcpTool` is provided at setup and described at start, as today: pi-durable reads a tool's
  * `description`, `parameters` and `replay` from the registered object at each use, so `describe`
  * changes the same object the registry holds (or a later one: it reads through a getter).
+ *
+ * OAuth: the `mcp.auth` capability (below) is an MCP server's tokens, by server name, as pi-mcp's
+ * `AuthProvider`. This export also gives pi-mcp's neutral OAuth parts (discovery, dynamic client
+ * registration, PKCE, refresh: `fetch` only), never its callback server, which listens on a port
+ * (`@pikit/pi-adapter/node`).
  */
 
 import type { Context } from "@earendil-works/chord";
 import type { ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
-import { type CallToolResult, StreamableHttpTransport, type StreamableHttpTransportOptions, type Tool, toLlmContent } from "@earendil-works/pi-mcp";
+import { type AuthProvider, type CallToolResult, StreamableHttpTransport, type StreamableHttpTransportOptions, type Tool, toLlmContent } from "@earendil-works/pi-mcp";
 import { type TSchema, Type } from "@earendil-works/pi-ai";
 
 export {
@@ -42,7 +47,56 @@ export type {
   StreamableHttpTransportOptions,
   Tool,
   ToolAnnotations,
+  UnauthorizedContext,
 } from "@earendil-works/pi-mcp";
+export {
+  authorizeMcp,
+  McpOAuthAuthorizationRequiredError,
+  McpOAuthProvider,
+  OAuthError,
+  refreshAuthorization,
+  selectResource,
+} from "@earendil-works/pi-mcp/oauth";
+export type {
+  AuthorizationServerMetadata,
+  McpOAuthProviderOptions,
+  McpOAuthState,
+  McpOAuthStateStore,
+  OAuthClientInformationMixed,
+  OAuthDiscoveryState,
+  OAuthTokens,
+} from "@earendil-works/pi-mcp/oauth";
+
+/**
+ * `mcp.auth`, one per MCP server name: the tokens of a server that needs an OAuth login, as pi-mcp's
+ * `AuthProvider` (the transport's `authProvider`), for the one URL they were obtained for.
+ *
+ * What a provider guarantees:
+ * - **One URL.** `url` is the server's endpoint the tokens are for; a consumer sends them nowhere
+ *   else (tool-mcp refuses a server of another URL), and the provider serves none it obtained for
+ *   another URL.
+ * - `token()` resolves the access token to send now, or rejects with
+ *   `McpOAuthAuthorizationRequiredError` when there is no login it can use (none yet, refused, for
+ *   another URL); its message says how to log in. It never resolves `undefined`.
+ * - `onUnauthorized({ token })`, after a 401: replaces `token` if it is still the current one,
+ *   once for every caller across the deployment (refresh tokens rotate: two refreshes at once revoke
+ *   each other's); a caller whose token was already replaced just gets the new one. A refresh the
+ *   authorization server refuses rejects with `McpOAuthAuthorizationRequiredError` (log in again),
+ *   and is not tried again until a new login.
+ * - No token, refresh token or client secret is ever in an error's message or a log line.
+ */
+export interface McpAuth extends AuthProvider {
+  /** The server endpoint these tokens are for. */
+  readonly url: string;
+  onUnauthorized: NonNullable<AuthProvider["onUnauthorized"]>;
+}
+
+declare module "@pikit/core" {
+  interface AppKeyedCapabilities {
+    /** By MCP server name (tool-mcp's `servers` key): that server's OAuth tokens, `McpAuth`. */
+    "mcp.auth": McpAuth;
+  }
+}
 
 /** What `mcpHttpTransport` takes: Pi's options, but the GET stream is never opened. */
 export type McpHttpTransportOptions = Omit<StreamableHttpTransportOptions, "openGetStream">;

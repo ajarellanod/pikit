@@ -31,23 +31,24 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-notify, tool-read, tool-schedule, tool-websearch-brave, tool-websearch-gemini, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, extension-tracing, memory-recall, tool-space-files | agents-live?, runtime-pi? | none |
+| `mcp.auth` | keyed | tool-mcp-oauth | tool-mcp? | none (tool-mcp-oauth's own tests; one provider) |
 | `agent.command` | keyed | admin-api, memory-recall, runtime-pi | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, scheduler-admit | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | tool-notify, admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql, tool-space-files | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql, tool-mcp-oauth, tool-space-files | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, tool-notify, health-registry?, tool-mcp? | `createKeyValueConformance` |
 | `storage.blob` | single | storage-blob-fs, storage-blob-s3 | tool-space-files | `createBlobConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-notify, tool-space-files | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-mcp-oauth, tool-notify, tool-space-files | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-mcp-oauth, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-serve, health-registry, repo-github-app, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
-| `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
+| `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-serve, health-registry, repo-github-app, settings-store, tool-mcp-oauth | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store?, tool-mcp-oauth? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-remote, execution-serve, repo-github-app, repo-github-token, storage-blob-s3, tool-websearch-brave, tool-websearch-gemini, execution-gondolin?, extension-tracing?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, execution-gondolin?, extension-pikit-self? | `createProposalsConformance`, `createProposalsServeConformance` (a `path` remote's `serve`) |
-| `health` | single | health-registry | channel-telegram?, extension-tracing?, outbound-durable?, provider-failover?, server-bun? | `createHealthConformance` |
+| `health` | single | health-registry | channel-telegram?, extension-tracing?, outbound-durable?, provider-failover?, server-bun?, tool-mcp-oauth? | `createHealthConformance` |
 | `email.send` | single | email-resend, email-ses | channel-web? | `createEmailSenderConformance` |
 | `model.complete` | single | runtime-pi | memory-summaries, admin-api?, channel-web? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
@@ -278,6 +279,16 @@ prompt sections, hooks on model requests, tool calls and compaction, tool wrappe
 tools. An agent runs with the ones it names, in order, after its own tools. Names starting with
 `pikit.` are the runtime's. Providers in the registry: extension-house-rules, extension-approvals,
 extension-tracing (hooks only: OpenTelemetry spans of each run, with the App's run events).
+
+### `mcp.auth` (keyed, `@pikit/pi-adapter/mcp`, experimental)
+
+One MCP server's OAuth tokens per server name (tool-mcp's `servers` key), as `McpAuth`: pi-mcp's
+`AuthProvider` for the one `url` the tokens were obtained for. `token()` resolves the token to send or
+rejects with `McpOAuthAuthorizationRequiredError` saying how to log in; `onUnauthorized({ token })`
+replaces a rejected token once across the deployment (refresh tokens rotate). No token, refresh token
+or client secret in an error or a log. Provider: tool-mcp-oauth (one owner actor keeps the logins and
+makes the refreshes; its tests and the workerd lane check it, no shared suite with one provider).
+User: tool-mcp, for a server with `auth: "oauth"`.
 
 ### `agent.command` (keyed, [command.ts](../packages/contracts/src/command.ts))
 

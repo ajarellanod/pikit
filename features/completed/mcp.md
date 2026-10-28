@@ -6,7 +6,7 @@ a tool. Hermes supports MCP, and users look for it in any agent's tool list.
 **Status:** built (phase 1): `tool-mcp` and `@pikit/pi-adapter/mcp`, Streamable HTTP with a bearer
 token from `secrets`, on both targets; strict at deploy (`pikit doctor` reaches each server),
 tolerant at run time (tool listings kept in `storage.kv`, and a seed of them `pikit up` bundles).
-OAuth and stdio are the open questions below; each would be a new component.
+OAuth is built as its own component, `tool-mcp-oauth` (below); stdio is still open.
 
 **Needed by:** nothing required.
 
@@ -129,12 +129,18 @@ uses `fetch`.
   from Cloudflare's edge the round trips may be shorter (not measured deployed).
 
 ## Open questions
-- **OAuth (phase 2).** pi-mcp's `./oauth` provider is neutral (the callback server is not): a
-  `tool-mcp-oauth` (or an option of tool-mcp) would take the redirect through an `http.route` (Worker
-  half on Cloudflare), keep tokens and client registration in `storage.kv` through pi-mcp's
-  `McpOAuthStateStore`, and start the login from `pikit configure` or the dashboard. Where a token
-  lives across a project's Durable Objects (per tenant, per server) is to decide with
-  [multi-tenant isolation](../multi-tenant-isolation.md).
+- **OAuth: built** (`tool-mcp-oauth`, its README). A server in tool-mcp says `auth: "oauth"`; its tokens
+  come from the keyed capability `mcp.auth` (`@pikit/pi-adapter/mcp`'s `McpAuth`, pi-mcp's
+  `AuthProvider` for one URL). One owner actor (`tool-mcp-oauth`: the App on a server, one Durable
+  Object on `durable`) keeps each server's login in its `storage.sql` and makes the deployment's
+  only refreshes, one per server at a time and only for the token still current, so rotating refresh
+  tokens are never spent twice. The login is the operator's: `pikit tool-mcp-oauth login <server>`
+  on their machine (pi-mcp's callback server, dynamic registration with the server's `clientName`,
+  PKCE), uploaded to `PUT /admin/api/tool-mcp-oauth/<server>` (`admin.auth`) and kept nowhere else.
+  A server not logged in fails only its own tools ("log in again") and reports `health` degraded; the
+  App starts. Figma's catalogue of client names is the README's "Client name". Still open: logging in
+  from the dashboard (it needs a public redirect URL), and tokens per tenant
+  ([multi-tenant isolation](../multi-tenant-isolation.md)).
 - **stdio** is a process: a separate, server-only `tool-mcp-stdio` component over pi-mcp's
   `StdioTransport` (it may import it from the adapter's `./node` export), ideally through
   [sandboxed execution](../sandboxed-execution.md). Never a flag of `tool-mcp`.
