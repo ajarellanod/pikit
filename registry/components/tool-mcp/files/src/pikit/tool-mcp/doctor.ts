@@ -8,6 +8,10 @@
  * value `pikit up` gives the app. Each failure is one problem naming the server; the token's value
  * never appears in one. Nothing is written: `pikit up` writes the seed (`deploy.ts`).
  *
+ * A server that logs in with OAuth (`auth: "oauth"`) is not reached: its login is the deployed
+ * app's alone (tool-mcp-oauth keeps none on this machine, since a second copy refreshing would revoke
+ * the app's rotating token), so the check skips it with a note saying so.
+ *
  * It also compares what each server listed with `seed.ts` and gives a note (never a problem) when the
  * seed is out of date: a build without the CLI (Workers Builds, a "Deploy to Cloudflare" button,
  * `docker build`) would bundle it as it is, and a new conversation would have to reach that server at
@@ -35,7 +39,8 @@ export interface DoctorIO {
  * note for each server whose listing `seed.ts` does not hold as it is now.
  */
 export async function doctor(io: DoctorIO, seed: McpSeed = bundled): Promise<{ problems: string[]; notes: string[] }> {
-  const servers = Object.entries(serversOf(io.config));
+  const all = Object.entries(serversOf(io.config));
+  const servers = all.filter(([, settings]) => settings.auth !== "oauth");
   const listed = await Promise.all(servers.map(([name, settings]) => listNamed(name, settings, io.get)));
   const problems = listed.flatMap((result) => ("problems" in result ? result.problems : []));
   const stale = servers.filter(([name, settings], index) => {
@@ -46,7 +51,13 @@ export async function doctor(io: DoctorIO, seed: McpSeed = bundled): Promise<{ p
     ([name]) =>
       `src/pikit/tool-mcp/seed.ts does not hold what the MCP server "${name}" lists now: \`pikit up\` rewrites it; commit it before a deploy without the CLI (Workers Builds, a Deploy button, docker build), or a new conversation reaches "${name}" at start`,
   );
+  for (const [name] of all.filter(([, settings]) => settings.auth === "oauth")) notes.push(oauthSkipped(name));
   return { problems, notes };
+}
+
+/** Why an OAuth server is not reached from this machine: what the doctor check and the seed say. */
+export function oauthSkipped(name: string): string {
+  return `the MCP server "${name}" logs in with OAuth: not reached from this machine (its login is the deployed app's only; \`pikit tool-mcp-oauth status\` shows it)`;
 }
 
 /** Whether `seed` holds, for server `name` at `url`, exactly the listing of `tools` (what `deploy.ts` would write). */
@@ -79,7 +90,7 @@ export async function listNamed(name: string, settings: ServerConfig, get: (name
   const secret = token;
   const client = new McpClient({ ...CLIENT, requestTimeoutMs: settings.timeoutMs ?? DOCTOR_TIMEOUT_MS });
   try {
-    await client.connect(transportTo(settings, secret === undefined ? undefined : async () => secret));
+    await client.connect(transportTo(settings, secret === undefined ? undefined : { token: async () => secret }));
     const listed = await client.listTools();
     const has = listed.map((tool) => tool.name).join(", ") || "none";
     const tools = settings.tools.flatMap((remote) => listed.filter((tool) => tool.name === remote).slice(0, 1));

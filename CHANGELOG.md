@@ -33,6 +33,12 @@ line names its area.
 
 ### Components
 
+- tool-mcp-oauth (new, both targets): OAuth logins for MCP servers (Figma's remote MCP). tool-mcp's
+  `auth: "oauth"` takes a server's tokens from the new keyed capability `mcp.auth`
+  (`@pikit/pi-adapter/mcp`); one owner actor keeps each login and makes the only refreshes (one per
+  server, for the token still current); `pikit tool-mcp-oauth login <server>` logs in on the
+  operator's machine (dynamic registration with the server's `clientName`, PKCE) and uploads it, nothing
+  kept locally. A server not logged in fails only its own tools and reports `health` degraded.
 - tool-notify ([features/completed/tool-notify.md](features/completed/tool-notify.md)), new, both
   targets: `notify({ to, text })` sends a Markdown message to a chat the operator named (a channel
   instance and a key), send-only; `from` as tool-delegate's (the whole delegation chain), a rate limit

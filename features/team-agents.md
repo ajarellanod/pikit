@@ -41,7 +41,7 @@ a project installs, and agents that name what they may use.
 | Routines (cron), followups (one-shot, agent-made) | built: `scheduler-sql` (`scheduler`), `scheduler-admit`, `scheduler-routines` (config), `tool-schedule` (the agent's, its own conversation); both targets | [scheduler](scheduler.md) |
 | Reply context (a terse reply to a routine's message) | none | with [scheduler](scheduler.md) |
 | A persistent JavaScript worker for the agent | none | [codemode](codemode.md) |
-| MCP servers per agent | `tool-mcp` | — |
+| MCP servers per agent | `tool-mcp`; OAuth logins (Figma) with `tool-mcp-oauth` | — |
 | Browser (cloud sessions) | none | [browser](browser.md) |
 | Attachments, assets, size limits | built: `InboundMessage.images` (Google Chat's and Telegram's photos, the web chat's and the dashboard's); files a user sends in Google Chat, Telegram or the web chat written to the conversation's workspace, their paths in the text (`@pikit/pi-adapter`'s `collectAttachments`, 10 MB a file, 25 MB a message); files kept for a space: `tool-space-files` | [rich-content](rich-content.md) for files in answers |
 | Durable outbound delivery | `outbound-durable`, `startAnswerDelivery` | — |

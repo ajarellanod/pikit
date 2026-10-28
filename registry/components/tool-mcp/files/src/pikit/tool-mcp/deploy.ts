@@ -12,13 +12,17 @@
  *
  * - **No secret.** The seed holds each server's URL and, of each named tool, only what the kept
  *   listing holds (name, title, description, inputSchema, annotations): never a token nor a header.
+ * - **OAuth servers are not reached** (`auth: "oauth"`): their login is the deployed app's only. The
+ *   seed keeps what it held for such a server (same URL, every named tool), and holds nothing new for
+ *   it: a start then reaches the server, or fails only its tools while it is not logged in.
  * - **No churn.** It holds no time, and `write` leaves the file alone when its text is the same: a
  *   deploy changes `seed.ts` only when a server's tools changed. Commit it, so that a build without
  *   the CLI (Workers Builds, a "Deploy to Cloudflare" button, `docker build`) bundles it too.
  */
 
-import { listNamed, serversOf } from "./doctor.ts";
+import { listNamed, oauthSkipped, serversOf } from "./doctor.ts";
 import { keptTool, type McpSeed, type SeedTool } from "./index.ts";
+import { seed as bundled } from "./seed.ts";
 
 /** The file this hook writes, in `src/pikit/tool-mcp/`. */
 export const SEED_FILE = "seed.ts";
@@ -35,13 +39,21 @@ export interface BeforeDeployIO {
 }
 
 /** Lists each server's named tools and writes them into `seed.ts`; resolves with the problems (empty when done). */
-export async function beforeDeploy(io: BeforeDeployIO): Promise<string[]> {
-  const servers = Object.entries(serversOf(io.config));
+export async function beforeDeploy(io: BeforeDeployIO, previous: McpSeed = bundled): Promise<string[]> {
+  const all = Object.entries(serversOf(io.config));
+  const servers = all.filter(([, settings]) => settings.auth !== "oauth");
   const listed = await Promise.all(servers.map(([name, settings]) => listNamed(name, settings, io.get)));
   const problems = listed.flatMap((result) => ("problems" in result ? result.problems : []));
   if (problems.length > 0) return problems;
 
   const seed: McpSeed = {};
+  for (const [name, settings] of all.filter(([, each]) => each.auth === "oauth")) {
+    const kept = Object.hasOwn(previous, name) ? previous[name] : undefined;
+    if (kept !== undefined && kept.url === settings.url && settings.tools.every((tool) => Object.hasOwn(kept.tools, tool))) {
+      seed[name] = { url: kept.url, tools: Object.fromEntries(settings.tools.map((tool) => [tool, kept.tools[tool] as SeedTool])) };
+    }
+    io.say(`· tool-mcp: ${oauthSkipped(name)}${seed[name] === undefined ? "; the seed holds nothing for it" : "; the seed keeps what it held"}`);
+  }
   servers.forEach(([name, settings], index) => {
     const result = listed[index];
     if (result === undefined || "problems" in result) return;

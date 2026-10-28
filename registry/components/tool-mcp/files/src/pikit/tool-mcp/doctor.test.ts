@@ -96,3 +96,11 @@ test("a server that cannot be reached gives its problem, and no note about the s
   expect(report.problems).toHaveLength(1);
   expect(report.notes).toEqual([]);
 });
+
+test("a server that logs in with OAuth is not reached from this machine: a note says why, never a problem", async () => {
+  const result = await doctor({ config: { servers: { figma: { url: "http://127.0.0.1:9/mcp", auth: "oauth", tools: ["whoami"] } } }, get: env({}) });
+  expect(result).toEqual({
+    problems: [],
+    notes: ['the MCP server "figma" logs in with OAuth: not reached from this machine (its login is the deployed app\'s only; `pikit tool-mcp-oauth status` shows it)'],
+  });
+});

@@ -17,7 +17,8 @@
   "optional": {
     "capabilities": [
       "secrets",
-      "storage.kv"
+      "storage.kv",
+      "mcp.auth"
     ]
   },
   "provides": [

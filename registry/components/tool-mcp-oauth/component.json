@@ -1,0 +1,79 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "tool-mcp-oauth",
+  "version": "0.0.1",
+  "title": "MCP OAuth: log your MCP servers in with a browser, tokens kept by the app",
+  "description": "OAuth logins for tool-mcp's servers (mcp.auth): `pikit tool-mcp-oauth login <server>` logs in on your machine (dynamic client registration with a client name you choose, PKCE) and uploads the login; one owner keeps it and refreshes each server's token once at a time, for every conversation.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
+    "capabilities": [
+      "storage.sql",
+      "actor.inbox",
+      "actor.mailbox"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "admin.auth",
+      "health"
+    ]
+  },
+  "provides": [
+    "http.route",
+    "mcp.auth"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "http.route",
+        "mcp.auth"
+      ],
+      "requires": [
+        "storage.sql",
+        "actor.inbox",
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth",
+        "health"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth"
+      ]
+    }
+  },
+  "commands": {
+    "tool-mcp-oauth": {
+      "file": "login.ts",
+      "description": "MCP servers' OAuth logins: tool-mcp-oauth login <server> [--port <n>] | status | logout <server> (any: --url <origin>)"
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
