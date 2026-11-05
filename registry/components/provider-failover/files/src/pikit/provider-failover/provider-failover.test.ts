@@ -170,7 +170,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     provides: ["model.provider"],
     // A keyed use is optional: a chain's providers are checked at start.
     requires: [],
-    optional: ["model.provider", "model.credentials", "secrets", "health"],
+    optional: ["model.provider", "model.credentials", "secrets", "health", "actor.mailbox", "actor.inbox", "storage.sql"],
   });
   expect(app.describe().capabilities["model.provider"]?.keys).toEqual({ openai: "test-providers", anthropic: "test-providers", failover: "provider-failover" });
 });
