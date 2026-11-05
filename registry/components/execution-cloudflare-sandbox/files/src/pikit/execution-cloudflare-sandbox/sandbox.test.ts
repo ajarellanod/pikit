@@ -390,13 +390,17 @@ describe("snapshots in storage.blob", () => {
       const harness = await seeded(archive, change);
       expect(await harness.sandbox.serve({ sandbox: "s-1", operation: "open", body: {} })).toMatchObject({ ok: false, code: "unavailable" });
     }
-    const tampered = await seeded(archive);
-    const prefix = await snapshotPrefix(chatKey("s-1"), agentOf("s-1", undefined));
-    const manifest = JSON.parse(new TextDecoder().decode((await tampered.snapshots.get(`${prefix}${MANIFEST}`))?.bytes));
-    const bytes = archive.slice();
-    bytes[bytes.length - 5] = (bytes[bytes.length - 5] ?? 0) ^ 1;
-    await tampered.snapshots.put(manifest.object, bytes);
-    expect(await tampered.sandbox.serve({ sandbox: "s-1", operation: "open", body: {} })).toMatchObject({ ok: false, code: "unavailable" });
+    // Another valid archive under the first one's name and size: only its SHA-256 tells them apart.
+    const other = await craftArchive([{ name: "b", content: "y" }]);
+    const swapped = setup();
+    const agent = agentOf("s-1", undefined);
+    const prefix = await snapshotPrefix(chatKey("s-1"), agent);
+    const sha256 = await sha256Hex(archive);
+    const object = `${prefix}snapshot-1-${sha256.slice(0, 16)}.tar.gz`;
+    await swapped.snapshots.put(object, other);
+    await swapped.snapshots.put(`${prefix}${MANIFEST}`, new TextEncoder().encode(JSON.stringify({ version: 1, object, sha256, size: other.length, createdAt: 1, agent })));
+    expect(await swapped.sandbox.serve({ sandbox: "s-1", operation: "open", body: {} })).toMatchObject({ ok: false, code: "unavailable" });
+    expect(swapped.logs.some((log) => String(log.fields?.error).includes("SHA-256"))).toBe(true);
   }, 30_000);
 });
 
