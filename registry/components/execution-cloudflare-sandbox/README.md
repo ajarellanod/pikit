@@ -12,7 +12,7 @@ gets no Previews), with no runtime, no agents and no channels.
 - **Requires:** `secrets` in the Worker's App (the token) and `storage.blob` in the default App (the
   snapshots; `storage-blob-s3`).
 - **Target:** `durable`, on Cloudflare only. Containers are Cloudflare's (Workers Paid), and celld's
-  Containers are not supported (`features/deployment-celld.md`).
+  Containers are not supported ([features/deployment-celld.md](https://github.com/ajarellanod/pikit/blob/main/features/deployment-celld.md)).
 - **Installs to:** `src/pikit/execution-cloudflare-sandbox/`: the two halves, the `Sandbox` Durable
   Object class, the images (`images/`) and the host's `wrangler.host.jsonc`.
 - **npm dependencies:** `@pikit/contracts`, `@pikit/pi-adapter` (pinned with Pi), `typebox`. No
