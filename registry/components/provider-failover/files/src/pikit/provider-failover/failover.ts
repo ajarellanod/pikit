@@ -1,12 +1,20 @@
 /**
  * provider-failover's logic, apart from the component (index.ts) so that its tests need no App:
  * which failures move a request to the next model (`classify`), how long a model that failed is
- * skipped (`createCooldowns`), the model a chain is (`chainModel`), and the provider that answers
- * a chain's request through its models in turn (`failoverProvider`).
+ * skipped (`createCooldowns`: this App's copy, which `shared.ts` shares), the model a chain is
+ * (`chainModel`), and the provider that answers a chain's request through its models in turn
+ * (`failoverProvider`); which of them a request goes to, in what order (`requestNeeds`,
+ * `requestOrder`), and with what options (`candidateOptions`).
  *
- * A request goes to the chain's models in order, those not cooling down first. A model that fails
- * before its answer shows anything is skipped, and the same request goes to the next one; a
- * failure after that is the answer's (it is never replayed elsewhere, so nothing is said twice),
+ * A chain is its first model to whoever uses it (its window, output, inputs, cost): it is never
+ * smaller than the model that answers when nothing fails. A request goes to the chain's models in
+ * order, those not cooling down first; one whose context window cannot hold it is skipped, and,
+ * when it holds images, one that sees them goes before one that does not (pi-ai shows that one a
+ * placeholder for each image). Each model is sent the options a direct call to it would have: its
+ * own output limit, and the least thinking for one whose thinking cannot be turned off.
+ *
+ * A model that fails before its answer shows anything is skipped, and the same request goes to the
+ * next one; a failure after that is the answer's (it is never replayed elsewhere, so nothing is said twice),
  * and pi-durable's retry decides, the failed model cooling down so that the retry starts on another.
  *
  * Neutral: no node-only import.
@@ -20,6 +28,7 @@ import {
   type AssistantMessageEvent,
   type AssistantMessageEventStream,
   createAssistantMessageEventStream,
+  estimateContextTokens,
   isContextOverflow,
   isRetryableAssistantError,
   type Model,
@@ -94,36 +103,72 @@ export interface Cooldowns {
   answered(candidate: Candidate): void;
   /** When the next cooldown ends; `undefined` when none is running. */
   nextEnd(): number | undefined;
+  /** What another App (`shared.ts`) learnt: each entry taken when it is newer (`at`) than the one kept. Whether one was. */
+  merge(entries: readonly CooldownEntry[]): boolean;
 }
 
 /**
- * The cooldowns, in memory: a restart forgets them, and on Cloudflare each conversation's object
- * has its own. Refused credentials cool the whole provider (every model of it fails the same way);
- * any other failure, the one model.
+ * One cooldown as it is kept and shared: `key` is a provider's credentials (`provider:<id>`) or a
+ * model (`model:<provider>/<id>`); `at` when it was learnt; `kind` absent (and `until` 0) when an
+ * answer cleared it. The newest `at` of a key wins, wherever it is merged.
  */
-export function createCooldowns(durations: CooldownDurations, now: () => number): Cooldowns {
-  const cooling = new Map<string, Cooling>();
+export interface CooldownEntry {
+  key: string;
+  kind?: FailureKind;
+  until: number;
+  at: number;
+}
+
+/**
+ * Whether `entry` replaces `kept`, wherever two meet (each copy, the owner), so that every order of
+ * arrival ends the same: the newer; learnt at the same time, an answer, then the later end.
+ */
+export function supersedes(entry: CooldownEntry, kept: CooldownEntry | undefined): boolean {
+  if (kept === undefined) return true;
+  if (entry.at !== kept.at) return entry.at > kept.at;
+  const rank = (each: CooldownEntry) => (each.kind === undefined ? Number.POSITIVE_INFINITY : each.until);
+  return rank(entry) > rank(kept);
+}
+
+/**
+ * The cooldowns of this App, in memory. Refused credentials cool the whole provider (every model of
+ * it fails the same way); any other failure, the one model. `learnt` hears each failure, and each
+ * answer that cleared one, as entries: `shared.ts` reports them to the App's owner of the cooldowns,
+ * and `merge`s what the other Apps learnt. Keys are the chains' models and providers, so the map stays small.
+ */
+export function createCooldowns(durations: CooldownDurations, now: () => number, learnt?: (entries: CooldownEntry[]) => void): Cooldowns {
+  const cooling = new Map<string, CooldownEntry>();
   const providerKey = (candidate: Candidate) => `provider:${candidate.model.provider}`;
   const modelKey = (candidate: Candidate) => `model:${candidate.model.provider}/${candidate.model.id}`;
   const current = (key: string): Cooling | undefined => {
     const entry = cooling.get(key);
-    if (entry === undefined) return undefined;
-    if (entry.until > now()) return entry;
-    cooling.delete(key);
-    return undefined;
+    return entry?.kind !== undefined && entry.until > now() ? (entry as Cooling) : undefined;
   };
   return {
     of: (candidate) => current(providerKey(candidate)) ?? current(modelKey(candidate)),
     failed(candidate, kind) {
-      cooling.set(kind === "auth" ? providerKey(candidate) : modelKey(candidate), { kind, until: now() + durations[kind] });
+      const entry = { key: kind === "auth" ? providerKey(candidate) : modelKey(candidate), kind, until: now() + durations[kind], at: now() };
+      cooling.set(entry.key, entry);
+      learnt?.([entry]);
     },
     answered(candidate) {
-      cooling.delete(providerKey(candidate));
-      cooling.delete(modelKey(candidate));
+      // Only what was cooling: an answer of a model that was not is no news to share.
+      const cleared = [providerKey(candidate), modelKey(candidate)].flatMap((key) => (current(key) === undefined ? [] : [{ key, until: 0, at: now() }]));
+      for (const entry of cleared) cooling.set(entry.key, entry);
+      if (cleared.length > 0) learnt?.(cleared);
     },
     nextEnd() {
       const ends = [...cooling.keys()].flatMap((key) => current(key)?.until ?? []);
       return ends.length === 0 ? undefined : Math.min(...ends);
+    },
+    merge(entries) {
+      let changed = false;
+      for (const entry of entries) {
+        if (!supersedes(entry, cooling.get(entry.key))) continue;
+        cooling.set(entry.key, entry.kind === undefined ? { key: entry.key, until: 0, at: entry.at } : { key: entry.key, kind: entry.kind, until: entry.until, at: entry.at });
+        changed = true;
+      }
+      return changed;
     },
   };
 }
@@ -134,10 +179,13 @@ export function attemptOrder(candidates: readonly Candidate[], cooldowns: Cooldo
 }
 
 /**
- * The model a chain is: what every one of its models can take. Its context window and output are
- * the smallest of them (pi-durable compacts and sizes summaries by it), its inputs those all take;
- * it reasons when one of them does (each model's own API ignores what it cannot do). Its cost is
- * the first model's: each answer's usage is priced by the model that gave it.
+ * The model a chain is: its first model, the one that answers while nothing fails. Its context
+ * window, maximum output, inputs and cost are the first's (pi-durable compacts by the window; tools
+ * show images when it takes them; each answer's usage is still priced by the model that gave it), so
+ * the chain is never limited to its weakest model: each request is fitted to the model it goes to
+ * instead (`requestOrder`, `candidateOptions`). It reasons when one of its models does, so that a
+ * caller allows for thinking (model.complete's `REASONING_TOKENS`); each model's own API ignores
+ * what it cannot do. It has no `thinkingLevelMap`: each model's own applies to its request.
  */
 export function chainModel(chain: Chain): Model<Api> {
   const models = chain.candidates.map((candidate) => candidate.model);
@@ -149,10 +197,73 @@ export function chainModel(chain: Chain): Model<Api> {
     provider: PROVIDER_ID,
     baseUrl: "",
     reasoning: models.some((model) => model.reasoning),
-    input: first.input.filter((input) => models.every((model) => model.input.includes(input))),
+    input: [...first.input],
     cost: first.cost,
-    contextWindow: Math.min(...models.map((model) => model.contextWindow)),
-    maxTokens: Math.min(...models.map((model) => model.maxTokens)),
+    contextWindow: first.contextWindow,
+    maxTokens: first.maxTokens,
+  };
+}
+
+/** What a request needs of the model it goes to. */
+export interface RequestNeeds {
+  /** Its size, estimated as pi-durable's compaction does: the newest answer's usage, plus estimates of what follows it. */
+  tokens: number;
+  /** Whether it holds an image (a user's, a tool result's). */
+  images: boolean;
+}
+
+export function requestNeeds(context: TranscriptContext): RequestNeeds {
+  return {
+    tokens: estimateContextTokens(context).tokens,
+    images: context.messages.some((message) => (message.role === "user" || message.role === "toolResult") && Array.isArray(message.content) && message.content.some((part) => part.type === "image")),
+  };
+}
+
+/** A model a request does not go to, and why. */
+export interface Skipped {
+  candidate: Candidate;
+  why: string;
+}
+
+/**
+ * The models a request needing `needs` tries, in order, and those it skips:
+ * - skipped: a model whose context window cannot hold it (it would only overflow);
+ * - then `attemptOrder`: those not cooling down first;
+ * - within each, when it holds images, the models that see them before those that do not. One that
+ *   does not is still tried, last: pi-ai replaces each image with a placeholder ("image omitted:
+ *   model does not support images") rather than fail, so it answers knowing what it cannot see,
+ *   and a conversation that once held an image is not refused by it for good.
+ */
+export function requestOrder(candidates: readonly Candidate[], cooldowns: Cooldowns, needs: RequestNeeds): { order: Candidate[]; skipped: Skipped[] } {
+  const skipped: Skipped[] = [];
+  const fit: Candidate[] = [];
+  for (const candidate of candidates) {
+    const window = candidate.model.contextWindow;
+    if (window > 0 && needs.tokens > window) skipped.push({ candidate, why: `about ${needs.tokens} tokens, over its ${window}-token window` });
+    else fit.push(candidate);
+  }
+  const order = attemptOrder(fit, cooldowns);
+  if (!needs.images) return { order, skipped };
+  const sees = (candidate: Candidate) => candidate.model.input.includes("image");
+  const cooling = order.findIndex((candidate) => cooldowns.of(candidate) !== undefined);
+  const groups = cooling === -1 ? [order] : [order.slice(0, cooling), order.slice(cooling)];
+  return { order: groups.flatMap((group) => [...group.filter(sees), ...group.filter((candidate) => !sees(candidate))]), skipped };
+}
+
+/**
+ * What `candidate` is sent of `request`'s options, as a direct call to it would have them (the
+ * chain's model has none of its models' limits or thinking levels):
+ * - `maxTokens` within its own maximum output;
+ * - for a model whose thinking cannot be turned off (`thinkingLevelMap.off` null:
+ *   `openrouter/z-ai/glm-5.3-flash`), the least thinking it allows (`minimal`) when the request asked
+ *   for none, as model.complete does for it; otherwise it thinks at its default, and a short answer
+ *   (a title's 32 tokens) is spent thinking and comes back empty.
+ */
+export function candidateOptions(candidate: Candidate, request: SimpleStreamOptions): Pick<SimpleStreamOptions, "maxTokens" | "reasoning"> {
+  const { model } = candidate;
+  return {
+    ...(request.maxTokens !== undefined && model.maxTokens > 0 && request.maxTokens > model.maxTokens && { maxTokens: model.maxTokens }),
+    ...(request.reasoning === undefined && model.reasoning && model.thinkingLevelMap?.off === null && { reasoning: "minimal" as const }),
   };
 }
 
@@ -162,6 +273,8 @@ export interface FailoverProviderOptions {
   /** The chains' own providers, with the App's credentials; `undefined` until the component starts. */
   models(): Models | undefined;
   cooldowns: Cooldowns;
+  /** Awaited before each request reads the cooldowns (`shared.ts`: the App's first sync, bounded). */
+  ready?(): Promise<void>;
   now(): number;
   /** Something cooled down or answered: the health report may have changed. */
   changed?(): void;
@@ -196,7 +309,16 @@ export function failoverProvider(options: FailoverProviderOptions): Provider {
     const chain = options.chains().get(model.id);
     const models = options.models();
     if (chain === undefined || models === undefined) throw new Error(`no chain named "${model.id}"`);
-    const order = attemptOrder(chain.candidates, options.cooldowns);
+    await options.ready?.();
+    const { order, skipped } = requestOrder(chain.candidates, options.cooldowns, requestNeeds(context));
+    const skips = skipped.map(({ candidate, why }) => `${candidate.name}: ${why}`);
+    if (order.length === 0) {
+      // Worded as an overflow (pi-ai's isContextOverflow), so that pi-durable compacts and retries.
+      out.push({ type: "error", reason: "error", error: failure(model, `provider-failover "${chain.id}": the request exceeds the context window of every model of the chain (${skips.join(", ")})`, options.now()) });
+      return;
+    }
+    // The window pi-durable compacts by: a smaller one's overflow is that model's, not the request's.
+    const chainWindow = chain.candidates[0]?.model.contextWindow ?? 0;
     const tried: string[] = [];
     for (const [index, candidate] of order.entries()) {
       const last = index === order.length - 1;
@@ -206,6 +328,7 @@ export function failoverProvider(options: FailoverProviderOptions): Provider {
       const { apiKey: _apiKey, deferred: _deferred, ...rest } = request ?? {};
       const own: SimpleStreamOptions = {
         ...rest,
+        ...candidateOptions(candidate, rest),
         ...(!last && { maxRetries: 0 }),
         onResponse: async (response, at) => {
           status = response.status;
@@ -244,15 +367,19 @@ export function failoverProvider(options: FailoverProviderOptions): Provider {
       const kind = classify(status, failed, candidate.model.contextWindow);
       if (kind !== undefined) options.cooldowns.failed(candidate, kind);
       options.changed?.();
-      const next = kind === undefined || last || request?.signal?.aborted === true ? undefined : order[index + 1];
+      // Too big for this model only (the estimate was short of its count): the next may hold it; nothing cools down.
+      const overflowed = kind === undefined && candidate.model.contextWindow < chainWindow && isContextOverflow(failed, candidate.model.contextWindow);
+      const next = (kind === undefined && !overflowed) || last || request?.signal?.aborted === true ? undefined : order[index + 1];
       if (kind !== undefined) options.failedOver?.({ chain: chain.id, from: candidate.name, kind, to: next?.name });
+      const outcome = kind ?? (overflowed ? "over its context window" : "not retried elsewhere");
       if (next === undefined) {
         for (const before of held) out.push(before);
-        const summary = tried.length === 0 ? "" : ` (provider-failover "${chain.id}" tried ${[...tried, `${candidate.name}: ${kind ?? "not retried elsewhere"}`].join(", ")})`;
+        const notes = [...(tried.length === 0 ? [] : [`tried ${[...tried, `${candidate.name}: ${outcome}`].join(", ")}`]), ...(skips.length === 0 || (kind === undefined && !overflowed) ? [] : [`skipped ${skips.join(", ")}`])];
+        const summary = notes.length === 0 ? "" : ` (provider-failover "${chain.id}" ${notes.join("; ")})`;
         out.push({ type: "error", reason: failed.stopReason === "aborted" ? "aborted" : "error", error: { ...failed, errorMessage: `${failed.errorMessage ?? "failed"}${summary}` } });
         return;
       }
-      tried.push(`${candidate.name}: ${kind}`);
+      tried.push(`${candidate.name}: ${outcome}`);
     }
   };
 
