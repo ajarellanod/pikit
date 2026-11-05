@@ -130,7 +130,8 @@ async function twoHosts(options: { object?: string; agents?: Record<string, stri
   const render = fakeHost({ open: { cwd: "/render", home: "/home/agent" }, exists: true });
   const app = await started(general.url, {
     values: { PIKIT_SANDBOX_TOKEN: TOKEN, PIKIT_SANDBOX_RENDER_TOKEN: RENDER_TOKEN },
-    config: { hosts: { general: { url: general.url }, render: { url: render.url, tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" } }, defaultHost: "general", agents: options.agents ?? { designer: "render" } },
+    // render first: the default host is the one named, not the first.
+    config: { hosts: { render: { url: render.url, tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" }, general: { url: general.url } }, defaultHost: "general", agents: options.agents ?? { designer: "render" } },
     ...(options.object !== undefined && { object: options.object }),
   });
   const lines = (host: typeof general) => host.seen.map((request) => `${request.sandbox} ${request.operation} ${request.agent}`);
