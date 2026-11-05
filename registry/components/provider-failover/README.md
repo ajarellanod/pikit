@@ -35,8 +35,9 @@ failed one is skipped for a while:
 | `transient` | 5xx, a timeout, a network failure, a cut stream | 30 seconds (`cooldownSeconds.transient`) |
 
 What another model would fail the same way never moves: an abort, a request too big for any model
-(a context overflow, which pi-durable compacts for; a 413), a bad request (a 400). The answer is
-that failure.
+(a context overflow of the first model, which pi-durable compacts for; a 413), a bad request (a
+400). The answer is that failure. A model that cannot take the request at all (too small a window)
+is skipped before it is asked: see [The model a chain is](#the-model-a-chain-is).
 
 A failure **after the answer has started** is that answer's: it is never replayed on another model,
 so nothing is said twice. pi-durable's retry runs the request again, and since the failed model
@@ -61,11 +62,44 @@ the chain's providers by itself: name them with `--login`, or set their keys.
 
 ### The model a chain is
 
-`failover/<chain>` is what all its models can take: its context window and maximum output are the
-smallest of them (pi-durable compacts by it), its inputs those all take (no images unless every
-model takes them), and it reasons when one of them does (each model's own API ignores what it
-cannot do). Moving between providers mid-conversation is pi-ai's: it converts the transcript, as
-when you switch models in Pi.
+`failover/<chain>` is its **first model**, the one that answers while nothing fails: its context
+window, maximum output, inputs and cost are the first's. A chain is never limited to its weakest
+model: with `["anthropic/claude-opus-5-5", "openai/gpt-6.1-sol", "openrouter/z-ai/glm-5.3-flash"]`,
+the agent keeps Opus's images and window even though GLM takes neither. It reasons when one of its
+models does, so that a caller allows for thinking (model.complete's extra `REASONING_TOKENS`); each
+model's own API ignores what it cannot do.
+
+Each request is fitted to the models it can go to instead:
+
+- **Too big for a model's window:** that model is skipped. The request's size is estimated as
+  pi-durable's compaction estimates it (pi-ai's `estimateContextTokens`: the newest answer's usage,
+  plus about 3.5 characters a token for what follows). When no model of the chain can hold it, the
+  answer is a context overflow naming the chain and each model's window
+  (`provider-failover "main": the request exceeds the context window of every model of the chain
+  (…)`), and pi-durable compacts and retries, rather than sending it to a model that would overflow.
+  A fallback that overflows all the same (its tokenizer counts more than the estimate) passes the
+  request on to the next model, without cooling down.
+- **Images:** when the request holds images, the models that see them are tried before those that
+  do not (among those not cooling down, then among those that are). A text-only model is still tried,
+  last: pi-ai replaces each image with `(image omitted: model does not support images)`, so it
+  answers knowing what it cannot see, rather than the request failing. Skipping it instead would
+  make it useless for the rest of any conversation that once held an image.
+- **Output and thinking:** each model is sent what a direct call to it would have. `maxTokens` is
+  clamped to its own maximum. A model whose thinking cannot be turned off (`thinkingLevelMap.off`
+  null, as `openrouter/z-ai/glm-5.3-flash`) thinks the least it allows (`minimal`) when the request
+  asked for no thinking. Otherwise a short answer (a conversation's 32-token title) is spent thinking
+  and comes back empty.
+
+**A fallback with a smaller window than the first model's.** pi-durable compacts by the chain's
+window, the first's, so a conversation grows past what the fallback holds. While it fits, the
+fallback answers; once it does not, the fallback is skipped, and, if the first model is failing
+too, the answer is the first's failure, naming the skip
+(`429 … (provider-failover "main" skipped openrouter/z-ai/glm-5.3-flash: about 150000 tokens, over
+its 128000-token window)`). pi-durable's retry tries again, on the first model once it is back. Put
+the models with the largest windows early in a chain when a fallback must hold long conversations.
+
+Moving between providers mid-conversation is pi-ai's: it converts the transcript, as when you
+switch models in Pi.
 
 ### Health
 
@@ -95,9 +129,12 @@ not fix them. The report is updated after each request and when a cooldown ends.
 
 `provider-failover.test.ts` is copied with the component and runs in your project. Its providers
 are fakes whose requests answer as each test scripts (an answer, a failure before or after its
-text); no network, no credential. It covers the chain's model, the start's refusals, moving a
-request and cooling down, a failure after the answer started, what never moves, every model
-failing, refused credentials cooling a provider, and the health reports. In the pikit repository,
+text); no network, no credential. It covers the chain's model (the first's window, output and
+inputs), the start's refusals, moving a request and cooling down, a failure after the answer
+started, what never moves, every model failing, refused credentials cooling a provider, the health
+reports, and fitting each request: images to the models that see them first, skipping a window too
+small (and failing as an overflow when none holds it), a smaller fallback's overflow moving on, and
+each model's own output limit and least thinking (also through `model.complete`). In the pikit repository,
 the workerd lane (`tests/workerd/test/provider-failover.workerd.ts`) composes it with runtime-pi,
 provider-openai and provider-anthropic in a real Durable Object: OpenAI's fake API refuses with a
 429, the agent answers through Anthropic's, and the next message goes to Anthropic alone.

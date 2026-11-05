@@ -8,8 +8,9 @@ import { afterEach, expect, test } from "bun:test";
 import type { HealthRegistry, HealthStatus } from "@pikit/contracts";
 import { type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { createManualClock } from "@pikit/core/testing";
-import { modelsFrom, type Provider } from "@pikit/pi-adapter";
-import { type Api, type AssistantMessage, createAssistantMessageEventStream, createProvider, type Model } from "@pikit/pi-adapter/provider";
+import type { AppContext } from "@pikit/core";
+import { createModelComplete, modelsFrom, type Provider } from "@pikit/pi-adapter";
+import { type Api, type AssistantMessage, createAssistantMessageEventStream, createProvider, isContextOverflow, type Model, type SimpleStreamOptions } from "@pikit/pi-adapter/provider";
 import providerFailover from "./index.ts";
 import { classify } from "./failover.ts";
 
@@ -20,12 +21,14 @@ type Outcome =
 
 const MINUTE = 60_000;
 
-/** What each fake model answers, in turn (the last one again when the script runs out), and what it was asked. */
+/** What each fake model answers, in turn (the last one again when the script runs out), and what it was asked, with which options. */
 const scripts = new Map<string, Outcome[]>();
 const asked: string[] = [];
+const sent: { name: string; maxTokens?: number; reasoning?: string }[] = [];
 afterEach(() => {
   scripts.clear();
   asked.length = 0;
+  sent.length = 0;
 });
 
 function message(model: Model<Api>, text: string, stopReason: AssistantMessage["stopReason"], errorMessage?: string): AssistantMessage {
@@ -42,12 +45,24 @@ function message(model: Model<Api>, text: string, stopReason: AssistantMessage["
   };
 }
 
+/** A fake model: `thinkingOff: null` is one whose thinking cannot be turned off (`thinkingLevelMap.off` null, as GLM's). */
+interface FakeModel {
+  id: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  image?: boolean;
+  reasoning?: boolean;
+  thinkingOff?: null;
+}
+
 /** A provider `id` with `models`, each answering as `scripts` says; `configured: false` has no credentials. */
-function fakeProvider(id: string, models: { id: string; contextWindow?: number; image?: boolean; reasoning?: boolean }[], configured = true): Provider {
-  const stream = (model: Model<Api>, _context: unknown, options?: { onResponse?: (response: { status: number; headers: Record<string, string> }, model: Model<Api>) => unknown }) => {
+function fakeProvider(id: string, models: FakeModel[], configured = true): Provider {
+  type Options = { maxTokens?: number; reasoning?: string; onResponse?: (response: { status: number; headers: Record<string, string> }, model: Model<Api>) => unknown };
+  const stream = (model: Model<Api>, _context: unknown, options?: Options) => {
     const out = createAssistantMessageEventStream();
     const name = `${model.provider}/${model.id}`;
     asked.push(name);
+    sent.push({ name, ...(options?.maxTokens !== undefined && { maxTokens: options.maxTokens }), ...(options?.reasoning !== undefined && { reasoning: options.reasoning }) });
     const script = scripts.get(name) ?? [{ answer: `${name} answers` }];
     const outcome = (script.length > 1 ? script.shift() : script[0]) as Outcome;
     void (async () => {
@@ -77,7 +92,8 @@ function fakeProvider(id: string, models: { id: string; contextWindow?: number; 
       input: m.image === false ? ["text"] : ["text", "image"],
       cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
       contextWindow: m.contextWindow ?? 200_000,
-      maxTokens: 32_000,
+      maxTokens: m.maxTokens ?? 32_000,
+      ...(m.thinkingOff === null && { thinkingLevelMap: { off: null } }),
     })),
     api: { stream, streamSimple: stream },
   });
@@ -85,6 +101,13 @@ function fakeProvider(id: string, models: { id: string; contextWindow?: number; 
 
 const openai = fakeProvider("openai", [{ id: "gpt-5.5", reasoning: true }, { id: "gpt-5.4-mini" }]);
 const anthropic = fakeProvider("anthropic", [{ id: "claude-sonnet-4-6", contextWindow: 100_000, image: false }]);
+const openrouter = fakeProvider("openrouter", [{ id: "z-ai/glm-5.3-flash", contextWindow: 128_000, maxTokens: 16_000, image: false, reasoning: true, thinkingOff: null }]);
+
+/** A user message's content, as a channel gives it. */
+type Content = string | ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
+const IMAGE = { type: "image" as const, data: "aW1hZ2U=", mimeType: "image/png" };
+/** A text of about `tokens` tokens, as pi-ai estimates (3.5 characters a token). */
+const sized = (tokens: number) => "x".repeat(Math.ceil(tokens * 3.5));
 
 function providing(...providers: Provider[]): ComponentDefinition {
   return defineComponent({
@@ -113,7 +136,7 @@ function recordingHealth() {
 const CHAIN = ["openai/gpt-5.5", "anthropic/claude-sonnet-4-6"];
 
 /** The App, started, with what a runtime would have: every model.provider in one Models. */
-async function started(chains: Record<string, string[]> = { main: CHAIN }, extra: ComponentDefinition[] = [], providers: Provider[] = [openai, anthropic]) {
+async function started(chains: Record<string, string[]> = { main: CHAIN }, extra: ComponentDefinition[] = [], providers: Provider[] = [openai, anthropic, openrouter]) {
   const clock = createManualClock();
   let provided: Provider[] = [];
   const reader = defineComponent({
@@ -131,10 +154,10 @@ async function started(chains: Record<string, string[]> = { main: CHAIN }, extra
   }).create();
   await app.start();
   const models = modelsFrom(provided);
-  const ask = async (chain = "main") => {
+  const ask = async (chain = "main", content: Content = "hello", options?: SimpleStreamOptions) => {
     const model = models.getModel("failover", chain);
     if (model === undefined) throw new Error(`no failover/${chain}`);
-    return models.completeSimple(model, { messages: [{ role: "user", content: "hello", timestamp: 0 }] });
+    return models.completeSimple(model, { messages: [{ role: "user", content, timestamp: 0 }] }, options);
   };
   return { app, clock, models, ask };
 }
@@ -152,12 +175,18 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().capabilities["model.provider"]?.keys).toEqual({ openai: "test-providers", anthropic: "test-providers", failover: "provider-failover" });
 });
 
-test("a chain is a model failover/<chain>: what all its models take, the smallest window, reasoning when one reasons", async () => {
-  const { app, models } = await started({ main: CHAIN, mini: ["openai/gpt-5.4-mini"] });
+test("a chain is a model failover/<chain>: its first model's window, output, inputs and cost, never its weakest's; reasoning when one reasons", async () => {
+  const { app, models } = await started({
+    main: [...CHAIN, "openrouter/z-ai/glm-5.3-flash"],
+    small: ["openrouter/z-ai/glm-5.3-flash", "openai/gpt-5.5"],
+    mini: ["openai/gpt-5.4-mini", "anthropic/claude-sonnet-4-6"],
+  });
   try {
     const main = models.getModel("failover", "main");
-    expect(main).toMatchObject({ provider: "failover", id: "main", contextWindow: 100_000, maxTokens: 32_000, input: ["text"], reasoning: true });
-    expect(main?.name).toBe("Failover main: openai/gpt-5.5 → anthropic/claude-sonnet-4-6");
+    expect(main).toMatchObject({ provider: "failover", id: "main", contextWindow: 200_000, maxTokens: 32_000, input: ["text", "image"], reasoning: true });
+    expect(main?.thinkingLevelMap).toBeUndefined();
+    expect(main?.name).toBe("Failover main: openai/gpt-5.5 → anthropic/claude-sonnet-4-6 → openrouter/z-ai/glm-5.3-flash");
+    expect(models.getModel("failover", "small")).toMatchObject({ contextWindow: 128_000, maxTokens: 16_000, input: ["text"], reasoning: true });
     expect(models.getModel("failover", "mini")).toMatchObject({ contextWindow: 200_000, input: ["text", "image"], reasoning: false });
     // Configured when one of its providers is (runtime-pi checks it at start).
     expect(await models.checkAuth("failover")).toBeDefined();
@@ -312,6 +341,132 @@ test("with health, each chain reports: degraded while a model cools down, saying
     await clock.advance(15 * MINUTE + 1);
     await ask();
     expect(health.reports.get("provider-failover:main")).toEqual({ status: "up" });
+  } finally {
+    await app.stop();
+  }
+});
+
+test("a request that holds images goes to the models that see them first; one that does not is still tried, last", async () => {
+  const { app, clock, ask } = await started({ main: ["openai/gpt-5.5", "anthropic/claude-sonnet-4-6", "openai/gpt-5.4-mini"] });
+  try {
+    // The first model sees images: it answers with them, as when nothing fails.
+    expect((await ask("main", [{ type: "text", text: "what is this?" }, IMAGE])).model).toBe("gpt-5.5");
+    expect(asked).toEqual(["openai/gpt-5.5"]);
+
+    // It fails: the next that sees images answers before the text-only one.
+    asked.length = 0;
+    scripts.set("openai/gpt-5.5", [{ fail: "429 Rate limit reached", status: 429 }]);
+    expect((await ask("main", [{ type: "text", text: "and this?" }, IMAGE])).model).toBe("gpt-5.4-mini");
+    expect(asked).toEqual(["openai/gpt-5.5", "openai/gpt-5.4-mini"]);
+
+    // Without images, the chain's order.
+    asked.length = 0;
+    expect((await ask()).model).toBe("claude-sonnet-4-6");
+    expect(asked).toEqual(["anthropic/claude-sonnet-4-6"]);
+
+    // Every one that sees images failing, the text-only one answers (pi-ai shows it a placeholder for each image).
+    await clock.advance(15 * MINUTE + 1);
+    asked.length = 0;
+    scripts.set("openai/gpt-5.5", [{ fail: "503 Service Unavailable", status: 503 }]);
+    scripts.set("openai/gpt-5.4-mini", [{ fail: "503 Service Unavailable", status: 503 }]);
+    expect((await ask("main", [IMAGE])).model).toBe("claude-sonnet-4-6");
+    expect(asked).toEqual(["openai/gpt-5.5", "openai/gpt-5.4-mini", "anthropic/claude-sonnet-4-6"]);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("a model whose context window cannot hold the request is skipped, and the failure says so", async () => {
+  const { app, ask } = await started();
+  try {
+    scripts.set("openai/gpt-5.5", [{ fail: "429 Rate limit reached", status: 429 }]);
+
+    const failed = await ask("main", sized(150_000));
+    expect(asked).toEqual(["openai/gpt-5.5"]);
+    expect(failed.errorMessage).toMatch(
+      /^429 Rate limit reached \(provider-failover "main" skipped anthropic\/claude-sonnet-4-6: about 15\d{4} tokens, over its 100000-token window\)$/,
+    );
+
+    // A request it holds goes to it.
+    asked.length = 0;
+    expect((await ask("main", sized(50_000))).provider).toBe("anthropic");
+  } finally {
+    await app.stop();
+  }
+});
+
+test("a request no model of the chain can hold is refused as an overflow (pi-durable compacts), naming why each was skipped", async () => {
+  const { app, ask } = await started();
+  try {
+    const failed = await ask("main", sized(250_000));
+    expect(asked).toEqual([]);
+    expect(failed.stopReason).toBe("error");
+    expect(failed.errorMessage).toMatch(
+      /^provider-failover "main": the request exceeds the context window of every model of the chain \(openai\/gpt-5\.5: about 25\d{4} tokens, over its 200000-token window, anthropic\/claude-sonnet-4-6: about 25\d{4} tokens, over its 100000-token window\)$/,
+    );
+    expect(isContextOverflow(failed)).toBe(true);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("an overflow of a model whose window is smaller than the chain's is that model's: the request moves on, nothing cools down", async () => {
+  const { app, clock, ask } = await started({ main: ["openai/gpt-5.5", "anthropic/claude-sonnet-4-6", "openai/gpt-5.4-mini"] });
+  try {
+    scripts.set("openai/gpt-5.5", [{ fail: "429 Rate limit reached", status: 429 }]);
+    scripts.set("anthropic/claude-sonnet-4-6", [{ fail: "prompt is too long: 104000 tokens > 100000 maximum", status: 400 }, { answer: "it fits now" }]);
+
+    expect((await ask("main", sized(90_000))).model).toBe("gpt-5.4-mini");
+    expect(asked).toEqual(["openai/gpt-5.5", "anthropic/claude-sonnet-4-6", "openai/gpt-5.4-mini"]);
+
+    // Not cooling: the next request (the first model still cooling) goes to it again.
+    asked.length = 0;
+    expect((await ask()).content).toEqual([{ type: "text", text: "it fits now" }]);
+    expect(asked).toEqual(["anthropic/claude-sonnet-4-6"]);
+
+    // The first model's overflow is the request's: pi-durable compacts for it, nothing moves.
+    await clock.advance(15 * MINUTE + 1);
+    asked.length = 0;
+    scripts.set("openai/gpt-5.5", [{ fail: "Your input exceeds the context window of this model", status: 400 }]);
+    expect((await ask()).errorMessage).toBe("Your input exceeds the context window of this model");
+    expect(asked).toEqual(["openai/gpt-5.5"]);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("each model is sent the options a direct call to it would have: its own output limit, the least thinking for one that cannot stop thinking", async () => {
+  const { app, ask } = await started({ main: ["openai/gpt-5.5", "openrouter/z-ai/glm-5.3-flash"] });
+  try {
+    scripts.set("openai/gpt-5.5", [{ fail: "429 Rate limit reached", status: 429 }]);
+
+    await ask("main", "hello", { maxTokens: 30_000 });
+    expect(sent).toEqual([
+      { name: "openai/gpt-5.5", maxTokens: 30_000 },
+      { name: "openrouter/z-ai/glm-5.3-flash", maxTokens: 16_000, reasoning: "minimal" },
+    ]);
+
+    // A level the request asks for is its own; no maxTokens, none sent (each model's own default).
+    sent.length = 0;
+    await ask("main", "hello", { reasoning: "high" });
+    expect(sent).toEqual([{ name: "openrouter/z-ai/glm-5.3-flash", reasoning: "high" }]);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("model.complete through a chain: a title that falls to a model that cannot stop thinking thinks the least, with room for it", async () => {
+  const { app, models } = await started({ main: ["openai/gpt-5.4-mini", "openrouter/z-ai/glm-5.3-flash"] });
+  try {
+    scripts.set("openai/gpt-5.4-mini", [{ fail: "429 Rate limit reached", status: 429 }]);
+    const ctx = { clock: { now: () => 0 } } as unknown as AppContext;
+
+    expect(await createModelComplete(() => models).complete({ model: "failover/main", prompt: "Title this", maxTokens: 32 }, ctx)).toBe("openrouter/z-ai/glm-5.3-flash answers");
+    // The chain reasons (one of its models does), so model.complete allows REASONING_TOKENS (2048) for thinking.
+    expect(sent).toEqual([
+      { name: "openai/gpt-5.4-mini", maxTokens: 32 + 2_048 },
+      { name: "openrouter/z-ai/glm-5.3-flash", maxTokens: 32 + 2_048, reasoning: "minimal" },
+    ]);
   } finally {
     await app.stop();
   }
