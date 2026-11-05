@@ -31,7 +31,7 @@ export { createSqlDatabaseConformance, createSqliteDatabaseConformance } from ".
 export type { KeyValueFixture } from "./storage-kv.ts";
 export { createKeyValueConformance, createMemoryKeyValueStorage } from "./storage-kv.ts";
 export type { BlobFixture } from "./blob.ts";
-export { BLOB_CASES, createBlobConformance, createMemoryBlobStorage } from "./blob.ts";
+export { BLOB_CASES, BLOB_CONFORMANCE_STREAM_BYTES, createBlobConformance, createMemoryBlobStorage } from "./blob.ts";
 
 export type { MailboxFixture } from "./mailbox.ts";
 export { createMailboxConformance, createMemoryMailbox } from "./mailbox.ts";

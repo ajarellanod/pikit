@@ -92,11 +92,15 @@ export { ProposalsError } from "./proposals.ts";
 export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
 export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
-export type { BlobEntry, BlobPage, BlobStorage, BlobStore, BlobValue } from "./blob.ts";
+export type { BlobEntry, BlobHash, BlobPage, BlobStorage, BlobStore, BlobStored, BlobStream, BlobStreamPutOptions, BlobValue } from "./blob.ts";
 export {
   BLOB_LIST_LIMIT,
   BLOB_MAX_KEY,
   BLOB_MIN_MAX_BYTES,
+  BlobChecksumError,
+  blobStreamChunks,
+  checkBlobPutStream,
+  createBlobHash,
   BlobKeyError,
   blobKeyProblem,
   blobListLimit,
