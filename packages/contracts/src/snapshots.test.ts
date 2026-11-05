@@ -260,7 +260,7 @@ test("an archive just over maxUnpackedBytes or maxEntries is refused by a restor
   const store = storeOf();
   const tmp = join(root, "tmp");
   const manifest = (await checkpointSnapshot(store, target(dir), { tmp, now: 1 }))?.manifest as SnapshotManifest;
-  const unpacked = Bun.gunzipSync((await store.get(manifest.object))?.bytes as Uint8Array).byteLength;
+  const unpacked = Bun.gunzipSync(new Uint8Array((await store.get(manifest.object))?.bytes as Uint8Array)).byteLength;
   // What the archive holds: every file, directory and link restored, links not followed.
   const probe = join(root, "probe");
   await restoreSnapshot(store, target(probe), { tmp, base: root });
