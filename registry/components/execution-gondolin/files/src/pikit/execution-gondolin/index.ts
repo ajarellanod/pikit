@@ -37,9 +37,12 @@
  *   host that exists only there and that this process answers with the repository's `serve`: the
  *   guest can clone and push branches under the prefix, never the main branch, and holds neither the
  *   repository nor the operator's decisions. `git` is then added to the image (`packages`).
- * - starts from Gondolin's image, or, with `packages`, from a checkpoint of it with those Alpine
+ * - starts from its machine's `image` (`image.ts`: one the operator built, or Gondolin's default build
+ *   with more Alpine packages, built on the host at start and kept by its content), else Gondolin's,
+ *   its root disk grown to `rootfsSize`; with `packages`, from a checkpoint of it with those Alpine
  *   packages, made once and kept in `<root>/.execution-gondolin-image/` (`gondolin.ts`): one per
- *   image build and packages, so each agent's machine keeps its own.
+ *   image build, packages and disk size, so each agent's machine keeps its own. An image that cannot
+ *   be had refuses the start, naming the machines that use it.
  *
  * The sandboxes of conversations are held in a bounded cache (`cache.ts`): an idle one is dropped and
  * rebuilt at its next `resolve`, its files untouched.
@@ -67,7 +70,8 @@ import Type, { type Static } from "typebox";
 import { SandboxCache } from "./cache.ts";
 import { createSandboxEnv, type Sandbox, TMP, WORKSPACE } from "./env.ts";
 import { gondolinLauncher } from "./gondolin.ts";
-import type { GuestLauncher, GuestProposals, GuestSpec } from "./guest.ts";
+import type { GuestImage, GuestLauncher, GuestProposals, GuestSpec } from "./guest.ts";
+import { prepareImages } from "./image.ts";
 import { Mounts } from "./paths.ts";
 import { Pool, Slot } from "./pool.ts";
 import { Retention, type RetentionLog } from "./retention.ts";
@@ -96,6 +100,11 @@ const cpus = (options = {}) => Type.Integer({ minimum: 1, ...options });
 const packageList = (options = {}) => Type.Array(Type.String({ pattern: "^[a-z0-9][a-z0-9+._-]*$" }), options);
 /** Whose a workspace is: the chat's and the agent's (`chat`), or the agent's in every chat (`agent`). */
 const workspaceMode = (options = {}) => Type.Union([Type.Literal("chat"), Type.Literal("agent")], options);
+/** A machine's image (`image.ts`): a Gondolin selector the operator built, or Alpine packages built here once. */
+const imageSetting = () =>
+  Type.Union([Type.String({ minLength: 1 }), Type.Object({ packages: packageList({ minItems: 1 }) }, { additionalProperties: false })]);
+/** The least size of each VM's root disk, grown at boot (`"4G"`). */
+const diskSize = () => Type.String({ pattern: "^[0-9]+[MG]$" });
 
 /**
  * An agent's machine: each field it sets replaces the base's (its `allowedHosts` are not added to the
@@ -110,6 +119,8 @@ const Profile = Type.Object(
     memory: Type.Optional(memory()),
     cpus: Type.Optional(cpus()),
     workspace: Type.Optional(workspaceMode()),
+    image: Type.Optional(imageSetting()),
+    rootfsSize: Type.Optional(diskSize()),
   },
   { additionalProperties: false },
 );
@@ -148,8 +159,17 @@ const Config = Type.Object({
    */
   workspace: workspaceMode({ default: "chat" }),
   /**
+   * The image VMs boot (`packages` are added over it): absent, Gondolin's own; a string, a Gondolin
+   * selector the operator built (an asset directory, a build id, a local `name:tag`); `{ packages }`,
+   * Gondolin's default build with those Alpine packages, built on the host at the first start that
+   * needs it and kept by its content. Checked (or built) at start.
+   */
+  image: Type.Optional(imageSetting()),
+  /** The least size of each VM's root disk (`"4G"`), grown at boot: room for what commands write outside `/workspace`. Absent: the image's own. */
+  rootfsSize: Type.Optional(diskSize()),
+  /**
    * A machine per agent, by agent name (`ConversationRef.agent`, exactly): its `packages`,
-   * `allowedHosts`, `secrets`, `memory`, `cpus` and `workspace`, each replacing the base's. An agent not named here
+   * `allowedHosts`, `secrets`, `memory`, `cpus`, `workspace`, `image` and `rootfsSize`, each replacing the base's. An agent not named here
    * (a misspelled key too) gets the base.
    */
   agents: Type.Record(Type.String(), Profile, { default: {}, propertyNames: { pattern: AGENT_NAME, maxLength: 100 } }),
@@ -162,6 +182,10 @@ const Config = Type.Object({
 });
 
 type Profile = Static<typeof Profile>;
+
+/** How messages name the base machine and an agent's (`image.ts`). */
+const BASE = "the base machine";
+const agentMachine = (agent: string) => `agent ${JSON.stringify(agent)}`;
 type Secret = Static<ReturnType<typeof secretList>>[number];
 
 /** The directory of a chat: the hex SHA-256 of its key (keys are any string; this is one safe name). */
@@ -258,6 +282,12 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
         },
       };
 
+      /** A machine's packages: the profile's (else the base's), after `git` with proposals here (the steward's). */
+      const packagesOf = (profile: Profile | undefined) => [...new Set([...(proposals.get() === undefined ? [] : ["git"]), ...(profile?.packages ?? config.packages)])];
+      /** Each machine's image, by machine (`BASE`, `agentMachine(name)`), prepared at start (`image.ts`). */
+      let images = new Map<string, GuestImage | undefined>();
+      const machineOf = new Map<Profile, string>(Object.entries(config.agents).map(([name, profile]) => [profile, agentMachine(name)]));
+
       const pool = new Pool({
         launcher,
         maxVms: config.maxVms,
@@ -295,9 +325,11 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
             }),
             memory: profile?.memory ?? config.memory,
             cpus: profile?.cpus ?? config.cpus,
-            // The steward's git, with proposals here.
-            packages: [...new Set([...(proposals.get() === undefined ? [] : ["git"]), ...(profile?.packages ?? config.packages)])],
+            packages: packagesOf(profile),
             imageDir: join(root, IMAGE_DIR),
+            image: images.get(profile === undefined ? BASE : (machineOf.get(profile) as string)),
+            rootfsSize: profile?.rootfsSize ?? config.rootfsSize,
+            inUse: [...images.values()],
             ...(proposals.get() !== undefined && { proposals: guestProposals }),
           };
         };
@@ -430,6 +462,16 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           // Temporary files and spilled output of an earlier process: no VM and no tool refers to them now.
           await rm(join(root, TMP_DIR), { recursive: true, force: true });
           await made(fallback, '"default" (execution)');
+          // Every machine's image, found or built now: one that cannot be had refuses the start, naming its machines.
+          images = await prepareImages(
+            join(root, IMAGE_DIR),
+            [
+              { whose: BASE, image: config.image, packages: packagesOf(undefined) },
+              ...Object.entries(config.agents).map(([name, profile]) => ({ whose: agentMachine(name), image: profile.image ?? config.image, packages: packagesOf(profile) })),
+            ],
+            launcher,
+            ctx.logger,
+          );
           // In the background: a first sweep may have much to delete.
           retention?.start();
         },

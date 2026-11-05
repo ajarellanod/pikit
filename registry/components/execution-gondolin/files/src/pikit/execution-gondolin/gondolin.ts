@@ -3,9 +3,12 @@
  *
  * - **Files**: each mount is Gondolin's `RealFSProvider` over a host directory, which refuses the
  *   guest's links that lead outside it.
- * - **Image**: Gondolin's, or, with `packages`, a checkpoint of it with those Alpine packages added
- *   (`imageWith`): made once by a VM whose only reachable host is the Alpine mirror, kept in `imageDir`
- *   by the image's build id and the packages, and resumed by every VM (a copy-on-write overlay).
+ * - **Image**: the machine's (`spec.image`, prepared at start by `image.ts`: one the operator built, or
+ *   one built on the host), else Gondolin's; with `packages`, a checkpoint of it with those Alpine
+ *   packages added (`imageWith`): made once by a VM whose only reachable host is the Alpine mirror,
+ *   kept in `imageDir` by the image's build id, the packages and the root disk's size, and resumed by
+ *   every VM (a copy-on-write overlay). `spec.rootfsSize` grows each VM's root disk at boot (Gondolin's
+ *   `rootfs.size`: a larger qcow2 overlay, then `resize2fs` in the guest).
  * - **Network**: `createHttpHooks` with `allowedHosts` exactly as given (an empty list denies every
  *   host: Gondolin answers 403), and each secret as a placeholder in `$NAME`, replaced by the host in
  *   the headers of requests to that secret's hosts only. Gondolin passes only HTTP and TLS, through its
@@ -27,8 +30,24 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { createHttpHooks, ensureGuestAssets, loadAssetManifest, RealFSProvider, type SecretManager, VM, type VMOptions, VmCheckpoint } from "@earendil-works/gondolin";
-import { type Guest, type GuestCommand, type GuestExit, type GuestLauncher, type GuestProposals, type GuestRun, type GuestSpec, PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
+import {
+  buildAssets,
+  createHttpHooks,
+  ensureGuestAssets,
+  ensureImageSelector,
+  getAssetDirectory,
+  getDefaultArch,
+  hasGuestAssets,
+  loadAssetManifest,
+  loadGuestAssets,
+  RealFSProvider,
+  type SecretManager,
+  VM,
+  type VMOptions,
+  VmCheckpoint,
+} from "@earendil-works/gondolin";
+import { type Guest, type GuestCommand, type GuestExit, type GuestImage, type GuestLauncher, type GuestProposals, type GuestRun, type GuestSpec, PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
+import { BUILD_PREFIX } from "./image.ts";
 import { kvmWarning, qemuProblem } from "./qemu.ts";
 
 /** Where the launcher writes each command's status (`cwd`, `program`, or its PID): a tmpfs in the guest. */
@@ -129,23 +148,47 @@ const images = new Map<string, Promise<VmCheckpoint>>();
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
 
 /**
- * The checkpoint's file name for Gondolin's image `buildId` with `packages` (in any order, repeats
- * ignored): `<build id's digest>-<packages' digest>.qcow2`, so one of another build can be told apart.
+ * The checkpoint's file name for the image `buildId` with `packages` (in any order, repeats ignored),
+ * made on a root disk of `rootfsSize` when one is set: `<build id's digest>-<digest of the rest>.qcow2`,
+ * so one of another build can be told apart.
  */
-export function imageFile(buildId: string, packages: readonly string[]): string {
-  return `${digest(buildId)}-${digest(JSON.stringify([...new Set(packages)].sort()))}.qcow2`;
+export function imageFile(buildId: string, packages: readonly string[], rootfsSize?: string): string {
+  const sorted = [...new Set(packages)].sort();
+  return `${digest(buildId)}-${digest(JSON.stringify(rootfsSize === undefined ? sorted : { packages: sorted, rootfsSize }))}.qcow2`;
 }
 
 /**
- * The files of an image directory (`names`) to remove once a checkpoint of `buildId` is made: those of
- * another build id (its checkpoints and partial ones), and every partial one of another process, even
- * one a live process is still writing (two servers sharing a `root`: that build then fails and is made
- * again at its next boot). The checkpoints of this build, whatever their packages (another agent's
- * machine), stay, and so do this process's partial ones (another agent's image being made now).
+ * The checkpoints of an image directory (`names`) to remove once one is made: those of a build id not
+ * in `buildIds` (the images every machine of the configuration boots: no machine uses them), and every
+ * partial one of another process, even one a live process is still writing (two servers sharing a
+ * `root`: that build then fails and is made again at its next boot). The checkpoints of those builds,
+ * whatever their packages (another agent's machine), stay, and so do this process's partial ones
+ * (another agent's image being made now), and the images `image.ts` builds (`build-*`).
  */
-export function staleImages(names: readonly string[], buildId: string, pid = process.pid): string[] {
-  const build = `${digest(buildId)}-`;
-  return names.filter((name) => !(name.startsWith(build) && (name.endsWith(".qcow2") || name.endsWith(`.${pid}.partial`))));
+export function staleImages(names: readonly string[], buildIds: readonly string[], pid = process.pid): string[] {
+  const builds = buildIds.map((buildId) => `${digest(buildId)}-`);
+  return names.filter(
+    (name) => !name.startsWith(BUILD_PREFIX) && !(builds.some((build) => name.startsWith(build)) && (name.endsWith(".qcow2") || name.endsWith(`.${pid}.partial`))),
+  );
+}
+
+/** Gondolin's default image's build id when it is on this machine (nothing is downloaded), else `undefined`. */
+function defaultBuildId(): string | undefined {
+  return hasGuestAssets() ? loadAssetManifest(getAssetDirectory())?.buildId : undefined;
+}
+
+/** Gondolin's options for `spec`'s image and root disk: its asset directory, and `rootfs.size`. */
+function imageOptions(spec: GuestSpec): Pick<VMOptions, "sandbox" | "rootfs"> {
+  return {
+    ...(spec.image !== undefined && { sandbox: { imagePath: spec.image.path } }),
+    ...(spec.rootfsSize !== undefined && { rootfs: { size: spec.rootfsSize } }),
+  };
+}
+
+/** Why an image built for `imageArch` cannot boot on this machine (`hostArch`), or `undefined`. */
+export function archProblem(imageArch: string | undefined, hostArch: string): string | undefined {
+  if (imageArch === undefined || imageArch === hostArch) return undefined;
+  return `it is built for ${imageArch}, and this machine runs ${hostArch} VMs: build it with --arch ${hostArch}`;
 }
 
 /**
@@ -155,11 +198,10 @@ export function staleImages(names: readonly string[], buildId: string, pid = pro
  * That VM is made here, outside the pool: it does not count against `maxVms`.
  */
 async function imageWith(spec: GuestSpec): Promise<VmCheckpoint> {
-  const assets = await ensureGuestAssets();
-  const buildId = loadAssetManifest(dirname(assets.rootfsPath))?.buildId;
-  if (buildId === undefined) throw new Error("Gondolin's guest image has no build id, so packages cannot be added to it: set `packages` to none");
+  const buildId = spec.image !== undefined ? spec.image.buildId : loadAssetManifest(dirname((await ensureGuestAssets()).rootfsPath))?.buildId;
+  if (buildId === undefined) throw new Error("the guest image has no build id, so packages cannot be added to it: set `packages` to none");
   const packages = [...new Set(spec.packages)].sort();
-  const name = imageFile(buildId, packages);
+  const name = imageFile(buildId, packages, spec.rootfsSize);
   const file = join(spec.imageDir, name);
   let found = images.get(file);
   if (found === undefined) {
@@ -167,7 +209,8 @@ async function imageWith(spec: GuestSpec): Promise<VmCheckpoint> {
       if (existsSync(file)) return VmCheckpoint.load(file);
       await mkdir(spec.imageDir, { recursive: true });
       const { httpHooks, env } = createHttpHooks({ allowedHosts: [ALPINE_MIRROR] });
-      const vm = await VM.create({ httpHooks, env, memory: spec.memory, cpus: spec.cpus, sessionLabel: "pikit image" });
+      // On the machine's root disk size: packages that need more room than the image leaves get it.
+      const vm = await VM.create({ httpHooks, env, memory: spec.memory, cpus: spec.cpus, sessionLabel: "pikit image", ...imageOptions(spec) });
       const partial = join(spec.imageDir, `${name.slice(0, -".qcow2".length)}.${process.pid}.partial`);
       try {
         const added = await vm.exec(["apk", "add", "--no-cache", ...packages]);
@@ -182,7 +225,10 @@ async function imageWith(spec: GuestSpec): Promise<VmCheckpoint> {
         throw error;
       }
       await rename(partial, file);
-      for (const stale of staleImages(await readdir(spec.imageDir), buildId)) await rm(join(spec.imageDir, stale), { force: true });
+      // Every machine's image's build is kept: Gondolin's default's when it is here (none, nothing of it to keep).
+      const inUse = spec.inUse.map((image) => (image === undefined ? defaultBuildId() : image.buildId));
+      const keep = [buildId, ...inUse.filter((id): id is string => id !== undefined)];
+      for (const stale of staleImages(await readdir(spec.imageDir), keep)) await rm(join(spec.imageDir, stale), { force: true });
       return VmCheckpoint.load(file);
     })();
     images.set(file, found);
@@ -292,6 +338,7 @@ export const gondolinLauncher: GuestLauncher = {
       memory: spec.memory,
       cpus: spec.cpus,
       sessionLabel: spec.label,
+      ...imageOptions(spec),
     };
     let vm: VM;
     if (spec.packages.length === 0) vm = await VM.create(options);
@@ -316,5 +363,18 @@ export const gondolinLauncher: GuestLauncher = {
       await vm.close().catch(() => undefined);
       throw error;
     }
+  },
+
+  async findImage(selector: string): Promise<GuestImage> {
+    // Gondolin's own resolution (a path, a build id, a local ref; a ref of its registry is pulled).
+    const resolved = await ensureImageSelector(selector);
+    loadGuestAssets(resolved.assetDir);
+    const problem = archProblem(resolved.arch, getDefaultArch());
+    if (problem !== undefined) throw new Error(problem);
+    return { path: resolved.assetDir, buildId: resolved.buildId ?? loadAssetManifest(resolved.assetDir)?.buildId };
+  },
+
+  async buildImage(config, outputDir): Promise<void> {
+    await buildAssets(config, { outputDir, verbose: false });
   },
 };
