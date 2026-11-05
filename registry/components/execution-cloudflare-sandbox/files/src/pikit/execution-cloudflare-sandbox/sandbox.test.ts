@@ -48,6 +48,7 @@ function setup(options: { container?: FakeContainer; maxBlobBytes?: number; call
   const clock = { offset: 0 };
   const logs: Logged[] = [];
   const logger: Logger = {
+    debug: () => {},
     info: (message, fields) => logs.push({ level: "info", message, ...(fields !== undefined && { fields }) }),
     warn: (message, fields) => logs.push({ level: "warn", message, ...(fields !== undefined && { fields }) }),
     error: (message, fields) => logs.push({ level: "error", message, ...(fields !== undefined && { fields }) }),

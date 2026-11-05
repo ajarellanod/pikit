@@ -541,7 +541,7 @@ export class Sandbox {
     canonicalPath: ({ path }) => this.file<string>("realpath", { path }),
     readTextFile: async ({ path }) => {
       const read = await this.bytes(path);
-      return read.ok ? { ok: true, value: new TextDecoder("utf-8", { ignoreBOM: true }).decode(read.value) } : read;
+      return read.ok ? { ok: true, value: new TextDecoder("utf-8", { fatal: false, ignoreBOM: true }).decode(read.value) } : read;
     },
     readTextLines: async ({ path, maxLines }) => {
       if (maxLines !== undefined && maxLines <= 0) return { ok: true, value: [] };
