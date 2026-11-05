@@ -1,0 +1,47 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "execution-cloudflare-sandbox",
+  "version": "0.0.1",
+  "title": "Cloudflare sandbox host: a Linux container per sandbox and agent, served to execution-remote",
+  "description": "A sandbox host on Cloudflare Containers speaking execution-serve's protocol: a container per sandbox id and agent, its image per agent, its workspace saved to storage.blob when idle and restored on first use; never given secrets.",
+  "targets": [
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
+    "capabilities": [
+      "secrets",
+      "storage.blob"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "http.route"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "PIKIT_SANDBOX_TOKEN",
+      "secret": true,
+      "required": true,
+      "description": "The token execution-remote clients send (the same value in their projects); at least 32 characters (for example `openssl rand -hex 32`). Never reaches a container."
+    }
+  ]
+}
