@@ -35,6 +35,7 @@ export const config = {
   "server-bun": { port: 3000 },
   "execution-serve": { leaseSeconds: 120 }, // default
   // "execution-gondolin": { ... }          // its README: images, sizes, the hosts a sandbox may reach
+  //   snapshots: { idleMinutes: 10 },      // idle sandboxes to storage.blob (storage-blob-s3): a disposable host
 };
 
 export default defineApp({
@@ -56,7 +57,16 @@ Deploy it like any server project (`pikit up`: deployment-docker publishes the p
 `127.0.0.1` only). Clients require `https://`, so put TLS in front: `expose-cloudflare-tunnel` (no
 open port), or a reverse proxy. The clients' config is then
 `"execution-remote": { hosts: { general: { url: "https://sandbox.example.com" } } }` with the same `PIKIT_SANDBOX_TOKEN`
-(execution-remote's README).
+(execution-remote's README). A client with several hosts names this one among them, with the token
+secret it was given (`hosts: { render: { url, tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" } }`), and
+routes agents to it (`agents: { designer: "render" }`): each host its own token, its own machines.
+
+With the provider's `snapshots` (execution-gondolin's, workspace-local's) and a `storage.blob`
+(storage-blob-s3), a sandbox unused for `idleMinutes` is saved to the bucket and released here, and
+its next request restores it: the host holds only the sandboxes in use, and a new host restores each
+from the bucket ([workspace snapshots](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)).
+This component needs nothing for it: each request resolves its sandbox, which is when the provider
+restores it.
 
 ## What it does
 
@@ -139,7 +149,8 @@ open port), or a reverse proxy. The clients' config is then
   provider counts as use, and each sandbox id is a chat of its own (`execution-serve:<id>`). So
   `retentionDays` in the host's execution-gondolin or workspace-local config deletes a sandbox nobody
   used for that many days (never one with a command running, so not one a client is still reading);
-  its next request finds it new and empty. A provider's `workspace: "agent"` (`per: "agent"`)
+  its next request finds it new and empty (with `snapshots`, `retentionDays` deletes the bucket's
+  snapshots instead). A provider's `workspace: "agent"` (`per: "agent"`)
   sandboxes are never deleted. This component keeps no files of its own.
 
 ## Config

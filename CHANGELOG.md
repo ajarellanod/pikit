@@ -33,6 +33,13 @@ line names its area.
 
 ### Components
 
+- A snapshot's restore is bounded: workspace-local's and execution-gondolin's `snapshots` take
+  `maxUnpackedBytes` (4 GiB: the tar after gunzip, headers included) and `maxEntries` (1,000,000),
+  past which the whole restore is refused and nothing is left half-extracted (a gzip bomb never fills
+  the disk); a checkpoint keeps to the same limits, so a host never saves what it would refuse.
+  execution-remote refuses two hosts at one `url`, and warns at start of a key of `agents` no
+  `agent.definition` has (a misspelled agent would work on the default host); the docs of sandboxed
+  execution, agent sandboxes, targets and SPEC §6 say what is built.
 - execution-remote reaches several sandbox hosts, an agent routed to its own
   ([features/agent-sandboxes.md](features/agent-sandboxes.md), "Several sandbox hosts"): config is
   `hosts: { <name>: { url, tokenSecret? } }`, `defaultHost` (required with several) and

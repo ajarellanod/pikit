@@ -132,7 +132,12 @@ request) restores it before the tool runs. The disk holds only the workspaces in
 - **With `retentionDays`**, the bucket's snapshots whose newest archive is older than N days are
   deleted (hourly, the manifest first) instead of the local directories, which are released anyway.
 - **`maxBytes`**: an archive larger stays here, a warning logged, until its next use.
-- **`maxUnpackedBytes`** (4 GiB) **and `maxEntries`** (1,000,000): what a restore takes at most, counted as the archive unpacks (the tar after gunzip, headers included; files, directories and links). Past either the whole restore is refused (the tool call fails, nothing at the directory, nothing left half-extracted): a gzip bomb or a huge archive never fills the disk. A checkpoint keeps to the same limits (a directory past them stays here, as past `maxBytes`); raise them to restore a snapshot a larger limit saved.
+- **`maxUnpackedBytes`** (4 GiB) **and `maxEntries`** (1,000,000): what a restore takes at most,
+  counted as the archive unpacks (the tar after gunzip, headers included; files, directories and
+  links). Past either the whole restore is refused (the tool call fails, nothing at the directory,
+  nothing left half-extracted): a gzip bomb or a huge archive never fills the disk. A checkpoint keeps
+  to the same limits (a directory past them stays here, as past `maxBytes`); raise them to restore a
+  snapshot a larger limit saved.
 - Its own files are in `<root>/.workspace-local-snapshots/` (archives on their way, restores, the index
   of the directories on disk, which a restart reads: each counts as used at start). A stop releases
   nothing.
