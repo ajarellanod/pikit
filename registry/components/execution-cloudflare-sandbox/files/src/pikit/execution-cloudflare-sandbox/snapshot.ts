@@ -23,13 +23,18 @@
  * alone, kept apart so a streaming or multipart helper can replace it.
  */
 
-import type { BlobStore } from "@pikit/contracts";
+import type { BlobStorage, BlobStore } from "@pikit/contracts";
 import { inspectArchive } from "./tar.ts";
 
 export const SNAPSHOT_NAMESPACE = "workspace-snapshots";
 export const MANIFEST = "manifest.json";
 export const SNAPSHOT_VERSION = 1;
 const ARCHIVE = /^snapshot-(\d{1,16})-([0-9a-f]{16})\.tar\.gz$/;
+
+/** The shared namespace of every backend's snapshots (not this component's name: `registry validate`'s `SHARED_NAMESPACES`). */
+export function openSnapshots(storage: BlobStorage): BlobStore {
+  return storage.namespace(SNAPSHOT_NAMESPACE);
+}
 
 export interface SnapshotManifest {
   version: 1;

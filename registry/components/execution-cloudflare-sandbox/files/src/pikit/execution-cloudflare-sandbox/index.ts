@@ -26,7 +26,7 @@ import Type, { type Static } from "typebox";
 import { SANDBOX_OBJECT } from "./context.ts";
 import { AGENT_NAME, MAX_AGENT_LENGTH } from "./protocol.ts";
 import { type Profile, Sandbox } from "./sandbox.ts";
-import { SNAPSHOT_NAMESPACE } from "./snapshot.ts";
+import { openSnapshots } from "./snapshot.ts";
 
 export { worker, WORKER_NAME } from "./worker.ts";
 export { objectName } from "./sandbox.ts";
@@ -107,7 +107,7 @@ export default defineComponent({
         const sandbox = new Sandbox({
           container: object.container,
           storage: object.storage,
-          snapshots: storage.namespace(SNAPSHOT_NAMESPACE),
+          snapshots: openSnapshots(storage),
           maxBlobBytes: storage.maxBytes,
           profile: (agent) => profileOf(config, agent),
           root: config.root,

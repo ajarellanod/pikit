@@ -135,10 +135,10 @@ export function createObjectStorage(): ObjectStorage & { values: Map<string, unk
   return storage;
 }
 
-/** One entry of a crafted archive. `type`: tar's typeflag ("0" file, "5" directory, "2" symlink, "1" hard link, "6" FIFO). */
+/** One entry of a crafted archive. `type`: tar's typeflag ("0" file, "5" directory, "2" symlink, "1" hard link, "6" FIFO, "x" pax header). */
 export interface CraftedEntry {
   name: string;
-  type?: "0" | "1" | "2" | "5" | "6";
+  type?: string;
   content?: string;
   linkname?: string;
   /** Spoil the header's checksum. */

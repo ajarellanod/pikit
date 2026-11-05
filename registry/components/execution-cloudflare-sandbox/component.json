@@ -12,8 +12,8 @@
     "contracts": "0.0.1",
     "adapter": "0.0.1",
     "capabilities": [
-      "secrets",
-      "storage.blob"
+      "storage.blob",
+      "secrets"
     ]
   },
   "optional": {
@@ -24,6 +24,24 @@
   ],
   "apps": {
     "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [],
+      "requires": [
+        "storage.blob"
+      ],
+      "optional": []
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "secrets"
+      ],
+      "optional": []
+    }
   },
   "dependencies": {
     "@pikit/contracts": "0.0.1",
