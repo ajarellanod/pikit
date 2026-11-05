@@ -129,8 +129,9 @@ it. A feed is a type inside a contract, not a capability: `agent.submissions.ans
 
 ## Context
 
-`Context` is `{ abortSignal, value(key), toString() }` ([context.ts](../packages/core/src/context.ts),
-K5), the same shape as Chord's. It is immutable; `withAbortSignal`, `withCancel` and
+`Context` is `{ abortSignal, telemetry, value(key), toString() }`
+([context.ts](../packages/core/src/context.ts), K5), the same shape as Chord's: `telemetry` is Chord's
+telemetry parent, a span that records nothing unless a host set one, which a derived context keeps. It is immutable; `withAbortSignal`, `withCancel` and
 `withContextValue` derive new ones. Every handler gets an `AppContext`, which adds `target`, `logger`,
 `clock`, `emit`, `run` and `derive`.
 

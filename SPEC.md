@@ -72,6 +72,9 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 - **K3. Events are never persisted.** An event is a notification and may be missed. A fact that
   must not be lost is a feed (`Feed`, `packages/contracts/src/feed.ts`). There is no runtime schema for events and no
   `registerEvent`. *Why:* one pattern for durability instead of two, and less kernel surface.
+  A live view follows state, not events: `agent.observe`'s `watch` sends what a conversation shows
+  whole, then the JSON ops that change it, folded for a consumer that falls behind and never dropped
+  (a hint says when entries went past unsent: read the transcript again).
 - **K4. The kernel takes a plain, validated object as config.** It merges the components' TypeBox
   schemas under their names, validates, and deep-freezes. Where the object comes from (TypeScript
   in `pikit.config.ts` today, YAML or a wizard later) is the project's or the CLI's business, never
@@ -80,12 +83,15 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   and to observers (K13). *Why:* formats change; the kernel's contract does not; and a component
   that read another's config would depend on it outside the capability graph, where `registry
   validate`, `pikit doctor` and `pikit remove` cannot see it (P4).
-- **K5. `Context` is pikit's own, and frozen.** Its shape is `abortSignal`, `value(key)`,
-  `toString()`, with `createContextKey`, `withAbortSignal`, `withCancel`, `withContextValue` and
-  `BACKGROUND_CONTEXT`. It grows only through context keys, never by changing the interface. It
-  matches Chord's shape today; when Chord changes, the adapter bridges it. Chord itself stays out of
-  the kernel, re-checked at Chord 1.0 (`features/kit-follow-ups.md`). *Why:* users are isolated
-  from Pi's weekly churn, and new needs (tracing, deadlines) fit as keys.
+- **K5. `Context` is pikit's own, and frozen.** Its shape is `abortSignal`, `telemetry`,
+  `value(key)`, `toString()`, with `createContextKey`, `withAbortSignal`, `withCancel`,
+  `withContextValue` and `BACKGROUND_CONTEXT`. It grows only through context keys, never by changing
+  the interface, but to keep Chord's shape: `telemetry` (pi-telemetry's `TelemetrySpan`, by shape)
+  came with Pi 1.5.0, as Chord's `Context` requires it since 1.4.0; the kernel records nothing (a
+  no-op span at the root, a derived context keeps its parent's) and exports neither the span's type
+  nor a way to set one. It matches Chord's shape today; when Chord changes, the adapter bridges it.
+  Chord itself stays out of the kernel, re-checked at every Pi pin bump (`docs/chord-decision.md`).
+  *Why:* users are isolated from Pi's weekly churn, and new needs (tracing, deadlines) fit as keys.
 - **K6. `stop()` may never run.** A `kill -9`, an out-of-memory kill or a Durable Object eviction
   ends the app with no `stop()`. `stop()` is for tidiness, never for correctness: whatever must
   survive is committed as it happens. *Why:* it is physically true, it is what Pi's durable
@@ -109,9 +115,10 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   anyone.
 - **K11. The kernel owns its TypeBox range.** `defineComponent`'s config schema is TypeBox
   (`TSchema`, `Static`), so TypeBox is part of the kernel's public API. The kernel declares its own
-  compatible range; only the adapter follows Pi's exact TypeBox version. *Why:* a TypeBox major
-  chosen by Pi must not change pikit's kernel without pikit deciding it. A schema-neutral API
-  (Standard Schema) is considered only if TypeBox becomes a problem.
+  compatible range. Pi has no TypeBox since 1.5.0 (its tool schemas are any JSON Schema, checked by
+  pi-schema): the adapter, which followed Pi's exact version, imports `typebox` as a dependency of
+  its own. *Why:* a TypeBox major chosen by Pi must not change pikit's kernel without pikit deciding
+  it. A schema-neutral API (Standard Schema) is considered only if TypeBox becomes a problem.
 - **K12. Typing by declaration merging stays, and is tested as shipped.** Events, capabilities and
   pipelines are typed by augmenting `@pikit/core`'s interfaces, as Pi types its messages. A type test
   builds a project against the packed `@pikit/core` tarball and declares its own augmentations, so
@@ -450,9 +457,11 @@ captures identity before normalization/routing, so in-place mutation cannot turn
   a skill that teaches an AI agent to add a view.
 - **It reads contracts and feeds, never internals.** The admin API is backed by the capabilities of
   the installed components. What must not be missed comes from feeds, not from events (K3). Live views
-  of conversations and tasks build on pi-durable's `watch()` and `taskGraph()`, reached through the
-  adapter, not on a copy of their state. Transcript and live-event payloads intentionally use Pi's
-  runtime JSON; integration tests run that producer's wire output through the UI consumer.
+  of conversations and tasks build on pi-durable's watches (a conversation's view, the task graph),
+  reached through the adapter, not on a copy of their state: what a conversation shows is state,
+  sent whole and then as the JSON ops that change it (`agent.observe`'s `watch`). Transcript entries
+  and the answer being written intentionally use Pi's runtime JSON; integration tests run that
+  producer's wire output through the UI consumer.
 - **It runs wherever the app runs, and closes no deployment** (§4,
   `features/deployment-targets.md`). The built UI is static files and the API is standard fetch
   handlers, so any host that serves the app serves the dashboard: `server-bun`, a Worker, and later
@@ -480,7 +489,7 @@ captures identity before normalization/routing, so in-place mutation cannot turn
 
 The admin API reads the composition through `APP_DESCRIPTION` (K13), the runtime through
 `agent.observe` (`packages/contracts/src/observe.ts`: conversations with their agent, busy state and
-cost, a transcript, a live event stream, usage; runtime-pi provides it from pi-durable's records), and
+cost, a transcript, one conversation live as state, usage; runtime-pi provides it from pi-durable's records), and
 asks `admin.auth` (`packages/contracts/src/admin.ts`; `admin-auth-token`, a bearer token from
 `secrets`, on both targets) before every answer. Its routes and the UI's files are prefix routes
 (`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves; every
