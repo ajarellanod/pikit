@@ -10,6 +10,7 @@ import {
   type AgentObserver,
   type AgentRequest,
   type AgentRuntime,
+  applyOps,
   compareHttpRoutes,
   diffOps,
   type ConversationRef,
@@ -26,6 +27,7 @@ import {
   type Usage,
 } from "@pikit/contracts";
 import { createMemoryKeyValueStorage, createMemorySubmissions } from "@pikit/contracts/testing";
+import type { ChatEvent } from "./api.ts";
 import type { AccountLink, AccountSession, AccountState, AccountSummary, AccountsPage, AccountsQuery, AccountUser, Accounts } from "./accounts/types.ts";
 import type { AccountsWiring } from "./wiring.ts";
 
@@ -443,6 +445,51 @@ export function sse(response: Response) {
         buffer += decoder.decode(value, { stream: true });
       }
       return data;
+    },
+  };
+}
+
+/**
+ * A client of a conversation's live events (`GET .../events`, over `sse`) that folds the live value
+ * as the page does: `until` reads until it is what a test expects, however the changes were folded.
+ */
+export function liveReader(response: Response) {
+  const events = sse(response);
+  /** Every event read, and the live value their `live` events make. */
+  const seen: ChatEvent[] = [];
+  let live: JsonValue = null;
+  /** The events `next` looked at. */
+  let looked = 0;
+  const read = async (): Promise<ChatEvent> => {
+    const [event] = (await events.take(1)) as ChatEvent[];
+    if (event === undefined) throw new Error("the stream ended");
+    seen.push(event);
+    if (event.type === "live") live = applyOps(live, event.ops as never);
+    return event;
+  };
+  return {
+    reader: events.reader,
+    seen,
+    /** The next `count` events. */
+    async take(count: number): Promise<ChatEvent[]> {
+      const taken: ChatEvent[] = [];
+      while (taken.length < count) taken.push(await read());
+      looked = seen.length;
+      return taken;
+    },
+    /** Reads until the live value is `expected`. */
+    async until(expected: unknown): Promise<void> {
+      while (!Bun.deepEquals(live, expected)) await read();
+    },
+    /** The next event of type `type` not looked at yet (one `until` read, or a new one). */
+    async next(type: ChatEvent["type"]): Promise<ChatEvent> {
+      for (;;) {
+        while (looked < seen.length) {
+          const event = seen[looked++] as ChatEvent;
+          if (event.type === type) return event;
+        }
+        await read();
+      }
     },
   };
 }

@@ -5,6 +5,7 @@
  */
 
 import { expect, test } from "bun:test";
+import { applyOps, diffOps, type JsonOp, type JsonValue } from "@pikit/contracts";
 import type { ChatEvent, ChatVisibility } from "./api.ts";
 import { FAILED_ANSWER, createEventProjector, projectEntry, projectMessage } from "./visibility.ts";
 
@@ -89,86 +90,72 @@ const live = (visibility: ChatVisibility, events: ChatEvent[]): ChatEvent[] => {
   return events.flatMap((event) => project(event) ?? []);
 };
 
-const stream: ChatEvent[] = [
-  {
-    type: "snapshot",
-    run: { inputs: [3] },
-    generation: { attempt: 1, message: { role: "assistant", content: [{ type: "thinking", thinking: "private" }], usage: { cost: 1 }, timestamp: 7 } },
-    tools: [{ callId: "t0", name: "fetch", status: "running", output: "secret output", taskId: 4 }],
-    usage: { cost: 9 },
-    inbox: [],
-  },
-  {
-    type: "message_update",
-    usage: { cost: 1 },
-    changes: [
-      { type: "thinking_delta", contentIndex: 0, delta: " more private" },
-      { type: "text_start", contentIndex: 1, block: { type: "text", text: "" } },
-      { type: "text_delta", contentIndex: 1, delta: "Hel" },
-      { type: "toolcall_start", contentIndex: 2, block: { type: "toolCall", id: "t1", name: "websearch", arguments: { q: "secret" } } },
-      { type: "toolcall_delta", contentIndex: 2, path: ["q"], delta: "secret" },
-      { type: "text_start", contentIndex: 3, block: { type: "text", text: "" } },
-      { type: "text_delta", contentIndex: 3, delta: "lo" },
-    ],
-  },
-  { type: "tool_execution_start", toolCallId: "t1", toolName: "websearch", args: { q: "secret" } },
-  { type: "tool_execution_update", toolCallId: "t1", toolName: "websearch", output: { append: "secret output" } },
-  { type: "tool_execution_end", toolCallId: "t1", toolName: "websearch" },
-  { type: "message_end", entry: { id: "web:1#abc", kind: "message", model: [{ ...assistant, timestamp: 7 }] } },
-  { type: "usage_changed", usage: { cost: 2 } },
-  { type: "agent_changed", agent: { systemPrompt: "secret" } },
-  { type: "run_end" },
-];
+/** The value the `live` events of `events` make, as a view folds them. */
+const folded = (events: ChatEvent[]): unknown => events.reduce<JsonValue>((value, event) => (event.type === "live" ? applyOps(value, event.ops as readonly JsonOp[]) : value), null);
 
-test("live, defaults: the partial's hidden thinking left out and the blocks after it renumbered; tools by name; message_end's entry as the transcript's; no usage, no unknown event", () => {
-  expect(live(DEFAULTS, stream)).toEqual([
-    { type: "snapshot", run: {}, generation: { message: { role: "assistant", content: [], timestamp: 7 } }, tools: [{ callId: "t0", name: "fetch", status: "running" }] },
+/** The live values of a run of the user's, as `live.ts` sends them (the runtime's answer and tools as they are): each a `live` event of the ops from the one before. */
+const going = (partial: unknown, tools: unknown[], more: Record<string, unknown> = {}) => ({ busy: true, partial, tools, ...more });
+const values = [
+  going({ role: "assistant", content: [{ type: "thinking", thinking: "private" }], usage: { cost: 1 }, timestamp: 7 }, [{ callId: "t0", name: "fetch", status: "running", output: "secret output", taskId: 4 }]),
+  going(
     {
-      type: "message_update",
-      changes: [
-        { type: "text_start", contentIndex: 0, block: { type: "text", text: "" } },
-        { type: "text_delta", contentIndex: 0, delta: "Hel" },
-        { type: "toolcall_start", contentIndex: 1, block: { type: "toolCall", id: "t1", name: "websearch", arguments: {} } },
-        { type: "text_start", contentIndex: 2, block: { type: "text", text: "" } },
-        { type: "text_delta", contentIndex: 2, delta: "lo" },
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "private, more private", thinkingSignature: "signature-1" },
+        { type: "text", text: "Hel" },
+        { type: "toolCall", id: "t1", name: "websearch", arguments: { q: "secret" } },
+        { type: "text", text: "lo" },
       ],
+      usage: { cost: 2 },
+      timestamp: 7,
     },
-    { type: "tool_execution_start", toolCallId: "t1", toolName: "websearch" },
-    { type: "tool_execution_end", toolCallId: "t1", toolName: "websearch" },
-    { type: "message_end", entry: { id: "web:1#abc", kind: "message", model: [projectMessage({ ...assistant, timestamp: 7 }, DEFAULTS)] } },
-    { type: "run_end" },
-  ]);
-  expect(JSON.stringify(live(DEFAULTS, stream))).not.toMatch(SECRET);
+    [{ callId: "t0", name: "fetch", status: "done", output: "secret output, more" }, { callId: "t1", name: "websearch", status: "running" }],
+  ),
+  { busy: false, tools: [], failure: { reason: "model_error", detail: "provider-error: 401 sk-secret" } },
+];
+const stream: ChatEvent[] = values.map((value, i) => ({ type: "live", ops: i === 0 ? [["r", value]] : diffOps(values[i - 1] as JsonValue, value as JsonValue) }));
+
+test("live, defaults: the first value whole, then only the ops between what users see; the partial without its hidden thinking (the blocks after it where they will be stored); tools by name; a failure by its word; no usage", () => {
+  const shown = live(DEFAULTS, stream);
+  expect(shown[0]).toEqual({ type: "live", ops: [["r", { busy: true, partial: { role: "assistant", content: [], timestamp: 7 }, tools: [{ callId: "t0", name: "fetch", status: "running" }] }]] });
+  expect(folded(shown.slice(0, 2))).toEqual({
+    busy: true,
+    partial: { role: "assistant", content: [{ type: "text", text: "Hel" }, { type: "toolCall", id: "t1", name: "websearch", arguments: {} }, { type: "text", text: "lo" }], timestamp: 7 },
+    tools: [{ callId: "t0", name: "fetch", status: "done" }, { callId: "t1", name: "websearch", status: "running" }],
+  });
+  expect(folded(shown)).toEqual({ busy: false, tools: [], failure: { reason: "model_error" } });
+  expect(JSON.stringify(shown)).not.toMatch(SECRET);
 });
 
-test("live, thinking on and tools full: the thinking streams at its own index; arguments and outputs pass", () => {
+test("live, thinking on and tools full: the thinking at its own index, without its signature; arguments and outputs pass; a text streamed costs its new text", () => {
   const shown = live({ thinking: true, tools: "full", context: true }, stream);
-  expect(shown[0]).toMatchObject({ generation: { message: { content: [{ type: "thinking", thinking: "private" }] } }, tools: [{ callId: "t0", output: "secret output" }] });
-  expect(shown[1]?.changes).toEqual([
-    { type: "thinking_delta", contentIndex: 0, delta: " more private" },
-    { type: "text_start", contentIndex: 1, block: { type: "text", text: "" } },
-    { type: "text_delta", contentIndex: 1, delta: "Hel" },
-    { type: "toolcall_start", contentIndex: 2, block: { type: "toolCall", id: "t1", name: "websearch", arguments: { q: "secret" } } },
-    { type: "toolcall_delta", path: ["q"], delta: "secret", contentIndex: 2 },
-    { type: "text_start", contentIndex: 3, block: { type: "text", text: "" } },
-    { type: "text_delta", contentIndex: 3, delta: "lo" },
-  ]);
-  expect(shown.map((event) => event.type)).toEqual(["snapshot", "message_update", "tool_execution_start", "tool_execution_update", "tool_execution_end", "message_end", "run_end"]);
-  expect(shown[2]).toEqual({ type: "tool_execution_start", toolCallId: "t1", toolName: "websearch", args: { q: "secret" } });
-  expect(JSON.stringify(shown)).not.toMatch(/usage|cost|systemPrompt/);
+  expect(folded(shown.slice(0, 2))).toEqual({
+    busy: true,
+    partial: {
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "private, more private" }, { type: "text", text: "Hel" }, { type: "toolCall", id: "t1", name: "websearch", arguments: { q: "secret" } }, { type: "text", text: "lo" }],
+      timestamp: 7,
+    },
+    tools: [{ callId: "t0", name: "fetch", status: "done", output: "secret output, more" }, { callId: "t1", name: "websearch", status: "running" }],
+  });
+  expect(shown[1]?.type === "live" && shown[1].ops).toContainEqual(["a", ["partial", "content", 0, "thinking"], ", more private"]);
+  expect(JSON.stringify(shown)).not.toMatch(/usage|cost|signature|provider-error/);
 });
 
-test("live, tools none: no tool event, no tool block, no tool in a snapshot", () => {
+test("live, tools none: no tool, no tool block; a change only to what is hidden sends nothing", () => {
   const shown = live({ ...DEFAULTS, tools: "none" }, stream);
-  expect(shown.map((event) => event.type)).toEqual(["snapshot", "message_update", "message_end", "run_end"]);
-  expect(shown[0]).toMatchObject({ tools: [] });
+  expect(folded(shown.slice(0, 2))).toEqual({ busy: true, partial: { role: "assistant", content: [{ type: "text", text: "Hel" }, { type: "text", text: "lo" }], timestamp: 7 }, tools: [] });
   expect(JSON.stringify(shown)).not.toMatch(/websearch|toolCall|fetch/);
+  const hidden = live(DEFAULTS, [stream[0] as ChatEvent, { type: "live", ops: [["a", ["partial", "content", 0, "thinking"], " more private"], ["s", ["partial", "usage"], { cost: 3 }]] }]);
+  expect(hidden).toHaveLength(1);
 });
 
-test("live: an entry with nothing shown is announced without it (the view reads the transcript again); entry_appended's entry cut the same way", () => {
+test("live: entries cut as the transcript's (one with nothing shown dropped); transcript hints pass; an unknown event never; ops that do not apply throw", () => {
   const none: ChatVisibility = { ...DEFAULTS, tools: "none" };
-  expect(live(none, [{ type: "message_end", entry: { id: "r#1", kind: "message", model: [result] } }])).toEqual([{ type: "message_end" }]);
-  expect(live(none, [{ type: "entry_appended", entry: { id: "r#1", kind: "message", model: [result] } }])).toEqual([{ type: "entry_appended" }]);
-  expect(live(DEFAULTS, [{ type: "entry_appended", entry: { id: "web:1", kind: "message", model: [user] } }])).toEqual([{ type: "entry_appended", entry: { id: "web:1", kind: "message", model: [user] } }]);
-  expect(live(DEFAULTS, [{ type: "entry_appended" }])).toEqual([{ type: "entry_appended" }]);
+  expect(live(none, [{ type: "entries", entries: [entry("r#1", result)] }])).toEqual([]);
+  expect(live(none, [{ type: "entries", entries: [entry("r#1", result), entry("r#2", assistant)] }])).toEqual([{ type: "entries", entries: [entry("r#2", projectMessage(assistant, none))] }]);
+  expect(live(DEFAULTS, [{ type: "entries", entries: [entry("web:1", user)] }])).toEqual([{ type: "entries", entries: [entry("web:1", user)] }]);
+  expect(live(DEFAULTS, [{ type: "transcript" }])).toEqual([{ type: "transcript" }]);
+  expect(live(DEFAULTS, [{ type: "usage" } as unknown as ChatEvent, { type: "agent_changed", agent: { systemPrompt: "secret" } } as unknown as ChatEvent])).toEqual([]);
+  expect(() => live(DEFAULTS, [{ type: "live", ops: [["a", ["partial"], "x"]] }])).toThrow("json-ops");
 });

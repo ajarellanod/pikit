@@ -23,11 +23,11 @@ import {
   streamResult,
 } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import { type ChatConfig, type ChatConversation, type ChatEvent, type ChatTranscriptEntry, MAX_DURABLE_IMAGE_BYTES } from "./api.ts";
+import { type ChatConfig, type ChatConversation, type ChatTranscriptEntry, MAX_DURABLE_IMAGE_BYTES } from "./api.ts";
 import { ACCOUNTS_KEY, CALL, SEEN } from "./calls.ts";
 import { runEntryId } from "./entries.ts";
 import { createChannelWeb, NAME } from "./index.ts";
-import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, OPERATOR, PIXEL, Runtime, router, type Served, secretsOf, serve, sse } from "./runtime.test-support.ts";
+import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, liveReader, OPERATOR, PIXEL, Runtime, router, type Served, secretsOf, serve } from "./runtime.test-support.ts";
 import { createChannelWebWorker } from "./worker.ts";
 
 const copy = (value: JsonValue): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
@@ -270,54 +270,50 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
   expect((other as ActorCallError).code).toBe("invalid_request");
 });
 
-test("live events on the Worker: the object's stream, a snapshot first, the answer as written while the user waits, cut by the policy in the Worker; the client leaving closes it in the object", async () => {
+test("live events on the Worker: the object's stream, the live value whole first, the answer as written while the user waits, cut by the policy in the Worker; the client leaving closes it in the object", async () => {
   const { platform, worker: w } = await cloud();
   const { id, requestId } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string; requestId: string };
   const key = `web:ana:${id}`;
   const { runtime } = await platform.object(key);
   const client = new AbortController();
-  const events = sse(await w.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
-  expect(await events.take(1)).toEqual([{ type: "snapshot", tools: [] }]);
+  const events = liveReader(await w.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
+  expect(await events.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
   await runtime.start(key, [requestId]);
-  runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "He" }], usage: { cost: 1 } } });
-  runtime.push({ type: "tool_execution_start", toolCallId: "t1", toolName: "websearch", args: { q: "secret" } });
-  expect(await events.take(3)).toEqual([
-    { type: "run_start" },
-    { type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "He" }] } },
-    { type: "tool_execution_start", toolCallId: "t1", toolName: "websearch" },
-  ]);
+  runtime.partial(key, { role: "assistant", content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "He" }], usage: { cost: 1 } });
+  runtime.live(key, (live) => ({ ...live, tools: [{ callId: "t1", name: "websearch", status: "running", output: "secret" }] }));
+  await events.until({ busy: true, partial: { role: "assistant", content: [{ type: "text", text: "He" }] }, tools: [{ callId: "t1", name: "websearch", status: "running" }] });
+  expect(JSON.stringify(events.seen)).not.toMatch(/private|secret|cost/);
   client.abort();
   await events.reader.cancel();
   for (let i = 0; i < 50 && runtime.released < runtime.watching; i++) await Bun.sleep(5);
   expect([runtime.watching, runtime.released]).toEqual([1, 1]);
 });
 
-test("entries told live on the Worker come from the conversation's object: what a run stored, a message sent, a state a read found; ids the transcript's", async () => {
+test("entries told live on the Worker come from the conversation's object: what a run wrote, a message sent, a state a read found; ids the transcript's", async () => {
   const { platform, worker: w } = await cloud();
   const { id, requestId } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string; requestId: string };
   const key = `web:ana:${id}`;
   const { runtime } = await platform.object(key);
   const client = new AbortController();
-  const events = sse(await w.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
-  expect(await events.take(1)).toEqual([{ type: "snapshot", tools: [] }]);
+  const events = liveReader(await w.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
+  expect(await events.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
   await runtime.start(key, [requestId]);
   const answer = answerOf("Hello");
-  runtime.push({ type: "message_end", entry: { id: 9, kind: "message", model: [answer as never] } });
+  runtime.entries(key, [{ messages: [answer as never] }]);
+  expect(await events.next("entries")).toEqual({
+    type: "entries",
+    entries: [{ id: runEntryId(requestId, answer), kind: "message", messages: [{ role: "assistant", content: [{ type: "text", text: "Hello" }], stopReason: "stop", timestamp: 1000 }] }],
+  });
   await runtime.end(key, [requestId], { messages: [answer] });
-  const seen = (await events.take(4)) as ChatEvent[];
-  expect(seen).toEqual([
-    { type: "run_start" },
-    { type: "message_end", entry: { id: runEntryId(requestId, answer), kind: "message", model: [{ role: "assistant", content: [{ type: "text", text: "Hello" }], stopReason: "stop", timestamp: 1000 }] } },
-    { type: "run_end" },
-    { type: "entry_appended" },
-  ]);
+  await events.until({ busy: false, tools: [] });
+  expect(await events.next("transcript")).toEqual({ type: "transcript" });
   expect((await transcriptOf(w, "ana", id))[0]?.id).toBe(runEntryId(requestId, answer));
 
   const sent = (await (await w.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "again" }))).json()) as { requestId: string };
-  expect(await events.take(1)).toMatchObject([{ type: "entry_appended", entry: { id: sent.requestId } }]);
+  expect(await events.next("entries")).toMatchObject({ type: "entries", entries: [{ id: sent.requestId }] });
   await runtime.end(key, [sent.requestId], { kind: "aborted", quiet: true });
   expect((await transcriptOf(w, "ana", id))[0]).toMatchObject({ id: sent.requestId, state: "aborted" });
-  expect(await events.take(2)).toEqual([{ type: "run_end" }, { type: "entry_appended" }]);
+  expect(await events.next("transcript")).toEqual({ type: "transcript" });
   client.abort();
   await events.reader.cancel();
 });
