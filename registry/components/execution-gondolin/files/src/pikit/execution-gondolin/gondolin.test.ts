@@ -23,6 +23,8 @@ import { qemuProblem } from "./qemu.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const problem = qemuProblem();
+/** What building an image needs besides QEMU (Gondolin's builder: e2fsprogs' mke2fs, lz4, cpio). */
+const builderMissing = ["mke2fs", "lz4", "cpio"].filter((tool) => Bun.which(tool) === null);
 /** Long enough for the first boot's image download. */
 const BOOT_MS = 600_000;
 
@@ -47,8 +49,7 @@ interface Running {
   logs: string[];
 }
 
-async function start(config: Record<string, unknown> = {}, providers: ComponentDefinition[] = []): Promise<Running> {
-  const root = join(temporaryDir(), "gondolin");
+async function start(config: Record<string, unknown> = {}, providers: ComponentDefinition[] = [], root = join(temporaryDir(), "gondolin")): Promise<Running> {
   let workspace: WorkspaceProvider | undefined;
   const reader = defineComponent({
     name: "workspace-reader",
@@ -168,4 +169,28 @@ if (problem !== undefined) {
     const reset = (await running.workspace.resolve({ key: "it:idle", agent: "it", conversationId: "after-new" }, running.app.context())).env;
     expect((await sh(reset, "cat made.txt")).output).toBe("kept\n");
   }, BOOT_MS);
+
+  if (builderMissing.length > 0) {
+    test.skip(`an image built on the host: skipped, ${builderMissing.join(", ")} not on PATH`, () => {});
+  } else {
+    test("an agent's image is built on the host at start, once: its VMs have ffmpeg and the root disk asked for, packages over it work, the base has neither; a restart finds it", async () => {
+      const config = { agents: { designer: { image: { packages: ["ffmpeg"] }, rootfsSize: "2G", packages: ["jq"] } }, idleSeconds: 600 };
+      const first = await start(config);
+      const designer = (await first.workspace.resolve({ key: "it:image", agent: "designer", conversationId: "image" }, first.app.context())).env;
+
+      const tools = await sh(designer, "ffmpeg -version | head -1; jq --version; df -k / | awk 'NR==2 { print ($2 > 1500000) }'");
+      const base = await sh(await first.env("image-base"), "command -v ffmpeg || echo none");
+
+      expect(tools.output).toMatch(/^ffmpeg version \S+.*\njq-\S+\n1\n$/);
+      expect(base.output).toBe("none\n");
+      expect(first.logs.filter((log) => log === "execution-gondolin: image built")).toHaveLength(1);
+      await first.app.stop();
+
+      // The same root again: found, not built.
+      const again = await start(config, [], first.root);
+      expect(again.logs.filter((log) => log.startsWith("execution-gondolin: building an image"))).toEqual([]);
+      const later = (await again.workspace.resolve({ key: "it:image", agent: "designer", conversationId: "image" }, again.app.context())).env;
+      expect((await sh(later, "ffmpeg -hide_banner -version >/dev/null && echo ok")).output).toBe("ok\n");
+    }, BOOT_MS);
+  }
 }
