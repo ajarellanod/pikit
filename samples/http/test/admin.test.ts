@@ -86,7 +86,8 @@ test("a run watched live, steered by an operator, then aborted; the chat's reque
   const reader = events.body!.getReader();
   const first = new TextDecoder().decode((await reader.read()).value);
   expect(first).toStartWith("data: ");
-  expect(JSON.parse(first.slice(6).split("\n")[0] ?? "")).toMatchObject({ type: "snapshot" });
+  // The live state whole first: the run going, named after the request it answers.
+  expect(JSON.parse(first.slice(6).split("\n")[0] ?? "")).toMatchObject({ type: "live", ops: [["r", { busy: true, requests: ["m1"] }]] });
 
   const steer = await admin(`/admin/api/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ text: "also this" }) });
   expect(steer.status).toBe(202);
