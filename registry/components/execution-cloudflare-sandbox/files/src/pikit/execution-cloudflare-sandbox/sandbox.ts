@@ -6,18 +6,23 @@
  *
  * - **Started on demand, restored once.** The first operation of an object whose container is not
  *   running starts it with the agent's image (`profile`), waits until the helper answers, and restores
- *   the chat and agent's snapshot (`snapshot.ts`) into an empty directory, moved into the root. A
- *   container still running (the object was evicted, the container was not) is used as it is: its disk
- *   is the truth. A snapshot that does not hold is never half-restored: the sandbox is `unavailable`,
- *   the log says why.
+ *   the chat and agent's snapshot (the shared format, `@pikit/contracts`' `workspace-snapshot.ts`): its
+ *   archive streamed from the bucket into a file of the container, checked on the way (size, SHA-256,
+ *   entries: `readSnapshotArchive`), and only then extracted into an empty directory, moved into the
+ *   root. A container still running (the object was evicted, the container was not) is used as it is:
+ *   its disk is the truth. A snapshot that does not hold is never half-restored: the sandbox is
+ *   `unavailable`, the log says why.
  * - **Every operation of execution-serve's protocol**, mapped onto the helper (`container.ts`) as
  *   pi-durable's local environment does it (its `FileError` codes), commands through the helper's
  *   `exec` (a process group of its own), output kept in an `OutputLog` read from a cursor
  *   (`output.ts`, execution-serve's own), readers on a hard link of the file as it was opened.
  * - **Checkpointed when idle.** Each operation pushes the object's alarm to `idleMs` after it (at most
  *   every 30 s); the alarm, when nothing ran or was asked since and no command runs, lists what a
- *   snapshot keeps (the helper's `snapshot-list`), tars and gzips it in the container, checks the
- *   archive, writes it (`writeSnapshot`), and only then destroys the container. A failed or skipped
+ *   snapshot keeps (the helper's `snapshot-list`), has the helper tar and gzip it into a file of the
+ *   container (`snapshot-make`: its size and SHA-256, which the key carries), streams that file from
+ *   the container's output into `putStream` (checked on the way, the SHA-256 checked by the provider:
+ *   `putSnapshotArchive`), writes the manifest, and only then destroys the container. The archive never
+ *   is whole in the object's memory: the limit is the store's `maxStreamBytes`. A failed or skipped
  *   checkpoint keeps the container: the local copy is the truth until the upload is verified.
  * - **Bounded.** Every container call has its own deadline (`within`): past an account's
  *   container limit a start may never happen. At most `MAX_COMMANDS` running commands and
@@ -27,14 +32,12 @@
  *   gets workspace secrets; the README).
  */
 
-import type { BlobStore } from "@pikit/contracts";
+import { type BlobStore, commitSnapshotManifest, deleteSupersededSnapshots, putSnapshotArchive, readSnapshotArchive, SnapshotArchiveRefused, snapshotId } from "@pikit/contracts";
 import type { Logger } from "@pikit/core";
 import { LineScanner, StreamDecoder, type ShellOutputWindow } from "@pikit/pi-adapter/execution";
-import { collect, ContainerTimeout, HELPER, helper, type ContainerProcess, type HelperAnswer, SIGKILL, SIGTERM, type SandboxContainer, streamOf, within } from "./container.ts";
+import { collect, ContainerTimeout, HELPER, helper, type ContainerProcess, type HelperAnswer, SIGKILL, SIGTERM, type SandboxContainer, within } from "./container.ts";
 import { OutputLog } from "./output.ts";
 import { fromBase64, MAX_READ_BYTES, type Operation, type Outcome, type ProtocolErrorCode, type RequestOf, toBase64, type WireError, type WireExecState, type WireFileInfo } from "./protocol.ts";
-import { readSnapshot, SnapshotRefused, snapshotPrefix, writeSnapshot } from "./snapshot.ts";
-import { ArchiveRefused, inspectArchive } from "./tar.ts";
 
 export const MAX_COMMANDS = 16;
 export const MAX_HANDLES = 64;
@@ -88,8 +91,8 @@ export interface SandboxOptions {
   storage: ObjectStorage;
   /** `storage.blob`'s `workspace-snapshots` namespace. */
   snapshots: BlobStore;
-  /** `storage.blob`'s `maxBytes`. */
-  maxBlobBytes: number;
+  /** The largest archive: `storage.blob`'s `maxStreamBytes`. */
+  maxArchiveBytes: number;
   profile(agent: string | undefined): Profile;
   root: string;
   idleMs: number;
@@ -314,7 +317,7 @@ export class Sandbox {
         await this.restore(identity);
       } catch (error) {
         await within(container.destroy(), callMs, "destroy").catch(() => {});
-        if (error instanceof SnapshotRefused) {
+        if (error instanceof SnapshotArchiveRefused) {
           logger.error("execution-cloudflare-sandbox: the workspace's snapshot cannot be restored; the sandbox stays unavailable until it is fixed or removed", { sandbox: identity.sandbox, agent, error: error.message });
           throw new ProtocolError("unavailable", "the sandbox's snapshot cannot be restored (the host's log says why)");
         }
@@ -324,70 +327,129 @@ export class Sandbox {
     return opened.value;
   }
 
-  /** The chat and agent's snapshot, if any, extracted into an empty directory whose entries are then moved into the root. */
+  /** The workspace's snapshot id: the format's, of execution-serve's chat key and agent for this sandbox. */
+  private async snapshotOf(identity: Identity): Promise<{ id: string; agent: string }> {
+    const agent = agentOf(identity.sandbox, identity.agent);
+    return { id: await snapshotId(chatKey(identity.sandbox), agent), agent };
+  }
+
+  /**
+   * The chat and agent's snapshot, if any: its archive streamed into a file beside the root, checked on
+   * the way; once all of it held, extracted into an empty directory whose entries are then moved into
+   * the root. `SnapshotArchiveRefused` when it does not hold (nothing extracted).
+   */
   private async restore(identity: Identity): Promise<void> {
     const { root, snapshots, logger, maxUnpackedBytes, snapshotMs } = this.options;
-    const agent = agentOf(identity.sandbox, identity.agent);
-    const prefix = await snapshotPrefix(chatKey(identity.sandbox), agent);
-    const snapshot = await readSnapshot(snapshots, prefix, agent, maxUnpackedBytes);
+    const target = await this.snapshotOf(identity);
+    const snapshot = await readSnapshotArchive(snapshots, target, { maxUnpackedBytes });
     if (snapshot === undefined) {
       await this.must(this.call("mkdir", { path: root, recursive: true }), "mkdir");
       return;
     }
     const staging = `${root}.restore`;
+    const archive = `${root}.restore.tar.gz`;
     await this.must(this.call("remove", { path: staging, recursive: true, force: true }), "remove");
     await this.must(this.call("mkdir", { path: staging, recursive: true }), "mkdir");
-    const extracted = await this.run(["tar", "-xzf", "-", "-C", staging], snapshot.archive, snapshotMs);
-    if (extracted.exitCode !== 0) throw new Error(`tar -x exited ${extracted.exitCode}: ${new TextDecoder().decode(extracted.stderr).slice(0, 500)}`);
-    await this.must(this.call("swap", { from: staging, to: root }), "swap");
-    logger.info("execution-cloudflare-sandbox: workspace restored", { sandbox: identity.sandbox, agent, object: snapshot.manifest.object, size: snapshot.manifest.size });
+    try {
+      await this.receive(archive, snapshot.chunks);
+      snapshot.result();
+      const extracted = await this.run(["tar", "-xzf", archive, "-C", staging, "--no-same-owner"], snapshotMs);
+      if (extracted.exitCode !== 0) throw new Error(`tar -x exited ${extracted.exitCode}: ${new TextDecoder().decode(extracted.stderr).slice(0, 500)}`);
+      await this.must(this.call("swap", { from: staging, to: root }), "swap");
+    } finally {
+      await this.call("remove", { path: archive, force: true });
+    }
+    logger.info("execution-cloudflare-sandbox: workspace restored", { sandbox: identity.sandbox, agent: target.agent, object: snapshot.manifest.object, size: snapshot.manifest.size });
   }
 
-  /** The idle checkpoint: the archive made, checked and written, then the container released. */
+  /**
+   * `chunks` written to `path` in the container as they come (the helper's `snapshot-receive`). A chunk
+   * that throws (the check refused the archive) ends the file there and is thrown once the helper
+   * answered: what was written is then never extracted.
+   */
+  private async receive(path: string, chunks: AsyncIterable<Uint8Array>): Promise<void> {
+    const iterator = chunks[Symbol.asyncIterator]();
+    let failure: unknown;
+    const stdin = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const next = await iterator.next();
+          if (next.done === true) controller.close();
+          else controller.enqueue(next.value);
+        } catch (error) {
+          failure = error;
+          controller.close();
+        }
+      },
+      async cancel() {
+        await iterator.return?.();
+      },
+    });
+    const answer = await this.call("snapshot-receive", { path }, this.options.snapshotMs, stdin);
+    if (failure !== undefined) throw failure;
+    if (!answer.ok) throw new Error(`pikit-sandbox snapshot-receive: ${answer.error.code}: ${answer.error.message}`);
+  }
+
+  /** The idle checkpoint: the archive made in the container, streamed to the bucket, the manifest written, then the container released. */
   private async checkpoint(identity: Identity): Promise<void> {
-    const { root, container, snapshots, maxBlobBytes, logger, snapshotMs, maxUnpackedBytes, callMs } = this.options;
-    const agent = agentOf(identity.sandbox, identity.agent);
+    const { root, container, snapshots, maxArchiveBytes, logger, snapshotMs, callMs } = this.options;
+    const target = await this.snapshotOf(identity);
     const listed = await this.must(this.call<{ entries: string[]; skipped: { path: string; reason: string }[] }>("snapshot-list", { root }, snapshotMs), "snapshot-list");
-    if (listed.skipped.length > 0) logger.warn("execution-cloudflare-sandbox: left out of the snapshot", { sandbox: identity.sandbox, agent, skipped: listed.skipped.slice(0, 20), count: listed.skipped.length });
+    if (listed.skipped.length > 0) logger.warn("execution-cloudflare-sandbox: left out of the snapshot", { sandbox: identity.sandbox, agent: target.agent, skipped: listed.skipped.slice(0, 20), count: listed.skipped.length });
     const list = new TextEncoder().encode([".", ...listed.entries].join("\0"));
-    const made = await this.run(["tar", "-czf", "-", "-C", root, "--no-recursion", "--null", "-T", "-"], list, snapshotMs, maxBlobBytes);
-    if (made.stdout === undefined) {
-      logger.error("execution-cloudflare-sandbox: the workspace is larger than storage.blob's maxBytes and is not saved; the container is kept until the platform's inactivity timeout, and its files are lost then", { sandbox: identity.sandbox, agent, maxBytes: maxBlobBytes });
-      return;
-    }
-    if (made.exitCode !== 0) throw new Error(`tar -c exited ${made.exitCode}: ${new TextDecoder().decode(made.stderr).slice(0, 500)}`);
-    let archive: Uint8Array;
+    const out = `${root}.snapshot.tar.gz`;
+    let manifest;
     try {
-      // The gzip member alone, without a tar's padding (bsdtar pads what it writes to a pipe).
-      archive = made.stdout.subarray(0, (await inspectArchive(made.stdout, maxUnpackedBytes)).length);
-    } catch (error) {
-      if (error instanceof ArchiveRefused) throw new Error(`the archive made is not one a restore takes: ${error.message}`);
-      throw error;
+      await this.call("remove", { path: out, force: true });
+      const made = await this.must(this.call<{ size: number; sha256: string } | { tooLarge: true }>("snapshot-make", { root, out, maxBytes: maxArchiveBytes }, snapshotMs, list), "snapshot-make");
+      if ("tooLarge" in made) {
+        logger.error("execution-cloudflare-sandbox: the workspace's archive is larger than storage.blob's maxStreamBytes and is not saved; the container is kept until the platform's inactivity timeout, and its files are lost then", { sandbox: identity.sandbox, agent: target.agent, maxStreamBytes: maxArchiveBytes });
+        return;
+      }
+      manifest = await this.upload(out, target, made.sha256);
+    } finally {
+      await this.call("remove", { path: out, force: true });
     }
-    const written = await writeSnapshot({ store: snapshots, prefix: await snapshotPrefix(chatKey(identity.sandbox), agent), agent, archive, createdAt: this.options.now(), maxBytes: maxBlobBytes });
-    if ("skipped" in written) {
-      logger.error(`execution-cloudflare-sandbox: the workspace is not saved: ${written.skipped}; the container is kept until the platform's inactivity timeout`, { sandbox: identity.sandbox, agent });
-      return;
-    }
-    logger.info("execution-cloudflare-sandbox: workspace saved; the container is released", { sandbox: identity.sandbox, agent, object: written.object, size: written.size });
+    await commitSnapshotManifest(snapshots, target.id, manifest);
+    await deleteSupersededSnapshots(snapshots, target.id, manifest.object).catch((error: unknown) =>
+      logger.warn("execution-cloudflare-sandbox: superseded snapshots were not deleted; the next checkpoint tries again", { error: error instanceof Error ? error.message : String(error) }),
+    );
+    logger.info("execution-cloudflare-sandbox: workspace saved; the container is released", { sandbox: identity.sandbox, agent: target.agent, object: manifest.object, size: manifest.size });
     await within(container.destroy(), callMs, "destroy");
     this.ready = undefined;
     this.handles.clear();
   }
 
-  /** A program run in the container with `stdin`, its output collected (`stdout` undefined past `maxStdout`). */
-  private async run(cmd: string[], stdin: Uint8Array, ms: number, maxStdout?: number): Promise<{ exitCode: number; stdout: Uint8Array | undefined; stderr: Uint8Array }> {
+  /** The archive at `out` in the container, streamed from `cat`'s output into the bucket (`putSnapshotArchive`), within `snapshotMs`. */
+  private async upload(out: string, target: { id: string; agent: string }, sha256: string) {
+    const { container, snapshots, maxArchiveBytes, maxUnpackedBytes, snapshotMs } = this.options;
     let process: ContainerProcess | undefined;
     const go = async () => {
-      process = await this.options.container.exec(cmd, { stdin: streamOf(stdin), stdout: "pipe", stderr: "pipe" });
-      const [stdout, stderr] = await Promise.all([collect(process.stdout, maxStdout), collect(process.stderr, 1024 * 1024)]);
-      if (stdout === undefined) process.kill(SIGKILL);
-      return { exitCode: stdout === undefined ? -1 : await process.exitCode, stdout, stderr: stderr ?? new Uint8Array() };
+      process = await container.exec(["cat", out], { stdout: "pipe", stderr: "pipe" });
+      const stderr = collect(process.stderr, 64 * 1024);
+      const manifest = await putSnapshotArchive(snapshots, { ...target, createdAt: this.options.now(), sha256, body: process.stdout ?? new ReadableStream(), maxBytes: maxArchiveBytes, maxUnpackedBytes });
+      const exitCode = await process.exitCode;
+      if (exitCode !== 0) {
+        await snapshots.delete(manifest.object).catch(() => {});
+        throw new Error(`cat of the archive exited ${exitCode}: ${new TextDecoder().decode((await stderr) ?? new Uint8Array()).slice(0, 500)}`);
+      }
+      return manifest;
+    };
+    return await within(go(), snapshotMs, "the snapshot's upload", () => process?.kill(SIGKILL));
+  }
+
+  /** A program run in the container, its stderr kept (1 MiB), its stdout passed over. */
+  private async run(cmd: string[], ms: number): Promise<{ exitCode: number; stderr: Uint8Array }> {
+    let process: ContainerProcess | undefined;
+    const go = async () => {
+      process = await this.options.container.exec(cmd, { stdout: "pipe", stderr: "pipe" });
+      const [, stderr] = await Promise.all([collect(process.stdout, 1024 * 1024), collect(process.stderr, 1024 * 1024)]);
+      return { exitCode: await process.exitCode, stderr: stderr ?? new Uint8Array() };
     };
     return await within(go(), ms, cmd[0] ?? "a program", () => process?.kill(SIGKILL));
   }
 
-  private call<T>(operation: string, args: Record<string, unknown>, ms = this.options.callMs, stdin?: Uint8Array): Promise<HelperAnswer<T>> {
+  private call<T>(operation: string, args: Record<string, unknown>, ms = this.options.callMs, stdin?: Uint8Array | ReadableStream<Uint8Array>): Promise<HelperAnswer<T>> {
     return helper<T>(this.options.container, operation, args, ms, stdin);
   }
 

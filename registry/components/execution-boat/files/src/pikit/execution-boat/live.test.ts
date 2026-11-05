@@ -40,7 +40,7 @@ const blob: BlobStorage = {
       },
       delete: async (key) => void data.delete(`${name}/${key}`),
       list: async (prefix) => ({ entries: [...data.entries()].filter(([k]) => k.startsWith(`${name}/${prefix}`)).map(([k, v]) => ({ key: k.slice(name.length + 1), size: v.length })).sort((a, b) => (a.key < b.key ? -1 : 1)) }),
-    });
+    }, 25 * 1024 * 1024);
     return store;
   },
 };

@@ -20,7 +20,7 @@
  *   sent only to boat's API, never in a VM, a log or an error (`api.ts` redacts it).
  * - **Portable**, with `snapshots: true` (needs `storage.blob`): a workspace is exported in the shared
  *   snapshot format before each stop and before its VM is deleted, and restored when a chat's agent
- *   has no VM (`portable.ts`, `snapshot.ts`).
+ *   has no VM (`portable.ts`, over `@pikit/contracts`' `workspace-snapshot.ts`).
  * - **Bounded**: `maxVms` up at once (the idlest stopped for a new one, else a bounded wait), every
  *   boat call with a deadline, a boat outage answered `shell_unavailable` (commands) or `unknown`
  *   (files), as execution-gondolin's failed boots.
@@ -28,8 +28,8 @@
  * Target: `server` (the gateway's timers, its view of the VMs it runs).
  */
 
-import { createHash } from "node:crypto";
 import { type BlobStorage, type ConversationRef, originOf } from "@pikit/contracts";
+import { snapshotIdOf } from "@pikit/contracts/snapshots";
 import { type AppContext, defineComponent } from "@pikit/core";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { BACKGROUND_CONTEXT } from "@pikit/pi-adapter/execution";
@@ -112,9 +112,9 @@ export interface BoatSeams {
 export const DEFAULT_PATHS: VmPaths = { home: "/home/user", tmp: "/tmp/pikit" };
 const HOUR = 3_600_000;
 
-/** A workspace: the hex SHA-256 of `"<chat key>\n<agent>"`, as the shared snapshot format keys it. */
+/** A workspace: the shared snapshot format's id of its chat key and agent (`snapshotIdOf`: the hex SHA-256 of `"<chat key>\n<agent>"`). */
 export function workspaceOf(chat: string, agent: string): string {
-  return createHash("sha256").update(`${chat}\n${agent}`).digest("hex");
+  return snapshotIdOf(chat, agent);
 }
 const DAY = 24 * HOUR;
 
@@ -231,6 +231,8 @@ export function createExecutionBoat(seams: BoatSeams = {}) {
               await work().catch((error: unknown) => log.warn(`execution-boat: ${what} failed`, { reason: error instanceof Error ? error.message : String(error) }));
               next = pikit.clock.now() + everyMs;
             }
+            // A stop during the work woke no one: it must not wait for this sleep.
+            if (stopped) break;
             let wake!: () => void;
             const woken = new Promise<void>((resolve) => {
               wake = resolve;

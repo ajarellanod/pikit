@@ -37,15 +37,22 @@ const r = JSON.parse(Buffer.from(process.argv[process.argv.length - 1], "base64"
 const kindOf = (s) => (s.isFile() ? "file" : s.isDirectory() ? "directory" : s.isSymbolicLink() ? "symlink" : undefined);
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const infoOf = (path, s) => ({ name: p.basename(path), path, kind: kindOf(s), size: s.size, mtimeMs: s.mtimeMs });
-const inside = (root, path) => path === root || path.startsWith(root + "/");
+// The link rule of the shared snapshot format (snapshotLinkStaysInside of @pikit/contracts, copied: this runs in the VM):
+// relative, climbing with leading .. only, no higher than the directory of the link, no .. after a name.
+const linkStaysInside = (at, target) => {
+  if (target === "" || target.includes("\0") || target.startsWith("/")) return false;
+  const parts = target.split("/").filter((part) => part !== "" && part !== ".");
+  let up = 0;
+  while (parts[up] === "..") up++;
+  return !parts.slice(up).includes("..") && up <= at.split("/").length - 1;
+};
 function walk(root, rel, list, skipped) {
   for (const name of fs.readdirSync(p.join(root, rel)).sort()) {
     const relative = rel === "" ? name : rel + "/" + name;
     const full = p.join(root, relative);
     const s = fs.lstatSync(full);
     if (s.isSymbolicLink()) {
-      const target = fs.readlinkSync(full);
-      if (target.startsWith("/") || !inside(root, p.resolve(p.dirname(full), target))) { skipped.push(relative); continue; }
+      if (!linkStaysInside(relative, fs.readlinkSync(full))) { skipped.push(relative); continue; }
       list.push(relative);
     } else if (s.isDirectory()) { list.push(relative); walk(root, relative, list, skipped); }
     else if (s.isFile()) list.push(relative);
@@ -129,7 +136,11 @@ const ops = {
     const done = cp.spawnSync("tar", args, { env: { ...process.env, COPYFILE_DISABLE: "1" } });
     fs.rmSync(names, { force: true });
     if (done.status !== 0) throw fail("ETAR", "tar failed: " + String(done.stderr).slice(0, 300));
-    return { size: fs.statSync(r.out).size, entries: list.length, skipped: skipped.length };
+    // Its SHA-256 (the key carries it; the bucket checks it against what it receives).
+    const hash = crypto.createHash("sha256"), chunk = Buffer.alloc(1 << 20), fd = fs.openSync(r.out, "r");
+    let size = 0;
+    try { for (let n; (n = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0; size += n) hash.update(chunk.subarray(0, n)); } finally { fs.closeSync(fd); }
+    return { size, sha256: hash.digest("hex"), entries: list.length, skipped: skipped.length };
   },
   restore() {
     const fresh = r.ws + ".restore-" + crypto.randomUUID();

@@ -17,7 +17,7 @@ import type { ContainerExecOptions, ContainerProcess, ContainerStart, SandboxCon
 import { createObjectStorage } from "./fake-container.test-support.ts";
 import type { Outcome, Values } from "./protocol.ts";
 import { Sandbox } from "./sandbox.ts";
-import { MANIFEST, SNAPSHOT_NAMESPACE } from "./snapshot.ts";
+import { SNAPSHOT_MANIFEST as MANIFEST, SNAPSHOT_NAMESPACE } from "@pikit/contracts";
 
 const IMAGE = process.env.PIKIT_DOCKER_IMAGE;
 
@@ -76,7 +76,7 @@ test.skipIf(IMAGE === undefined)("the base image: files, a command, an idle chec
     container,
     storage: createObjectStorage(),
     snapshots: blobs,
-    maxBlobBytes: 25 * 1024 * 1024,
+    maxArchiveBytes: 1024 * 1024 * 1024,
     profile: () => ({ image: "base", internet: false }),
     root: "/workspace",
     idleMs: 600_000,

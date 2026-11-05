@@ -134,25 +134,38 @@ the base's: `size` and `template`. An agent `agents` does not name gets the base
 
 ## Portability: the shared snapshot format
 
-With `snapshots: true` (needs `storage.blob`), `snapshot.ts` writes and reads the format every backend
-shares (kept apart from boat's code, so a shared helper can replace it):
+With `snapshots: true` (needs `storage.blob`), workspaces are written and read in the format every
+backend shares, through its one implementation, `@pikit/contracts`' `workspace-snapshot.ts`: the
+namespace, the id and keys, the manifest and its checks, the archive's entry check, the order of the
+writes, the deletion of superseded archives. What is boat's own (`portable.ts`, `helper.ts`) is how
+the archive is made and extracted in the VM and carried through boat's signed file URLs.
 
-- In namespace `workspace-snapshots`, under `<hex SHA-256 of "<chat key>\n<agent>">/`: the archive
+- In namespace `workspace-snapshots`, under `<id>/` (the workspace above: `snapshotIdOf` of the chat
+  key and agent, the same id execution-gondolin, workspace-local and execution-cloudflare-sandbox
+  compute behind execution-serve, `execution-serve:<sandbox>`): the archive
   `snapshot-<createdAt ms>-<first 16 hex of its SHA-256>.tar.gz`, then `manifest.json`, written last:
   `{ "version": 1, "object", "sha256", "size", "createdAt", "agent" }`.
-- **Export** (before each idle stop, and before a deletion when needed): `tar` in the VM, of the
-  workspace's contents (relative paths; regular files, directories and links that stay inside: links
-  out, FIFOs and sockets are skipped, and the log says how many), downloaded to the gateway, checked,
-  put, read back and compared, then the manifest; superseded archives are deleted after it. The VM's
-  copy is the truth until then: an archive larger than `storage.blob`'s `maxBytes` (25 MiB by
-  default; a streaming upload is another change) is not saved, the stop goes ahead (boat keeps the
-  disk), and retention never deletes that VM unsaved.
-- **Restore** (a workspace with no VM): the manifest, the archive, its size and SHA-256, and every
-  entry (`checkArchive`: no absolute path, no `..`, no hard link, device or FIFO, no link that leaves
-  the root, followed through the archive's own links) are checked before anything reaches the VM; it
-  is extracted into an empty directory beside the workspace, then swapped in. A snapshot that fails
-  any check is refused: the new VM is deleted and the use fails saying why (an empty workspace never
-  replaces the snapshot). Remove or fix the snapshot to use that chat again.
+- **Export** (before each idle stop, and before a deletion when needed): `tar` in the VM (pax format),
+  of the workspace's contents (relative paths; regular files, directories and links that stay inside
+  by the format's rule: `..` only leading, no higher than the link's directory; links out, FIFOs and
+  sockets are skipped, and the log says how many), gzip'd into a file whose size and SHA-256 the
+  helper gives. The gateway streams it from boat's signed download URL straight into `putStream`
+  (`putSnapshotArchive`: its entries checked on the way, its SHA-256 checked by the provider), then
+  writes the manifest and reads it back (`commitSnapshotManifest`); superseded archives are deleted
+  after it. The VM's copy is the truth until then: a download cut partway, an archive the check
+  refuses, or one larger than `storage.blob`'s `maxStreamBytes` is not saved, no manifest names
+  anything new, the stop goes ahead (boat keeps the disk), and retention never deletes that VM unsaved.
+- **Restore** (a workspace with no VM): the manifest (another version, another agent's, another
+  workspace's refused), then the archive streamed from `getStream` to the VM's signed upload URL
+  (with its Content-Length), its size, SHA-256 and every entry checked on the way
+  (`readSnapshotArchive`, `SnapshotTarCheck`: the server restore's rules, no absolute path, no `..`,
+  nothing under a link, no link out, no hard link, device, FIFO or sparse file, nothing after the end).
+  Only once all of it held is it extracted, into an empty directory beside the workspace, then swapped
+  in. A snapshot that fails any check is refused: the new VM is deleted and the use fails saying why
+  (an empty workspace never replaces the snapshot). Remove or fix the snapshot to use that chat again.
+- **Size**: the gateway never holds an archive (a gunzip window, the paths seen, the provider's part:
+  16 MiB for storage-blob-s3); the limit is `storage.blob`'s `maxStreamBytes` (S3's multipart limit
+  for storage-blob-s3), and boat's longest synchronous command (600 s) for the `tar` in the VM.
 
 ## Secrets and network
 
@@ -258,8 +271,9 @@ Germany, Finland and France, snapshot copies may be stored outside the EU, per [
   programs). Processes started by `sudo` (root's `environ`) neither.
 - **A gateway that dies** leaves its VMs up until boat's auto-stop (`autoStopSeconds`), or until the
   next gateway adopts and idles them.
-- **Snapshots are whole values**: larger than `storage.blob`'s `maxBytes`, a workspace stays on boat
-  (and is never deleted unsaved); after boat's 14 days of a stopped VM, boat may delete it.
+- **Snapshots up to `maxStreamBytes`**: larger, a workspace stays on boat (and is never deleted
+  unsaved); after boat's 14 days of a stopped VM, boat may delete it. The `tar` in the VM and its
+  extraction run within boat's 600 s synchronous command.
 - **`retentionDays` counts from the stop**, which comes `idleSeconds` after the last use. A VM
   resumed by retention to be exported first is not counted against `maxVms`.
 - **boat's command history**: boat keeps every command and its output 90 days, readable while the
@@ -296,21 +310,25 @@ over local directories, commands in a real local `bash`, so the real helper and 
   API failing after `callSeconds`, an outage (`shell_unavailable`, `unknown`, then recovery), malformed
   answers (a list, a command's status, a command's result);
 - snapshots: the export at an idle stop in the shared format (keys, manifest, sha256, size, relative
-  entries, links out and FIFOs left out), deletion without a resume when the snapshot is fresh, restore
-  into a new VM, the superseded archive deleted; an export too large for the store keeping the VM
-  through retention; another backend's archive restored; an archive escaping the root or tampered
-  refused, no VM kept.
+  entries, links out, links with `..` after a name and FIFOs left out), deletion without a resume when
+  the snapshot is fresh, restore into a new VM, the superseded archive deleted; an export too large
+  for the store (`maxStreamBytes`) keeping the VM through retention; an archive past `maxBytes`
+  streamed out and back (the double's `get` refuses it), a download cut partway naming nothing, the
+  upload's Content-Length; another backend's archive restored; an archive escaping the root, tampered,
+  or another agent's manifest refused, no VM kept;
+- a stop that lands while a loop's tick works returns (it once slept on with no one to wake it).
 
-`snapshot.test.ts`: the format alone: keys, manifests, archives as GNU tar, bsdtar and the tests' own
-writer make them, every refused kind (absolute names, `..`, pax paths, links out directly and
-through other links, hard links, devices, FIFOs, GNU long names, global pax paths, bad checksums, not
-gzip), and a save's order (archive, read back, manifest, superseded deleted).
+The format's own cases (each manifest and archive refusal, the order of the writes, a body failing
+partway) are `@pikit/contracts`' `workspace-snapshot.test.ts`, the one implementation's. In the
+repository, `tests/acceptance/workspace-snapshots.test.ts` moves one workspace between the server
+helper, this gateway (over the fake boat) and execution-cloudflare-sandbox, byte for byte, checks the
+three compute one id, and that another agent's manifest is refused by all.
 
 **Mutation checks** (each guarantee broken in its one place, its test seen failing, restored): `noEnv`
 dropped from the create; `Vms.stop`'s in-use check; the probe's verdict; the retention period; the
-"never deleted unsaved" check; the key's redaction; the secrets refusal; `maxVms`; links out through
-links; `..` in names; the manifest written before the archive; a refused restore keeping its VM; the
-malformed-status check; a call's deadline.
+"never deleted unsaved" check; the key's redaction; the secrets refusal; `maxVms`; the manifest
+written before the archive; the limit as `maxBytes` instead of `maxStreamBytes`; a refused restore
+keeping its VM; the malformed-status check; a call's deadline; the stop's check after a tick.
 
 `live.test.ts` runs against boat itself when `BOAT_API_KEY` is set (skipped, saying so, otherwise):
 the whole `ExecutionEnv` suite on one small VM, Ubuntu with `node` and no key in its environment, the

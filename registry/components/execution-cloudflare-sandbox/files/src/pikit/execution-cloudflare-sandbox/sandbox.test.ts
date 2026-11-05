@@ -6,17 +6,21 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { silentLogger, type Logger } from "@pikit/core";
 import { createMemoryBlobStorage } from "@pikit/contracts/testing";
-import type { BlobStore } from "@pikit/contracts";
+import { type BlobStore, SNAPSHOT_MANIFEST as MANIFEST, SNAPSHOT_NAMESPACE, snapshotId } from "@pikit/contracts";
 import { craftArchive } from "./archive.test-support.ts";
+import { HELPER } from "./container.ts";
 import { createFakeContainer, createObjectStorage, type FakeContainer } from "./fake-container.test-support.ts";
 import { profileOf, type SandboxConfig } from "./index.ts";
 import type { Operation, Outcome, Values, WireExecState } from "./protocol.ts";
 import { agentOf, chatKey, Sandbox, type SandboxReply } from "./sandbox.ts";
-import { MANIFEST, SNAPSHOT_NAMESPACE, sha256Hex, snapshotPrefix } from "./snapshot.ts";
+
+const sha256Hex = async (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+const snapshotPrefix = async (chat: string, agent: string) => `${await snapshotId(chat, agent)}/`;
 
 const BASE: SandboxConfig = {
   image: "base",
@@ -39,11 +43,11 @@ afterEach(() => {
 
 type Logged = { level: string; message: string; fields?: Record<string, unknown> };
 
-function setup(options: { container?: FakeContainer; maxBlobBytes?: number; callMs?: number; startMs?: number; config?: SandboxConfig; snapshots?: BlobStore } = {}) {
+function setup(options: { container?: FakeContainer; maxBytes?: number; maxStreamBytes?: number; callMs?: number; startMs?: number; config?: SandboxConfig; snapshots?: BlobStore } = {}) {
   const container = options.container ?? createFakeContainer();
   containers.push(container);
   const storage = createObjectStorage();
-  const blobs = createMemoryBlobStorage();
+  const blobs = createMemoryBlobStorage({ ...(options.maxBytes !== undefined && { maxBytes: options.maxBytes }), ...(options.maxStreamBytes !== undefined && { maxStreamBytes: options.maxStreamBytes }) });
   const snapshots = options.snapshots ?? blobs.namespace(SNAPSHOT_NAMESPACE);
   const clock = { offset: 0 };
   const logs: Logged[] = [];
@@ -59,7 +63,7 @@ function setup(options: { container?: FakeContainer; maxBlobBytes?: number; call
       container,
       storage,
       snapshots,
-      maxBlobBytes: options.maxBlobBytes ?? blobs.maxBytes,
+      maxArchiveBytes: blobs.maxStreamBytes,
       profile: (agent) => profileOf(config, agent),
       root: container.root,
       idleMs: 600_000,
@@ -273,6 +277,8 @@ describe("snapshots in storage.blob", () => {
     mkdirSync(`${container.root}/empty`);
     symlinkSync("src/a.txt", `${container.root}/inside`);
     symlinkSync("/etc/passwd", `${container.root}/outside`);
+    // Inside once resolved, but `..` after a name: the shared rule leaves it out (a restore anywhere refuses it).
+    symlinkSync("src/../src/a.txt", `${container.root}/climbs`);
     expect(storage.alarm).toBeGreaterThan(Date.now() + 9 * 60_000);
 
     await idle(harness);
@@ -286,7 +292,7 @@ describe("snapshots in storage.blob", () => {
     const archive = (await snapshots.get(manifest.object))?.bytes as Uint8Array;
     expect(archive.length).toBe(manifest.size);
     expect(await sha256Hex(archive)).toBe(manifest.sha256);
-    expect(harness.logs.find((log) => log.level === "warn")?.fields).toMatchObject({ skipped: [{ path: "outside", reason: "a symlink pointing outside the workspace" }] });
+    expect(harness.logs.find((log) => log.level === "warn")?.fields).toMatchObject({ skipped: [{ path: "climbs", reason: "a symlink pointing outside the workspace" }, { path: "outside", reason: "a symlink pointing outside the workspace" }] });
 
     // A new container: the workspace comes back, the link outside does not.
     expect(existsSync(container.root)).toBe(false);
@@ -329,28 +335,82 @@ describe("snapshots in storage.blob", () => {
     await call(sandbox, "execKill", { command: "c-1", cursor: 0, wait: 5000 });
   }, 30_000);
 
-  test("over storage.blob's maxBytes: skipped, the container kept, the log says so", async () => {
-    const harness = setup({ maxBlobBytes: 64 });
+  test("over storage.blob's maxBytes, the archive is streamed (putStream) and restored (getStream)", async () => {
+    const harness = setup({ maxBytes: 1024 });
+    const big = Array.from({ length: 400 }, () => crypto.randomUUID()).join("\n");
+    await call(harness.sandbox, "writeFile", { path: `${harness.container.root}/big`, content: { text: big } });
+    await idle(harness);
+    expect(harness.container.destroyed).toBe(1);
+    const prefix = await snapshotPrefix(chatKey("s-1"), agentOf("s-1", undefined));
+    const archive = (await harness.snapshots.list(prefix)).entries.find((entry) => entry.key.endsWith(".tar.gz"));
+    expect(archive?.size).toBeGreaterThan(1024);
+    await expect(harness.snapshots.get(archive?.key as string)).rejects.toThrow(/larger/);
+    expect(await call(harness.sandbox, "readTextFile", { path: `${harness.container.root}/big` })).toBe(big);
+  }, 30_000);
+
+  test("over storage.blob's maxStreamBytes: skipped, the container kept, the log says so", async () => {
+    const harness = setup({ maxBytes: 64, maxStreamBytes: 64 });
     await call(harness.sandbox, "writeFile", { path: `${harness.container.root}/big`, content: { text: crypto.randomUUID().repeat(50) } });
     await idle(harness);
     expect(harness.container.destroyed).toBe(0);
     expect(harness.container.running).toBe(true);
     expect((await harness.snapshots.list("")).entries).toEqual([]);
-    expect(harness.logs.some((log) => log.level === "error" && log.message.includes("maxBytes"))).toBe(true);
+    expect(harness.logs.some((log) => log.level === "error" && log.message.includes("maxStreamBytes"))).toBe(true);
+    expect(existsSync(`${harness.container.root}.snapshot.tar.gz`)).toBe(false);
   }, 30_000);
 
-  test("a failed upload keeps the container (the local copy is the truth) and tries again", async () => {
+  test("an upload that fails partway keeps the container (the local copy is the truth), writes no manifest, and tries again", async () => {
     const blobs = createMemoryBlobStorage().namespace(SNAPSHOT_NAMESPACE);
     let failing = true;
-    const flaky: BlobStore = { ...blobs, put: (key, bytes, options) => (failing ? Promise.reject(new Error("S3 down")) : blobs.put(key, bytes, options)) };
+    const log: string[] = [];
+    const flaky: BlobStore = {
+      ...blobs,
+      put: async (key, bytes, options) => (log.push(`put ${key}`), blobs.put(key, bytes, options)),
+      delete: async (key) => (log.push(`delete ${key}`), blobs.delete(key)),
+      putStream: async (key, body, options) => {
+        log.push(`putStream ${key}`);
+        if (!failing) return await blobs.putStream(key, body, options);
+        // The first chunk read, then the bucket goes away: the multipart upload is aborted.
+        for await (const _ of body) throw new Error("S3 down");
+        throw new Error("S3 down");
+      },
+    };
     const harness = setup({ snapshots: flaky });
     await call(harness.sandbox, "writeFile", { path: `${harness.container.root}/a`, content: { text: "x" } });
     await idle(harness);
     expect(harness.container.destroyed).toBe(0);
     expect(readFileSync(`${harness.container.root}/a`, "utf8")).toBe("x");
+    expect((await blobs.list("")).entries).toEqual([]);
+    expect(log.filter((entry) => entry.startsWith("put "))).toEqual([]);
     failing = false;
+    log.length = 0;
     await idle(harness);
     expect(harness.container.destroyed).toBe(1);
+    // The archive whole first, the manifest last.
+    const prefix = await snapshotPrefix(chatKey("s-1"), agentOf("s-1", undefined));
+    expect(log).toEqual([expect.stringMatching(new RegExp(`^putStream ${prefix}snapshot-\\d+-[0-9a-f]{16}\\.tar\\.gz$`)), `put ${prefix}${MANIFEST}`]);
+  }, 30_000);
+
+  test("an archive the check refuses on its way to the bucket is never named by a manifest", async () => {
+    const harness = setup();
+    await call(harness.sandbox, "writeFile", { path: `${harness.container.root}/a`, content: { text: "x" } });
+    // A FIFO in the list (made after snapshot-list would skip it, as a race would): tar archives it, the check refuses.
+    const real = harness.container.exec.bind(harness.container);
+    harness.container.exec = async (cmd, options) => {
+      if (cmd[0] === HELPER && cmd[1] === "snapshot-list") {
+        spawnSync("mkfifo", [`${harness.container.root}/fifo`]);
+        const process = await real(cmd, options);
+        const text = await new Response(process.stdout).text();
+        const answer = JSON.parse(text) as { ok: true; value: { entries: string[] } };
+        answer.value.entries.push("./fifo");
+        return { ...process, stdout: new Response(JSON.stringify(answer)).body as ReadableStream<Uint8Array> };
+      }
+      return await real(cmd, options);
+    };
+    await idle(harness);
+    expect(harness.container.destroyed).toBe(0);
+    expect((await harness.snapshots.list("")).entries).toEqual([]);
+    expect(harness.logs.some((log) => log.level === "error" && String(log.fields?.error).includes("FIFO"))).toBe(true);
   }, 30_000);
 
   async function seeded(archive: Uint8Array, change?: (manifest: Record<string, unknown>) => void) {

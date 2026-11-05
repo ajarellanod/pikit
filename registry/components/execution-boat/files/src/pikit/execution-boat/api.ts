@@ -327,6 +327,19 @@ export class BoatApi {
     return bytes;
   }
 
+  /** The body at a signed download URL (no key sent), as it comes: a snapshot's archive, of any size. */
+  async downloadStream(url: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    const response = await this.raw(url, { method: "GET" }, signal, "download");
+    if (response.body === null) throw new BoatError("malformed", "boat file download: no body");
+    return response.body;
+  }
+
+  /** PUTs `body` (`size` bytes, its Content-Length) to a signed upload URL (no key sent), as it comes. */
+  async uploadStream(url: string, body: ReadableStream<Uint8Array>, size: number, signal?: AbortSignal): Promise<void> {
+    const response = await this.raw(url, { method: "PUT", body, headers: { "content-type": "application/octet-stream", "content-length": String(size) }, duplex: "half" } as RequestInit, signal, "upload");
+    await response.body?.cancel();
+  }
+
   /** PUTs `bytes` to a signed upload URL (no key sent). */
   async upload(url: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void> {
     const response = await this.raw(url, { method: "PUT", body: bytes, headers: { "content-type": "application/octet-stream" } }, signal, "upload");

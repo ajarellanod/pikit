@@ -13,7 +13,9 @@
  *   and resume (recorded), the confirmation header of a delete, file URLs only under the home or the
  *   temporary directory, and no `Authorization` on a signed URL (recorded as a leak).
  * - **Faults**: `down` (every call fails, as a network outage), `hang` (no answer until cancelled),
- *   `override` (one route answers what the test says: an error, a malformed body).
+ *   `override` (one route answers what the test says: an error, a malformed body), `cutDownloads`
+ *   (a signed download's body fails after its first bytes). A signed upload whose Content-Length is
+ *   not its body's is refused (400), as a server would.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
@@ -68,6 +70,10 @@ export class FakeBoat {
   override: { method: string; path: RegExp; answer: () => Response | Promise<Response> } | undefined;
   createMs = 0;
   resumeMs = 0;
+  /** While true, a signed download's body errors after its first 100 bytes. */
+  cutDownloads = false;
+  /** Each signed upload: its Content-Length header and the bytes received. */
+  readonly uploads: { contentLength: string | null; bytes: number }[] = [];
   /** The page size of the sandbox list (tests paging). */
   pageSize = 100;
   private next = 1;
@@ -312,11 +318,21 @@ export class FakeBoat {
     const { mkdir, readFile, writeFile } = await import("node:fs/promises");
     if (method === "GET") {
       if (!existsSync(grant.path)) return new Response("not found", { status: 404 });
-      return new Response(await readFile(grant.path));
+      const bytes = await readFile(grant.path);
+      if (!this.cutDownloads) return new Response(bytes);
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(bytes.subarray(0, 100)));
+          controller.error(new Error("the connection was reset"));
+        },
+      }));
     }
     await mkdir(resolve(grant.path, ".."), { recursive: true });
     const body = init?.body;
     const bytes = body instanceof Uint8Array ? body : new Uint8Array(await new Response(body as ConstructorParameters<typeof Response>[0]).arrayBuffer());
+    const contentLength = headers.get("content-length");
+    this.uploads.push({ contentLength, bytes: bytes.length });
+    if (contentLength !== null && Number(contentLength) !== bytes.length) return new Response("Content-Length is not the body's", { status: 400 });
     await writeFile(grant.path, bytes);
     return new Response(null, { status: 200 });
   }
