@@ -400,8 +400,10 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
 - **Ask.** Tell Workers apart without `unref` (for example `navigator.userAgent ===
   "Cloudflare-Workers"`), or never keep a retention timer and check expiry at task changes only, as
   pi-durable already does where it keeps none.
-- **To delete when it ships:** `WORKERS_SETTINGS` in `runtime.ts`; the workerd lane stays.
-- **If sent:** a concrete bug with a short repro and a one-line fix, the kind #10188 was.
+- **Shipped in pi-durable 1.4.0** (not sent by pikit): in Workers with `nodejs_compat` the timers
+  that evict idle documents and contexts are declined, and memory is freed at later commits.
+  `WORKERS_SETTINGS` is gone from `runtime.ts`; the workerd lane, which still evicts after each run,
+  proves it.
 
 ## 19. pi-ai: OAuth refresh and `toAuth` in a bundle
 - **Problem.** A stored OAuth credential reaches its provider's flow (`toAuth` at every request,
