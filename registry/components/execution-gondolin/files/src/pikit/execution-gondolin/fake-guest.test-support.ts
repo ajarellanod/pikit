@@ -108,11 +108,12 @@ export class FakeLauncher implements GuestLauncher {
     return found;
   }
 
-  /** Writes what a build leaves: a manifest with a build id (`fake-<n>`). */
+  /** Writes what a build leaves: a rootfs, then a manifest with a build id (`fake-<n>`); a failing one, the rootfs half written. */
   async buildImage(config: BuildConfig, outputDir: string): Promise<void> {
     this.builds.push({ config, outputDir });
-    if (this.buildError !== undefined) throw this.buildError;
     await mkdir(outputDir, { recursive: true });
+    await writeFile(join(outputDir, "rootfs.ext4"), "");
+    if (this.buildError !== undefined) throw this.buildError;
     await writeFile(join(outputDir, "manifest.json"), JSON.stringify({ buildId: `fake-${this.builds.length}` }));
   }
 
