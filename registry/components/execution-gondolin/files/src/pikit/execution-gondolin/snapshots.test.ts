@@ -140,6 +140,36 @@ test("a sandbox with a command running is never released, however long; it goes 
   await s.app.stop();
 });
 
+test("a VM booted while the checkpoint runs (an environment held, no resolve) keeps the workspace here", async () => {
+  const base = createMemoryBlobStorage({ maxStreamBytes: 2 ** 30 });
+  let onUpload: () => Promise<void> = async () => {};
+  const storage: BlobStorage = {
+    ...base,
+    namespace: (name) => {
+      const store = base.namespace(name);
+      return { ...store, putStream: async (key, body, options) => (await onUpload(), await store.putStream(key, body, options)) };
+    },
+  };
+  const s = await started({ snapshots: {} }, { storage });
+  const env = await s.env("test:held");
+  expect((await env.writeFile("/workspace/a.txt", "a", ctx)).ok).toBe(true);
+  onUpload = async () => {
+    onUpload = async () => {};
+    expect((await env.exec("true", undefined, ctx)).ok).toBe(true);
+  };
+  await idle(s, 10);
+  await until(() => s.launcher.guests.length === 1);
+  await Bun.sleep(100);
+  expect(s.launcher.live).toHaveLength(1);
+  const host = join(s.root, "chats", chat("test:held"), "support");
+  expect(existsSync(join(host, "a.txt"))).toBe(true);
+  // Still unused: the next sweep closes that VM first, then releases it.
+  await idle(s, 1);
+  await until(() => !existsSync(host));
+  expect(s.launcher.live).toHaveLength(0);
+  await s.app.stop();
+});
+
 test("a shared sandbox (workspace: \"agent\") is never released; a new host restores a chat's sandbox from the bucket", async () => {
   const storage = createMemoryBlobStorage({ maxStreamBytes: 2 ** 30 });
   const s = await started({ snapshots: {}, agents: { librarian: { workspace: "agent" } } }, { storage });

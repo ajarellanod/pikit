@@ -270,6 +270,9 @@ test("a checkpoint that stops at any step leaves the directory and the snapshot 
   const changed = describe(dir);
   expect(changed).not.toEqual(before);
 
+  // The manifest read back is another's (a second host wrote meanwhile): not taken as written.
+  const otherHost: BlobStore = { ...store, get: async (key) => (key === snapshotManifestKey(ID) ? { bytes: new TextEncoder().encode("{}") } : await store.get(key)) };
+  await expect(checkpointSnapshot(otherHost, target(dir), { tmp, now: 250 })).rejects.toThrow("read back is not the one written");
   // The archive cannot be written (its temporary area is a file).
   writeFileSync(join(root, "blocked"), "");
   await expect(checkpointSnapshot(store, target(dir), { tmp: join(root, "blocked"), now: 200 })).rejects.toThrow();
@@ -280,11 +283,11 @@ test("a checkpoint that stops at any step leaves the directory and the snapshot 
   }
   // The read back failed after the manifest was written: that snapshot is whole, and it is the one named.
   expect((await manifestOf()).createdAt).toBe(500);
-  expect((await archives()).length).toBe(3);
+  expect((await archives()).length).toBe(4);
   // A use while it uploaded: the archive it sent is deleted, the manifest left as it was.
   expect(await checkpointSnapshot(store, target(dir), { tmp, now: 600, beforeManifest: () => false })).toBeUndefined();
   expect((await manifestOf()).createdAt).toBe(500);
-  expect((await archives()).length).toBe(3);
+  expect((await archives()).length).toBe(4);
   expect(readdirSync(tmp)).toEqual([]);
   expect(first?.manifest.createdAt).toBe(100);
 
@@ -497,6 +500,30 @@ test("WorkspaceSnapshots: a use during the checkpoint keeps the directory; a res
   await Bun.sleep(50);
   expect(existsSync(ws.dir)).toBe(true);
   expect(await base.get(snapshotManifestKey(ID))).toBeUndefined();
+  // Used after its manifest was written (while superseded archives are deleted): saved, but kept here.
+  let onList: () => void = () => {};
+  const listing: BlobStore = { ...store, list: async (prefix, options) => (onList(), await store.list(prefix, options)) };
+  const later = manager(root, listing);
+  await later.snapshots.start();
+  onList = () => {
+    onList = () => {};
+    void later.snapshots.use(ws);
+  };
+  await later.clock.advance(11 * 60_000);
+  await Bun.sleep(100);
+  expect(await base.get(snapshotManifestKey(ID))).toBeDefined();
+  expect(existsSync(ws.dir)).toBe(true);
+  // A call of an environment given for it that starts during the checkpoint, with no use: kept too.
+  let release: () => void = () => {};
+  onUpload = () => {
+    onUpload = () => {};
+    void later.snapshots.track(ws.dir, { run: () => new Promise<void>((resolve) => (release = resolve)) }).run();
+  };
+  await later.clock.advance(11 * 60_000);
+  await Bun.sleep(100);
+  expect(existsSync(ws.dir)).toBe(true);
+  release();
+  await later.snapshots.stop();
   await first.snapshots.stop();
 
   // A new process: the workspace is found from the index, counts as used at start, and goes when idle.
