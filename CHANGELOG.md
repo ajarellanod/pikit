@@ -41,6 +41,15 @@ line names its area.
   `execution`'s own and any unnamed agent's on the default host; sandbox ids are unchanged. Each
   host's token is its own secret and goes only to that host; an unknown host, several hosts without a
   default, a bad name, an unset secret or two hosts with one token stop the App at start.
+- execution-gondolin: a VM image per machine ([features/agent-sandboxes.md](features/agent-sandboxes.md),
+  "Images per machine"). `image` (the base's or a profile's) is a Gondolin selector you built
+  (`gondolin build --tag designer:1`), or `{ packages }`: Gondolin's default build with those Alpine
+  packages, built on the host at the first start that needs it, kept under
+  `<root>/.execution-gondolin-image/build-<digest>/` by Gondolin's version and the config, never
+  rebuilt for a restart. `rootfsSize` (`"4G"`) grows each VM's root disk. An image that cannot be
+  had refuses the start naming its machines; making a checkpoint or an image removes only those no
+  machine uses. The README has a designer (Chromium, ffmpeg, ImageMagick: a banner rendered to PNG
+  frames, an MP4 and a GIF) with its measurements: 42 s cold build, 0.7 s boot, 9.5 s render.
 - extension-tracing ([features/tracing.md](features/tracing.md)), new on both targets: agents
   naming `tracing` export their run, model-request and tool-call spans to Langfuse or an OTLP/HTTP
   JSON collector. Credentials come from named secrets; content is off by default, redacted and capped

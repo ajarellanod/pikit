@@ -4,7 +4,10 @@
  * hangs ends only when killed (exit 137) or when its VM closes (`failed`).
  */
 
-import type { Guest, GuestCommand, GuestExit, GuestLauncher, GuestRun, GuestSpec } from "./guest.ts";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { BuildConfig } from "@earendil-works/gondolin";
+import type { Guest, GuestCommand, GuestExit, GuestImage, GuestLauncher, GuestRun, GuestSpec } from "./guest.ts";
 
 /** What a fake command does: output chunks then an exit, never started, its VM failing, or hang until killed. */
 export type FakeBehaviour =
@@ -92,6 +95,27 @@ export class FakeLauncher implements GuestLauncher {
   /** When set, a boot waits for it. */
   bootGate: Promise<void> | undefined;
   respond: (command: GuestCommand) => FakeBehaviour = () => ({});
+  /** The images `findImage` finds, by selector; any other is not found. */
+  images: Record<string, GuestImage> = {};
+  /** Each `buildImage`'s config and output directory, in order. */
+  readonly builds: { config: BuildConfig; outputDir: string }[] = [];
+  /** When set, every build fails with it. */
+  buildError: Error | undefined;
+
+  async findImage(selector: string): Promise<GuestImage> {
+    const found = Object.hasOwn(this.images, selector) ? this.images[selector] : undefined;
+    if (found === undefined) throw new Error(`image '${selector}' not found`);
+    return found;
+  }
+
+  /** Writes what a build leaves: a rootfs, then a manifest with a build id (`fake-<n>`); a failing one, the rootfs half written. */
+  async buildImage(config: BuildConfig, outputDir: string): Promise<void> {
+    this.builds.push({ config, outputDir });
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(join(outputDir, "rootfs.ext4"), "");
+    if (this.buildError !== undefined) throw this.buildError;
+    await writeFile(join(outputDir, "manifest.json"), JSON.stringify({ buildId: `fake-${this.builds.length}` }));
+  }
 
   check(): string | undefined {
     return this.problem;

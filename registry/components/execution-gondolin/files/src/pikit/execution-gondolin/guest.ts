@@ -4,6 +4,11 @@
  * (`fake-guest.test-support.ts`) to drive the pool and the environment without QEMU.
  */
 
+import type { BuildConfig } from "@earendil-works/gondolin";
+
+/** A Gondolin image (its asset directory: kernel, initramfs, rootfs and `manifest.json`) and its build id. */
+export type GuestImage = { path: string; buildId: string | undefined };
+
 /** A secret the guest may use: `$name` holds a placeholder, which the host replaces in requests to `hosts` only. */
 export type GuestSecret = { name: string; hosts: readonly string[]; value: string };
 
@@ -41,6 +46,15 @@ export interface GuestSpec {
    */
   packages: readonly string[];
   imageDir: string;
+  /** The image the VM boots (prepared at start, `image.ts`), under `packages`; `undefined`: Gondolin's default. */
+  image: GuestImage | undefined;
+  /** The least size of the VM's root disk (`"4G"`), grown at boot; `undefined`: the image's own. */
+  rootfsSize: string | undefined;
+  /**
+   * Every machine's image in this configuration (`undefined`: Gondolin's default): making a checkpoint
+   * for `packages` removes only those of a build none of them is.
+   */
+  inUse: readonly (GuestImage | undefined)[];
   /** The proposals repository, when `proposals` is installed. */
   proposals?: GuestProposals;
 }
@@ -90,4 +104,11 @@ export interface GuestLauncher {
   /** What makes VMs slow here (no KVM on Linux), or `undefined`: a warning at start, never a refusal. */
   warning(): string | undefined;
   boot(spec: GuestSpec): Promise<Guest>;
+  /**
+   * The image `selector` names (Gondolin's selector: an asset directory, a build id, a local
+   * `name:tag`), or throws saying why there is none (or why it cannot boot here). At start.
+   */
+  findImage(selector: string): Promise<GuestImage>;
+  /** Builds the image `config` describes into `outputDir` (Gondolin's builder, on the host). At start. */
+  buildImage(config: BuildConfig, outputDir: string): Promise<void>;
 }

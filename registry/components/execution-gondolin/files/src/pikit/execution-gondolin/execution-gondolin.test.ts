@@ -21,7 +21,8 @@ import { createWorkspaceConformance } from "@pikit/pi-adapter/testing";
 import { doctor } from "./doctor.ts";
 import { FakeLauncher } from "./fake-guest.test-support.ts";
 import { SandboxCache } from "./cache.ts";
-import { GondolinGuest, gitConfig, imageFile, proposalsHook, staleImages } from "./gondolin.ts";
+import { archProblem, GondolinGuest, gitConfig, imageFile, proposalsHook, staleImages } from "./gondolin.ts";
+import { BUILD_PREFIX, buildConfig, buildName, staleBuilds } from "./image.ts";
 import { type GuestSpec, PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
 import { createExecutionGondolin, holdsWorkingDirectory, IMAGE_DIR, KEEP_SANDBOXES, PROFILE_WARNING, TMP_DIR, USED_DIR } from "./index.ts";
 import { qemuBinary, qemuProblem } from "./qemu.ts";
@@ -445,6 +446,9 @@ test("the VM boots at the first command, once, with the conversation's directori
     cpus: 1,
     packages: [],
     imageDir: join(s.root, IMAGE_DIR),
+    image: undefined,
+    rootfsSize: undefined,
+    inUse: [undefined],
   });
   expect(guest?.commands).toEqual([
     { command: "echo", cwd: "/workspace/sub", env: { A: "1" }, inheritEnv: true },
@@ -849,7 +853,7 @@ test("live agents (agent.directory) are not used: agents-live uses agent.tools, 
   await s.app.stop();
 });
 
-test("images: one checkpoint per build id and packages; making one removes only another build's files and other processes' partial ones", () => {
+test("images: one checkpoint per build id, packages and disk size; making one removes only the files of a build no machine uses, and other processes' partial ones", () => {
   const dev = imageFile("build-1", ["github-cli", "git"]);
   const analyst = imageFile("build-1", ["py3-pandas"]);
   // The packages in any order, each once, name the same file; the build id is its own part of the name.
@@ -860,8 +864,141 @@ test("images: one checkpoint per build id and packages; making one removes only 
   expect(old.split("-")[0]).not.toBe(dev.split("-")[0]);
   const partial = (file: string, pid: number) => file.replace(/\.qcow2$/, `.${pid}.partial`);
 
+  // The root disk's size is part of the name when set: a checkpoint made on a 4G disk is not a 1G one's.
+  expect(imageFile("build-1", ["chromium"], "4G")).not.toBe(imageFile("build-1", ["chromium"]));
+  expect(imageFile("build-1", ["chromium"], "4G")).not.toBe(imageFile("build-1", ["chromium"], "1G"));
+  expect(imageFile("build-1", ["chromium"], "4G").split("-")[0]).toBe(dev.split("-")[0]);
+
   const names = [dev, analyst, old, partial(analyst, 42), partial(dev, 7), partial(old, 42), "stray.qcow2"];
-  expect(staleImages(names, "build-1", 42).sort()).toEqual([old, partial(dev, 7), partial(old, 42), "stray.qcow2"].sort());
+  expect(staleImages(names, ["build-1"], 42).sort()).toEqual([old, partial(dev, 7), partial(old, 42), "stray.qcow2"].sort());
+  // Another machine's image (build-0, a designer's) keeps its checkpoints; the images built here (build-*) are image.ts's.
+  const built = ["build-0123456789abcdef", "build-0123456789abcdef.7.partial"];
+  expect(staleImages([...names, ...built], ["build-1", "build-0"], 42).sort()).toEqual([partial(dev, 7), "stray.qcow2"].sort());
+});
+
+/** The image fields of the spec a VM booted with. */
+const imageOf = ({ image, rootfsSize, packages }: GuestSpec) => ({ image: image?.buildId, rootfsSize, packages });
+
+test("images: a machine's image and rootfsSize are what its VMs boot with, field by field; a built one is kept under root, a selector is the operator's", async () => {
+  const launcher = new FakeLauncher();
+  launcher.images["base:1"] = { path: "/images/base", buildId: "base-1" };
+  const s = await started(
+    {
+      image: "base:1",
+      rootfsSize: "2G",
+      agents: {
+        designer: { image: { packages: ["ffmpeg", "chromium", "font-noto", "imagemagick"] }, rootfsSize: "4G", memory: "2G" },
+        analyst: { packages: ["py3-pandas"] },
+      },
+    },
+    { launcher },
+  );
+  const bootOf = async (agent: string) => {
+    await run((await s.workspace.resolve(ref("1", agent), s.app.context())).env, "true");
+    return s.launcher.guests.at(-1)?.spec as GuestSpec;
+  };
+
+  // Built once at start, from Gondolin's default build config with the packages added (sorted, after its own).
+  expect(launcher.builds).toHaveLength(1);
+  const rootfsPackages = launcher.builds[0]?.config.alpine?.rootfsPackages ?? [];
+  expect(rootfsPackages.slice(-4)).toEqual(["chromium", "ffmpeg", "font-noto", "imagemagick"]);
+  expect(rootfsPackages).toContain("e2fsprogs-extra"); // resize2fs, for rootfsSize
+  const designer = await bootOf("designer");
+  expect(imageOf(designer)).toEqual({ image: "fake-1", rootfsSize: "4G", packages: [] });
+  expect(designer.image?.path).toStartWith(join(s.root, IMAGE_DIR, BUILD_PREFIX));
+  expect(designer.memory).toBe("2G");
+  // What a profile leaves out is the base's: its image and disk, with its own packages over them.
+  expect(imageOf(await bootOf("analyst"))).toEqual({ image: "base-1", rootfsSize: "2G", packages: ["py3-pandas"] });
+  expect(imageOf(await bootOf("support"))).toEqual({ image: "base-1", rootfsSize: "2G", packages: [] });
+  await run(s.execution, "true");
+  expect(imageOf(s.launcher.guests.at(-1)?.spec as GuestSpec)).toEqual({ image: "base-1", rootfsSize: "2G", packages: [] });
+  // Every VM knows every machine's image: what making a checkpoint keeps.
+  expect(new Set(designer.inUse.map((image) => image?.buildId))).toEqual(new Set(["base-1", "fake-1"]));
+  await s.app.stop();
+});
+
+test("images: two machines with different images coexist; a new build removes only built images no machine uses, and other processes' partial ones", async () => {
+  const root = join(temporaryDir(), "gondolin");
+  const images = join(root, IMAGE_DIR);
+  const designer = { image: { packages: ["chromium"] } };
+  const editor = { image: { packages: ["ffmpeg"] } };
+  const first = await started({ agents: { designer, editor } }, { root });
+  expect(first.launcher.builds).toHaveLength(2);
+  const builtDirs = () => readdirSync(images).filter((name) => name.startsWith(BUILD_PREFIX)).sort();
+  const both = builtDirs();
+  expect(both).toHaveLength(2);
+  const bootOf = async (s: Started, agent: string) => {
+    await run((await s.workspace.resolve(ref("1", agent), s.app.context())).env, "true");
+    return s.launcher.guests.at(-1)?.spec.image;
+  };
+  const [a, b] = [await bootOf(first, "designer"), await bootOf(first, "editor")];
+  expect(a?.path).not.toBe(b?.path);
+  expect(new Set([a?.buildId, b?.buildId])).toEqual(new Set(["fake-1", "fake-2"]));
+  await first.app.stop();
+
+  // A checkpoint beside them, a stray partial build of another process, and one of a third image.
+  writeFileSync(join(images, imageFile("fake-1", ["git"])), "");
+  mkdirSync(join(images, `${BUILD_PREFIX}feedfacefeedface.1.partial`));
+  // The editor's image changes: the new one is built, the old one (no machine uses it) removed; the designer's stays.
+  const second = await started({ agents: { designer, editor: { image: { packages: ["ffmpeg", "imagemagick"] } } } }, { root });
+  expect(second.launcher.builds).toHaveLength(1);
+  const now = builtDirs();
+  expect(now).toHaveLength(2);
+  expect(now.filter((name) => both.includes(name))).toHaveLength(1);
+  expect(existsSync(join(images, imageFile("fake-1", ["git"])))).toBe(true);
+  await second.app.stop();
+  expect(staleBuilds(["build-a", "build-b", "build-c.7.partial", "build-d.8.partial", "x.qcow2"], ["build-a"], 8)).toEqual(["build-b", "build-c.7.partial"]);
+});
+
+test("images: a built image is found again by every later start, never built twice; two machines with one build (in any order) share it", async () => {
+  const root = join(temporaryDir(), "gondolin");
+  const config = { image: { packages: ["ffmpeg", "chromium"] }, agents: { designer: { image: { packages: ["chromium", "ffmpeg", "chromium"] } }, artist: {} } };
+  const first = await started(config, { root });
+  expect(first.launcher.builds).toHaveLength(1);
+  await first.app.stop();
+  const second = await started(config, { root });
+  expect(second.launcher.builds).toEqual([]);
+  await run((await second.workspace.resolve(ref("1", "designer"), second.app.context())).env, "true");
+  expect(second.launcher.guests[0]?.spec.image?.buildId).toBe("fake-1");
+  await second.app.stop();
+  expect(buildName(buildConfig(["ffmpeg", "chromium"]))).toBe(buildName(buildConfig(["chromium", "ffmpeg"])));
+  expect(buildName(buildConfig(["ffmpeg"]))).not.toBe(buildName(buildConfig(["chromium", "ffmpeg"])));
+});
+
+test("images: one that cannot be had refuses the start, naming its machines; nothing half-built is kept", async () => {
+  const failure = async (config: Record<string, unknown>, launcher = new FakeLauncher(), root = join(temporaryDir(), "gondolin")) =>
+    await started(config, { launcher, root }).then(
+      async (s) => (await s.app.stop(), "started"),
+      (error: unknown) => String(((error as Error).cause as Error | undefined)?.message),
+    );
+
+  expect(await failure({ agents: { designer: { image: "designer:1" } } })).toBe(
+    'execution-gondolin: the image of agent "designer" ("designer:1") cannot be used: image \'designer:1\' not found',
+  );
+  expect(await failure({ image: "designer:1", agents: { designer: {}, artist: { image: "other:1" } } })).toStartWith(
+    'execution-gondolin: the image of the base machine and agent "designer" ("designer:1") cannot be used',
+  );
+  const broken = new FakeLauncher();
+  broken.buildError = new Error("ERROR: unable to select packages: chromiun (no such package)");
+  const root = join(temporaryDir(), "gondolin");
+  expect(await failure({ agents: { designer: { image: { packages: ["chromiun"] } }, artist: { image: { packages: ["chromiun"] } } } }, broken, root)).toBe(
+    'execution-gondolin: the image of agents "designer", "artist" (Gondolin\'s with chromiun) could not be built: ERROR: unable to select packages: chromiun (no such package)',
+  );
+  expect(readdirSync(join(root, IMAGE_DIR))).toEqual([]);
+  // An image with no build id cannot have packages added over it (their checkpoint names its build).
+  const noId = new FakeLauncher();
+  noId.images["./my-assets"] = { path: "/images/mine", buildId: undefined };
+  expect(await failure({ agents: { designer: { image: "./my-assets", packages: ["git"] } } }, noId)).toStartWith(
+    'execution-gondolin: the image of agent "designer" ("./my-assets") has no build id',
+  );
+  expect(await failure({ agents: { designer: { image: "./my-assets" } } }, noId)).toBe("started");
+  // The fields' own shapes.
+  for (const profile of [{ rootfsSize: "4 GB" }, { rootfsSize: "4T" }, { image: "" }, { image: { packages: [] } }, { image: { packages: ["--allow-untrusted"] } }, { image: { packages: ["x"], oci: "debian" } }]) {
+    expect({ profile, refused: await failure({ agents: { designer: profile } }).then((said) => said !== "started") }).toEqual({ profile, refused: true });
+  }
+  expect(archProblem("x86_64", "aarch64")).toBe("it is built for x86_64, and this machine runs aarch64 VMs: build it with --arch aarch64");
+  expect(archProblem("aarch64", "aarch64")).toBeUndefined();
+  expect(archProblem(undefined, "aarch64")).toBeUndefined();
 });
 
 test("start refuses when secrets are configured without a secrets provider, or when no VM can boot here; it warns when VMs are slow", async () => {

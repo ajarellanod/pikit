@@ -131,6 +131,41 @@ now tells the host which agent each request is for. The secrets' values stay in 
   agentless sandbox a directory of its own.
 - A sandbox's readers and commands stay scoped to the sandbox id, as today.
 
+## Images per machine (built 2026-11-05)
+Gondolin's image keeps about 80 MB free on its root disk, so `packages` could not hold Chromium,
+ffmpeg or ImageMagick. execution-gondolin's machines (the base, each profile, field by field) gain:
+- **`image`**: absent, Gondolin's (as before); a string, a Gondolin image selector the operator
+  built (a local `name:tag`, a build id, an asset directory): anything `gondolin build` makes (an OCI
+  base, `postBuild`); or `{ packages: [...] }`, Gondolin's default build config with those Alpine
+  packages added, built by Gondolin's builder on the host (no VM) at the first start that needs it,
+  into `<root>/.execution-gondolin-image/build-<digest of Gondolin's version and the config>/`, and
+  found by every later start (never rebuilt for a restart; a changed list is a new image).
+- **`rootfsSize`** (`"4G"`): Gondolin's `rootfs.size`, each VM's root disk grown at boot (also the
+  VM that makes a `packages` checkpoint, whose name now carries the size).
+- **Checked at start**: every machine's image is found or built before the app starts; a selector
+  with no image, another architecture's, a failed build, or an image without a build id under
+  `packages` refuses the start with one error naming the machines that use it.
+- **Revises the frozen "Images" rule**: making a checkpoint removes only the checkpoints of a build
+  id that no machine of the configuration boots ("another build id" was right with one image for
+  all; with an image per machine it would delete another profile's), and every partial one of
+  another process; making an image removes only the built images no machine uses. `packages` stays
+  a checkpoint, over the machine's image.
+
+```ts
+designer: {
+  image: { packages: ["chromium", "ffmpeg", "imagemagick", "font-noto"] },
+  rootfsSize: "4G",
+  memory: "2G",
+  cpus: 2,
+}
+```
+
+Measured on an Apple M3 (HVF, Gondolin 0.13.0): the build takes 42 s on a cold machine, 8 s with
+Gondolin's cache warm, and 5 ms at a start that finds it; the image is 857 MB; a VM boots in 0.7 s;
+headless Chromium renders 24 banner frames and ffmpeg an MP4 and a GIF in 9.5 s (2 CPUs). On a
+sandbox host the profile is the host's, as every other field (execution-gondolin's README, "The
+image", has the example, the numbers and Linux's differences). Not measured on Linux KVM.
+
 ## The GitHub CLI (spike, 2026-10-20)
 Checked in a real Gondolin VM (Alpine 3.23, gh 2.83.0) with `$GH_TOKEN` a placeholder: `gh api`,
 `gh repo view`, `gh pr list`, `git ls-remote`, `git clone` of a private repository and an
