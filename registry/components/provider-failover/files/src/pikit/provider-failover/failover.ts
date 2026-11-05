@@ -94,36 +94,62 @@ export interface Cooldowns {
   answered(candidate: Candidate): void;
   /** When the next cooldown ends; `undefined` when none is running. */
   nextEnd(): number | undefined;
+  /** What another App (`shared.ts`) learnt: each entry taken when it is newer (`at`) than the one kept. Whether one was. */
+  merge(entries: readonly CooldownEntry[]): boolean;
 }
 
 /**
- * The cooldowns, in memory: a restart forgets them, and on Cloudflare each conversation's object
- * has its own. Refused credentials cool the whole provider (every model of it fails the same way);
- * any other failure, the one model.
+ * One cooldown as it is kept and shared: `key` is a provider's credentials (`provider:<id>`) or a
+ * model (`model:<provider>/<id>`); `at` when it was learnt; `kind` absent (and `until` 0) when an
+ * answer cleared it. The newest `at` of a key wins, wherever it is merged.
  */
-export function createCooldowns(durations: CooldownDurations, now: () => number): Cooldowns {
-  const cooling = new Map<string, Cooling>();
+export interface CooldownEntry {
+  key: string;
+  kind?: FailureKind;
+  until: number;
+  at: number;
+}
+
+/**
+ * The cooldowns of this App, in memory. Refused credentials cool the whole provider (every model of
+ * it fails the same way); any other failure, the one model. `learnt` hears each failure, and each
+ * answer that cleared one, as entries: `shared.ts` reports them to the App's owner of the cooldowns,
+ * and `merge`s what the other Apps learnt. Keys are the chains' models and providers, so the map stays small.
+ */
+export function createCooldowns(durations: CooldownDurations, now: () => number, learnt?: (entries: CooldownEntry[]) => void): Cooldowns {
+  const cooling = new Map<string, CooldownEntry>();
   const providerKey = (candidate: Candidate) => `provider:${candidate.model.provider}`;
   const modelKey = (candidate: Candidate) => `model:${candidate.model.provider}/${candidate.model.id}`;
   const current = (key: string): Cooling | undefined => {
     const entry = cooling.get(key);
-    if (entry === undefined) return undefined;
-    if (entry.until > now()) return entry;
-    cooling.delete(key);
-    return undefined;
+    return entry?.kind !== undefined && entry.until > now() ? (entry as Cooling) : undefined;
   };
   return {
     of: (candidate) => current(providerKey(candidate)) ?? current(modelKey(candidate)),
     failed(candidate, kind) {
-      cooling.set(kind === "auth" ? providerKey(candidate) : modelKey(candidate), { kind, until: now() + durations[kind] });
+      const entry = { key: kind === "auth" ? providerKey(candidate) : modelKey(candidate), kind, until: now() + durations[kind], at: now() };
+      cooling.set(entry.key, entry);
+      learnt?.([entry]);
     },
     answered(candidate) {
-      cooling.delete(providerKey(candidate));
-      cooling.delete(modelKey(candidate));
+      // Only what was cooling: an answer of a model that was not is no news to share.
+      const cleared = [providerKey(candidate), modelKey(candidate)].flatMap((key) => (current(key) === undefined ? [] : [{ key, until: 0, at: now() }]));
+      for (const entry of cleared) cooling.set(entry.key, entry);
+      if (cleared.length > 0) learnt?.(cleared);
     },
     nextEnd() {
       const ends = [...cooling.keys()].flatMap((key) => current(key)?.until ?? []);
       return ends.length === 0 ? undefined : Math.min(...ends);
+    },
+    merge(entries) {
+      let changed = false;
+      for (const entry of entries) {
+        const kept = cooling.get(entry.key);
+        if (kept !== undefined && kept.at >= entry.at) continue;
+        cooling.set(entry.key, entry.kind === undefined ? { key: entry.key, until: 0, at: entry.at } : { key: entry.key, kind: entry.kind, until: entry.until, at: entry.at });
+        changed = true;
+      }
+      return changed;
     },
   };
 }
@@ -162,6 +188,8 @@ export interface FailoverProviderOptions {
   /** The chains' own providers, with the App's credentials; `undefined` until the component starts. */
   models(): Models | undefined;
   cooldowns: Cooldowns;
+  /** Awaited before each request reads the cooldowns (`shared.ts`: the App's first sync, bounded). */
+  ready?(): Promise<void>;
   now(): number;
   /** Something cooled down or answered: the health report may have changed. */
   changed?(): void;
@@ -196,6 +224,7 @@ export function failoverProvider(options: FailoverProviderOptions): Provider {
     const chain = options.chains().get(model.id);
     const models = options.models();
     if (chain === undefined || models === undefined) throw new Error(`no chain named "${model.id}"`);
+    await options.ready?.();
     const order = attemptOrder(chain.candidates, options.cooldowns);
     const tried: string[] = [];
     for (const [index, candidate] of order.entries()) {

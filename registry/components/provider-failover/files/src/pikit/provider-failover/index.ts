@@ -11,8 +11,14 @@
  * a missing model, a provider or network failure) is skipped for a while, and the same request goes
  * to the next model at once. A failure after the answer has started is that answer's: pi-durable's
  * retry runs it again, on another model since the failed one cools down. An abort, a request too big
- * for any model, or a bad request is never retried elsewhere. The cooldowns are in memory (a
- * restart forgets them; on Cloudflare, each conversation's object has its own).
+ * for any model, or a bad request is never retried elsewhere.
+ *
+ * With `actor.mailbox` installed, the cooldowns are shared (`shared.ts`): one actor,
+ * `provider-failover:cooldowns`, keeps them in its `storage.sql` (this App on a server, a Durable
+ * Object on Cloudflare), so a restart keeps them and one conversation's failure protects the others.
+ * Each App reads its own copy, reports what it learns and reads the others' every `refreshSeconds`
+ * at most; an owner that fails is logged, never in a request's way. Without it, they are this App's
+ * memory only.
  *
  * It uses the other `model.provider`s and the App's credentials (`model.credentials`, `secrets`),
  * as runtime-pi does, so that each model answers with its own provider's credentials. With `health`
@@ -28,6 +34,10 @@ import type { HealthReporter } from "@pikit/contracts";
 import { type Models, modelsFrom, parseModelName } from "@pikit/pi-adapter";
 import Type from "typebox";
 import { type Chain, createCooldowns, failoverProvider, PROVIDER_ID } from "./failover.ts";
+import { answerSync, shareCooldowns } from "./shared.ts";
+
+/** How long an App's first requests wait for its first read of the shared cooldowns. */
+const FIRST_WAIT_MS = 1_000;
 
 const seconds = (value: number, description: string) => Type.Integer({ minimum: 1, default: value, description });
 
@@ -44,6 +54,8 @@ const Config = Type.Object({
     },
     { default: {} },
   ),
+  /** With `actor.mailbox`: how old this App's copy of the shared cooldowns may be before a request reads them again. */
+  refreshSeconds: Type.Integer({ minimum: 1, default: 10 }),
 });
 
 export default defineComponent({
@@ -54,12 +66,17 @@ export default defineComponent({
     const credentials = pikit.useOptional("model.credentials");
     const secrets = pikit.useOptional("secrets");
     const health = pikit.useOptional("health");
+    // The shared cooldowns (shared.ts): reached with the mailbox; kept by the App with an inbox and SQL that owns them.
+    const mailbox = pikit.useOptional("actor.mailbox");
+    const inbox = pikit.useOptional("actor.inbox");
+    const sql = pikit.useOptional("storage.sql");
 
     let chains = new Map<string, Chain>();
     let models: Models | undefined;
     let now = () => Date.now();
     let changed: (() => void) | undefined;
     let failedOver: ((event: { chain: string; from: string; kind: string; to: string | undefined }) => void) | undefined;
+    let log: ((level: "warn" | "info", message: string, fields?: Record<string, unknown>) => void) | undefined;
     const cooldowns = createCooldowns(
       {
         rate: config.cooldownSeconds.rate * 1000,
@@ -68,12 +85,23 @@ export default defineComponent({
         transient: config.cooldownSeconds.transient * 1000,
       },
       () => now(),
+      (entries) => sharing.learnt(entries),
     );
+    const sharing = shareCooldowns({
+      mailbox: () => mailbox.get(),
+      cooldowns: () => cooldowns,
+      now: () => now(),
+      refreshMs: config.refreshSeconds * 1000,
+      firstWaitMs: FIRST_WAIT_MS,
+      changed: () => changed?.(),
+      log: (level, message, fields) => log?.(level, message, fields),
+    });
     // Building the provider opens nothing: its chains and their providers are read at start.
     const provider = failoverProvider({
       chains: () => chains,
       models: () => models,
       cooldowns,
+      ready: () => sharing.ready(),
       now: () => now(),
       changed: () => changed?.(),
       failedOver: (event) => failedOver?.(event),
@@ -135,8 +163,16 @@ export default defineComponent({
             event,
           );
         report();
+
+        log = (level, message, fields) => background.logger[level](message, fields);
+        const calls = inbox.get();
+        const db = sql.get();
+        if (calls !== undefined && db !== undefined) answerSync(calls, () => db, () => now());
+        sharing.start(background);
       },
       stop() {
+        sharing.stop();
+        log = undefined;
         clearTimeout(timer);
         changed = undefined;
         failedOver = undefined;
