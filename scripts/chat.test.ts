@@ -19,7 +19,7 @@ import { type ChatFiles, createAssets } from "../registry/components/channel-web
 import { IMAGE_TYPES, MAX_DURABLE_FILES_BYTES, MAX_DURABLE_IMAGE_BYTES, MAX_FILE_BYTES, MAX_FILES, MAX_FILES_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "../registry/components/channel-web/chat/src/lib/chat-api.ts";
 import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../registry/components/channel-web/chat/src/lib/errors.ts";
 import { base64Bytes, fileLimits, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
-import { INITIAL, type LiveState, reduce } from "../registry/components/channel-web/chat/src/lib/transcript.ts";
+import { failureText, INITIAL, type LiveEvent, type LiveState, reduce, type RunFailure } from "../registry/components/channel-web/chat/src/lib/transcript.ts";
 import { type ChatClient, chatSource, conversationsPath, transcriptPath } from "../registry/components/channel-web/chat/src/lib/source.ts";
 import { newChatPath, parseRoute, PROJECTS_PATH, projectIdOf, projectPath, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
 import { shownProjects } from "../registry/components/channel-web/chat/src/lib/project-list.ts";
@@ -202,33 +202,38 @@ describe("live events", () => {
         controller.close();
       },
     });
-  const fold = (events: unknown[], from: LiveState = INITIAL): LiveState => events.reduce<LiveState>((state, event) => reduce(state, { type: "event", event: event as { type: string } }), from);
+  const fold = (events: unknown[], from: LiveState = INITIAL): LiveState => events.reduce<LiveState>((state, event) => reduce(state, { type: "event", event: event as LiveEvent }), from);
 
-  test("a stream's events, read with fetch and folded by the shared live state: the answer as written, then its entry by the transcript's id; an error event ends it", async () => {
+  test("a stream's events, read with fetch and folded by the shared live state: the live value whole then its ops (the answer as written), its entry by the transcript's id before the change that ends it, why a run failed; an error event ends it", async () => {
     const answer = { role: "assistant", content: [{ type: "text", text: "Hello" }], timestamp: 2 };
     const text = [
-      `data: ${JSON.stringify({ type: "snapshot", run: {}, tools: [] })}\n\n`,
+      `data: ${JSON.stringify({ type: "live", ops: [["r", { busy: true, tools: [] }]] })}\n\n`,
       ": heartbeat\n\n",
-      `data: ${JSON.stringify({ type: "message_start", message: { ...answer, content: [{ type: "text", text: "" }] } })}\n\n`,
-      `data: ${JSON.stringify({ type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: "Hel" }] })}\n\n`,
-      `data: ${JSON.stringify({ type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: "lo" }] })}\n\n`,
-      `data: ${JSON.stringify({ type: "message_end", entry: { id: "web:r1#ab12", kind: "message", model: [answer] } })}\n\n`,
-      `data: ${JSON.stringify({ type: "run_end" })}\n\n`,
+      `data: ${JSON.stringify({ type: "live", ops: [["s", ["partial"], { ...answer, content: [{ type: "text", text: "" }] }]] })}\n\n`,
+      `data: ${JSON.stringify({ type: "live", ops: [["a", ["partial", "content", 0, "text"], "Hel"]] })}\n\n`,
+      `data: ${JSON.stringify({ type: "live", ops: [["a", ["partial", "content", 0, "text"], "lo"]] })}\n\n`,
+      `data: ${JSON.stringify({ type: "entries", entries: [{ id: "web:r1#ab12", kind: "message", messages: [answer] }] })}\n\n`,
+      `data: ${JSON.stringify({ type: "live", ops: [["s", ["busy"], false], ["d", ["partial"]]] })}\n\n`,
+      `data: ${JSON.stringify({ type: "live", ops: [["s", ["failure"], { reason: "model_error" }]] })}\n\n`,
       'event: error\ndata: {"error":"watch_failed"}\n\n',
-      `data: ${JSON.stringify({ type: "run_start" })}\n\n`,
+      `data: ${JSON.stringify({ type: "transcript" })}\n\n`,
     ].join("");
     // Cut anywhere: the parser waits for each event's blank line.
     const chunks = text.match(/[\s\S]{1,7}/g) ?? [];
     const events: unknown[] = [];
     await readSse(body(chunks), (event) => events.push(event));
 
-    expect(events.map((event) => (event as { type: string }).type)).toEqual(["snapshot", "message_start", "message_update", "message_update", "message_end", "run_end"]);
+    expect(events.map((event) => (event as { type: string }).type)).toEqual(["live", "live", "live", "live", "entries", "live", "live"]);
     const writing = fold(events.slice(0, 4));
-    expect(writing).toMatchObject({ busy: true, partial: { content: [{ type: "text", text: "Hello" }] } });
-    // The ended answer is the transcript's entry, by its id: the view merges it with the transcript, nothing swapped.
-    const ended = fold(events);
+    expect(writing).toMatchObject({ busy: true, tools: [], partial: { content: [{ type: "text", text: "Hello" }] } });
+    // The ended answer is the transcript's entry, by its id, in before the answer leaves: the view merges it with the transcript, nothing swapped.
+    const ended = fold(events.slice(0, 6));
     expect(ended).toMatchObject({ busy: false, partial: undefined, entries: [{ id: "web:r1#ab12", kind: "message", messages: [answer] }] });
     expect(ended.changes).toBeGreaterThan(0);
+    // Why it failed: the runtime's word, said plainly (users never get its text).
+    const failed = fold(events);
+    expect(failed.failure).toEqual({ reason: "model_error" });
+    expect(failureText(failed.failure as RunFailure)).toBe("The model failed.");
   });
 
   test("the chat's source reads the chat API's transcript, events, messages and abort, and checks a message before it goes", async () => {

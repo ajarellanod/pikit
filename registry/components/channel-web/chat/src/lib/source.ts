@@ -1,7 +1,8 @@
 /**
  * A conversation as the chat API serves it (`/chat/api/conversations/:id/…`, `chat-api.ts`), for the
  * shared view (`components/pikit/conversation.tsx`, features/completed/chat-parity.md): its transcript (entries
- * newest first, paged), its live events (a `snapshot` first, read with `fetch`: `client.ts`'s `follow`),
+ * newest first, paged), its live events (`ChatEvent`s, the shared view's `LiveEvent`s as users see
+ * them: the live value whole first, then ops; read with `fetch`: `client.ts`'s `follow`),
  * a message (text, images and files, checked before it goes: `images.ts`) and a stop.
  *
  * Pure: the requests go through the `ChatClient` given (`client.ts`'s in the page), so
@@ -66,7 +67,8 @@ export function chatSource(id: string, client: ChatClient, target: string): Chat
   return {
     id,
     transcript: (page) => client.get<ChatPage<ChatTranscriptEntry>>(transcriptPath(id, page)),
-    follow: (onEvent, signal) => client.follow(`${path}/events`, onEvent, signal),
+    // The same shapes: `ChatJsonOp` is `JsonOp` with its values unknown (chat-api.ts imports nothing).
+    follow: (onEvent, signal) => client.follow(`${path}/events`, (event) => onEvent(event as LiveEvent), signal),
     send: async ({ text, images, files = [] }) => {
       const sent = images.map(({ mimeType, data }) => ({ mimeType, data }));
       const attached = filesOf(files);

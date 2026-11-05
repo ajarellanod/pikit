@@ -120,7 +120,7 @@ export interface ChatBackend extends ChatIndex {
   image(ref: ChatRef, messageId: string, index: number, ctx: AppContext): Promise<ChatImage>;
   /** Throws `not_found` and the admission's refusals. */
   send(ref: ChatRef, message: NewMessage, ctx: AppContext): Promise<ChatSendResponse>;
-  /** The live events (`live.ts`), a `snapshot` first, until `ctx` is cancelled. Throws `not_found` before the first. */
+  /** The live events (`live.ts`), a `live` with the whole value first, until `ctx` is cancelled. Throws `not_found` before the first. */
   live(ref: ChatRef, ctx: AppContext): Promise<AsyncIterable<ChatEvent>>;
   /** Stops the run going, if one does. Throws `not_found`. */
   abort(ref: ChatRef, ctx: AppContext): Promise<void>;

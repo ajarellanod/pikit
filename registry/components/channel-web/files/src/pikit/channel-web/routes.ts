@@ -255,7 +255,8 @@ async function projectNameOf(request: Request): Promise<string> {
 }
 
 /**
- * `events` cut by `visibility` (`visibility.ts`): what users may see of each, in order. Not a generator:
+ * `events` cut by `visibility` (`visibility.ts`): what users may see of each, in order; ops that do not
+ * apply end it with their error, `events` released. Not a generator:
  * its `return` reaches `events` at once, also while a `next` waits (a generator would queue it behind
  * that `next`, and a stream that is idle would never close: on Cloudflare the object's stays open).
  */
@@ -269,7 +270,13 @@ function projected(events: AsyncIterable<ChatEvent>, visibility: VisibilitySetti
           for (;;) {
             const read = await inner.next();
             if (read.done === true) return read;
-            const shown = project(read.value);
+            let shown: ChatEvent | undefined;
+            try {
+              shown = project(read.value);
+            } catch (error) {
+              await inner.return?.().catch(() => {});
+              throw error;
+            }
             if (shown !== undefined) return { done: false, value: shown };
           }
         },

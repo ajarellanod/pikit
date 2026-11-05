@@ -1,19 +1,22 @@
 /**
  * A conversation's JSON, as whatever serves it gives it (the dashboard's admin API, channel-web's chat
- * API): its transcript's entries (`TranscriptEntry`, pi-durable's, newest first, paged) and its live
- * events (`LiveEvent`, pi-durable's, a `snapshot` first); and what its live view knows of them:
- * `reduce` folds each event into a `LiveState`. Pure: no React, no request.
+ * API): its transcript's entries (`TranscriptEntry`, newest first, paged) and its live events
+ * (`LiveEvent`, `agent.observe`'s `watch` as state); and what its live view knows of them: `reduce`
+ * folds each event into a `LiveState`. Pure: no React, no request.
  *
- * The stream starts with a `snapshot` and a client that fell behind gets a new one, so the state is
- * rebuilt from each snapshot, never from a count of events. What is written for good (entries) is read
- * from the transcript again: `changes` counts the times it changed. Until it is, `entries` holds the
- * ones the stream announced (a message ended, an entry appended), as the transcript gives them. An
- * answer that ended between two snapshots (a reconnect, a client that fell behind) is in `ended` (its
- * last partial) until the transcript has it.
+ * The stream sends what the conversation shows live (`Live`) whole first (`["r", value]`), then the
+ * ops that change it (`json-ops.ts`), and the newest state again to a client that fell behind: the
+ * state is that value with every `live` event's ops applied in order, never a count of events. What is
+ * written for good (entries) is read from the transcript again: `changes` counts the times it changed
+ * (an `entries`, `usage` or `transcript` event, and a value sent whole: a stream that starts again says
+ * nothing of what it missed). Until it is read, `entries` holds the ones the stream announced, as the
+ * transcript gives them: they come before the change that ends the answer they hold, so an answer
+ * never leaves the thread before its entry is in it.
  */
 
 // Relative, not `@/`: scripts/dashboard.test.ts imports this module from outside the dashboard.
-import type { AssistantMessage as Assistant, Message, RunningTool } from "./messages.ts";
+import { applyOps, type JsonOp, type JsonValue } from "./json-ops.ts";
+import type { AssistantMessage as Assistant, RunningTool } from "./messages.ts";
 
 /** One entry of a conversation's history: its messages in pi-ai's JSON (admin-api's `ApiTranscriptEntry`). */
 export interface TranscriptEntry {
@@ -29,130 +32,120 @@ export interface TranscriptPage {
   next?: string;
 }
 
-/** One live event of a conversation, in the runtime's JSON (admin-api's `ApiEvent`): a `snapshot` first. */
-export interface LiveEvent {
-  type: string;
-  [field: string]: unknown;
+/** Why the newest run ended without an answer (admin-api's `ApiRunFailure`), until a run starts again. */
+export interface RunFailure {
+  /** The runtime's word: `model_error`, `no_model`, `aborted`, `reset`, `interrupted`, `turn_limit`, … */
+  reason: string;
+  /** What the runtime says of it (an error's text), when it says anything. */
+  detail?: string;
 }
+
+/**
+ * One live event of a conversation (admin-api's `ApiEvent`): `live`, the ops over what it shows (the
+ * first `[["r", value]]`); `entries` the transcript gained, oldest first; `usage` and `transcript`, read
+ * those again.
+ */
+export type LiveEvent =
+  | { type: "live"; ops: readonly JsonOp[] }
+  | { type: "entries"; entries: readonly TranscriptEntry[] }
+  | { type: "usage" }
+  | { type: "transcript" };
 
 export interface LiveState {
   connected: boolean;
+  /** What the conversation shows live (admin-api's `ApiLive`), as the ops made it; `undefined` until the first. */
+  value: JsonValue | undefined;
+  /** Read of `value`: whether a run goes, the answer being written, the tools not done, why the last run gave no answer. */
   busy: boolean;
-  /** The answer being written. */
   partial?: Assistant | undefined;
   tools: RunningTool[];
+  failure?: RunFailure | undefined;
   /** The entries the stream announced, oldest first: the transcript's newest, maybe not read yet. */
   entries: TranscriptEntry[];
-  /** Answers whose partial a snapshot no longer had (written for good meanwhile), as last seen, oldest first. */
-  ended: Assistant[];
   /** Bumped whenever the transcript or the cost changed: read them again. */
   changes: number;
 }
 
-export const INITIAL: LiveState = { connected: false, busy: false, tools: [], entries: [], ended: [], changes: 0 };
-
-/** Answers ended kept: the transcript has the older ones by now. */
-const KEPT_ENDED = 5;
+export const INITIAL: LiveState = { connected: false, value: undefined, busy: false, tools: [], entries: [], changes: 0 };
 
 export type Action = { type: "reset" } | { type: "connected" } | { type: "disconnected" } | { type: "event"; event: LiveEvent };
 
-/** An entry as the transcript gives it: pi-durable's, its model messages. */
-function entryOf(value: unknown): TranscriptEntry | undefined {
-  const entry = value as { id?: unknown; kind?: unknown; model?: unknown } | undefined;
-  if (entry?.id === undefined) return undefined;
-  return { id: String(entry.id), kind: String(entry.kind), messages: Array.isArray(entry.model) ? entry.model : [] };
-}
-
 /** The ones announced, the most recent kept: older ones are in the transcript read since. */
 const KEPT_ENTRIES = 50;
-const withEntry = (entries: TranscriptEntry[], value: unknown): TranscriptEntry[] => {
-  const entry = entryOf(value);
-  return entry === undefined || entries.some((each) => each.id === entry.id) ? entries : [...entries, entry].slice(-KEPT_ENTRIES);
+const withEntries = (entries: TranscriptEntry[], added: readonly TranscriptEntry[]): TranscriptEntry[] => {
+  const known = new Set(entries.map((each) => each.id));
+  const fresh: TranscriptEntry[] = [];
+  for (const each of added) {
+    if (known.has(each.id)) continue;
+    known.add(each.id);
+    fresh.push(each);
+  }
+  return fresh.length === 0 ? entries : [...entries, ...fresh].slice(-KEPT_ENTRIES);
 };
 
-type Change =
-  | { type: "text_start" | "thinking_start" | "toolcall_start" | "block"; contentIndex: number; block: Assistant["content"][number] }
-  | { type: "text_delta" | "thinking_delta"; contentIndex: number; delta: string }
-  | { type: "toolcall_delta" }
-  | { type: "message"; message: Assistant };
+type Fields = { readonly [key: string]: JsonValue };
+const isObject = (value: JsonValue | undefined): value is Fields => typeof value === "object" && value !== null && !Array.isArray(value);
 
-function applyChanges(partial: Assistant | undefined, changes: Change[]): Assistant | undefined {
-  let message = partial;
-  for (const change of changes) {
-    if (change.type === "message") {
-      message = change.message;
-      continue;
-    }
-    if (message === undefined || change.type === "toolcall_delta") continue;
-    const content = [...message.content];
-    if ("delta" in change) {
-      const part = content[change.contentIndex];
-      if (part?.type === "text" && change.type === "text_delta") content[change.contentIndex] = { ...part, text: part.text + change.delta };
-      if (part?.type === "thinking" && change.type === "thinking_delta") content[change.contentIndex] = { ...part, thinking: part.thinking + change.delta };
-    } else {
-      content[change.contentIndex] = change.block;
-    }
-    message = { ...message, content };
-  }
-  return message;
+/** What `value` (an `ApiLive`) shows: what a part of it that is not as it says is left out of. */
+function shown(value: JsonValue): Pick<LiveState, "busy" | "partial" | "tools" | "failure"> {
+  const live = isObject(value) ? value : {};
+  const partial = live.partial;
+  const failure = live.failure;
+  const tools = Array.isArray(live.tools) ? (live.tools as readonly JsonValue[]) : [];
+  return {
+    busy: live.busy === true,
+    // The same object while its ops leave it alone (`applyOps`): the thread knows it by identity.
+    partial: isObject(partial) && Array.isArray(partial.content) ? (partial as unknown as Assistant) : undefined,
+    tools: tools.filter(isObject).flatMap((tool) =>
+      tool.status === "done" ? [] : [{ callId: String(tool.callId), name: String(tool.name), output: typeof tool.output === "string" ? tool.output : "" }],
+    ),
+    failure: isObject(failure) ? { reason: String(failure.reason), ...(typeof failure.detail === "string" && { detail: failure.detail }) } : undefined,
+  };
 }
-
-type ToolOutput = { trimStart?: number; append?: string } | { set: string };
 
 export function reduce(state: LiveState, action: Action): LiveState {
   if (action.type === "reset") return INITIAL;
   if (action.type === "connected") return { ...state, connected: true };
   if (action.type === "disconnected") return { ...state, connected: false };
   const event = action.event;
-  const changed = { ...state, changes: state.changes + 1 };
   switch (event.type) {
-    case "snapshot": {
-      const generation = event.generation as { message?: Assistant } | undefined;
-      const tools = (event.tools as { callId: string; name: string; status: string; output?: string }[] | undefined) ?? [];
-      const partial = generation?.message;
-      // The answer being written is gone from this snapshot: it ended, and is shown as it was until the transcript has it.
-      const gone = state.partial !== undefined && partial?.timestamp !== state.partial.timestamp ? state.partial : undefined;
-      return {
-        ...changed,
-        busy: event.run !== undefined,
-        partial,
-        ended: gone === undefined ? state.ended : [...state.ended, gone].slice(-KEPT_ENDED),
-        tools: tools.filter((tool) => tool.status !== "done").map((tool) => ({ callId: tool.callId, name: tool.name, output: tool.output ?? "" })),
-      };
+    case "live": {
+      let value: JsonValue;
+      try {
+        value = applyOps(state.value ?? null, event.ops);
+      } catch {
+        // Ops that do not apply to what is held: nothing more is applied until the value comes whole again.
+        return { ...state, value: undefined };
+      }
+      // A value sent whole starts a stream (or catches up one that fell behind): what it missed is read again.
+      const whole = event.ops.some((op) => op[0] === "r");
+      return { ...state, ...shown(value), value, changes: whole ? state.changes + 1 : state.changes };
     }
-    case "run_start":
-      return { ...state, busy: true };
-    case "run_end":
-      return { ...changed, busy: false, partial: undefined, tools: [] };
-    case "message_start": {
-      const message = event.message as Message;
-      return message.role === "assistant" ? { ...state, partial: message } : state;
-    }
-    case "message_update":
-      return { ...state, partial: applyChanges(state.partial, event.changes as Change[]) };
-    case "message_end":
-      return { ...changed, partial: undefined, entries: withEntry(state.entries, event.entry) };
-    case "tool_execution_start":
-      return { ...state, tools: [...state.tools, { callId: String(event.toolCallId), name: String(event.toolName), output: "" }] };
-    case "tool_execution_update": {
-      const output = event.output as ToolOutput | undefined;
-      if (output === undefined) return state;
-      return {
-        ...state,
-        tools: state.tools.map((tool) => {
-          if (tool.callId !== event.toolCallId) return tool;
-          if ("set" in output) return { ...tool, output: output.set };
-          return { ...tool, output: tool.output.slice(output.trimStart ?? 0) + (output.append ?? "") };
-        }),
-      };
-    }
-    case "tool_execution_end":
-      return { ...changed, tools: state.tools.filter((tool) => tool.callId !== event.toolCallId) };
-    case "entry_appended":
-      return { ...changed, entries: withEntry(state.entries, event.entry) };
-    case "usage_changed":
-      return changed;
+    case "entries":
+      return { ...state, entries: withEntries(state.entries, event.entries), changes: state.changes + 1 };
+    case "usage":
+    case "transcript":
+      return { ...state, changes: state.changes + 1 };
     default:
       return state;
   }
+}
+
+const FAILURES: Record<string, string> = {
+  model_error: "The model failed",
+  no_model: "There was no model to answer with",
+  aborted: "The run was stopped",
+  reset: "The conversation was reset",
+  interrupted: "The App stopped while the model answered",
+  faulted: "The run failed",
+  orphaned: "The run could not go on",
+  restart_limit: "The run was cut off too many times",
+  turn_limit: "The tool rounds reached their limit",
+  nothing_to_answer: "There was nothing to answer",
+};
+
+/** Why the last run gave no answer, said plainly: the runtime's reason, and what it said of it. */
+export function failureText(failure: RunFailure): string {
+  const said = FAILURES[failure.reason] ?? `It ended: ${failure.reason}`;
+  return failure.detail === undefined || failure.detail === "" ? `${said}.` : `${said}: ${failure.detail}`;
 }

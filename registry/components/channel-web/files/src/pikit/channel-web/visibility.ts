@@ -15,14 +15,18 @@
  *   `names` the same with no content; with `none` dropped. Never its `details`.
  * - **Any other message** (a system prompt, a role the runtime adds): dropped.
  *
- * Live (`createEventProjector`, one per stream): the dashboard's event shapes, each cut the same way.
- * A hidden block of the answer being written is left out, and the changes after it are renumbered
- * (`contentIndex`), so the partial a view folds is the transcript's message as it will be stored. Tool
- * events go with `names` without their arguments and output (`tool_execution_update` not at all), with
- * `none` not at all. An event of a type not named here is dropped.
+ * Live (`createEventProjector`, one per stream): the live value (`ChatLive`) is projected whole at each
+ * change (`projectLive`), and what goes out is the ops between one projection and the next (`diffOps`),
+ * so nothing hidden can pass in an op. The answer being written is cut as an assistant message is (kept
+ * even when nothing is left: a partial), so the partial a view holds is the transcript's message as it
+ * will be stored. Its tools go with `names` as their call id, name and status, with `full` their output
+ * too, with `none` not at all. Why a run failed goes as the runtime's word for it, never its text.
+ * `entries` are cut as the transcript's (an entry left with nothing is dropped). An event of a type not
+ * named here is dropped.
  */
 
-import type { ChatEvent, ChatVisibility } from "./api.ts";
+import { applyOps, diffOps, type JsonOp, type JsonValue } from "@pikit/contracts";
+import type { ChatEvent, ChatLive, ChatLiveTool, ChatVisibility } from "./api.ts";
 
 type Fields = Record<string, unknown>;
 const fieldsOf = (value: unknown): Fields => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Fields) : {});
@@ -82,96 +86,51 @@ export function projectEntry<E extends { messages: unknown[] }>(entry: E, visibi
   return messages.length === 0 ? undefined : { ...entry, messages };
 }
 
-/** A live event's entry (`{ id, kind, model }`, pi-durable's form) as users see it, or `undefined`. */
-function liveEntryOf(value: unknown, visibility: ChatVisibility): Fields | undefined {
-  const entry = fieldsOf(value);
-  if (entry.id === undefined) return undefined;
-  const model = projectMessages(Array.isArray(entry.model) ? entry.model : [], visibility);
-  return model.length === 0 ? undefined : { id: entry.id, kind: entry.kind, model };
+/** A call of the tool round as users see it, or `undefined` (none at all with `tools: "none"`). */
+function toolOf(value: unknown, visibility: ChatVisibility): ChatLiveTool | undefined {
+  const tool = fieldsOf(value);
+  if (visibility.tools === "none" || typeof tool.callId !== "string" || typeof tool.name !== "string") return undefined;
+  const status = tool.status === "pending" || tool.status === "done" ? tool.status : "running";
+  return { callId: tool.callId, name: tool.name, status, ...(visibility.tools === "full" && typeof tool.output === "string" && { output: tool.output }) };
+}
+
+/** A conversation's live value (`ChatLive`, as `live.ts` makes it) as users see it. */
+export function projectLive(value: unknown, visibility: ChatVisibility): ChatLive {
+  const live = fieldsOf(value);
+  const partial = fieldsOf(live.partial);
+  const shown = partial.role === "assistant" ? assistantOf(partial, visibility, true) : undefined;
+  const reason = fieldsOf(live.failure).reason;
+  return {
+    busy: live.busy === true,
+    ...(shown !== undefined && { partial: shown }),
+    tools: Array.isArray(live.tools) ? live.tools.flatMap((tool) => toolOf(tool, visibility) ?? []) : [],
+    ...(typeof reason === "string" && { failure: { reason } }),
+  };
 }
 
 /**
- * The projection of one stream's live events: stateful, as it renumbers the blocks of the answer being
- * written (its original block types kept, `types`). `undefined`: the event is dropped.
+ * The projection of one stream's events: stateful, as it holds the live value as it came (`raw`) and
+ * as it was last shown (`shown`). `undefined`: the event is dropped (nothing users see changed).
+ * Throws on `live` ops that do not apply to the value before them: the stream ends, the view reconnects.
  */
 export function createEventProjector(visibility: ChatVisibility): (event: ChatEvent) => ChatEvent | undefined {
-  /** The original types of the partial's blocks, by their index in the runtime's message. */
-  let types: unknown[] = [];
-  const typesOf = (message: Fields): unknown[] => (Array.isArray(message.content) ? message.content.map((block) => fieldsOf(block).type) : []);
-  /** Where block `index` is in the message shown: the blocks shown before it. */
-  const shownIndex = (index: number): number => types.slice(0, index).filter((type) => shows(type, visibility)).length;
-  const partialOf = (value: unknown): Fields | undefined => {
-    const message = fieldsOf(value);
-    if (message.role !== "assistant") return undefined;
-    types = typesOf(message);
-    return assistantOf(message, visibility, true);
-  };
-  const toolsShown = visibility.tools !== "none";
-
+  let raw: JsonValue = null;
+  let shown: ChatLive | undefined;
   return (event) => {
     switch (event.type) {
-      case "snapshot": {
-        types = [];
-        const generation = fieldsOf(event.generation);
-        const partial = generation.message === undefined ? undefined : partialOf(generation.message);
-        const tools = toolsShown && Array.isArray(event.tools) ? event.tools.map(fieldsOf) : [];
-        return {
-          type: "snapshot",
-          ...(event.run !== undefined && event.run !== null && { run: {} }),
-          ...(partial !== undefined && { generation: { message: partial } }),
-          tools: tools.map((tool) => ({ ...pick(tool, ["callId", "name", "status"]), ...(visibility.tools === "full" && typeof tool.output === "string" && { output: tool.output }) })),
-        };
+      case "live": {
+        raw = applyOps(raw, event.ops as readonly JsonOp[]);
+        const next = projectLive(raw, visibility);
+        const ops = shown === undefined ? [["r", next as unknown as JsonValue] as const] : diffOps(shown as unknown as JsonValue, next as unknown as JsonValue);
+        shown = next;
+        return ops.length === 0 ? undefined : { type: "live", ops };
       }
-      case "run_start":
-      case "run_end":
-        types = [];
-        return { type: event.type };
-      case "message_start": {
-        const partial = partialOf(event.message);
-        return partial === undefined ? undefined : { type: "message_start", message: partial };
+      case "entries": {
+        const entries = (Array.isArray(event.entries) ? event.entries : []).flatMap((entry) => projectEntry(entry, visibility) ?? []);
+        return entries.length === 0 ? undefined : { type: "entries", entries };
       }
-      case "message_update": {
-        const changes = (Array.isArray(event.changes) ? event.changes.map(fieldsOf) : []).flatMap((change): Fields[] => {
-          if (change.type === "message") {
-            const partial = partialOf(change.message);
-            return partial === undefined ? [] : [{ type: "message", message: partial }];
-          }
-          if (typeof change.contentIndex !== "number") return [];
-          const index = change.contentIndex;
-          if (change.type === "text_start" || change.type === "thinking_start" || change.type === "toolcall_start" || change.type === "block") {
-            types[index] = fieldsOf(change.block).type;
-            const block = blockOf(change.block, visibility);
-            return block === undefined ? [] : [{ type: change.type, contentIndex: shownIndex(index), block }];
-          }
-          if ((change.type === "text_delta" || change.type === "thinking_delta") && shows(types[index], visibility) && typeof change.delta === "string") {
-            return [{ type: change.type, contentIndex: shownIndex(index), delta: change.delta }];
-          }
-          // A tool call's arguments as written: with `full` only (the views fold them from the block).
-          if (change.type === "toolcall_delta" && visibility.tools === "full" && types[index] === "toolCall") {
-            return [{ ...pick(change, ["type", "path", "delta"]), contentIndex: shownIndex(index) }];
-          }
-          return [];
-        });
-        return changes.length === 0 ? undefined : { type: "message_update", changes };
-      }
-      case "message_end": {
-        types = [];
-        const entry = liveEntryOf(event.entry, visibility);
-        return { type: "message_end", ...(entry !== undefined && { entry }) };
-      }
-      case "tool_execution_start":
-      case "tool_execution_end": {
-        if (!toolsShown) return undefined;
-        const call = pick(event, ["toolCallId", "toolName"]);
-        if (visibility.tools === "full" && event.type === "tool_execution_start" && event.args !== undefined) return { type: event.type, ...call, args: event.args };
-        return { type: event.type, ...call };
-      }
-      case "tool_execution_update":
-        return visibility.tools === "full" ? { type: event.type, ...pick(event, ["toolCallId", "toolName", "output"]) } : undefined;
-      case "entry_appended": {
-        const entry = event.entry === undefined ? undefined : liveEntryOf(event.entry, visibility);
-        return { type: "entry_appended", ...(entry !== undefined && { entry }) };
-      }
+      case "transcript":
+        return { type: "transcript" };
       default:
         return undefined;
     }

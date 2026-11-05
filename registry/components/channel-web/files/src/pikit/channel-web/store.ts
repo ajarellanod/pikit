@@ -165,9 +165,9 @@ export interface ChatStore {
 
   /**
    * The request that started the run going in runtime conversation `conversationId` (`agent.started`),
-   * until it ends: in memory, in the App that runs it (a server, or the conversation's object), where
-   * the live view is made. A view opened mid-run names the run by it (a snapshot names its inputs by
-   * submission id only). Lost with the process, and so is the run's watch: nothing stale outlives it.
+   * until it ends: in memory, in the App that runs it (a server, or the conversation's object). A run
+   * that ended before its admission returned is told from one started since by it (`backend.ts`'s
+   * `endedEarly`). Lost with the process: nothing stale outlives it.
    */
   runStarted(conversationId: string, requestId: string): void;
   runEnded(conversationId: string): void;

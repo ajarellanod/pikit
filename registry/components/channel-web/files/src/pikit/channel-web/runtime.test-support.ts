@@ -11,14 +11,18 @@ import {
   type AgentRequest,
   type AgentRuntime,
   compareHttpRoutes,
+  diffOps,
   type ConversationRef,
   type ConversationRegistry,
   type HttpRoute,
+  type JsonValue,
   matchesHttpRoute,
   type ObservedConversation,
   type ObservedEvent,
+  type ObservedLive,
   parseHttpRouteKey,
   type RunSettlement,
+  type TranscriptEntry,
   type Usage,
 } from "@pikit/contracts";
 import { createMemoryKeyValueStorage, createMemorySubmissions } from "@pikit/contracts/testing";
@@ -143,7 +147,11 @@ export class FakeAccounts implements Accounts {
   }
 }
 
-/** The runtime: conversations, live events a test pushes, runs a test ends, and `agent.submissions`. */
+/**
+ * The runtime: conversations, their live state (`ObservedLive`) and entries as a test sets them, sent
+ * to their watchers as `agent.observe` sends them (the value whole first, then ops), runs a test ends,
+ * and `agent.submissions`.
+ */
 export class Runtime {
   conversations = new Map<string, ObservedConversation>();
   pointers = new Map<string, ConversationRef>();
@@ -159,15 +167,44 @@ export class Runtime {
   runsAtOnce = false;
   /** The App's context, for the events of runs a test ends. */
   events: AppContext | undefined;
-  private listeners = new Set<(event: ObservedEvent) => void>();
+  /** Each conversation's live value, by its id: idle until a test sets it. */
+  private lives = new Map<string, ObservedLive>();
+  private listeners = new Set<{ id: string; listen: (event: ObservedEvent) => void }>();
   watching = 0;
   released = 0;
   private next = 1;
 
   constructor(private readonly idOf: (n: number) => string = (n) => `c${n}`) {}
 
-  push(event: ObservedEvent): void {
-    for (const listener of this.listeners) listener(event);
+  /** Sends `event` to the watchers of `key`'s conversation. */
+  push(key: string, event: ObservedEvent): void {
+    const id = this.pointers.get(key)?.conversationId;
+    for (const listener of this.listeners) if (listener.id === id) listener.listen(event);
+  }
+
+  /** The live value of conversation `id`. */
+  liveOf(id: string): ObservedLive {
+    return this.lives.get(id) ?? { busy: false, tools: [] };
+  }
+
+  /** `key`'s live value changed to `change(current)`: sent to its watchers as the ops between them. */
+  live(key: string, change: (live: ObservedLive) => ObservedLive): void {
+    const id = (this.pointers.get(key) as ConversationRef).conversationId;
+    const before = this.liveOf(id);
+    const after = change(before);
+    this.lives.set(id, after);
+    const ops = diffOps(before as unknown as JsonValue, after as unknown as JsonValue);
+    if (ops.length > 0) this.push(key, { type: "live", ops });
+  }
+
+  /** The answer being written in `key`'s run is `partial` (`undefined`: none). */
+  partial(key: string, partial: unknown): void {
+    this.live(key, ({ partial: _gone, ...live }) => (partial === undefined ? live : { ...live, partial: partial as JsonValue }));
+  }
+
+  /** The transcript of `key`'s conversation gained `entries` (each `{ messages }`; ids made up). */
+  entries(key: string, entries: readonly Pick<TranscriptEntry, "messages">[]): void {
+    this.push(key, { type: "entries", entries: entries.map((entry, i) => ({ id: `e${i}`, kind: "message", ...entry })) });
   }
 
   readonly observer: AgentObserver = {
@@ -182,16 +219,19 @@ export class Runtime {
     if (!this.conversations.has(id)) throw new Error(`agent.observe: no conversation ${id}`);
     const queue: ObservedEvent[] = [];
     let wake: (() => void) | undefined;
-    const listener = (event: ObservedEvent) => {
-      queue.push(event);
-      wake?.();
+    const listener = {
+      id,
+      listen: (event: ObservedEvent) => {
+        queue.push(event);
+        wake?.();
+      },
     };
     this.listeners.add(listener);
     this.watching++;
     const onAbort = () => wake?.();
     ctx.abortSignal?.addEventListener("abort", onAbort);
     try {
-      yield { type: "snapshot", ...(this.conversations.get(id)?.busy === true && { run: { requestId: "x" } }) };
+      yield { type: "live", ops: [["r", this.liveOf(id) as unknown as JsonValue]] };
       for (;;) {
         if (ctx.abortSignal?.aborted === true) return;
         const event = queue.shift();
@@ -252,31 +292,19 @@ export class Runtime {
     },
   };
 
-  private submissions = 0;
-
-  /** The watch's `submission` events for `requestIds`, as Pi reports each request it took: their submission ids. */
-  submit(requestIds: string[]): number[] {
-    return requestIds.map((requestId) => {
-      const id = ++this.submissions;
-      this.push({ type: "submission", record: { id, requestId } });
-      return id;
-    });
-  }
-
   /**
-   * A run of `key`'s conversation starts with `requestIds` (busy, `agent.started`, `run_start`); its
-   * `run_start` names `inputs` (submission ids), by default new ones whose `submission` events come
-   * first, as Pi's do in the commit that starts the run; `null`: none (inputs the watch cannot name).
+   * A run of `key`'s conversation starts with `requestIds` (busy, `agent.started`, its live value going
+   * with those requests and no tools).
    */
-  async start(key: string, requestIds: string[], inputs: number[] | null = this.submit(requestIds)): Promise<void> {
+  async start(key: string, requestIds: string[]): Promise<void> {
     const conversation = this.pointers.get(key) as ConversationRef;
     this.conversations.set(conversation.conversationId, { ...(this.conversations.get(conversation.conversationId) as ObservedConversation), busy: true });
-    this.push({ type: "run_start", ...(inputs !== null && { inputs }) });
+    this.live(key, () => ({ busy: true, requests: requestIds, tools: [] }));
     await this.events?.emit("agent.started", { conversation, requestId: requestIds[0] as string, resumed: false });
   }
 
   /**
-   * The run of `key` that took `requestIds` ends (recorded, then announced unless `quiet`), with what it
+   * The run of `key` that took `requestIds` ends (recorded, its live value idle, with why it failed, then announced unless `quiet`), with what it
    * wrote (`messages`; by default the runtime's own user message, which the user never sees, then its
    * answer, `answerOf(text)`).
    */
@@ -297,7 +325,12 @@ export class Runtime {
     };
     this.conversations.set(conversation.conversationId, { ...(this.conversations.get(conversation.conversationId) as ObservedConversation), busy: false });
     await this.record.submissions.settled(run, this.events ?? (undefined as never));
-    this.push({ type: "run_end" });
+    this.live(key, () => ({
+      busy: false,
+      tools: [],
+      ...(kind === "failed" && { failure: { reason: "model_error", detail: "the model failed" } }),
+      ...(kind === "aborted" && { failure: { reason: "aborted" } }),
+    }));
     if (outcome.quiet !== true) {
       const written = outcome.messages ?? [{ role: "user", content: "[the runtime's prompt]", timestamp: 1 }, ...(kind === "completed" ? [answerOf(run.text ?? "")] : [])];
       const result = { ...run, messages: written as never[] };

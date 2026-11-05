@@ -300,7 +300,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         parseKey(conversation.key) === undefined
           ? undefined
           : guarded("a run's start was not recorded", async (now) => {
-              // Before anything awaits: a view opened from now on names this run by it (`live.ts`).
+              // Before anything awaits: an admission that returns from now on knows a run goes (`endedEarly`).
               store.runStarted(conversation.conversationId, requestId);
               const row = await store.change(conversation.key, { busy: true });
               if (row !== undefined) await changed(row, now);
