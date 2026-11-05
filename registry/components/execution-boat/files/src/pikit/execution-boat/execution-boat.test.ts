@@ -9,17 +9,19 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type BlobStorage, type BlobStore, type ConversationRef } from "@pikit/contracts";
 import { type App, type Clock, type ComponentDefinition, defineApp, defineComponent, type Logger, systemClock } from "@pikit/core";
-import { createLifecycleConformance, createManualClock, type ManualClock } from "@pikit/core/testing";
+import { createLifecycleConformance, createManualClock } from "@pikit/core/testing";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@pikit/pi-adapter/execution";
 import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
 import { createWorkspaceConformance } from "@pikit/pi-adapter/testing";
 import { FakeBoat, failure, json } from "./fake-boat.test-support.ts";
+import { tarGz } from "./tar.test-support.ts";
 import { createExecutionBoat, workspaceOf } from "./index.ts";
 
 export const KEY = "boat_live_0123456789abcdefSECRET";
@@ -505,5 +507,106 @@ test("a malformed answer is an error, never a guess", async () => {
   await stopApp(s);
 });
 
-void createManualClock;
-export type { ManualClock };
+// --- Portability: the shared snapshot format ------------------------------------------------------
+
+const prefixOf = (id: string, agent = "support") => workspace(id, agent);
+const manifestOf = (data: Map<string, Uint8Array>, id: string) => {
+  const bytes = data.get(`workspace-snapshots/${prefixOf(id)}/manifest.json`);
+  return bytes === undefined ? undefined : (JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>);
+};
+
+/** The names in a gzip'd tar, read by the system's tar. */
+function namesIn(bytes: Uint8Array): string[] {
+  const file = join(temporaryDir(), "a.tar.gz");
+  writeFileSync(file, bytes);
+  const listed = spawnSync("tar", ["-t", "-z", "-f", file]);
+  return String(listed.stdout).split("\n").filter((line) => line !== "").map((line) => line.replace(/\/$/, "")).sort();
+}
+
+test("snapshots: an idle stop exports the workspace in the shared format; a VM deleted by retention comes back from it", async () => {
+  const clock = createManualClock();
+  const blob = memoryBlob();
+  const s = await started({ snapshots: true, retentionDays: 1 }, { clock, providers: [blob.component] });
+  const env = await s.env("1");
+  await env.writeFile("notes/a.txt", "kept", ctx);
+  const made = await run(env, "ln -s notes/a.txt inside && ln -s /etc/hosts outside && ln -s ../.. up && mkfifo fifo");
+  expect(made.result).toEqual({ ok: true, value: { exitCode: 0 } });
+  await clock.advance(IDLE);
+  await until(() => stateOf(s, "1")[0] === "archived", "the idle stop");
+
+  const manifest = manifestOf(blob.data, "1");
+  expect(manifest).toMatchObject({ version: 1, agent: "support", createdAt: clock.now() });
+  const object = String(manifest?.object);
+  expect(object).toMatch(new RegExp(`^${prefixOf("1")}/snapshot-${clock.now()}-[0-9a-f]{16}\\.tar\\.gz$`));
+  const archive = blob.data.get(`workspace-snapshots/${object}`) as Uint8Array;
+  expect(manifest?.size).toBe(archive.length);
+  expect(manifest?.sha256).toBe(new Bun.CryptoHasher("sha256").update(archive).digest("hex"));
+  expect(object).toContain(String(manifest?.sha256).slice(0, 16));
+  // Relative paths, the workspace's contents only; links out and the FIFO left out.
+  expect(namesIn(archive)).toEqual(["inside", "notes", "notes/a.txt"]);
+  expect(s.logs.find((log) => log.message === "execution-boat: workspace exported")?.fields).toMatchObject({ skipped: 3 });
+
+  await clock.advance(DAY + HOUR);
+  await until(() => stateOf(s, "1").length === 0, "the deletion");
+  // Saved after the VM's last start: deleted without resuming it.
+  expect(s.fake.count("POST", /\/resume$/)).toBe(0);
+  expect(await text(env, "notes/a.txt")).toBe("kept");
+  expect(await text(env, "inside")).toBe("kept");
+  expect(s.fake.of(workspace("1")).length).toBe(1);
+  expect(s.logs.some((log) => log.message === "execution-boat: workspace restored from its snapshot")).toBe(true);
+
+  // The next export supersedes the first archive, deleted once the new manifest is written.
+  await env.writeFile("notes/b.txt", "later", ctx);
+  await clock.advance(IDLE);
+  await until(() => stateOf(s, "1")[0] === "archived", "the second stop");
+  const archives = [...blob.data.keys()].filter((key) => key.startsWith(`workspace-snapshots/${prefixOf("1")}/snapshot-`));
+  expect(archives).toEqual([`workspace-snapshots/${String(manifestOf(blob.data, "1")?.object)}`]);
+  expect(archives[0]).not.toBe(`workspace-snapshots/${object}`);
+  await stopApp(s);
+});
+
+test("snapshots: a workspace that could not be exported is never deleted unsaved (the VM stays the truth)", async () => {
+  const clock = createManualClock();
+  const blob = memoryBlob(10);
+  const s = await started({ snapshots: true, retentionDays: 1 }, { clock, providers: [blob.component] });
+  const env = await s.env("1");
+  await env.writeFile("a.txt", "too big for a 10-byte store", ctx);
+  await clock.advance(IDLE);
+  await until(() => stateOf(s, "1")[0] === "archived", "the idle stop");
+  expect(s.logs.some((log) => log.message.includes("could not be exported before its VM stopped") && String(log.fields?.reason).includes("maxBytes"))).toBe(true);
+  await clock.advance(DAY + HOUR);
+  await until(() => s.logs.some((log) => log.message === "execution-boat: a VM past retentionDays was kept"), "the kept VM");
+  // Resumed to export again, which failed: stopped again, not deleted.
+  expect(s.fake.count("POST", /\/resume$/)).toBe(1);
+  expect(s.fake.count("DELETE", /^\/sandboxes\/[^/]+$/)).toBe(0);
+  expect(stateOf(s, "1")).toEqual(["archived"]);
+  expect(manifestOf(blob.data, "1")).toBeUndefined();
+  await stopApp(s);
+});
+
+test("snapshots: a workspace with no VM is restored from another backend's snapshot; one escaping the root is refused and no VM kept", async () => {
+  const blob = memoryBlob();
+  const s = await started({ snapshots: true }, { providers: [blob.component] });
+  const put = async (id: string, archive: Uint8Array) => {
+    const sha256 = new Bun.CryptoHasher("sha256").update(archive).digest("hex");
+    const object = `${prefixOf(id)}/snapshot-1000-${sha256.slice(0, 16)}.tar.gz`;
+    blob.data.set(`workspace-snapshots/${object}`, archive);
+    blob.data.set(`workspace-snapshots/${prefixOf(id)}/manifest.json`, new TextEncoder().encode(JSON.stringify({ version: 1, object, sha256, size: archive.length, createdAt: 1000, agent: "support" })));
+  };
+  await put("1", tarGz([{ name: "src/", type: "5" }, { name: "src/main.py", content: "print('from gondolin')\n" }, { name: "main", type: "2", linkname: "src/main.py" }]));
+  const env = await s.env("1");
+  expect(await text(env, "src/main.py")).toBe("print('from gondolin')\n");
+  expect(await text(env, "main")).toBe("print('from gondolin')\n");
+
+  await put("2", tarGz([{ name: "ok.txt", content: "x" }, { name: "../escaped.txt", content: "evil" }]));
+  const refused = await (await s.env("2")).readTextFile("ok.txt", ctx);
+  expect(refused.ok ? "" : refused.error.message).toMatch(/snapshot could not be restored, so no VM was kept: .*refused/);
+  expect(s.fake.of(workspace("2"))).toEqual([]);
+  // A tampered archive (its sha256 no longer the manifest's): refused the same way.
+  await put("3", tarGz([{ name: "a", content: "a" }]));
+  blob.data.set(`workspace-snapshots/${String(manifestOf(blob.data, "3")?.object)}`, tarGz([{ name: "a", content: "b" }]));
+  const tampered = await (await s.env("3")).exists("a", ctx);
+  expect(tampered.ok ? "" : tampered.error.message).toMatch(/does not match its manifest|its manifest says/);
+  expect(s.fake.of(workspace("3"))).toEqual([]);
+  await stopApp(s);
+});
