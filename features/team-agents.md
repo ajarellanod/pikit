@@ -45,7 +45,7 @@ a project installs, and agents that name what they may use.
 | Browser (cloud sessions) | none | [browser](browser.md) |
 | Attachments, assets, size limits | built: `InboundMessage.images` (Google Chat's and Telegram's photos, the web chat's and the dashboard's); files a user sends in Google Chat, Telegram or the web chat written to the conversation's workspace, their paths in the text (`@pikit/pi-adapter`'s `collectAttachments`, 10 MB a file, 25 MB a message); files kept for a space: `tool-space-files` | [rich-content](rich-content.md) for files in answers |
 | Durable outbound delivery | `outbound-durable`, `startAnswerDelivery` | — |
-| Model fallback, provider account failover | built: `provider-failover` (`failover/<chain>`) | — |
+| Model fallback, provider account failover | built: `provider-failover` (`failover/<chain>`; more accounts of one provider as `accounts`, each with its own credential, `anthropic-2/<model>`) | — |
 | Tracing (Langfuse, OpenTelemetry) | built: `extension-tracing`, opt-in per agent, runs and model/tool spans over OTLP/HTTP JSON to Langfuse or any collector; content off by default, redacted when enabled; both targets | [tracing](tracing.md) |
 | Dashboard, monitor | the dashboard (`src/dashboard/`, admin-api): chat, agents, settings, proposals | — |
 | Metrics (`/metrics`), observability | `log-events`, health | [health](health.md) |

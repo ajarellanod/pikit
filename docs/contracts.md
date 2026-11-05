@@ -798,8 +798,9 @@ producer/consumer boundary, not every shape or browser rendering.
   as `provider/modelId`. Every pi-ai provider is a subpath `@pikit/pi-adapter/providers/<id>`.
   Providers: provider-anthropic, provider-openai, provider-openrouter, provider-openai-compatible, provider-faux
   (scripted models for tests), and provider-failover (`failover/<chain>`: a chain of the other
-  providers' models, a request moving to the next model when one fails before it answers). `modelProviders` in
-  `component.json` lists their keys.
+  providers' models, a request moving to the next model when one fails before it answers; and its `accounts`, more
+  accounts of an installed provider, each under an id and with a credential of its own). `modelProviders` in
+  `component.json` lists their keys (an account's id is config, not listed).
 - **`model.credentials`** (`@pikit/pi-adapter`): pi-ai's `CredentialStore`, per provider id; pi-ai
   writes refreshed OAuth tokens back. Without it, providers read their environment variables (through
   `secrets` first, if installed). Providers: credentials-file (server), credentials-do (durable: one
