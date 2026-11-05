@@ -10,7 +10,8 @@
  *   schema), forwarding each operation to the sandbox's object.
  * - **This one, the default export**: in each `Sandbox` Durable Object (`entrypoint.ts`), one per
  *   sandbox id and agent, its container started with the agent's image, its workspace saved to
- *   `storage.blob` when idle and restored when its container is new (`sandbox.ts`, `snapshot.ts`). In
+ *   `storage.blob` when idle and restored when its container is new (`sandbox.ts`, in the shared format of
+ *   `@pikit/contracts`' `workspace-snapshot.ts`). In
  *   any other object of the project (deployment-cloudflare's `/health` one), it does nothing.
  *
  * **No secrets** (owner's decision): this host never gets a workspace secret. The config has no
@@ -21,12 +22,12 @@
  * Target: `durable` (Cloudflare: Containers are Cloudflare's; celld's Containers are not supported).
  */
 
+import { openSnapshotStore } from "@pikit/contracts";
 import { defineComponent } from "@pikit/core";
 import Type, { type Static } from "typebox";
 import { SANDBOX_OBJECT } from "./context.ts";
 import { AGENT_NAME, MAX_AGENT_LENGTH } from "./protocol.ts";
 import { type Profile, Sandbox } from "./sandbox.ts";
-import { openSnapshots } from "./snapshot.ts";
 
 export { worker, WORKER_NAME } from "./worker.ts";
 export { objectName } from "./sandbox.ts";
@@ -107,8 +108,8 @@ export default defineComponent({
         const sandbox = new Sandbox({
           container: object.container,
           storage: object.storage,
-          snapshots: openSnapshots(storage),
-          maxBlobBytes: storage.maxBytes,
+          snapshots: openSnapshotStore(storage),
+          maxArchiveBytes: storage.maxStreamBytes,
           profile: (agent) => profileOf(config, agent),
           root: config.root,
           idleMs: config.idleMinutes * 60_000,

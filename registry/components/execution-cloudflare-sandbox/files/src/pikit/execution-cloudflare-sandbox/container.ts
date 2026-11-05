@@ -119,12 +119,12 @@ export type HelperAnswer<T> = { ok: true; value: T } | { ok: false; error: WireE
 
 /**
  * Runs `pikit-sandbox <operation> <json>` in `container` within `ms`, with `stdin` as its input when
- * given. A helper that does not answer, exits non-zero or prints no JSON is an `unknown` error.
+ * given (bytes, or a stream it reads as it comes). A helper that does not answer, exits non-zero or prints no JSON is an `unknown` error.
  */
-export async function helper<T>(container: SandboxContainer, operation: string, args: Record<string, unknown>, ms: number, stdin?: Uint8Array): Promise<HelperAnswer<T>> {
+export async function helper<T>(container: SandboxContainer, operation: string, args: Record<string, unknown>, ms: number, stdin?: Uint8Array | ReadableStream<Uint8Array>): Promise<HelperAnswer<T>> {
   let process: ContainerProcess | undefined;
   const run = async (): Promise<HelperAnswer<T>> => {
-    process = await container.exec([HELPER, operation, JSON.stringify(args)], { stdout: "pipe", stderr: "pipe", ...(stdin !== undefined && { stdin: streamOf(stdin) }) });
+    process = await container.exec([HELPER, operation, JSON.stringify(args)], { stdout: "pipe", stderr: "pipe", ...(stdin !== undefined && { stdin: stdin instanceof ReadableStream ? stdin : streamOf(stdin) }) });
     const [out, err, exitCode] = await Promise.all([collect(process.stdout), collect(process.stderr), process.exitCode]);
     const text = new TextDecoder().decode(out);
     if (exitCode !== 0) return unknown(`pikit-sandbox ${operation} exited ${exitCode}: ${new TextDecoder().decode(err).trim().slice(0, 500)}`);

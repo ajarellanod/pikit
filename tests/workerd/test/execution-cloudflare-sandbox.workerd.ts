@@ -10,13 +10,16 @@
  * - the object's App (`object.ts`) composed in a real SQLite-backed Durable Object over a container
  *   double that answers the helper's `open` and `mkdir`: the identity kept in the object's storage,
  *   the idle alarm set in it, a container that never answers unavailable within the start's deadline;
- * - the shared snapshot format through workerd's Web Crypto, `CompressionStream` and
- *   `DecompressionStream`: written, read back, and an archive leaving the root refused.
+ * - the shared snapshot format (`@pikit/contracts`' `workspace-snapshot.ts`, what this host runs)
+ *   through workerd's Web Crypto, streams, `CompressionStream` and `DecompressionStream`: an archive
+ *   streamed and checked into the bucket, the manifest, read back checked; an archive leaving the root
+ *   refused, and none stored.
  */
 
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { commitSnapshotManifest, putSnapshotArchive, readSnapshotArchive, SnapshotArchiveRefused, snapshotId } from "@pikit/contracts";
 import { createMemoryBlobStorage } from "@pikit/contracts/testing";
 import { expect, it } from "vitest";
 import { createWorkerHost } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
@@ -25,7 +28,6 @@ import type { ContainerProcess, SandboxContainer } from "../../../registry/compo
 import executionCloudflareSandbox, { objectName, worker as sandboxWorker } from "../../../registry/components/execution-cloudflare-sandbox/files/src/pikit/execution-cloudflare-sandbox/index.ts";
 import { createSandboxObjectHost } from "../../../registry/components/execution-cloudflare-sandbox/files/src/pikit/execution-cloudflare-sandbox/object.ts";
 import type { SandboxReply, SandboxRequest } from "../../../registry/components/execution-cloudflare-sandbox/files/src/pikit/execution-cloudflare-sandbox/sandbox.ts";
-import { readSnapshot, SnapshotRefused, snapshotPrefix, writeSnapshot } from "../../../registry/components/execution-cloudflare-sandbox/files/src/pikit/execution-cloudflare-sandbox/snapshot.ts";
 import secretsWorkers from "../../../registry/components/secrets-workers/files/src/pikit/secrets-workers/index.ts";
 import { workerEnv } from "./host.ts";
 
@@ -132,14 +134,23 @@ it("a container that never answers is unavailable within the start's deadline", 
 });
 
 it("the shared snapshot format through workerd's Web APIs; an archive leaving the root refused", async () => {
-  const store = createMemoryBlobStorage().namespace("workspace-snapshots");
-  const prefix = await snapshotPrefix("execution-serve:o-abc", "designer");
-  const archive = await craftArchive([{ name: "./", type: "5" }, { name: "./a.txt", content: "kept" }]);
-  const written = await writeSnapshot({ store, prefix, agent: "designer", archive, createdAt: 1234, maxBytes: 1 << 20 });
-  expect(written).toMatchObject({ version: 1, size: archive.length, createdAt: 1234, agent: "designer" });
-  expect((await readSnapshot(store, prefix, "designer", 1 << 20))?.archive).toEqual(archive);
+  const store = createMemoryBlobStorage({ maxBytes: 1024 }).namespace("workspace-snapshots");
+  const id = await snapshotId("execution-serve:o-abc", "designer");
+  const sha256 = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const random = new Uint8Array(4096);
+  crypto.getRandomValues(random);
+  const archive = await craftArchive([{ name: "./", type: "5" }, { name: "./a.txt", content: "kept" }, { name: "./noise", content: Array.from(random, (byte) => byte.toString(36)).join("") }]);
+  expect(archive.length).toBeGreaterThan(1024);
+  const manifest = await putSnapshotArchive(store, { id, agent: "designer", createdAt: 1234, sha256: await sha256(archive), body: new Blob([archive as Uint8Array<ArrayBuffer>]).stream() });
+  expect(manifest).toMatchObject({ version: 1, size: archive.length, createdAt: 1234, agent: "designer" });
+  await commitSnapshotManifest(store, id, manifest);
+  const read = await readSnapshotArchive(store, { id, agent: "designer" });
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of read?.chunks ?? []) chunks.push(chunk);
+  expect(new Uint8Array(await new Blob(chunks as Uint8Array<ArrayBuffer>[]).arrayBuffer())).toEqual(archive);
+  expect(read?.result()).toEqual({ size: archive.length, sha256: await sha256(archive), entries: 3 });
 
   const escaping = await craftArchive([{ name: "../out.txt", content: "x" }]);
-  await writeSnapshot({ store, prefix, agent: "designer", archive: escaping, createdAt: 5678, maxBytes: 1 << 20 });
-  await expect(readSnapshot(store, prefix, "designer", 1 << 20)).rejects.toThrow(SnapshotRefused);
+  await expect(putSnapshotArchive(store, { id, agent: "designer", createdAt: 5678, sha256: await sha256(escaping), body: new Blob([escaping as Uint8Array<ArrayBuffer>]).stream() })).rejects.toThrow(SnapshotArchiveRefused);
+  expect((await store.list("")).entries.map((entry) => entry.key)).toEqual([`${id}/manifest.json`, manifest.object]);
 });

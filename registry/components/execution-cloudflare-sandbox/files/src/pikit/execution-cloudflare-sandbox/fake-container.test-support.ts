@@ -41,7 +41,7 @@ export function createFakeContainer(options: { images?: Record<string, string> }
     for (const process of live) process.kill(9);
     live.clear();
     rmSync(root, { recursive: true, force: true });
-    rmSync(`${root}.restore`, { recursive: true, force: true });
+    for (const beside of [".restore", ".restore.tar.gz", ".snapshot.tar.gz"]) rmSync(`${root}${beside}`, { recursive: true, force: true });
     rmSync(temp, { recursive: true, force: true });
     mkdirSync(temp, { recursive: true });
   };

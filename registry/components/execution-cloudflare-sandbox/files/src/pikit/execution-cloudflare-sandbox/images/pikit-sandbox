@@ -4,7 +4,8 @@
 // sandbox protocol is one short process: `pikit-sandbox <operation> <json>`, which prints one JSON line,
 // `{"ok":true,"value":...}` or `{"ok":false,"error":{"code","message","path"}}` (pi-durable's
 // `FileError` codes, mapped from Node's errno as pi-durable's local environment maps them), and exits 0.
-// Any other exit is the helper's own failure. `write` reads the content from stdin.
+// Any other exit is the helper's own failure. `write` reads the content from stdin; so do
+// `snapshot-make` (the paths to archive) and `snapshot-receive` (a snapshot's archive, streamed).
 //
 // `exec` is the exception: it runs a command in a process group of its own, passes its stdout and
 // stderr through as they come (and appends both to the spill file when asked), exits with the
@@ -21,7 +22,10 @@ const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
+const { Transform } = require("node:stream");
+const { pipeline } = require("node:stream/promises");
+const zlib = require("node:zlib");
 
 const READERS = path.join(os.tmpdir(), ".pikit-readers");
 
@@ -65,7 +69,22 @@ async function readStdin() {
   return Buffer.concat(chunks);
 }
 
-/** Paths below `root` a snapshot keeps: directories, regular files, symlinks that point inside. */
+/**
+ * Whether a link at `at` (relative) with `target` stays inside the root, by the shared snapshot
+ * format's rule (`snapshotLinkStaysInside` of @pikit/contracts, which this copies: the helper runs in
+ * the container, where no package is): relative, climbing with leading `..` only, no higher than the
+ * link's directory, no `..` after a name. A restore refuses an archive with any other link.
+ */
+function linkStaysInside(at, target) {
+  if (target === "" || target.includes("\0") || target.startsWith("/")) return false;
+  const parts = target.split("/").filter((part) => part !== "" && part !== ".");
+  let up = 0;
+  while (parts[up] === "..") up++;
+  if (parts.slice(up).includes("..")) return false;
+  return up <= at.split("/").length - 1;
+}
+
+/** Paths below `root` a snapshot keeps: directories, regular files, symlinks that stay inside (`linkStaysInside`). */
 async function snapshotList(root) {
   const entries = [];
   const skipped = [];
@@ -81,8 +100,7 @@ async function snapshotList(root) {
       } else if (stats.isFile()) entries.push(`./${child}`);
       else if (stats.isSymbolicLink()) {
         const target = await fsp.readlink(path.join(root, child));
-        const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(child), target));
-        if (path.posix.isAbsolute(target) || resolved === ".." || resolved.startsWith("../")) skipped.push({ path: child, reason: "a symlink pointing outside the workspace" });
+        if (!linkStaysInside(child, target)) skipped.push({ path: child, reason: "a symlink pointing outside the workspace" });
         else entries.push(`./${child}`);
       } else skipped.push({ path: child, reason: "not a regular file, a directory or a symlink" });
     }
@@ -214,6 +232,56 @@ const operations = {
   },
   async "snapshot-list"({ root }) {
     return await snapshotList(root);
+  },
+  /**
+   * The archive of the paths on stdin (NUL-separated, relative to `root`, as `snapshot-list` gave
+   * them): `tar` (pax format, no recursion) gzip'd here into `out` (created, never replaced), hashed
+   * as it is written: `{ size, sha256 }`, or `{ tooLarge: true }` past `maxBytes` (nothing left).
+   * One gzip member and nothing after it, whatever tar pads its own output with.
+   */
+  async "snapshot-make"({ root, out, maxBytes }) {
+    const list = await readStdin();
+    await fsp.mkdir(path.dirname(out), { recursive: true });
+    const tar = spawn("tar", ["-c", "-f", "-", "--format=pax", "-C", root, "--no-recursion", "--null", "-T", "-"], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, COPYFILE_DISABLE: "1" } });
+    const exited = new Promise((resolve) => tar.on("close", (code) => resolve(code)));
+    const stderr = [];
+    tar.stderr.on("data", (chunk) => stderr.push(chunk));
+    tar.stdin.on("error", () => {});
+    tar.stdin.end(list);
+    const hash = createHash("sha256");
+    let size = 0;
+    let tooLarge = false;
+    const counted = new Transform({
+      transform(chunk, _encoding, done) {
+        size += chunk.length;
+        if (typeof maxBytes === "number" && size > maxBytes) {
+          tooLarge = true;
+          return done(new Error("the archive is larger than maxBytes"));
+        }
+        hash.update(chunk);
+        done(null, chunk);
+      },
+    });
+    try {
+      await pipeline(tar.stdout, zlib.createGzip(), counted, fs.createWriteStream(out, { flags: "wx", mode: 0o600 }));
+    } catch (error) {
+      tar.kill("SIGKILL");
+      await fsp.rm(out, { force: true });
+      if (tooLarge) return { tooLarge: true };
+      throw error;
+    }
+    const code = await exited;
+    if (code !== 0) {
+      await fsp.rm(out, { force: true });
+      throw new Error(`tar -c exited ${code}: ${Buffer.concat(stderr).toString().slice(0, 500)}`);
+    }
+    return { size, sha256: hash.digest("hex") };
+  },
+  /** Writes stdin to `path` as it comes (a snapshot's archive, checked by the Worker as it streams). */
+  async "snapshot-receive"({ path: at }) {
+    await fsp.mkdir(path.dirname(at), { recursive: true });
+    await pipeline(process.stdin, fs.createWriteStream(at, { mode: 0o600 }));
+    return null;
   },
   /**
    * `from`'s contents take the place of `to`'s: what `to` held removed, each entry of `from` renamed

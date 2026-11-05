@@ -267,7 +267,7 @@ describe("the host's files", () => {
   });
 
   test("only durable-object.ts and entrypoint.ts reach Workers or the project; the helper is no Worker module", () => {
-    for (const file of ["index.ts", "worker.ts", "sandbox.ts", "object.ts", "snapshot.ts", "tar.ts", "container.ts", "context.ts", "protocol.ts", "output.ts"]) {
+    for (const file of ["index.ts", "worker.ts", "sandbox.ts", "object.ts", "container.ts", "context.ts", "protocol.ts", "output.ts"]) {
       const text = readFileSync(join(here, file), "utf8");
       expect(text).not.toContain("cloudflare:workers");
       expect(text).not.toContain("pikit.config.ts\"");
