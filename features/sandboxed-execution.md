@@ -20,6 +20,10 @@ the decisions and limits.
 for a server or a Durable Object, in a sandbox of a host; their protocol is execution-remote's own
 (`protocol.ts`, copied in both). The sandboxes themselves are a `workspace` provider's on the host
 (execution-gondolin's micro-VMs). `execution-docker` and hosted sandboxes: not built.
+`execution-cloudflare-sandbox` built (2026-11-05, `registry/components/`): a sandbox host on Cloudflare
+Containers, a Worker of its own speaking the same protocol, a container per sandbox id and agent with
+an image per agent, its workspace saved to `storage.blob` when idle (the shared snapshot format) and
+restored on first use; never given secrets. Not run on real Containers yet (its README).
 
 **Needed by:** self-improvement requires `execution-cloudflare-sandbox` (SPEC §6): that one is
 required work, specified there, not here. On the server, SPEC §6's rule that the workspace's network
