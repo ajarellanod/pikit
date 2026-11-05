@@ -20,10 +20,15 @@
  *   directory and swapping it in is the backend's.
  */
 
-import type { BlobStore } from "@pikit/contracts";
+import type { BlobStorage, BlobStore } from "@pikit/contracts";
 
 export const SNAPSHOT_NAMESPACE = "workspace-snapshots";
 export const MANIFEST = "manifest.json";
+
+/** The format's namespace of `blob`: shared by every backend, not one component's own (registry validate allows it by name). */
+export function snapshotStore(blob: BlobStorage): BlobStore {
+  return blob.namespace(SNAPSHOT_NAMESPACE);
+}
 
 export interface SnapshotManifest {
   version: 1;

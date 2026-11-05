@@ -18,7 +18,7 @@ import type { Clock } from "@pikit/core";
 import type { BoatApi } from "./api.ts";
 import type { VmPaths } from "./env.ts";
 import { helperCommand } from "./helper.ts";
-import { loadSnapshot, readManifest, SNAPSHOT_NAMESPACE, saveSnapshot } from "./snapshot.ts";
+import { loadSnapshot, readManifest, saveSnapshot, snapshotStore } from "./snapshot.ts";
 import type { Vm, VmLog, VmSnapshots } from "./vms.ts";
 
 /** boat's longest synchronous command: what an export or a restore may take in the VM. */
@@ -51,7 +51,7 @@ export async function helper<T>(api: BoatApi, id: string, node: string, request:
 
 export function boatSnapshots(options: PortableOptions): VmSnapshots {
   const { api, node } = options;
-  const store = () => options.blob().namespace(SNAPSHOT_NAMESPACE);
+  const store = () => snapshotStore(options.blob());
   const prefix = (vm: Vm) => `${vm.key}/`;
   return {
     async latest(vm) {

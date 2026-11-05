@@ -198,6 +198,14 @@
       ],
       "path": "components/email-ses"
     },
+    "execution-boat": {
+      "version": "0.0.1",
+      "description": "Each agent's tools work, in each chat, in a boat.dev VM of its own (persistent Ubuntu in boat's cloud), served by execution-serve: stopped when idle, resumed on use, deleted after retentionDays, optionally saved in the shared snapshot format. No secrets reach a VM.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/execution-boat"
+    },
     "execution-do": {
       "version": "0.0.1",
       "description": "The agent's workspace and shell inside its Durable Object, on Cloudflare: files in the object's SQL, a bash without processes, git with fenced pushes, and node in QuickJS.",

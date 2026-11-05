@@ -410,6 +410,8 @@ test("storage names: a component's tables and indexes start with its name, its s
   expect(kv('kv.namespace("outbound-durable")')).toEqual([]);
   expect(kv("kv?.namespace(NAME)", 'const NAME = "outbound-durable";\n')).toEqual([]);
   expect(kv("kv.namespace()")).toEqual([]);
+  // The shared workspace snapshot format's namespace: any backend opens it.
+  expect(kv('blob.namespace("workspace-snapshots")')).toEqual([]);
   expect(check("export class Env { namespace(name: string) { return name; } }\n")).toEqual([]);
   expect(kv("kv.namespace('channel-telegram')")).toEqual([
     'files/store.ts opens the storage.kv namespace "channel-telegram": a component opens the one named after it, namespace("outbound-durable")',

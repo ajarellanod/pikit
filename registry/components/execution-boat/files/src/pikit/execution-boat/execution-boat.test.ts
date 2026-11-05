@@ -345,6 +345,38 @@ test("idle stop never during a command: a long command keeps its VM, which stops
   await stopApp(s);
 });
 
+test("idle stop never during a command that started while the idle check probed the VM", async () => {
+  const clock = createManualClock();
+  const s = await started({}, { clock });
+  const env = await s.env("1");
+  await env.writeFile("a.txt", "x", ctx);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let probing = false;
+  const fetch = s.fake.fetch;
+  // The idle check's probe is the next command call: held until a command of the agent has started.
+  s.fake.override = {
+    method: "POST",
+    path: /\/commands$/,
+    answer: async () => {
+      s.fake.override = undefined;
+      probing = true;
+      await held;
+      const id = s.fake.of(workspace("1"))[0]?.id as string;
+      return fetch(`https://boat.dev/api/v1/sandboxes/${id}/commands`, { method: "POST", headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" }, body: JSON.stringify({ command: `printf %s '{"ok":true,"value":0}'`, timeoutSeconds: 5 }) });
+    },
+  };
+  await clock.advance(IDLE);
+  await until(() => probing, "the probe");
+  const running = run(env, "sleep 0.5; echo survived");
+  await until(() => (s.fake.of(workspace("1"))[0]?.processes.size ?? 0) > 0, "the command");
+  release();
+  const done = await running;
+  expect(done.stdout).toBe("survived\n");
+  expect(s.fake.count("POST", /\/stop$/)).toBe(0);
+  await stopApp(s);
+});
+
 test("idle stop never while a process a command left is running (marked PIKIT_BOAT_COMMAND, found in /proc)", async () => {
   const clock = createManualClock();
   const s = await started({}, { clock });

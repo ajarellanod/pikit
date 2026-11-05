@@ -32,7 +32,7 @@ export const VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // Plain CommonJS for `node -e` (and `bun -e`): no single quote anywhere, so it needs no escaping.
 const SCRIPT = String.raw`
-const fs = require("fs"), p = require("path"), cp = require("child_process"), crypto = require("crypto");
+const fs = require("node:fs"), p = require("node:path"), cp = require("node:child_process"), crypto = require("node:crypto");
 const r = JSON.parse(Buffer.from(process.argv[process.argv.length - 1], "base64").toString("utf8"));
 const kindOf = (s) => (s.isFile() ? "file" : s.isDirectory() ? "directory" : s.isSymbolicLink() ? "symlink" : undefined);
 const fail = (code, message) => Object.assign(new Error(message), { code });

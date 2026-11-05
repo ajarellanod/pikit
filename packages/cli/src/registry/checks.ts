@@ -336,6 +336,11 @@ export function checkTargetReaders(componentDir: string): string[] {
 const CREATES = /\bCREATE\s+(?:UNIQUE\s+|TEMP(?:ORARY)?\s+|VIRTUAL\s+)?(TABLE|INDEX)\s+(?:IF\s+NOT\s+EXISTS\s+)?["[]?((?:\$\{[^}]*\}|[^\s()"'`[\];,])*)/gi;
 /** A call of a method `namespace`: `storage.get().namespace(…)`, `kv.get()?.namespace(…)`. */
 const NAMESPACE_CALL = /\.\s*namespace\s*\(/g;
+/**
+ * Namespaces of a format several components share, which any of them may open: the shared workspace
+ * snapshot format's (features/workspace-snapshots.md), written by one backend and read by another.
+ */
+const SHARED_NAMESPACES = new Set(["workspace-snapshots"]);
 /** A file's top-level `const NAME = "literal"` (exported or not): the names a table or namespace may be given by. */
 const LITERAL_CONST = /^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:"([^"\\\n]*)"|'([^'\\\n]*)'|`([^`\\$]*)`)/gm;
 
@@ -386,7 +391,7 @@ export function storageNameProblems(name: string, at: string, source: string): s
     const opened = literal ?? (/^[A-Za-z_$][\w$]*$/.test(argument) ? consts.get(argument) : undefined);
     if (opened === undefined) {
       problems.push(`${at} opens the storage.kv namespace ${argument}, which validate cannot read: write namespace("${name}"), or a const of the same file`);
-    } else if (opened !== name) {
+    } else if (opened !== name && !SHARED_NAMESPACES.has(opened)) {
       problems.push(`${at} opens the storage.kv namespace "${opened}": a component opens the one named after it, namespace("${name}")`);
     }
   }

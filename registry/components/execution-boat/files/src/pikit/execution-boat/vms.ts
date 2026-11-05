@@ -302,9 +302,15 @@ export class Vms {
     }
   }
 
-  /** Exports (with `snapshots`) and stops a running VM nobody uses; marked at once, so no use starts on it meanwhile. */
-  stop(vm: Vm, why: string): Promise<void> {
-    if (vm.busy > 0 || vm.transition !== undefined || vm.state !== "running" || vm.id === undefined) return Promise.resolve();
+  /**
+   * Exports (with `snapshots`) and stops a running VM nobody uses: the one place that decides a VM is
+   * not in use. Nothing in flight (`busy`) and, with `unusedSince`, no use since then (one that came
+   * and went while the idle check probed). The check and the mark are one synchronous step: a use
+   * that arrives next waits for the stop, then resumes the VM.
+   */
+  stop(vm: Vm, why: string, unusedSince?: number): Promise<void> {
+    if (vm.busy > 0 || (unusedSince !== undefined && vm.lastUse !== unusedSince)) return Promise.resolve();
+    if (vm.transition !== undefined || vm.state !== "running" || vm.id === undefined) return Promise.resolve();
     const id = vm.id;
     return this.begin(vm, "stop", async () => {
       if (this.options.snapshots !== undefined) {
@@ -348,8 +354,8 @@ export class Vms {
         if (left > 0) {
           keep = true;
           this.options.log.debug("execution-boat: VM idle but a command left processes running; kept", { agent: vm.agent, processes: left });
-        } else if (vm.busy === 0 && vm.lastUse === seen) {
-          await this.stop(vm, "idle");
+        } else {
+          await this.stop(vm, "idle", seen);
           continue;
         }
       }
