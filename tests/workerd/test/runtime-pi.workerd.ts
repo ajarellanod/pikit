@@ -234,8 +234,8 @@ it("a model error's backoff is the object's alarm: the object goes meanwhile, an
     );
     expect(answers).toEqual([]);
 
-    // The handler closed pi-durable inside its event (nothing in-process waits for the retry), so the
-    // object can be evicted until its alarm.
+    // The retry is a durable sleep, in storage, and Pi keeps no timer for it (`onWake`: the object's
+    // alarm wakes it), so nothing in-process waits for it and the object can be evicted until its alarm.
     await evictDurableObject(objectOf(key));
     vi.useFakeTimers({ toFake: ["Date"], now: due + 1_000, shouldAdvanceTime: true });
     await vi.waitFor(
