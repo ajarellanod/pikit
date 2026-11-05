@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import type { BlobStore } from "@pikit/contracts";
 import { createMemoryBlobStorage } from "@pikit/contracts/testing";
-import { craftArchive } from "./fake-container.test-support.ts";
+import { craftArchive } from "./archive.test-support.ts";
 import { archiveKey, MANIFEST, parseManifest, readSnapshot, SnapshotRefused, sha256Hex, snapshotPrefix, writeSnapshot } from "./snapshot.ts";
 import { ArchiveRefused, entryPath, inspectArchive, linkStaysInside } from "./tar.ts";
 
