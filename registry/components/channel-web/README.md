@@ -4,7 +4,7 @@ People who are not operators talk to the assistant from a web page, `/chat/`, wi
 own: they sign in with an email and a password, a link by email, Google, GitHub or any OAuth2/OIDC
 platform, see and continue only their own conversations, watch the answer as it is written, attach
 images and files and stop a run. A conversation reads as the dashboard's (the same JSON: a transcript of
-pi-ai messages and pi-durable's live events), cut to what the operator lets users see (thinking,
+pi-ai messages and `agent.observe`'s live state), cut to what the operator lets users see (thinking,
 tools, the Context panel); the operator may let them pick an assistant, and they search their
 conversations by title. They organize their chats in projects, whose chats share what the App keeps
 per space (memory, instructions, saved files), and type the commands the operator lets them
@@ -86,7 +86,7 @@ when they are read (`visibility.ts`; a change applies to history too):
 | `thinking: false` (default) | | the model's thinking (blocks, deltas, signatures) |
 | `thinking: true` | the thinking blocks | their signatures |
 | `tools: "none"` | | any tool call, result or event (an answer made only of tool calls is left out) |
-| `tools: "names"` (default) | a call's name, its result's `isError`, tool events by name | arguments, output, a result's content |
+| `tools: "names"` (default) | a call's name, its result's `isError`, the live tools by name and status | arguments, output, a result's content |
 | `tools: "full"` | arguments, output, results' content | a result's `details` |
 | `context: true` (default) / `false` | whether the page shows the Context panel (images sent; sources with `tools: "full"`) | |
 
@@ -238,7 +238,7 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   them wrote, cut by `visibility`. The sender of each message is `{ channel: "web", id: <user id> }`,
   so roles by actor see a user, not an operator. An operator's follow-up from the dashboard
   (`dashboard:` request ids) and a run only such follow-ups started are never stored for the user nor
-  streamed (only that a run goes: `run_start`, `run_end`).
+  streamed (only that a run goes: the live value's `busy`).
 - **History.** A run that answered one of the user's messages is stored whole when it ends
   (`agent.settled`, `agent.failed`): `AgentResult.messages` (the assistant's, with thinking and tool
   calls, and the tools' results; never the runtime's user or system messages), in the turn of the
@@ -250,22 +250,26 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   other file, its name alone) and those messages, each its own entry.
 - **One id per entry, live or read.** A user's message's id is its request id; a run's message's is
   `<the run's first request>#<hash of the message itself>` (its role, time, tool call id, blocks' text
-  and ids: `entries.ts`). The live view announces each message the run writes (`message_end`'s
-  `entry`) with that id and in that form, and the transcript reads it so later: a view merging them by
+  and ids: `entries.ts`). The live view announces each message the run writes (an `entries` event)
+  with that id and in that form, and the transcript reads it so later: a view merging them by
   id never shows one twice nor swaps one for another when the run ends.
 - **A message sent while a run goes waits out of the transcript** and of the live view until that run
-  ends (its messages are stored only then); then it is announced (`entry_appended`) after them. The
+  ends (its messages are stored only then); then it is announced (`entries`) after them. The
   page shows it as sent meanwhile.
-- **Live view** (`live.ts`): pi-durable's events in the dashboard's shapes (a `snapshot` first,
-  `run_start`, `run_end`, `message_*`, `tool_execution_*`, `entry_appended`), the answer and the tools
-  only during a run whose inputs are known to include one of the user's messages (by the request ids
-  the runtime's own events give before the run starts). A run that answers both the user's message and
-  an operator's follow-up is the user's. A run already going when the view opened is named by the
-  request that started it, which its App heard (`agent.started`), so a first message's answer streams
-  even when the page follows it late. It fails closed: a run it cannot name (its start not heard: the
-  process restarted) streams nothing, and its messages come with the transcript once stored. Never a
-  runtime's own entry, a system prompt, usage or cost. `entry_appended` without an entry: something
-  stored changed (a run's messages, a message's state): read the transcript again.
+- **Live view** (`live.ts`): state, in admin-api's shapes. `live` events carry `ChatLive` (`api.ts`),
+  the user's projection of `agent.observe`'s `ObservedLive`, sent whole first (`["r", value]`) and then
+  as the JSON ops that change it (Chord's vocabulary: a streamed answer costs its new text): whether a
+  run goes (any run), and only for a run whose requests include one of the user's (a `web:` request id)
+  the answer being written, the tools (call id, name, status, output) and why it ended without an
+  answer (the runtime's word, never its error's text). A run that answers both the user's message and
+  an operator's follow-up is the user's. It fails closed: a run with none of the user's requests shows
+  only that it goes, and a failure of a run the view never saw is not shown. `entries` events carry the
+  user's messages admitted or released and the messages a run of the user's wrote, with the
+  transcript's ids, before the change that ends the answer they hold; never a runtime's own entry, a
+  system prompt, usage or cost. `transcript`: something stored changed (a run's messages, a message's
+  state): read the transcript again. The routes cut it by the policy by projecting the whole value
+  (`visibility.ts`'s `projectLive`) and sending the ops between one projection and the next: nothing
+  hidden passes in an op.
 - **Messages** go through `admitInbound` (the router, `inbound.normalize`, duplicates by request id),
   with their images (at most 4 PNG, JPEG, WebP or GIF, 5 MB each; 1 MB in all on Cloudflare; the body
   at most what those and the text need, `maxBodyOf`). The
@@ -388,8 +392,8 @@ under an https `PIKIT_PUBLIC_URL`).
   included), history (a run's messages stored once with the message it answered, the runtime's user
   message never, a failed run's kept, pages), a lost run end (its state read, its answer delivered,
   replaced when heard late), a run that ends before its admission returns (a quick model: not busy, its
-  message answered), an operator's follow-up and its run never shown, live events in the dashboard's
-  shapes with `message_end`'s entry the transcript's (same id, same messages), a message held behind a
+  message answered), an operator's follow-up and its run never shown, the live value in admin-api's
+  shapes with its `entries` the transcript's (same id, same messages), a message held behind a
   run, the policy as a live setting on history and live events, the agents users may pick (allowed,
   refused, denied by routing, taken away; the one Routing suggests in `/me`, a dry run), the search, stop, duplicates, request ids, images and body
   limits (on Cloudflare under a call's 32 MiB), files (written before dispatch at
@@ -405,8 +409,8 @@ under an https `PIKIT_PUBLIC_URL`).
   `"all"`, `[]`), run in the conversation with the user as sender, never dispatched nor in the
   transcript, once by request id, a failure's message, a routing denial running nothing and keeping no
   claim, a first message that is a command making the chat in its project's space.
-- `visibility.test.ts`: each policy value on messages, entries and live events (a hidden block's
-  deltas left out and the next renumbered), and what never shows under the defaults.
+- `visibility.test.ts`: each policy value on messages, entries and the live value (a hidden block
+  left out of the partial, a change only to what is hidden sending nothing), and what never shows under the defaults.
 - Security cases: a spoofed `Host` gets no link nor email and `400` (accounts, the operator's routes),
   loopback hosts and `PIKIT_PUBLIC_URL` work; a client's `x-forwarded-for` never resets a rate limit,
   distinct addresses never share one; a squatter's password never works once the owner comes (magic
@@ -448,7 +452,7 @@ under an https `PIKIT_PUBLIC_URL`).
   outbound-durable, admin-auth-token, admin-api): better-auth in the accounts actor (its bundle,
   AsyncLocalStorage, scrypt from `node:crypto`, Web Crypto), sign-up and sign-in with a password, the
   cookies (`__Secure-` and `Secure` on https only, path `/chat/`), a message and its answer (the
-  transcript), the live view (`snapshot`, `message_*` whose entry ids the transcript has), another
+  transcript), the live view (the value whole, then ops; `entries` whose ids the transcript has), another
   user's every route on a chat `404`, an operator's follow-up never in the user's transcript or live
   view, the search, an agent picked (and suggested by `/me`), the accounts' tables in the accounts actor only;
   an invitation's link setting a password, a ban refused once the cookie cache expired (the actor asked
