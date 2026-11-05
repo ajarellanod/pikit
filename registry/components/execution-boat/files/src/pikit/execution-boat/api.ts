@@ -125,13 +125,17 @@ export class BoatApi {
     return key === "" ? text : text.split(key).join("[redacted]");
   }
 
-  private signal(signal: AbortSignal | undefined): AbortSignal {
-    const timeout = AbortSignal.timeout(this.options.timeoutMs);
+  private signal(signal: AbortSignal | undefined, timeoutMs = this.options.timeoutMs): AbortSignal {
+    const timeout = AbortSignal.timeout(timeoutMs);
     return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
   }
 
   /** One call to the API: its JSON answer, or a `BoatError`. */
-  async call(method: string, path: string, options: { body?: unknown; query?: [string, string][]; headers?: Record<string, string>; signal?: AbortSignal; allow404?: boolean } = {}): Promise<Json | undefined> {
+  async call(
+    method: string,
+    path: string,
+    options: { body?: unknown; query?: [string, string][]; headers?: Record<string, string>; signal?: AbortSignal; allow404?: boolean; timeoutMs?: number } = {},
+  ): Promise<Json | undefined> {
     const url = new URL(this.options.baseUrl.replace(/\/+$/, "") + path);
     for (const [name, value] of options.query ?? []) url.searchParams.append(name, value);
     const what = `${method} ${path.replace(/\/sandboxes\/[^/]+/, "/sandboxes/{id}")}`;
@@ -146,12 +150,12 @@ export class BoatApi {
           ...options.headers,
         },
         ...(options.body !== undefined && { body: JSON.stringify(options.body) }),
-        signal: this.signal(options.signal),
+        signal: this.signal(options.signal, options.timeoutMs),
       });
     } catch (error) {
       if (options.signal?.aborted === true) throw new BoatError("aborted", `${what}: cancelled`);
       const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
-      throw new BoatError("unavailable", this.redact(`boat API unreachable (${what}): ${timedOut ? `no answer within ${this.options.timeoutMs} ms` : error instanceof Error ? error.message : String(error)}`));
+      throw new BoatError("unavailable", this.redact(`boat API unreachable (${what}): ${timedOut ? `no answer within ${options.timeoutMs ?? this.options.timeoutMs} ms` : error instanceof Error ? error.message : String(error)}`));
     }
     let text: string;
     try {
@@ -217,8 +221,12 @@ export class BoatApi {
     return out;
   }
 
-  async resume(id: string, request: { type: Size; ttlSeconds: number }, signal?: AbortSignal): Promise<void> {
-    await this.call("POST", `/sandboxes/${encodeURIComponent(id)}/resume`, { body: { type: request.type, ttlSeconds: request.ttlSeconds, noEnv: true }, ...(signal !== undefined && { signal }) });
+  /** Resumes a stopped sandbox (on `type`, or its own size without one). */
+  async resume(id: string, request: { type?: Size; ttlSeconds: number }, signal?: AbortSignal): Promise<void> {
+    await this.call("POST", `/sandboxes/${encodeURIComponent(id)}/resume`, {
+      body: { ...(request.type !== undefined && { type: request.type }), ttlSeconds: request.ttlSeconds, noEnv: true },
+      ...(signal !== undefined && { signal }),
+    });
   }
 
   async stop(id: string, signal?: AbortSignal): Promise<void> {
@@ -239,6 +247,8 @@ export class BoatApi {
   async run(id: string, command: string, timeoutSeconds: number, signal?: AbortSignal): Promise<CommandResult> {
     const body = await this.call("POST", `/sandboxes/${encodeURIComponent(id)}/commands`, {
       body: { command, timeoutSeconds: Math.max(1, Math.min(600, Math.ceil(timeoutSeconds))) },
+      // The call outlives boat's own deadline for the command, so its answer says it timed out.
+      timeoutMs: Math.max(this.options.timeoutMs, (Math.min(600, Math.ceil(timeoutSeconds)) + 10) * 1000),
       ...(signal !== undefined && { signal }),
     });
     if (body === undefined || typeof body.stdout !== "string" || typeof body.stderr !== "string" || !(body.exitCode === null || Number.isInteger(body.exitCode))) {

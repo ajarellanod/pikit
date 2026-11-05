@@ -181,7 +181,7 @@ export async function checkArchive(bytes: Uint8Array): Promise<ArchiveSummary> {
   let ended = false;
   const need = async (n: number): Promise<boolean> => {
     while (pending.length < n && !ended) {
-      let chunk: ReadableStreamReadResult<Uint8Array>;
+      let chunk: Awaited<ReturnType<typeof reader.read>>;
       try {
         chunk = await reader.read();
       } catch {
