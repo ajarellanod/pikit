@@ -14,6 +14,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type BlobStorage, type BlobStore, type ConversationRef } from "@pikit/contracts";
+import { withStreams } from "./blob.test-support.ts";
 import { type App, type Clock, type ComponentDefinition, defineApp, defineComponent, type Logger, systemClock } from "@pikit/core";
 import { createLifecycleConformance, createManualClock } from "@pikit/core/testing";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
@@ -68,9 +69,10 @@ export function memoryBlob(maxBytes = 25 * 1024 * 1024) {
   const data = new Map<string, Uint8Array>();
   const storage: BlobStorage = {
     maxBytes,
+    maxStreamBytes: maxBytes,
     namespace(name) {
       const at = (key: string) => `${name}/${key}`;
-      const store: BlobStore = {
+      const store: BlobStore = withStreams({
         async put(key, bytes) {
           if (bytes.length > maxBytes) throw new Error("too large");
           data.set(at(key), bytes.slice());
@@ -87,7 +89,7 @@ export function memoryBlob(maxBytes = 25 * 1024 * 1024) {
           entries.sort((a, b) => (a.key < b.key ? -1 : 1));
           return { entries };
         },
-      };
+      });
       return store;
     },
   };

@@ -12,6 +12,7 @@
 
 import { afterAll, expect, test } from "bun:test";
 import type { BlobStorage, BlobStore } from "@pikit/contracts";
+import { withStreams } from "./blob.test-support.ts";
 import { type App, defineApp, defineComponent, systemClock } from "@pikit/core";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { atCwd, BACKGROUND_CONTEXT } from "@pikit/pi-adapter/execution";
@@ -29,8 +30,9 @@ if (KEY === undefined || KEY === "") console.log("execution-boat live.test.ts: s
 const data = new Map<string, Uint8Array>();
 const blob: BlobStorage = {
   maxBytes: 25 * 1024 * 1024,
+  maxStreamBytes: 25 * 1024 * 1024,
   namespace(name) {
-    const store: BlobStore = {
+    const store: BlobStore = withStreams({
       put: async (key, bytes) => void data.set(`${name}/${key}`, bytes.slice()),
       get: async (key) => {
         const bytes = data.get(`${name}/${key}`);
@@ -38,7 +40,7 @@ const blob: BlobStorage = {
       },
       delete: async (key) => void data.delete(`${name}/${key}`),
       list: async (prefix) => ({ entries: [...data.entries()].filter(([k]) => k.startsWith(`${name}/${prefix}`)).map(([k, v]) => ({ key: k.slice(name.length + 1), size: v.length })).sort((a, b) => (a.key < b.key ? -1 : 1)) }),
-    };
+    });
     return store;
   },
 };

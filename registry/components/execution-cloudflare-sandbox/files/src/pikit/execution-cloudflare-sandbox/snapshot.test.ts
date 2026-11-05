@@ -20,6 +20,8 @@ function recorded(store: BlobStore) {
     get: (key) => store.get(key),
     delete: async (key) => (log.push(`delete ${key}`), store.delete(key)),
     list: (prefix, options) => store.list(prefix, options),
+    putStream: (key, body, options) => store.putStream(key, body, options),
+    getStream: (key) => store.getStream(key),
   };
   return { store: wrapped, log };
 }

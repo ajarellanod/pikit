@@ -10,6 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BlobStore } from "@pikit/contracts";
+import { withStreams } from "./blob.test-support.ts";
 import { archiveKey, checkArchive, loadSnapshot, MANIFEST, parseManifest, SnapshotError, saveSnapshot, sha256Hex, snapshotPrefix } from "./snapshot.ts";
 import { tarGz } from "./tar.test-support.ts";
 
@@ -18,7 +19,7 @@ const encoder = new TextEncoder();
 function store() {
   const data = new Map<string, Uint8Array>();
   const log: string[] = [];
-  const blob: BlobStore = {
+  const blob: BlobStore = withStreams({
     async put(key, bytes) {
       log.push(`put ${key}`);
       data.set(key, bytes.slice());
@@ -34,7 +35,7 @@ function store() {
     async list(prefix) {
       return { entries: [...data.entries()].filter(([k]) => k.startsWith(prefix)).map(([key, v]) => ({ key, size: v.length })).sort((a, b) => (a.key < b.key ? -1 : 1)) };
     },
-  };
+  });
   return { data, log, blob };
 }
 
