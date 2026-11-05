@@ -75,6 +75,8 @@ export interface VmsOptions {
   base: Machine;
   /** How often a create or resume is polled until ready (real time). */
   pollMs: number;
+  /** Makes a new VM's workspace and temporary directories. */
+  prepare(id: string, vm: Vm): Promise<void>;
   /** Counts the processes a command left running in the VM `id`. */
   probe(id: string): Promise<number>;
   snapshots?: VmSnapshots;
@@ -231,6 +233,7 @@ export class Vms {
         );
         vm.id = created.id;
         await this.ready(created.id, signal);
+        await this.options.prepare(created.id, vm);
         this.options.log.info("execution-boat: VM created", { agent: vm.agent, size: vm.machine.size, ...(vm.machine.template !== undefined && { template: vm.machine.template }), ms: Date.now() - began });
         if (this.options.snapshots !== undefined) {
           try {

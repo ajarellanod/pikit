@@ -247,8 +247,8 @@ export class BoatApi {
   async run(id: string, command: string, timeoutSeconds: number, signal?: AbortSignal): Promise<CommandResult> {
     const body = await this.call("POST", `/sandboxes/${encodeURIComponent(id)}/commands`, {
       body: { command, timeoutSeconds: Math.max(1, Math.min(600, Math.ceil(timeoutSeconds))) },
-      // The call outlives boat's own deadline for the command, so its answer says it timed out.
-      timeoutMs: Math.max(this.options.timeoutMs, (Math.min(600, Math.ceil(timeoutSeconds)) + 10) * 1000),
+      // The call outlives boat's own deadline for the command by 5 s, so its answer says it timed out.
+      timeoutMs: (Math.min(600, Math.ceil(timeoutSeconds)) + 5) * 1000,
       ...(signal !== undefined && { signal }),
     });
     if (body === undefined || typeof body.stdout !== "string" || typeof body.stderr !== "string" || !(body.exitCode === null || Number.isInteger(body.exitCode))) {

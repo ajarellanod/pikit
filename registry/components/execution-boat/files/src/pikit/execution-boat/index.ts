@@ -149,7 +149,7 @@ export function createExecutionBoat(seams: BoatSeams = {}) {
           return key;
         },
         fetch: seams.fetch ?? fetch,
-        timeoutMs: (config.callSeconds + 10) * 1000,
+        timeoutMs: config.callSeconds * 1000,
       });
       const base: Machine = { size: config.size as Size, ...(config.template !== undefined && { template: config.template }) };
       const machineOf = (profile: Profile | undefined): Machine => {
@@ -168,6 +168,10 @@ export function createExecutionBoat(seams: BoatSeams = {}) {
         autoStopSeconds: config.autoStopSeconds,
         base,
         pollMs,
+        prepare: async (id, vm) => {
+          const where = paths(vm.key);
+          for (const dir of [`${where.home}/workspace`, where.tmp]) await helper(api, id, config.node, { op: "mkdir", path: dir, recursive: true }, config.callSeconds);
+        },
         probe: (id) => helper<number>(api, id, config.node, { op: "probe", proc, marker: MARKER }, config.callSeconds),
         ...(config.snapshots && {
           snapshots: boatSnapshots({
