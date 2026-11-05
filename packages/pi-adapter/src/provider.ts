@@ -23,7 +23,9 @@
  *   `openai-responses`, `anthropic-messages`, `google-generative-ai`, `mistral-conversations`…).
  * - A provider that answers through other providers (provider-failover) writes its own streams:
  *   `createAssistantMessageEventStream` makes one, `isContextOverflow` and
- *   `isRetryableAssistantError` read a failed answer as pi-ai and pi-durable do.
+ *   `isRetryableAssistantError` read a failed answer as pi-ai and pi-durable do, and
+ *   `estimateContextTokens` sizes a request as pi-durable's compaction does (the newest answer's
+ *   usage, plus estimates of what follows it).
  *
  * Neutral: no node-only import.
  */
@@ -35,6 +37,7 @@ export type { Api, ApiKeyAuth, AuthContext, Model, ModelCost, ProviderAuth, Prov
 export { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 export { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 export { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry";
+export { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 export type {
   AssistantMessage,
   AssistantMessageEvent,
