@@ -64,7 +64,7 @@ routes agents to it (`agents: { designer: "render" }`): each host its own token,
 With the provider's `snapshots` (execution-gondolin's, workspace-local's) and a `storage.blob`
 (storage-blob-s3), a sandbox unused for `idleMinutes` is saved to the bucket and released here, and
 its next request restores it: the host holds only the sandboxes in use, and a new host restores each
-from the bucket ([workspace snapshots](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)).
+from the bucket ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)).
 This component needs nothing for it: each request resolves its sandbox, which is when the provider
 restores it.
 
