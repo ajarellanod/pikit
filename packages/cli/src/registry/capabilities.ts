@@ -194,7 +194,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "Files a component keeps by key, in a namespace of its own, too large for a row or a value (saved files, snapshots): put, get, delete, list by prefix.",
+    summary: "Files a component keeps by key, in a namespace of its own, too large for a row or a value (saved files, snapshots): put, get, delete, list by prefix; larger ones streamed in and out, checked by SHA-256.",
   },
   "actor.mailbox": {
     mode: "single",

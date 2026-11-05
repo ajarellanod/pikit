@@ -29,6 +29,16 @@ Everything the `storage.blob` contract promises (`createBlobConformance` passes)
   contract's keys), its continuation token the cursor. A page may hold fewer keys than asked (the
   store decides), as the contract allows. An object under the prefix whose name is not a key of the
   contract (written by something else) is skipped.
+- **Streams as multipart uploads** (`putStream`): a body larger than one part (`partBytes`, 16 MiB by
+  default, at least S3's 5 MiB) is `CreateMultipartUpload`, one `UploadPart` per part, each signed
+  with its own SHA-256 (which S3 checks), then `CompleteMultipartUpload`, when the object appears
+  whole: a reader sees the old object until then. One part is held in memory at a time; a body of
+  one part or less is one `PutObject`. The body's whole SHA-256 (`blobStreamChunks`, the contract's)
+  is checked before the upload is completed. A body that fails, is too large or has another SHA-256,
+  a part S3 refuses, or a completion S3 answers with an error (even with 200) aborts the upload
+  (`AbortMultipartUpload`): the key keeps its old object. `getStream` is one `GET` whose body is
+  given as it arrives, its size the `Content-Length`; a `get` of an object larger than `maxBytes` is
+  refused from its `Content-Length`, before its body is read.
 - **Refused before any request**: a key, a value or a content type the contract refuses.
 - **What fails is said**: any other answer than 2xx (or 404 on `get` / `delete`) rejects with S3's
   status and error code (`HTTP 403 SignatureDoesNotMatch`), never a key. A request longer than
@@ -46,8 +56,10 @@ Everything the `storage.blob` contract promises (`createBlobConformance` passes)
   accessKeyIdSecret: "S3_ACCESS_KEY_ID",         // the NAMES of the secrets, never their values
   secretAccessKeySecret: "S3_SECRET_ACCESS_KEY",
   sessionTokenSecret: "S3_SESSION_TOKEN",        // read when set (temporary credentials)
-  maxBytes: 26214400,                // the largest value, in bytes: at least 25 MiB (the default)
-  timeoutMs: 60000,                  // one request, its body included
+  maxBytes: 26214400,                // the largest whole value (put, get), in bytes: at least 25 MiB (the default)
+  partBytes: 16777216,               // each part of a multipart upload (putStream): 5 MiB to 5 GiB, 16 MiB by default; one is held in memory
+  maxStreamBytes: 167772160000,      // the largest stream: at least maxBytes, at most 10,000 parts (the default)
+  timeoutMs: 60000,                  // one request, its body included; for getStream, each read of its body
 }
 ```
 
@@ -61,12 +73,21 @@ Cloudflare); without them the app does not start, naming the secret. The credent
 - **A celld fleet's bucket**: the endpoint, region and bucket its nodes read (`S3_ENDPOINT`,
   `AWS_REGION`, `CELLD_BUCKET`), with a `prefix` of its own (`pikit/`) so nothing meets `deploy/`.
 - **MinIO, rustfs**: `endpoint` `http://127.0.0.1:9000` (path-style), the region it is set to.
+- **Google Cloud Storage** through its XML API: `endpoint` `https://storage.googleapis.com`,
+  `region` `auto`, an HMAC key of a service account (Cloud Storage, Settings, Interoperability) as
+  the access key id and secret. Its multipart uploads are S3's.
+- **Give the bucket a lifecycle rule that aborts incomplete multipart uploads** (a day): a process
+  that dies in the middle of a `putStream` leaves its parts, invisible to `get` and `list`, which the
+  store keeps (and bills) until then. R2 aborts them after 7 days on its own.
 
 ## Limits
 
-- **Values whole, in memory**: one `PutObject` per value, no multipart upload, no streaming. On
-  Cloudflare a Durable Object has 128 MB of memory: keep `maxBytes` at its default there.
-- **No retries**, no checksum beyond the signed SHA-256 of the body S3 checks on `put`.
+- **Whole values in memory**: `put` and `get` hold a value whole. On Cloudflare a Durable Object has
+  128 MB of memory: keep `maxBytes` at its default there, and `partBytes` (what `putStream` holds)
+  small.
+- **No retries**, of a request or of a part: a part that fails aborts the whole upload, and the
+  caller puts again. No checksum beyond the signed SHA-256 S3 checks on each `put` and part, and the
+  stream's whole SHA-256 checked here.
 - **No probe at start**: a wrong bucket or key is found at the first call, with S3's error. (Starting
   makes no request, so a conversation's object starts without one.)
 
@@ -83,8 +104,14 @@ checks every request's signature as S3 does, from what it received, the body's h
 the session token), path-style over HTTP (`Bun.serve`), and virtual-hosted on AWS's endpoint behind
 the global `fetch`, under a prefix, with a session token and pages of at most 3 keys; the lifecycle
 suite; the signer against AWS's examples; the objects' names and metadata in the bucket; a wrong key,
-S3's errors and timeouts; refused input never sent; the start failures. In the pikit repository the
-suite also runs in workerd (`tests/workerd/test/storage-blob-s3.workerd.ts`).
+S3's errors and timeouts; refused input never sent; the start failures; multipart uploads (the fake
+refuses a part under 5 MiB but the last, and a completion whose parts or ETags are not its own): the
+requests of one, a body of one part as one `PutObject`, an upload aborted when the body fails, a part
+is refused, the completion answers 200 with an error, or the SHA-256 is another, nothing left in the
+bucket; a large object refused to `get` from its `Content-Length`; `partBytes` and `maxStreamBytes`
+out of S3's bounds refused. Mutation-checked: without the abort, without the `Content-Length` check,
+or with a part dropped, a case fails. In the pikit repository the suite, and a multipart upload and
+its abort, also run in workerd (`tests/workerd/test/storage-blob-s3.workerd.ts`).
 
 An opt-in run against a real store, each case under a prefix of its own and emptied after: set
 `PIKIT_S3_TEST_ENDPOINT`, `PIKIT_S3_TEST_BUCKET`, `PIKIT_S3_TEST_REGION`,
