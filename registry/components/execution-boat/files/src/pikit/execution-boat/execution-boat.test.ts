@@ -454,16 +454,18 @@ test("a use that arrives while its VM is being deleted waits, then works in a ne
   await stopApp(s);
 });
 
-test("a restarted gateway adopts the VMs it left running, and stops them once idle", async () => {
+test("a restarted gateway adopts the VMs it left running (every page of the list), and stops them once idle", async () => {
   const clock = createManualClock();
   const root = temporaryDir();
   const first = await started({}, { clock, root });
   await (await first.env("1")).writeFile("a.txt", "x", ctx);
+  await (await first.env("2")).writeFile("b.txt", "y", ctx);
   await first.app.stop();
+  first.fake.pageSize = 1;
   const second = await started({}, { clock, root, fake: first.fake });
-  await until(() => second.logs.some((log) => log.message === "execution-boat: retention sweep" && log.fields?.adopted === 1), "the adoption");
+  await until(() => second.logs.some((log) => log.message === "execution-boat: retention sweep" && log.fields?.adopted === 2), "the adoption");
   await clock.advance(IDLE);
-  await until(() => stateOf(second, "1")[0] === "archived", "the adopted VM's idle stop");
+  await until(() => stateOf(second, "1")[0] === "archived" && stateOf(second, "2")[0] === "archived", "the adopted VMs' idle stop");
   await stopApp(second);
 });
 
