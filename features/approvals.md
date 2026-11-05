@@ -73,7 +73,7 @@ of asker, one mechanism:
 - **One contract, `approvals`.** A question answered now and a decision answered in days differ only
   in their deadline, a value of each question. The split into `interaction` (an answer now) and
   `approvals` (days) came from runs that waited in the worker's memory and died with it. On pi-durable a
-  run waits durably (its tasks, `sleep(until)`, below), and on Cloudflare a wait in memory does not
+  run waits durably (its tasks, durable sleeps, below), and on Cloudflare a wait in memory does not
   survive an evicted Durable Object, so every question waits the same durable way.
 - **Not `proposals`.** `proposals` (SPEC §6, `packages/contracts/src/proposals.ts`) is the agent's
   change to itself: a branch an operator reviews in the dashboard or on the git host, deployed when
@@ -103,7 +103,8 @@ of asker, one mechanism:
   `${conversationId}:${runId}:${toolCallId}`.
 
 ## Pi first
-Pi's durable runtime has durable tasks with phases, waits (`sleep(until)`), memos and an abort
+Pi's durable runtime has durable tasks with phases, waits (since 1.4.0 a phase ends asleep,
+`runtime.sleepUntil(until, checkpoint, context)`, holding no invocation), memos and an abort
 protocol (`pico-v5.md` §5): a run can wait days for an answer with no task engine in pikit. pikit
 builds only the surface (where the question goes, how the answer comes back) and the record of
 questions across conversations. `pi-durable` 1.0 ships these tasks, and the kit runs on it

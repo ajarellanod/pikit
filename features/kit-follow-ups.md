@@ -59,8 +59,11 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   Pi had to the admin API's live part, was removed in Pi 1.2.0 with `pi-client` and `pi-protocol`;
   Chord 1.2.0's hosts link over WebSockets (`webSocketLink`, `acceptWebSockets`), with nothing for a
   browser or authentication yet. Re-check at each Pi bump: when Pi serves sessions to a browser with
-  authentication, admin-api's events and actions move onto it and pikit's own transport goes. The coding agent's RPC
-  mode is for one process over stdio; its event vocabulary is the one `agent.observe` forwards.
+  authentication, admin-api's events and actions move onto it and pikit's own transport goes. 1.5.0:
+  not yet; Chord v2 has an HTTP layer with authenticators and a security baseline
+  (`src/next-node/http`), experimental and not exported. The coding agent's RPC mode is for one
+  process over stdio. Since Pi 1.5.0 removed `watchEvents`, `agent.observe` forwards no event
+  vocabulary: its `watch` is state (`ObservedLive` and JSON ops), read from pi-durable's state.
 - **When:** in phases, each one usable. The first two have landed (CHANGELOG): `admin-api`,
   `src/dashboard/` (`registry/dashboard/`) and `pikit new --ui` / `pikit ui on|off` on a server, with
   the conversations, one live, steer, abort and reset, cost and the composition. Next:
@@ -86,13 +89,14 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **When:** the other skills with what they teach (adding a view with the dashboard).
 
 ## Chord: through the adapter and components, never in `@pikit/core`
-- **Decided (validated against Chord 1.2.0, 2026-10-13, with a spike that ran the whole repository over a Chord-backed kernel):**
+- **Decided (validated against Chord 1.2.0, 2026-10-13, with a spike that ran the whole repository over a Chord-backed kernel; re-checked against 1.5.0, 2026-11-05, gates G1, G2 and G6):**
   `@pikit/core` stays, and Chord does not enter the kernel. The gates that must pass first, the check
   for each, what each validation found and how to re-run the spike are in
   [docs/chord-decision.md](../docs/chord-decision.md); it is re-validated at every Pi pin bump.
 - **Keep:** aligning `Context` with Chord's shape.
 - **Candidate**, through the adapter, when its feature is built: the operator UI's live state
-  (SPEC §5), pi-durable's `watch()` and `taskGraph()` mapped through the `agent.observe` contract. pikit
+  (SPEC §5), pi-durable's watches (`Conversation.watch()`, `Harness.watchTaskGraph()` since 1.5.0)
+  mapped through the `agent.observe` contract. pikit
   serves no Chord objects (hosts, facets), so nothing else of Chord's is a candidate.
 - **Open:** Chord's semver ([docs/upstream](../docs/upstream/README.md), proposal 10; gate G1).
 - **Size:** none now; each candidate is weighed with its feature.

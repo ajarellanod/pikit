@@ -16,7 +16,9 @@ is not offered until it loads them (`deferred`) and `tool_search`, which matter 
 many tools, for example several MCP servers ([mcp](completed/mcp.md)).
 
 ## Pi first
-Checked against Pi 1.2.0 (pi-durable's README, "Code mode" and "Deferred tools"; its CHANGELOG):
+Checked against Pi 1.2.0 (pi-durable's README, "Code mode" and "Deferred tools"; its CHANGELOG), and
+the names again at 1.5.0 (`createCodemodeExtension`, `createToolSearchExtension`, `CodemodeSandbox`,
+`RemoteCodemodeSandbox`), with the changes since listed last:
 - **`createCodemodeExtension({ sandbox })`** (`@earendil-works/pi-durable/codemode`) adds the
   `codemode` tool and a prompt section listing the tools scripts can call (TypeScript declarations
   within a token budget, `namespaces` by name prefix, such as an MCP server's). Scripts call
@@ -38,6 +40,12 @@ Checked against Pi 1.2.0 (pi-durable's README, "Code mode" and "Deferred tools";
 - **Who calls what.** `ToolRegistration.callers` (`model`, `tools` or both) and the agent's
   `modelTools` say which tools the model is offered; `deferred: true` tools wait for `tool_search`
   (`createToolSearchExtension()`, BM25), which loads matches with `control.addTools`.
+- **Since 1.2.0.** Script deadlines and wall time are on the Harness clock (1.4.0). In 1.5.0: the
+  built-in `read` declares a structured output (a text file's text or an image's `ImageContent`), so
+  `image(await tools.read(...))` works; the extension no longer loads pi-codemode's WASM QuickJS
+  runtime itself (it runs scripts only in the sandbox the host passes); `tool_search` and
+  `searchTools()` rank like the coding agent (an exact name first) and match words in any script;
+  tool schemas are any JSON Schema, checked by `@earendil-works/pi-schema` instead of TypeBox.
 
 ## How it fits pikit
 - **An `extension-codemode` component** providing `agent.extension` `codemode` over

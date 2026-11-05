@@ -84,7 +84,7 @@ Adding an agent is adding a folder and running `pikit agents`; adding a skill is
 ## Pi first
 Pi's coding agent reads `SYSTEM.md` (it replaces its system prompt), Agent Skills folders
 (`SKILL.md`), which pikit's runtime already reads as `defineSkill`, and prompt templates
-(`prompts/<name>.md`, its `docs/prompt-templates.md` at v1.3.0). pikit takes the names and the
+(`prompts/<name>.md`, its `docs/prompt-templates.md` at v1.5.0, unchanged since v1.3.0). pikit takes the names and the
 format, not the loader: Pi's reads the disk where it runs, which Cloudflare cannot. `AGENTS.md` is left
 out on purpose: a coding agent working in `src/agents/support/` reads an `AGENTS.md` there as its own
 instructions, so the agent's context lives in `SYSTEM.md`.
