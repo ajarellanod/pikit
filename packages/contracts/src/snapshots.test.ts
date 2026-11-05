@@ -21,13 +21,14 @@ import {
   SNAPSHOT_SWEEP_MS,
   SnapshotArchiveError,
   snapshotId,
+  SnapshotTooLargeError,
   snapshotIdOf,
   type SnapshotTarget,
   WorkspaceSnapshots,
   writeSnapshotArchive,
 } from "./snapshots.ts";
 import { createMemoryBlobStorage } from "./testing/blob.ts";
-import { deleteSnapshotsBefore, parseSnapshotManifest, snapshotArchiveKey, snapshotManifestKey } from "./workspace-snapshot.ts";
+import { deleteSnapshotsBefore, parseSnapshotManifest, type SnapshotManifest, snapshotArchiveKey, snapshotManifestJson, snapshotManifestKey } from "./workspace-snapshot.ts";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -226,6 +227,62 @@ test("an archive with an entry that could leave the directory is refused whole, 
   await expect(extractSnapshotArchive(once(Bun.gzipSync(raw)), root)).rejects.toThrow("checksum");
   const cut = Bun.gzipSync(Bun.gunzipSync(tarOf([{ name: "y", body: "y".repeat(2000) }], false)).slice(0, 1024));
   await expect(extractSnapshotArchive(once(cut), temporary())).rejects.toThrow("middle of an entry");
+});
+
+test("a gzip bomb is refused once it unpacks past maxUnpackedBytes, having written no more than that, and its restore leaves nothing", async () => {
+  const size = 64 * 1024 * 1024;
+  const bomb = new Uint8Array(Bun.gzipSync(new Uint8Array(Buffer.concat([header("bomb.bin", "0", size), new Uint8Array(size), new Uint8Array(1024)]))));
+  expect(bomb.byteLength).toBeLessThan(size / 100);
+  const root = temporary();
+  const dest = join(root, "dest");
+  mkdirSync(dest);
+  const limit = 1024 * 1024;
+  await expect(extractSnapshotArchive(once(bomb), dest, { maxUnpackedBytes: limit })).rejects.toThrow("unpacks to more than 1048576 bytes (snapshots.maxUnpackedBytes)");
+  expect(lstatSync(join(dest, "bomb.bin")).size).toBeLessThanOrEqual(limit);
+
+  // Through a restore: refused whole, nothing at the workspace, nothing left in tmp.
+  const store = storeOf();
+  const sha256 = createHash("sha256").update(bomb).digest("hex");
+  const object = snapshotArchiveKey(ID, 1, sha256);
+  await store.put(object, bomb);
+  await store.put(snapshotManifestKey(ID), new TextEncoder().encode(snapshotManifestJson({ version: 1, object, sha256, size: bomb.byteLength, createdAt: 1, agent: "support" })));
+  const tmp = join(root, "tmp");
+  const workspaceDir = join(root, "chats", "c", "support");
+  await expect(restoreSnapshot(store, target(workspaceDir), { tmp, base: root, maxUnpackedBytes: limit })).rejects.toThrow(SnapshotArchiveError);
+  expect(existsSync(workspaceDir)).toBe(false);
+  expect(readdirSync(tmp)).toEqual([]);
+});
+
+test("an archive just over maxUnpackedBytes or maxEntries is refused by a restore (nothing left) and by a checkpoint (the directory kept); one just under is taken", async () => {
+  const root = temporary();
+  const dir = workspace(root);
+  const before = describe(dir);
+  const store = storeOf();
+  const tmp = join(root, "tmp");
+  const manifest = (await checkpointSnapshot(store, target(dir), { tmp, now: 1 }))?.manifest as SnapshotManifest;
+  const unpacked = Bun.gunzipSync((await store.get(manifest.object))?.bytes as Uint8Array).byteLength;
+  // What the archive holds: every file, directory and link restored, links not followed.
+  const probe = join(root, "probe");
+  await restoreSnapshot(store, target(probe), { tmp, base: root });
+  const count = (at: string): number => readdirSync(at).reduce((n, name) => n + 1 + (lstatSync(join(at, name)).isDirectory() ? count(join(at, name)) : 0), 0);
+  const entries = count(probe);
+  expect(entries).toBe(16);
+  const dest = join(root, "chats", "c", "support");
+  for (const [limits, name] of [
+    [{ maxUnpackedBytes: unpacked - 1 }, "maxUnpackedBytes"],
+    [{ maxEntries: entries - 1 }, "maxEntries"],
+  ] as const) {
+    await expect(restoreSnapshot(store, target(dest), { tmp, base: root, ...limits })).rejects.toThrow(`(snapshots.${name}): nothing restored`);
+    expect(existsSync(dest)).toBe(false);
+    expect(readdirSync(tmp)).toEqual([]);
+    const refused = await checkpointSnapshot(store, target(dir), { tmp, now: 2, ...limits }).then(() => undefined, (error: unknown) => error);
+    expect(refused instanceof SnapshotTooLargeError && refused.limit).toBe(name);
+    expect(describe(dir)).toEqual(before);
+    expect(readdirSync(tmp)).toEqual([]);
+  }
+  expect(await restoreSnapshot(store, target(dest), { tmp, base: root, maxUnpackedBytes: unpacked, maxEntries: entries })).toEqual(manifest);
+  expect(count(dest)).toBe(entries);
+  expect((await checkpointSnapshot(store, target(dir), { tmp, now: 3, maxUnpackedBytes: unpacked, maxEntries: entries }))?.manifest.size).toBe(manifest.size);
 });
 
 test("the link rule: relative, leading .. only, never above the root", () => {

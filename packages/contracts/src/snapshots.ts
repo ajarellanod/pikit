@@ -23,6 +23,11 @@
  *   archive's size and SHA-256 are the manifest's, and it is extracted into an empty directory of its
  *   own (beside the workspace, same filesystem) renamed into place only once all of it was written and
  *   checked. A failure leaves no directory where the workspace goes.
+ * - **A restore is bounded**: past `maxUnpackedBytes` (the bytes the archive unpacks to: the tar after
+ *   gunzip, headers included, which bounds what is written) or `maxEntries` (files, directories,
+ *   links), the whole restore is refused before more is written, and what it wrote is removed. A
+ *   checkpoint takes the same limits: an archive a restore would refuse is never saved (the directory
+ *   stays on this host, as past `maxBytes`).
  * - **No entry escapes the restore's directory**: an absolute path, a `..` segment, a NUL, an entry
  *   under a link, a link that would lead out (the rule above), a hard link or a device refuses the
  *   whole archive. Links are made last, so no file is ever written through one; files are created
@@ -93,11 +98,31 @@ export interface SnapshotSkipped {
   other: number;
 }
 
-/** An archive larger than the `maxBytes` its workspace may have: refused at checkpoint, the directory kept. */
+/** Bounds a restore takes (and a checkpoint, so it never saves an archive a restore would refuse). */
+export interface SnapshotLimits {
+  /** The most bytes an archive may unpack to: its tar after gunzip, headers included. Default `SNAPSHOT_MAX_UNPACKED_BYTES`. */
+  maxUnpackedBytes?: number;
+  /** The most entries (files, directories, links) an archive may hold. Default `SNAPSHOT_MAX_ENTRIES`. */
+  maxEntries?: number;
+}
+
+/** `maxUnpackedBytes`' default: 4 GiB. */
+export const SNAPSHOT_MAX_UNPACKED_BYTES = 4 * 1024 * 1024 * 1024;
+/** `maxEntries`' default. */
+export const SNAPSHOT_MAX_ENTRIES = 1_000_000;
+
+function limitsOf(limits: SnapshotLimits): Required<SnapshotLimits> {
+  return { maxUnpackedBytes: limits.maxUnpackedBytes ?? SNAPSHOT_MAX_UNPACKED_BYTES, maxEntries: limits.maxEntries ?? SNAPSHOT_MAX_ENTRIES };
+}
+
+/** A workspace past a limit its snapshots have (`maxBytes`, `maxUnpackedBytes`, `maxEntries`): refused at checkpoint, the directory kept. */
 export class SnapshotTooLargeError extends Error {
   readonly code = "snapshot_too_large";
-  constructor(readonly maxBytes: number) {
-    super(`workspace snapshots: the workspace's archive is larger than its ${maxBytes} bytes (snapshots.maxBytes): it stays on this host`);
+  constructor(
+    readonly limit: "maxBytes" | "maxUnpackedBytes" | "maxEntries",
+    readonly max: number,
+  ) {
+    super(`workspace snapshots: the workspace's archive ${limit === "maxEntries" ? `has more than ${max} entries` : limit === "maxBytes" ? `is larger than its ${max} bytes` : `unpacks to more than ${max} bytes`} (snapshots.${limit}): it stays on this host`);
     this.name = "SnapshotTooLargeError";
   }
 }
@@ -191,7 +216,7 @@ function entryHeader(path: string, type: "0" | "2" | "5", size: number, mode: nu
 }
 
 /** The tar of `root`'s contents, as it is read: depth first, names sorted. */
-async function* tarOf(root: string, skipped: SnapshotSkipped): AsyncGenerator<Uint8Array> {
+async function* tarOf(root: string, skipped: SnapshotSkipped, entry: () => void): AsyncGenerator<Uint8Array> {
   async function* walk(rel: string): AsyncGenerator<Uint8Array> {
     const names = (await readdir(rel === "" ? root : join(root, rel))).sort();
     for (const name of names) {
@@ -201,9 +226,11 @@ async function* tarOf(root: string, skipped: SnapshotSkipped): AsyncGenerator<Ui
       const mtime = Math.floor(info.mtimeMs / 1000);
       const mode = info.mode & PERMISSIONS;
       if (info.isDirectory()) {
+        entry();
         yield* entryHeader(`${path}/`, "5", 0, mode, mtime);
         yield* walk(path);
       } else if (info.isFile()) {
+        entry();
         yield* entryHeader(path, "0", info.size, mode, mtime);
         const handle = await open(full, "r");
         try {
@@ -224,6 +251,7 @@ async function* tarOf(root: string, skipped: SnapshotSkipped): AsyncGenerator<Ui
           skipped.links++;
           continue;
         }
+        entry();
         yield* entryHeader(path, "2", 0, 0o777, mtime, target);
       } else {
         skipped.other++;
@@ -236,20 +264,32 @@ async function* tarOf(root: string, skipped: SnapshotSkipped): AsyncGenerator<Ui
 
 /**
  * Writes the gzip'd tar of `root`'s contents to `file` (created, never replaced), hashing it: its
- * size, SHA-256 and what it left out. Past `maxBytes` it stops (`SnapshotTooLargeError`). `root`
- * must be a directory of its own, not a link.
+ * size, SHA-256 and what it left out. Past `maxBytes`, or past a limit a restore takes (`SnapshotLimits`),
+ * it stops (`SnapshotTooLargeError`). `root` must be a directory of its own, not a link.
  */
-export async function writeSnapshotArchive(root: string, file: string, options: { maxBytes?: number } = {}): Promise<{ size: number; sha256: string; skipped: SnapshotSkipped }> {
+export async function writeSnapshotArchive(root: string, file: string, options: { maxBytes?: number } & SnapshotLimits = {}): Promise<{ size: number; sha256: string; skipped: SnapshotSkipped }> {
   if (!(await lstat(root)).isDirectory()) throw new Error("workspace snapshots: a workspace to archive is a directory, not a link or a file");
+  const { maxUnpackedBytes, maxEntries } = limitsOf(options);
   const skipped: SnapshotSkipped = { links: 0, other: 0 };
   const hash = createHash("sha256");
   let size = 0;
+  let entries = 0;
+  let unpacked = 0;
+  const tar = async function* () {
+    for await (const chunk of tarOf(root, skipped, () => {
+      if (++entries > maxEntries) throw new SnapshotTooLargeError("maxEntries", maxEntries);
+    })) {
+      unpacked += chunk.byteLength;
+      if (unpacked > maxUnpackedBytes) throw new SnapshotTooLargeError("maxUnpackedBytes", maxUnpackedBytes);
+      yield chunk;
+    }
+  };
   const out = await open(file, "wx", 0o600);
   try {
-    await pipeline(Readable.from(tarOf(root, skipped)), createGzip(), async (compressed: AsyncIterable<Uint8Array>) => {
+    await pipeline(Readable.from(tar()), createGzip(), async (compressed: AsyncIterable<Uint8Array>) => {
       for await (const chunk of compressed) {
         size += chunk.byteLength;
-        if (options.maxBytes !== undefined && size > options.maxBytes) throw new SnapshotTooLargeError(options.maxBytes);
+        if (options.maxBytes !== undefined && size > options.maxBytes) throw new SnapshotTooLargeError("maxBytes", options.maxBytes);
         hash.update(chunk);
         await out.write(chunk);
       }
@@ -309,10 +349,20 @@ class TarExtractor {
   private readonly linkPaths = new Set<string>();
   private readonly directories = new Map<string, { mode: number; mtime: number }>();
   private pendingFile: { path: string; mode: number; mtime: number } | undefined;
+  private unpacked = 0;
+  private entries = 0;
 
-  constructor(private readonly dest: string) {}
+  constructor(
+    private readonly dest: string,
+    private readonly limits: Required<SnapshotLimits>,
+  ) {}
 
   async write(chunk: Uint8Array): Promise<void> {
+    // Counted before anything of it is written: what a restore writes never passes the limit.
+    this.unpacked += chunk.byteLength;
+    if (this.unpacked > this.limits.maxUnpackedBytes) {
+      throw new SnapshotArchiveError(`the archive unpacks to more than ${this.limits.maxUnpackedBytes} bytes (snapshots.maxUnpackedBytes): nothing restored; raise it to restore this snapshot`);
+    }
     let at = 0;
     while (at < chunk.byteLength) {
       if (this.ended) return;
@@ -419,6 +469,9 @@ class TarExtractor {
     if (type === "K") return text((value) => void (this.longLink = decoder.decode(value).replace(/\0+$/, "")));
     this.paxPath = this.paxLink = this.paxSize = this.longName = this.longLink = undefined;
     if (!Number.isSafeInteger(size) || size < 0) throw new SnapshotArchiveError("the archive has an entry with no valid size");
+    if (++this.entries > this.limits.maxEntries) {
+      throw new SnapshotArchiveError(`the archive has more than ${this.limits.maxEntries} entries (snapshots.maxEntries): nothing restored; raise it to restore this snapshot`);
+    }
 
     const segments = segmentsOf(name);
     if (type === "5") {
@@ -494,9 +547,13 @@ function parsePax(bytes: Uint8Array): [string, string][] {
   return out;
 }
 
-/** Extracts the gzip'd tar `compressed` into `dest` (an empty directory), refusing any entry that could leave it. */
-export async function extractSnapshotArchive(compressed: AsyncIterable<Uint8Array>, dest: string): Promise<void> {
-  const extractor = new TarExtractor(dest);
+/**
+ * Extracts the gzip'd tar `compressed` into `dest` (an empty directory), refusing any entry that could
+ * leave it, and an archive past `limits`. On a failure what it wrote stays in `dest`: the caller removes
+ * it (`restoreSnapshot` does).
+ */
+export async function extractSnapshotArchive(compressed: AsyncIterable<Uint8Array>, dest: string, limits: SnapshotLimits = {}): Promise<void> {
+  const extractor = new TarExtractor(dest, limitsOf(limits));
   try {
     await pipeline(Readable.from(compressed), createGunzip(), async (tar: AsyncIterable<Uint8Array>) => {
       for await (const chunk of tar) await extractor.write(chunk);
@@ -527,12 +584,17 @@ export interface CheckpointSteps {
 export async function checkpointSnapshot(
   store: BlobStore,
   target: SnapshotTarget,
-  options: { tmp: string; now: number; maxBytes?: number } & CheckpointSteps,
+  options: { tmp: string; now: number; maxBytes?: number } & SnapshotLimits & CheckpointSteps,
 ): Promise<{ manifest: SnapshotManifest; skipped: SnapshotSkipped } | undefined> {
   await mkdir(options.tmp, { recursive: true, mode: 0o700 });
   const file = join(options.tmp, `archive-${randomUUID()}.tar.gz`);
   try {
-    const archive = await writeSnapshotArchive(target.dir, file, options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes });
+    const { maxBytes, maxUnpackedBytes, maxEntries } = options;
+    const archive = await writeSnapshotArchive(target.dir, file, {
+      ...(maxBytes !== undefined && { maxBytes }),
+      ...(maxUnpackedBytes !== undefined && { maxUnpackedBytes }),
+      ...(maxEntries !== undefined && { maxEntries }),
+    });
     const object = snapshotArchiveKey(target.id, options.now, archive.sha256);
     const stored = await store.putStream(object, createReadStream(file), { contentType: SNAPSHOT_CONTENT_TYPE, sha256: archive.sha256 });
     if (stored.size !== archive.size || stored.sha256 !== archive.sha256) throw new Error("workspace snapshots: the bucket stored another archive than the one sent");
@@ -578,11 +640,12 @@ async function realParents(base: string, dir: string): Promise<void> {
 /**
  * Restores `target`'s snapshot into `target.dir`, which must not exist: the manifest, then its
  * archive, streamed and hashed into a directory of its own in `tmp`, its size and SHA-256 checked,
- * then renamed into place (its parents made under `base`, never through a link). Resolves with the
- * manifest, or `undefined` when there is no snapshot (nothing made). On any failure nothing is at
- * `target.dir`.
+ * then renamed into place (its parents made under `base`, never through a link). Past `maxUnpackedBytes`
+ * or `maxEntries` it is refused (`SnapshotArchiveError`). Resolves with the manifest, or `undefined`
+ * when there is no snapshot (nothing made). On any failure nothing is at `target.dir`, and nothing it
+ * extracted stays in `tmp`.
  */
-export async function restoreSnapshot(store: BlobStore, target: SnapshotTarget, options: { tmp: string; base: string }): Promise<SnapshotManifest | undefined> {
+export async function restoreSnapshot(store: BlobStore, target: SnapshotTarget, options: { tmp: string; base: string } & SnapshotLimits): Promise<SnapshotManifest | undefined> {
   // A manifest read just before another host replaced it names an archive that host deleted: read again.
   for (let attempt = 1; ; attempt++) {
     const manifest = await readSnapshotManifest(store, target);
@@ -607,7 +670,7 @@ export async function restoreSnapshot(store: BlobStore, target: SnapshotTarget, 
           yield chunk;
         }
       };
-      await extractSnapshotArchive(counted(), staging);
+      await extractSnapshotArchive(counted(), staging, options);
       const sha256 = hash.digest("hex");
       if (size !== manifest.size || sha256 !== manifest.sha256) throw new SnapshotArchiveError(`the archive is not the manifest's (${size} bytes, SHA-256 ${sha256.slice(0, 16)}..., not ${manifest.size}, ${manifest.sha256.slice(0, 16)}...)`);
       await realParents(options.base, target.dir);
@@ -642,6 +705,9 @@ export interface WorkspaceSnapshotsOptions {
   idleMs: number;
   /** The largest archive a workspace may have; a larger one stays on this host, the operator told. */
   maxBytes?: number;
+  /** A restore's bounds (`SnapshotLimits`), which checkpoints also keep to. */
+  maxUnpackedBytes?: number;
+  maxEntries?: number;
   /** With `retentionDays`: snapshots whose newest archive is older than this are deleted from the bucket, hourly. */
   retentionMs?: number;
   clock: Clock;
@@ -727,7 +793,13 @@ export class WorkspaceSnapshots {
   }
 
   private async restore(target: SnapshotTarget): Promise<void> {
-    const manifest = await restoreSnapshot(this.options.store(), target, { tmp: this.tmp, base: this.options.base });
+    const { maxUnpackedBytes, maxEntries } = this.options;
+    const manifest = await restoreSnapshot(this.options.store(), target, {
+      tmp: this.tmp,
+      base: this.options.base,
+      ...(maxUnpackedBytes !== undefined && { maxUnpackedBytes }),
+      ...(maxEntries !== undefined && { maxEntries }),
+    });
     if (manifest !== undefined) this.options.log.info(`${this.options.name}: restored a workspace from its snapshot`, { bytes: manifest.size, agent: target.agent });
   }
 
@@ -811,6 +883,8 @@ export class WorkspaceSnapshots {
       tmp: this.tmp,
       now: this.options.clock.now(),
       ...(this.options.maxBytes !== undefined && { maxBytes: this.options.maxBytes }),
+      ...(this.options.maxUnpackedBytes !== undefined && { maxUnpackedBytes: this.options.maxUnpackedBytes }),
+      ...(this.options.maxEntries !== undefined && { maxEntries: this.options.maxEntries }),
       beforeManifest: unused,
     });
     if (saved === undefined) return undefined;
