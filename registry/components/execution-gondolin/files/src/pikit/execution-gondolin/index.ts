@@ -71,6 +71,7 @@ import type { GuestLauncher, GuestProposals, GuestSpec } from "./guest.ts";
 import { Mounts } from "./paths.ts";
 import { Pool, Slot } from "./pool.ts";
 import { Retention, type RetentionLog } from "./retention.ts";
+import { GondolinSnapshots, SnapshotsConfig } from "./snapshots.ts";
 
 /**
  * A variable name: a secret's name is the guest's `$NAME` and the name in `secrets`. Never one of
@@ -159,6 +160,12 @@ const Config = Type.Object({
    * `workspace: "agent"` one. Absent (the default): kept forever. Global only.
    */
   retentionDays: Type.Optional(Type.Integer({ minimum: 1 })),
+  /**
+   * Saves a chat's sandbox of an agent to `storage.blob` once unused for `idleMinutes` (its VM closed
+   * first), deletes it here, and restores it at its next use (`snapshots.ts`). Never a
+   * `workspace: "agent"` one. With `retentionDays`, the bucket's snapshots unused that long go instead.
+   */
+  snapshots: Type.Optional(SnapshotsConfig),
 });
 
 type Profile = Static<typeof Profile>;
@@ -241,6 +248,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
     setup(pikit, config) {
       const secrets = pikit.useOptional("secrets");
       const proposals = pikit.useOptional("proposals");
+      const blob = pikit.useOptional("storage.blob");
       // Only to warn of a profile no agent has: none here (a sandbox host) is a normal state.
       const definitions = pikit.useKeyed("agent.definition");
       const root = resolve(config.root);
@@ -346,8 +354,23 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
       // has two, and retention sees every sandbox in use among the entries.
       const idle = (box: Sandbox) => box.slot.guest === undefined && box.slot.busy === 0 && box.running.size === 0 && box.active === 0;
       const conversations = new SandboxCache<{ box: Sandbox; env: ExecutionEnv }>(KEEP_SANDBOXES, ({ box }) => idle(box));
+      const snapshots =
+        config.snapshots === undefined
+          ? undefined
+          : new GondolinSnapshots({
+              config: config.snapshots,
+              root,
+              retentionDays: config.retentionDays,
+              blob: () => blob.get(),
+              sandboxes: function* () {
+                for (const [, { box }] of conversations.all()) yield box;
+              },
+              clock: pikit.clock,
+              log: () => log,
+            });
+      // With snapshots, retention is the bucket's: the local directories are released anyway.
       const retention =
-        config.retentionDays === undefined
+        config.retentionDays === undefined || snapshots !== undefined
           ? undefined
           : new Retention({
               chats: join(root, CHATS_DIR),
@@ -396,8 +419,13 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
             const box = sandbox(path, path, label, profile);
             return { box, env: createSandboxEnv(box) };
           });
-          // Noted before anything awaits; waits for a retirement of the chat in progress, which leaves no directory.
-          if (chatDir !== undefined) await retention?.use(chatDir);
+          // Noted before anything awaits; waits for a retirement of the chat in progress, which leaves no directory,
+          // and for a snapshot's release, then restores the workspace from the bucket when it is not on disk.
+          if (chatDir !== undefined) {
+            const restoring = snapshots?.use(originOf(conversation).key, agent, found.box);
+            await retention?.use(chatDir);
+            await restoring;
+          }
           // Every call: a directory removed meanwhile is made again, and one made already costs nothing.
           await made(found.box, whose);
           return { env: found.env };
@@ -430,11 +458,13 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           // Temporary files and spilled output of an earlier process: no VM and no tool refers to them now.
           await rm(join(root, TMP_DIR), { recursive: true, force: true });
           await made(fallback, '"default" (execution)');
+          await snapshots?.start();
           // In the background: a first sweep may have much to delete.
           retention?.start();
         },
         async stop() {
           await retention?.stop();
+          await snapshots?.stop();
           await pool.stop();
         },
       };

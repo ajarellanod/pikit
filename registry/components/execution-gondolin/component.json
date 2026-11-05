@@ -16,6 +16,7 @@
     "capabilities": [
       "secrets",
       "proposals",
+      "storage.blob",
       "agent.definition"
     ]
   },

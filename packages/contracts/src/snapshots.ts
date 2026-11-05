@@ -645,10 +645,12 @@ export interface WorkspaceSnapshotsOptions {
   /** With `retentionDays`: snapshots whose newest archive is older than this are deleted from the bucket, hourly. */
   retentionMs?: number;
   clock: Clock;
-  /** Whether something works in `dir` now (a command, a file operation, a VM up): never checkpointed then. */
+  /** Whether something works in `dir` now (a command, a file operation): never checkpointed then. */
   busy?(dir: string): boolean;
-  /** Before a checkpoint of `dir` (closing its idle VM); `false` keeps it for now. */
+  /** Before a checkpoint of `dir`, makes it quiet (closes its idle VM); `false` keeps it for now. */
   prepare?(dir: string): Promise<boolean>;
+  /** Whether `dir` is still quiet (no VM booted since `prepare`): checked before the manifest and at the release. */
+  quiet?(dir: string): boolean;
   /** After `dir` was released (its other files removed). */
   released?(dir: string): Promise<void>;
   log: SnapshotLog;
@@ -795,7 +797,7 @@ export class WorkspaceSnapshots {
   private async checkpoint(known: Known): Promise<number | undefined> {
     const { target } = known;
     const uses = known.uses;
-    const unused = () => known.uses === uses && !this.active.has(target.dir) && this.options.busy?.(target.dir) !== true;
+    const unused = () => known.uses === uses && !this.active.has(target.dir) && this.options.busy?.(target.dir) !== true && this.options.quiet?.(target.dir) !== false;
     if (!(await exists(target.dir))) {
       // Gone meanwhile (deleted by hand, retired): nothing to save.
       this.known.delete(target.dir);
