@@ -33,6 +33,18 @@ line names its area.
 
 ### Components
 
+- Workspace snapshots ([features/workspace-snapshots.md](features/workspace-snapshots.md)):
+  workspace-local and execution-gondolin take `snapshots: { idleMinutes: 10, maxBytes?, namespace? }`
+  (with a `storage.blob`). A chat's workspace of an agent unused that long is saved to the bucket in
+  the shared format (a gzip'd tar, then `manifest.json`) and deleted from the host, its VM closed
+  first; the next resolve restores it, its SHA-256 checked, before anything runs. Never while a
+  command, a file operation or a VM holds it; shared workspaces never. With `retentionDays`, the
+  bucket's old snapshots are deleted instead of the local directories. Sandbox hosts become
+  disposable (execution-gondolin's README has one with storage-blob-s3).
+- storage-blob-fs and storage-blob-s3 stream (`putStream`, `getStream`, `maxStreamBytes`):
+  storage-blob-s3 as an S3 multipart upload (`partBytes`, 16 MiB, one part in memory), aborted when
+  the body fails, a part or the completion is refused, or the SHA-256 is another; storage-blob-fs
+  through its temporary file. A `get` of a value larger than `maxBytes` is refused.
 - extension-tracing ([features/tracing.md](features/tracing.md)), new on both targets: agents
   naming `tracing` export their run, model-request and tool-call spans to Langfuse or an OTLP/HTTP
   JSON collector. Credentials come from named secrets; content is off by default, redacted and capped
@@ -164,6 +176,15 @@ line names its area.
 
 ### Contracts
 
+- `storage.blob` streams: `putStream(key, body, { contentType?, sha256? })` resolves with the size and
+  SHA-256 stored and replaces the value only once all of it arrived and was checked (a body that
+  fails, past `maxStreamBytes` or with another SHA-256, `BlobChecksumError`, stores nothing);
+  `getStream(key)`; `BlobStorage.maxStreamBytes`. Every provider reads a body through
+  `blobStreamChunks` (`createBlobHash`: SHA-256 in plain JavaScript). Five new suite cases, each
+  checked against a broken double. The workspace snapshot format in `@pikit/contracts`
+  (`snapshotId`, `snapshotArchiveKey`, `parseSnapshotManifest`, `deleteSnapshotsBefore`…) and the
+  server's directory helper in `@pikit/contracts/snapshots` (server only: tar, checkpoint, restore,
+  `WorkspaceSnapshots`).
 - `ConversationRef.space` and `spaceOf(ref)`: the place several conversations share, given by the
   channel (`AdmitOptions.space`), recorded for good by `conversations.registry`, whose `resolve` now
   takes `(key, agent, { channel, space? }, ctx)`, and by the runtime.
