@@ -14,7 +14,7 @@ names it `failover/<chain>`, and each request goes to the first of its models th
 defineAgent({ name: "assistant", model: "failover/main" })
 ```
 
-- **Provides:** `model.provider`, under the key `failover`.
+- **Provides:** `model.provider`, under the key `failover`, and under each account's id ("Accounts" below).
 - **Uses:** the other `model.provider`s (each chain's models), and, when installed,
   `model.credentials`, `secrets`, `health`, and `actor.mailbox`, `actor.inbox` and `storage.sql`
   (the shared cooldowns).
@@ -84,6 +84,55 @@ configure --login anthropic`) or its key in `.env` (`OPENAI_API_KEY`, `ANTHROPIC
 `pikit configure` asks only for the providers agents name, here `failover`, so it does not offer
 the chain's providers by itself: name them with `--login`, or set their keys.
 
+## Accounts
+
+More accounts of one provider (a second Claude subscription, an OpenAI API key beside a ChatGPT
+login) are `accounts`: each is a model provider of its own, under an id you choose, with the models,
+API and logins of the installed provider it is an account of, and a credential of its own.
+
+```ts
+// pikit.config.ts
+"provider-failover": {
+  accounts: {
+    // A second Claude Pro/Max login: `pikit configure --login anthropic-2`.
+    "anthropic-2": { provider: "anthropic" },
+    // A key in a variable of its own: where anthropic reads ANTHROPIC_API_KEY, it reads ANTHROPIC_API_KEY_3.
+    "anthropic-3": { provider: "anthropic", env: { ANTHROPIC_API_KEY: "ANTHROPIC_API_KEY_3" } },
+    // The API key, while `openai` holds a ChatGPT login (a stored login wins over the variable).
+    "openai-key": { provider: "openai", env: { OPENAI_API_KEY: "OPENAI_API_KEY" } },
+  },
+  chains: {
+    main: ["anthropic/claude-opus-4-8", "anthropic-2/claude-opus-4-8", "openai/gpt-5.5", "openai-key/gpt-5.5"],
+  },
+},
+```
+
+An account's models are `<account>/<modelId>` (`anthropic-2/claude-opus-4-8`): a chain names them,
+and so can an agent, runtime-pi, `model.complete` or `pikit configure`, as any provider's.
+
+- **Its credential** is stored under its id in `model.credentials` (credentials-file,
+  credentials-do), beside the provider's own, never over it. Log in with
+  `pikit configure --login anthropic-2` (on Cloudflare, the login is uploaded to credentials-do's
+  route under `anthropic-2`); pi-ai refreshes its tokens apart from the provider's.
+- **Its variables** are only those its `env` maps: the provider's variable → the account's
+  (`ANTHROPIC_API_KEY` → `ANTHROPIC_API_KEY_3`), read through `secrets` first, then the environment.
+  Without `env` it reads none, so it never answers with the provider's own key; with nothing stored
+  either, it is not configured (and fails in a chain as refused credentials). `pikit configure`
+  does not ask for an account's variable: set it in `.env` yourself (or as a Worker secret).
+- **Its requests** go through the provider it is an account of, as that provider's own (pi-ai's APIs
+  tell a ChatGPT login or their own tool calls by the provider's id); the answer is the account's.
+  In the transcript, each account replays only what it answered itself (its signatures, its reasoning);
+  the other accounts' answers are another provider's to it.
+- **Cooldowns are per account**: a rate limit cools that account's model, refused credentials that
+  whole account, never the other accounts of the provider. The health report says which account to log
+  in to again (`log in to anthropic-2 again`).
+
+An account id is a provider id (lowercase letters, digits, `.`, `_`, `-`, at most 64). The App
+refuses to start with an account named `failover` or like an installed provider, an account of a
+provider that is not installed, or of another account (or of `failover`). An account carries the
+provider's chat models only (no image or classifier models, no deferred answers), and the files a
+provider may read by itself (`~/.aws/credentials`) are not separated: an account takes a login or a key.
+
 ### The model a chain is
 
 `failover/<chain>` is its **first model**, the one that answers while nothing fails: its context
@@ -149,8 +198,8 @@ shared cooldowns brings news from other conversations.
   clock, and Durable Objects' clocks agree closely enough for this.
 - **Without `actor.mailbox`, the cooldowns are in memory.** A restart forgets them: the first
   request after it tries the first model again.
-- **One credential per provider.** A chain cannot go from a ChatGPT subscription to an OpenAI API
-  key, nor between two accounts of one provider: `openai` has one credential.
+- **One credential per provider id.** Another account of a provider is an account of it under an id
+  of its own ("Accounts"): `openai` holds a ChatGPT login, `openai-key` an API key.
 - **Configuration** is checked at start: a chain that names a model no installed provider has, or
   another chain, refuses to start the App.
 
@@ -173,6 +222,16 @@ OpenAI's fake API refuses with a 429, the agent answers through Anthropic's, and
 goes to Anthropic alone. A second case runs two conversations' `PlatformConversation` objects with
 actors-do: after one of them meets the 429, the other's first message goes to Anthropic alone,
 through the owner object `provider-failover:cooldowns`.
+
+`accounts.test.ts`, copied too, covers the accounts with fake providers and a store in memory: each
+answering with its own credential (stored, logged in, or from its own variable), never the
+provider's; the provider sent the request and the transcript as its own; a chain moving from a
+rate-limited account to the next; refused credentials cooling only that account; and the refusals.
+In the pikit repository, `packages/cli/src/commands/configure-accounts.test.ts` runs
+`pikit configure --login` on an account and finds the login stored under its id, and the workerd lane
+(`tests/workerd/test/provider-failover-accounts.workerd.ts`) a chain from a rate-limited Anthropic key
+to an account's own (a Worker secret), through pi-ai's real SDK. No test runs a login through an
+account against a real API (a ChatGPT login of an account of `openai`, say).
 
 `component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
 the test "what setup declares" pins it.
