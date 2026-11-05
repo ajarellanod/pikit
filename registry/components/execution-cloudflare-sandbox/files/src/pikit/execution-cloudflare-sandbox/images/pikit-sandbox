@@ -1,0 +1,286 @@
+#!/usr/bin/env node
+// pikit-sandbox: the one helper execution-cloudflare-sandbox runs in a container (Node, no packages),
+// installed at /usr/local/bin/pikit-sandbox by the images' Dockerfiles. Each file operation of the
+// sandbox protocol is one short process: `pikit-sandbox <operation> <json>`, which prints one JSON line,
+// `{"ok":true,"value":...}` or `{"ok":false,"error":{"code","message","path"}}` (pi-durable's
+// `FileError` codes, mapped from Node's errno as pi-durable's local environment maps them), and exits 0.
+// Any other exit is the helper's own failure. `write` reads the content from stdin.
+//
+// `exec` is the exception: it runs a command in a process group of its own, passes its stdout and
+// stderr through as they come (and appends both to the spill file when asked), exits with the
+// command's code (128 + the signal's number when a signal ended it), and kills the whole group on
+// SIGTERM, SIGINT or SIGHUP. A command that cannot be started exits 127, saying why on stderr.
+//
+// No extension on purpose: it runs in the container, never in the Worker, so the registry's import
+// rules for the Worker's files (no node:* on `durable`) do not apply to it.
+
+"use strict";
+
+const fs = require("node:fs");
+const fsp = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
+const { randomUUID } = require("node:crypto");
+
+const READERS = path.join(os.tmpdir(), ".pikit-readers");
+
+function fileError(error, fallbackPath) {
+  const code = error && typeof error === "object" ? error.code : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  const at = error && typeof error.path === "string" ? error.path : fallbackPath;
+  const mapped =
+    code === "ENOENT" ? "not_found"
+    : code === "EACCES" || code === "EPERM" ? "permission_denied"
+    : code === "ENOTDIR" ? "not_directory"
+    : code === "EISDIR" ? "is_directory"
+    : code === "EINVAL" ? "invalid"
+    : "unknown";
+  return { code: mapped, message, ...(at !== undefined && { path: at }) };
+}
+
+class Refused extends Error {
+  constructor(code, message, at) {
+    super(message);
+    this.refused = { code, message, ...(at !== undefined && { path: at }) };
+  }
+}
+
+function kindOf(stats) {
+  if (stats.isFile()) return "file";
+  if (stats.isDirectory()) return "directory";
+  if (stats.isSymbolicLink()) return "symlink";
+  return undefined;
+}
+
+function infoOf(at, stats) {
+  const kind = kindOf(stats);
+  if (kind === undefined) throw new Refused("invalid", "Unsupported file type", at);
+  return { name: path.basename(at), path: at, kind, size: stats.size, mtimeMs: stats.mtimeMs };
+}
+
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+/** Paths below `root` a snapshot keeps: directories, regular files, symlinks that point inside. */
+async function snapshotList(root) {
+  const entries = [];
+  const skipped = [];
+  const walk = async (relative) => {
+    const absolute = relative === "." ? root : path.join(root, relative);
+    const names = (await fsp.readdir(absolute)).sort();
+    for (const name of names) {
+      const child = relative === "." ? name : `${relative}/${name}`;
+      const stats = await fsp.lstat(path.join(root, child));
+      if (stats.isDirectory()) {
+        entries.push(`./${child}`);
+        await walk(child);
+      } else if (stats.isFile()) entries.push(`./${child}`);
+      else if (stats.isSymbolicLink()) {
+        const target = await fsp.readlink(path.join(root, child));
+        const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(child), target));
+        if (path.posix.isAbsolute(target) || resolved === ".." || resolved.startsWith("../")) skipped.push({ path: child, reason: "a symlink pointing outside the workspace" });
+        else entries.push(`./${child}`);
+      } else skipped.push({ path: child, reason: "not a regular file, a directory or a symlink" });
+    }
+  };
+  await walk(".");
+  return { entries, skipped };
+}
+
+const operations = {
+  async open() {
+    return { home: os.homedir() };
+  },
+  async info({ path: at }) {
+    return infoOf(at, await fsp.lstat(at));
+  },
+  async exists({ path: at }) {
+    try {
+      infoOf(at, await fsp.lstat(at));
+      return true;
+    } catch (error) {
+      if (error && error.code === "ENOENT") return false;
+      throw error;
+    }
+  },
+  async realpath({ path: at }) {
+    return await fsp.realpath(at);
+  },
+  async read({ path: at, offset, length }) {
+    const file = await fsp.open(at, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+    try {
+      const stats = await file.stat();
+      if (stats.isDirectory()) throw new Refused("is_directory", "EISDIR: illegal operation on a directory, read", at);
+      if (offset === undefined) return (await file.readFile()).toString("base64");
+      const buffer = Buffer.alloc(Math.max(0, Math.min(length, Math.max(0, stats.size - offset))));
+      let filled = 0;
+      while (filled < buffer.length) {
+        const { bytesRead } = await file.read(buffer, filled, buffer.length - filled, offset + filled);
+        if (bytesRead === 0) break;
+        filled += bytesRead;
+      }
+      return buffer.subarray(0, filled).toString("base64");
+    } finally {
+      await file.close();
+    }
+  },
+  async write({ path: at, append }) {
+    const content = await readStdin();
+    await fsp.mkdir(path.dirname(at), { recursive: true });
+    if (append === true) await fsp.appendFile(at, content);
+    else await fsp.writeFile(at, content);
+    return null;
+  },
+  async truncate({ path: at, size }) {
+    const file = await fsp.open(at, "r+");
+    try {
+      await file.truncate(size);
+    } finally {
+      await file.close();
+    }
+    return null;
+  },
+  async flush({ path: at }) {
+    const file = await fsp.open(at, "r+");
+    try {
+      if ((await file.stat()).isDirectory()) throw new Refused("is_directory", "Is a directory", at);
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    return null;
+  },
+  async rename({ from, to }) {
+    try {
+      await fsp.rename(from, to);
+    } catch (error) {
+      throw Object.assign(error, { path: from });
+    }
+    return null;
+  },
+  async list({ path: at }) {
+    const infos = [];
+    for (const entry of await fsp.readdir(at, { withFileTypes: true })) {
+      const child = path.join(at, entry.name);
+      let stats;
+      try {
+        stats = await fsp.lstat(child);
+      } catch (error) {
+        if (error && error.code === "ENOENT") continue; // removed meanwhile
+        throw error;
+      }
+      if (kindOf(stats) !== undefined) infos.push(infoOf(child, stats));
+    }
+    return infos;
+  },
+  async mkdir({ path: at, recursive }) {
+    await fsp.mkdir(at, { recursive: recursive ?? true });
+    return null;
+  },
+  async remove({ path: at, recursive, force }) {
+    await fsp.rm(at, { recursive: recursive ?? false, force: force ?? false });
+    return null;
+  },
+  async mktemp({ file, prefix, suffix }) {
+    if (file !== true) return await fsp.mkdtemp(path.join(os.tmpdir(), prefix ?? "tmp-"));
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "tmp-"));
+    const at = path.join(dir, `${prefix ?? ""}${randomUUID()}${suffix ?? ""}`);
+    await fsp.writeFile(at, "");
+    return at;
+  },
+  /** A reader's file, kept as it was opened: a hard link in the readers' directory (or its path, when it cannot be linked). */
+  async pin({ path: at, noFollow }) {
+    const stats = noFollow === true ? await fsp.lstat(at) : await fsp.stat(at);
+    if (stats.isSymbolicLink()) throw new Refused("invalid", "Refusing to follow a symbolic link", at);
+    if (stats.isDirectory()) throw new Refused("is_directory", "EISDIR: illegal operation on a directory, read", at);
+    if (!stats.isFile()) throw new Refused("invalid", "Not a regular file", at);
+    await fsp.mkdir(READERS, { recursive: true });
+    const pinned = path.join(READERS, randomUUID());
+    let linked = true;
+    try {
+      await fsp.link(await fsp.realpath(at), pinned);
+    } catch {
+      linked = false;
+    }
+    return { info: { name: path.basename(at), path: at, kind: "file", size: stats.size, mtimeMs: stats.mtimeMs }, pinned: linked ? pinned : at };
+  },
+  async unpin({ pinned }) {
+    if (path.dirname(pinned) === READERS) await fsp.rm(pinned, { force: true });
+    return null;
+  },
+  async "snapshot-list"({ root }) {
+    return await snapshotList(root);
+  },
+  /** `from` takes `to`'s place: `to` moved aside, `from` renamed over it, the old one removed. */
+  async swap({ from, to }) {
+    const aside = `${to}.old-${randomUUID()}`;
+    let moved = false;
+    try {
+      await fsp.rename(to, aside);
+      moved = true;
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") throw error;
+    }
+    await fsp.rename(from, to);
+    if (moved) await fsp.rm(aside, { recursive: true, force: true });
+    return null;
+  },
+};
+
+function exec(spec) {
+  const env = spec.inheritEnv === false ? { ...(spec.env ?? {}) } : { ...process.env, ...(spec.env ?? {}) };
+  const argv = typeof spec.run === "string" ? ["/bin/sh", "-c", spec.run] : spec.run;
+  const spill = spec.spill === undefined ? undefined : fs.openSync(spec.spill, "a");
+  const child = spawn(argv[0], argv.slice(1), { cwd: spec.cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const stop = () => {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      child.kill("SIGKILL");
+    }
+  };
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, stop);
+  const forward = (from, to) =>
+    from.on("data", (chunk) => {
+      to.write(chunk);
+      if (spill !== undefined) fs.writeSync(spill, chunk);
+    });
+  forward(child.stdout, process.stdout);
+  forward(child.stderr, process.stderr);
+  child.on("error", (error) => {
+    process.stderr.write(`pikit-sandbox: cannot run ${JSON.stringify(argv[0])}: ${error.message}\n`);
+    process.exitCode = 127;
+  });
+  child.on("close", (code, signal) => {
+    if (spill !== undefined) fs.closeSync(spill);
+    const exitCode = code ?? (signal === null ? 1 : 128 + (os.constants.signals[signal] ?? 0));
+    process.stdout.write("", () => process.stderr.write("", () => process.exit(process.exitCode === 127 ? 127 : exitCode)));
+  });
+}
+
+async function main() {
+  const [operation, raw] = process.argv.slice(2);
+  const args = raw === undefined ? {} : JSON.parse(raw);
+  if (operation === "exec") return exec(args);
+  const run = Object.hasOwn(operations, operation) ? operations[operation] : undefined;
+  if (run === undefined) {
+    process.stdout.write(`${JSON.stringify({ ok: false, error: { code: "not_supported", message: `pikit-sandbox: no operation ${JSON.stringify(operation)}` } })}\n`);
+    return;
+  }
+  let answer;
+  try {
+    answer = { ok: true, value: await run(args) };
+  } catch (error) {
+    answer = { ok: false, error: error instanceof Refused ? error.refused : fileError(error, args.path) };
+  }
+  process.stdout.write(`${JSON.stringify(answer)}\n`);
+}
+
+main().catch((error) => {
+  process.stderr.write(`pikit-sandbox: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(2);
+});
