@@ -91,6 +91,7 @@
     "@earendil-works/pi-durable": "1.5.0",
     "@earendil-works/pi-mcp": "1.5.0",
     "@pikit/contracts": "workspace:*",
-    "@pikit/core": "workspace:*"
+    "@pikit/core": "workspace:*",
+    "typebox": "1.3.27"
   }
 }

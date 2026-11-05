@@ -41,6 +41,7 @@ export type {
   DirReader,
   ExecutionEnv,
   ExecutionErrorCode,
+  FileChange,
   FileErrorCode,
   FileInfo,
   FileKind,
@@ -57,7 +58,6 @@ export type {
   ShellSpillOptions,
   TextLine,
   TextLineReader,
-  WatchChange,
   WatchTarget,
 } from "@earendil-works/pi-durable/env";
 export type { EnvTarget } from "@earendil-works/pi-durable";

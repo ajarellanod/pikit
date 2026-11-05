@@ -14,7 +14,8 @@
 
 import type { Context as ChordContext } from "@earendil-works/chord";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
-import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import type { Provider } from "@earendil-works/pi-ai/models";
 import { type AgentDefinition, defineAgent } from "@pikit/contracts";
 

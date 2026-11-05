@@ -10,6 +10,7 @@
  *   with the same error after rolling back when it rejects. A failed ROLLBACK surfaces as its own
  *   error (storage-sqlite), which is what `SqliteDatabase` asks for.
  * - **Handles expire.** A transaction handle refuses statements once its callback has settled.
+ * - **`runCounted`** is `run`'s `changes`: SQLite's `changes()` on every `storage.sql` provider.
  * - **`exec`** runs one statement per `run`; several are split (`splitSqlStatements`) and, outside a
  *   transaction, run in one, so nothing interleaves between them.
  * - **`bigint`**: `storage.sql` has none. pi-durable 1.0 never binds one (its ids are numbers, its
@@ -52,6 +53,7 @@ export function sqliteDatabaseFrom(db: SqlDatabase): SqliteDatabase {
       return track(() => db.transaction(async (tx) => executor(tx, () => {}).exec(sql)));
     },
     run: (sql, ...params) => track(() => database.run(sql, ...params)),
+    runCounted: (sql, ...params) => track(() => database.runCounted(sql, ...params)),
     get: (sql, ...params) => track(() => database.get(sql, ...params)),
     all: (sql, ...params) => track(() => database.all(sql, ...params)),
     transaction: <T>(callback: (transaction: SqliteExecutor) => Promise<T>) =>
@@ -102,6 +104,8 @@ function executor(statements: SqlStatements, assertActive: () => void): SqliteEx
       guarded(async () => {
         await statements.run(sql, params.map(bind));
       }),
+    // `storage.sql`'s `changes` is SQLite's `changes()` on every provider, the count pi-durable asks for.
+    runCounted: (sql, ...params) => guarded(async () => (await statements.run(sql, params.map(bind))).changes),
     get: <T extends object>(sql: string, ...params: SqliteValue[]) =>
       guarded(async () => (await statements.query(sql, params.map(bind)))[0] as T | undefined),
     all: <T extends object>(sql: string, ...params: SqliteValue[]) =>

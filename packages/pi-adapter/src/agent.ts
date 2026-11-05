@@ -29,7 +29,7 @@
  */
 
 import type { Context as ChordContext, JsonValue } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
   type AgentChange,
   AgentDoc,
@@ -81,6 +81,8 @@ export const ConversationDoc = defineDoc<{ key: string; agent: string; channel?:
   history: "latest",
   fork: "initial",
   initial: () => ({ key: "", agent: "" }),
+  // Written when a message is admitted, rarely changed after: its deltas stay few.
+  checkpointWhen: () => false,
 });
 
 /** `agent.state`: the updates of the conversation's state (only those), merged over the agent's initial state when read. */
@@ -91,6 +93,8 @@ export const AgentStateDoc = defineDoc<JsonObject>({
   history: "latest",
   fork: "current",
   initial: () => ({}),
+  // Written on every state update for the conversation's life: a periodic base bounds the replay on load.
+  checkpointWhen: (_value, _ops, { deltasSinceBase }) => deltasSinceBase >= 64,
 });
 
 /** The extension of an agent's tools. */
@@ -188,7 +192,9 @@ export class AgentConfigs {
     const name = (changes.model as string | undefined) ?? agent.model;
     const slash = name.indexOf("/");
     const model = slash === -1 ? undefined : { provider: name.slice(0, slash), modelId: name.slice(slash + 1) };
-    if (model === undefined || this.source.models.getModel(model.provider, model.modelId) === undefined) {
+    // The Harness's `models` may be a function, read at each use as pi-durable does.
+    const models = typeof this.source.models === "function" ? this.source.models() : this.source.models;
+    if (model === undefined || models.getModel(model.provider, model.modelId) === undefined) {
       throw new Error(`agent "${agent.name}": model "${name}" is not provided by any model.provider`);
     }
     const extensions = ((changes.extensions as TurnConfig["extensions"] | undefined) ?? agent.extensions ?? []).map((entry) => this.extensionOf(agent.name, entry));

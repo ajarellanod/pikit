@@ -11,7 +11,7 @@ import { BACKGROUND_CONTEXT, type Logger } from "@pikit/core";
 import { AGENT_STATE, type AgentDefinition, defineAgent } from "@pikit/contracts";
 import { createAgentStateConformance } from "@pikit/contracts/testing";
 import { defineTool } from "@earendil-works/pi-durable";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import type { DurableTool } from "./agent.ts";
 import { databaseFile, holdTool, type ModelRequest, openWorker, scriptedProvider, type Worker } from "./test-support.ts";
 

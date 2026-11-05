@@ -40,6 +40,9 @@ export const AdmissionsDoc = defineDoc<{ conversations: { [conversationId: strin
   version: 1,
   scope: "session",
   initial: () => ({ conversations: {} }),
+  // Every admission adds a key and its log removes it, for the session's life: the value stays small and the
+  // deltas would not, so a periodic base bounds the replay on load.
+  checkpointWhen: (_value, _ops, { deltasSinceBase }) => deltasSinceBase >= 64,
 });
 
 /** The kind of the entry an input with a sender or parts is placed as (pi-durable's `InputEntry`); its data is `{ sender?, parts? }`. */

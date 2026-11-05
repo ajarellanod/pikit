@@ -229,6 +229,8 @@ const DelegationsDoc = defineDoc<{ [toolTaskId: string]: Delegation }>({
   history: "latest",
   fork: "initial",
   initial: () => ({}),
+  // Each delegation adds and updates its entry, so the deltas grow with the conversation: a periodic base bounds the replay.
+  checkpointWhen: (_value, _ops, { deltasSinceBase }) => deltasSinceBase >= 64,
 });
 
 type ReporterInput = {
