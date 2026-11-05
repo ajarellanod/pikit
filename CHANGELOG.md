@@ -223,6 +223,12 @@ line names its area.
   migration.
 - workspace-local: an agent name may start with one `_` (execution-serve's agentless sandboxes,
   `_<sandbox>`), so a client's `execution` alone still resolves behind it.
+- provider-failover: `accounts`, more accounts of an installed provider (`"anthropic-2": { provider:
+  "anthropic" }`), each a model provider of its own (`anthropic-2/<model>`, for chains and agents)
+  with its own credential in `model.credentials` (`pikit configure --login anthropic-2`) or its own
+  variables (`env: { ANTHROPIC_API_KEY: "ANTHROPIC_API_KEY_3" }`), never the provider's. A chain moves
+  from a rate-limited account to the next, and refused credentials cool only that account. A ChatGPT
+  login and an OpenAI API key can now be in one chain (`openai` and an account of it).
 
 ### Contracts
 

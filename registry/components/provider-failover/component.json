@@ -18,7 +18,10 @@
       "model.provider",
       "model.credentials",
       "secrets",
-      "health"
+      "health",
+      "actor.mailbox",
+      "actor.inbox",
+      "storage.sql"
     ]
   },
   "provides": [
