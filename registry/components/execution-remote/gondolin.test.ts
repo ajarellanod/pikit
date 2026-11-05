@@ -71,7 +71,7 @@ if (problem !== undefined) {
     const reader = defineComponent({ name: "reader-test", setup: (pikit) => void (handle = pikit.use("workspace")) });
     client = await defineApp({
       components: [secretsOf({ PIKIT_SANDBOX_TOKEN: TOKEN }), executionRemote, reader],
-      config: { "execution-remote": { endpoint: url.origin } },
+      config: { "execution-remote": { hosts: { general: { url: url.origin } } } },
       logger: silentLogger,
     }).create();
     await client.start();
