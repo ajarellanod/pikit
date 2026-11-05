@@ -114,7 +114,7 @@ With `snapshots` (and a `storage.blob`), a chat's directory of an agent
 here; the next `resolve` of that chat and agent (the runtime's next tool call, execution-serve's next
 request) restores it before the tool runs. The disk holds only the workspaces in use.
 
-- **The shared format** (features/workspace-snapshots.md): namespace `workspace-snapshots`, keys under
+- **The shared format** ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)): namespace `workspace-snapshots`, keys under
   the hex SHA-256 of `"<chat key>\n<agent>"`, a gzip'd tar, then `manifest.json` written last. What
   execution-gondolin (or another backend) saved, this restores, and the other way round.
 - **What counts as use** is what retention counts: a `resolve`, noted in memory at once. **Never in

@@ -211,7 +211,7 @@ to the bucket and deleted here; the next `resolve` of that chat and agent (the r
 call, execution-serve's next request) restores it before anything runs. A host then holds only the
 workspaces in use: replace it, and the next host restores each chat's from the bucket.
 
-- **The format is shared** (features/workspace-snapshots.md, `@pikit/contracts`' `workspace-snapshot.ts`):
+- **The format is shared** ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md), `@pikit/contracts`' `workspace-snapshot.ts`):
   namespace `workspace-snapshots`, keys under the hex SHA-256 of `"<chat key>\n<agent>"`, a gzip'd
   tar `snapshot-<ms>-<sha16>.tar.gz`, then `manifest.json` written last. workspace-local and the
   other backends write the same, so one restores what another saved.
