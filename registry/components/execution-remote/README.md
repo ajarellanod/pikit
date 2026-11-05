@@ -8,7 +8,8 @@ a real Linux, as a server's does. pi-durable's own `read`, `write`, `edit` and `
 
 - **Provides:** `execution` and `execution.shell` (pi-durable's `ExecutionEnv`, `env.ts`) and
   `workspace` (a sandbox per chat and agent).
-- **Requires:** `secrets` (the hosts' tokens).
+- **Requires:** `secrets` (the hosts' tokens). **Optional:** `agent.definition` (only to warn of a
+  misspelled agent in `agents`).
 - **Targets:** `server` and `durable` (only `fetch` and Web Crypto). On Cloudflare it belongs in the
   conversation object's App (the default export of `pikit.config.ts`), not the Worker's.
 - **Installs to:** `src/pikit/execution-remote/`.
@@ -39,8 +40,9 @@ every host's token. How to run a host: execution-serve's README.
 ## Which host
 
 Every host speaks execution-serve's protocol, whatever runs the sandboxes behind it (execution-gondolin
-micro-VMs on a machine of your own, or later a gateway to a cloud sandbox): they are just entries in
-`hosts`, each with its own token. A conversation's sandbox is on its agent's host,
+micro-VMs on a machine of your own behind execution-serve, a Cloudflare container per sandbox with
+execution-cloudflare-sandbox, a boat.dev sandbox through execution-boat's gateway): they are just
+entries in `hosts`, each with its own token. A conversation's sandbox is on its agent's host,
 `agents[ConversationRef.agent]`, or on `defaultHost` when `agents` does not name the agent (by its
 exact name). A delegated child is its own agent's: a child of another agent works on that agent's
 host (in that agent's sandbox, as below), a child of the same agent on its parent's. `execution`'s
@@ -48,8 +50,14 @@ own sandbox (no conversation, no agent) is on `defaultHost`.
 
 - **The app does not start**, the error naming what is wrong, when `agents` or `defaultHost` names a
   host `hosts` has not, several hosts have no `defaultHost`, a key of `agents` is not an agent's name
-  (or of `hosts` not kebab-case), a host's secret is unset or shorter than 32 characters, or two hosts
-  have the same token (one secret, or two secrets of one value).
+  (or of `hosts` not kebab-case), a host's secret is unset or shorter than 32 characters, two hosts
+  have the same token (one secret, or two secrets of one value), or two hosts have the same `url`
+  (the same origin and path, a trailing `/` or not): one execution-serve takes one token, so one of the
+  two would be refused on every request. Route both hosts' agents to one name instead.
+- **A misspelled agent is warned of** at start: in an App that provides `agent.definition`s, a key
+  of `agents` none of them has is logged (`AGENTS_WARNING`, naming it), since the agent meant works
+  on `defaultHost` without a word otherwise. Live agents (`agent.directory`, agents-live) are not
+  checked, as execution-gondolin's profiles are not: a key for one is warned of, and still routes.
 - **Each host's token goes to that host only**, in its requests' `Authorization` header: a host never
   sees another's, so one host compromised cannot act on another.
 - **The sandbox id does not depend on the host** (below: a hash of the chat or object and the agent).
@@ -212,10 +220,13 @@ on a server and in a Durable Object; a delegated child of another agent on its o
 same-agent child on its parent's; each host's token in its own requests only; refused at start: a host
 `agents` or `defaultHost` names and `hosts` has not, several hosts without `defaultHost`, no host, bad
 agent and host names, an unknown key in a host, a host's secret unset, an http url, two hosts naming
-one secret or two secrets of one value (the value never in the error). Each of these was
+one secret or two secrets of one value (the value never in the error), two hosts at one url (a
+trailing `/` or not; one origin with two paths or two ports starts); a key of `agents` no
+`agent.definition` has warned of, naming it, and nothing warned when every key is an agent's or no
+definitions are known. Each of these was
 mutation-checked (routing every agent to the default host, `agents` matched without `hasOwn`, one
-token for every host, `execution` on the first host, each start check removed): a test fails for
-each.
+token for every host, `execution` on the first host, each start check removed, the warning removed,
+the url compared with its trailing `/`): a test fails for each.
 
 In the registry (`app.test.ts`, beside `files/`): against a real execution-serve (server-bun, a
 provider keyed by conversation and agent as execution-gondolin's is, over execution-local) on

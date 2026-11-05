@@ -623,14 +623,16 @@ what pikit offers, which there is nothing (features/deployment-local.md).
 **On Cloudflare** (checked against Cloudflare's documentation, August 2026):
 - **The workspace** is `execution-do`: each conversation's Durable Object, on the Free plan, with a
   shell without processes and its own `git` (the steward's subset, as real git; the workspace-git
-  suite). A Cloudflare Sandbox (a Linux container, Workers Paid, billed while active) may come as
-  another `execution` provider (`features/sandboxed-execution.md`): it would run real git and tests,
-  in a Worker of its own (a Worker with containers gets no Previews).
+  suite). A Cloudflare Sandbox (a Linux container, Workers Paid, billed while active) is built as a
+  sandbox host, not as another `execution` provider: `execution-cloudflare-sandbox`, in a Worker of
+  its own (a Worker with containers gets no Previews), speaking execution-serve's protocol, which the
+  conversation's App reaches through `execution-remote` (`features/sandboxed-execution.md`). It runs
+  real git and tests; proposals are not wired to it.
 - **Credentials** never reach the agent (C7): `execution-do`'s `git` asks `proposals.remote()`
   (proposals-github: the repository `repo.github` connects, `repo-github-app` a GitHub App the operator connects
   from the dashboard, short-lived tokens for one repository) and pushes only branches under the
-  remote's prefix (`pikit/self/*`) to it. A Sandbox would keep the
-  rule through its outbound handler, which injects the credential per request.
+  remote's prefix (`pikit/self/*`) to it. The Sandbox host keeps the
+  rule by holding none: it never gets secrets.
 - **The repository** is on GitHub or GitLab, which Workers Builds builds from. A branch builds a
   **Worker Preview**: its own URL, Durable Object namespace and bindings, where the change (the
   dashboard included) runs before anyone approves it. Merging to the protected main branch deploys.

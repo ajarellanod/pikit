@@ -38,8 +38,12 @@
  * - **A host's `url`** is `https://`, or `http://` to the machine itself (`localhost`, `127.0.0.1`,
  *   `[::1]`): the token never crosses a network in clear.
  * - **Fail closed at start**: `agents` or `defaultHost` naming a host `hosts` has not, several hosts and
- *   no `defaultHost`, a key of `agents` that is not an agent's name (or of `hosts` not a host's): the
- *   App does not start, the error naming it.
+ *   no `defaultHost`, a key of `agents` that is not an agent's name (or of `hosts` not a host's), two
+ *   hosts at one `url` (one execution-serve takes one token, and two hosts never share one: one of them
+ *   would be refused on every request): the App does not start, the error naming it.
+ * - **A misspelled agent is warned of** at start, where `agent.definition`s are provided and a key of
+ *   `agents` is none of theirs (`AGENTS_WARNING`): the agent meant would work on the default host. A
+ *   live agent's (`agent.directory`, agents-live) is not checked, as execution-gondolin's profiles.
  * - **Credentials (SPEC C7).** Nothing secret goes to the sandbox through this component: no
  *   variable, no file, no command carries the token or any other secret of the App. A sandbox that
  *   needs a credential gets it from its host, injected outside the sandbox (execution-gondolin does it
@@ -105,6 +109,16 @@ const Config = Type.Object(
 
 type RemoteConfig = Static<typeof Config>;
 
+/** The warning for a key of `agents` no `agent.definition` has. */
+export const AGENTS_WARNING =
+  "execution-remote: `agents` names an agent no agent.definition has (misspelled?): the agent meant works on the default host, unless the name is a live agent's (agents-live), which is not checked";
+
+/** A host's `url` as compared with another's: the origin and the path, with no trailing `/`. */
+const sameHostKey = (url: string) => {
+  const parsed = new URL(url);
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+};
+
 /**
  * The host each agent is on, and the default one, or why the config cannot be used (every problem,
  * each naming what is wrong). The grammar of the names is the schema's.
@@ -158,6 +172,8 @@ export default defineComponent({
   config: Config,
   setup(pikit, config) {
     const secrets = pikit.use("secrets");
+    // Only to warn of an agent no definition has: none here is a normal state (a Worker's App with live agents only).
+    const definitions = pikit.useKeyed("agent.definition");
 
     /** Each host's token, by host name, read at start: a host's transport reads its own only. */
     const tokens = new Map<string, string>();
@@ -208,10 +224,17 @@ export default defineComponent({
           throw new Error(`${NAME}: this App is not a Durable Object's (WORKERS_HOST has no object): install execution-remote in the default export of pikit.config.ts, the conversation object's App, not in the Worker's.`);
         }
         if (!route.ok) throw new Error(`${NAME}: ${route.problems.join("; ")}`);
+        const byUrl = new Map<string, string>();
         for (const [name, { url }] of Object.entries(config.hosts)) {
           const problem = urlProblem(name, url);
           if (problem !== undefined) throw new Error(`${NAME}: ${problem}`);
+          const twin = byUrl.get(sameHostKey(url));
+          if (twin !== undefined) throw new Error(`${NAME}: the hosts ${twin} and ${name} have the same url (${url}): one execution-serve, which takes one token; name it once and route both hosts' agents to it`);
+          byUrl.set(sameHostKey(url), name);
         }
+        const known = definitions.keys();
+        const unknown = Object.keys(config.agents).filter((name) => !known.includes(name));
+        if (known.length > 0 && unknown.length > 0) ctx.logger.warn(AGENTS_WARNING, { agents: unknown, defined: known });
         const sandbox = host?.object === undefined ? undefined : `o-${host.object.id}`;
         if (sandbox !== undefined && !isSandboxId(sandbox)) throw new Error(`${NAME}: the Durable Object's id makes no sandbox id (${JSON.stringify(sandbox.slice(0, 40))})`);
         const read = new Map<string, string>();

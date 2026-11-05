@@ -19,7 +19,7 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type BlobStorage, SNAPSHOT_NAMESPACE } from "@pikit/contracts";
-import { openSnapshotStore, snapshotIdOf, type SnapshotLog, WorkspaceSnapshots } from "@pikit/contracts/snapshots";
+import { openSnapshotStore, SNAPSHOT_MAX_ENTRIES, SNAPSHOT_MAX_UNPACKED_BYTES, snapshotIdOf, type SnapshotLog, WorkspaceSnapshots } from "@pikit/contracts/snapshots";
 import type { Clock } from "@pikit/core";
 import Type, { type Static } from "typebox";
 import type { Sandbox } from "./env.ts";
@@ -33,6 +33,10 @@ export const SnapshotsConfig = Type.Object(
     idleMinutes: Type.Number({ exclusiveMinimum: 0, default: 10 }),
     /** The largest archive (gzip'd) a workspace may have: a larger one stays here, a warning logged. */
     maxBytes: Type.Optional(Type.Integer({ minimum: 1 })),
+    /** A restore refuses an archive that unpacks to more bytes (its tar after gunzip): a gzip bomb never fills the disk. A checkpoint past it keeps the workspace here. */
+    maxUnpackedBytes: Type.Integer({ minimum: 1, default: SNAPSHOT_MAX_UNPACKED_BYTES }),
+    /** A restore refuses an archive with more entries (files, directories, links); a checkpoint past it keeps the workspace here. */
+    maxEntries: Type.Integer({ minimum: 1, default: SNAPSHOT_MAX_ENTRIES }),
     /** The `storage.blob` namespace: the shared format's; another only to keep two fleets apart in one bucket. */
     namespace: Type.String({ default: SNAPSHOT_NAMESPACE, pattern: "^[a-z0-9_.-]{1,100}$" }),
   },
@@ -91,6 +95,8 @@ export class GondolinSnapshots {
       state: join(root, SNAPSHOTS_DIR),
       idleMs: config.idleMinutes * 60_000,
       ...(config.maxBytes !== undefined && { maxBytes: config.maxBytes }),
+      maxUnpackedBytes: config.maxUnpackedBytes,
+      maxEntries: config.maxEntries,
       ...(this.options.retentionDays !== undefined && { retentionMs: this.options.retentionDays * 24 * 3_600_000 }),
       clock,
       // A command or a file operation running; a VM up but idle is closed by `prepare`.

@@ -17,7 +17,9 @@
     ]
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "agent.definition"
+    ]
   },
   "provides": [
     "execution",

@@ -40,7 +40,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [memory](memory.md) | ⭐ | Memory across conversations and channels, per space (shared by its agents), per agent kept apart, per person (preferences): built (`memory-sql`, `memory-recall`, `memory-summaries`, both targets), with full-text search, rules and preferences approved by people (`/rules`, `/prefs`), structured summaries; profiles and linking not | No |
 | [pairing](pairing.md) | ⭐ | Unknown senders approved by the owner from the chat | No |
 | [rich-content](rich-content.md) | ⭐ | Images, files and buttons; the shape is decided, kept in its file | No |
-| [sandboxed-execution](sandboxed-execution.md) | ⭐ | Commands in a container, VM or remote host | Partly: SPEC §6 requires `execution-cloudflare-sandbox`, specified there |
+| [sandboxed-execution](sandboxed-execution.md) | ⭐ | Commands in a container, VM or remote host: built as execution-gondolin (a micro-VM per chat and agent), execution-remote to several sandbox hosts (each agent routed to its own), a Cloudflare Sandbox host (execution-cloudflare-sandbox) and a boat.dev gateway (execution-boat); execution-docker not | No: SPEC §6 names `execution-cloudflare-sandbox`, built as a sandbox host |
 | [self-improvement](self-improvement.md) | ⭐ | SPEC §6 built: the `pikit-self` skill, proposals as pull requests approved in the dashboard, deploy and rollback, on both targets | Yes: SPEC §6, the launch |
 | [settings](settings.md) | ⭐ | A Settings dialog, a section per installed component, live values: the agent's prompt and model, agents and routing as data | Yes: the launch |
 | [scheduler](scheduler.md) | ⭐ | Scheduled prompts (the agent's, and routines in the config), answered in the chat; built on both targets: `scheduler-sql`, `scheduler-admit`, `scheduler-routines`, `tool-schedule` | No |
@@ -50,7 +50,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
 | [channel-google-chat](channel-google-chat.md) | | Google Chat: threads, "Thinking…" edited into the answer, cards, attachments, questions (`ask_user`). Built on both targets and tested against a fake Google (a server first, conformance, workerd); moves to `completed/` once checked live with a real app | No |
 | [agent-folders](agent-folders.md) | | Each agent a folder (`agent.ts`, `SYSTEM.md`, per-channel texts, skills) and the skills catalog as folders: the component `agents-folders`, `pikit agents` writes the one file the App lists | No |
-| [agent-sandboxes](agent-sandboxes.md) | | A machine per agent (packages, hosts, secrets, memory, CPUs) and a sandbox per conversation and agent: execution-gondolin's profiles, also behind execution-remote and execution-serve; workspaces deleted after `retentionDays` unused (opt-in); built | No |
+| [agent-sandboxes](agent-sandboxes.md) | | A machine per agent (packages, hosts, secrets, memory, CPUs) and a sandbox per conversation and agent: execution-gondolin's profiles (an image and root disk per machine), also behind execution-remote and execution-serve, an agent routed to a host of its own; workspaces deleted after `retentionDays` unused (opt-in) or saved to a bucket when idle (snapshots); built | No |
 | [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |
 | [channel-context](channel-context.md) | | A directory, a prompt and tools per channel, from `ConversationRef.channel` (built); `prepare` already does prompt and tools | No |
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |
@@ -77,7 +77,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [slash-commands](slash-commands.md) | | Commands typed in a chat: built for the registry's (`agent.command`) in Google Chat, Telegram and the web chat (`admitInbound`'s `commands`); Pi extensions' own not | No |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations, in the channel's key (no contract field); replies in their thread | No |
-| [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation; `storage.blob` built (storage-blob-fs, storage-blob-s3); snapshots in a bucket built (workspace-local, execution-gondolin: idle 10 minutes, restored on use) | Open: SPEC §6's git workspace |
+| [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation; `storage.blob` built (storage-blob-fs, storage-blob-s3); snapshots in a bucket built (workspace-local, execution-gondolin: idle 10 minutes, restored on use, a restore bounded; execution-cloudflare-sandbox and execution-boat in the same format) | Open: SPEC §6's git workspace |
 
 Other channels (Signal, iMessage, Matrix, Home Assistant…) get a file when someone needs one.
 

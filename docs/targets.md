@@ -16,7 +16,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `actors-do`: RPC to `idFromName(key)` (`scope` `"one"`) |
 | `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `actors-do`: rows over the object's one alarm, in slices |
 | `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-workers`: the Worker's `env` |
-| `execution` | `execution-local`: the machine's files and shell; or `execution-gondolin`: a Linux micro-VM per conversation and agent (QEMU), its files on the host | `execution-do`: files in the object's SQL, a simulated shell; or `execution-remote`: a real shell in a sandbox of a host running `execution-serve` (a server, e.g. with execution-gondolin) |
+| `execution` | `execution-local`: the machine's files and shell; or `execution-gondolin`: a Linux micro-VM per conversation and agent (QEMU), its files on the host; or `execution-remote`, as on durable | `execution-do`: files in the object's SQL, a simulated shell; or `execution-remote`: a real shell in a sandbox of a sandbox host, each agent routed to its own (`hosts`): execution-serve on a server (execution-gondolin's micro-VMs, execution-boat's boat.dev VMs) or execution-cloudflare-sandbox's Worker (a Cloudflare container per sandbox) |
 | Workspace retention (`retentionDays`, opt-in) | execution-gondolin, workspace-local: a sweep at start and hourly, in process | execution-do: a `wakeups` request in each object (actors-do); an object that never wakes again keeps its files |
 | Telegram | `channel-telegram` (long polling) | `channel-telegram-webhook` (two halves) |
 | HTTP API channel | `channel-http` | `channel-http` (two halves: routes in the Worker, the wait in the object) |
@@ -154,8 +154,9 @@ rules and the node templates ("Running a fleet").
 
 - **server**: no per-conversation isolation (one process holds every conversation); no horizontal
   scale (one process per storage); timers do not survive a restart by themselves.
-- **durable**: no processes or native binaries in the object (a real Linux is a sandbox on a server,
-  through `execution-remote`); no connection held between events (no long polling); no `restart`
+- **durable**: no processes or native binaries in the object (a real Linux is a sandbox of a sandbox
+  host, through `execution-remote`: execution-serve on a server, or execution-cloudflare-sandbox's
+  Worker of Cloudflare containers); no connection held between events (no long polling); no `restart`
   and no `exec`, and `down` deletes data (deployment-cloudflare's README).
 
 What a component cannot do on a target is in that component's README: credentials-file (a file: credentials-do on Cloudflare), execution-do

@@ -725,6 +725,12 @@ test("snapshots: across a restart the bucket is the truth; a new host restores t
   const second = await snapshotted(temporaryDir(), { snapshots: {} }, storage);
   expect(await (await envIn(second, "test:host")).readTextFile("kept.md", second.app.context())).toEqual({ ok: true, value: "kept" });
   await second.app.stop();
+  // A host whose maxUnpackedBytes the archive passes refuses the restore whole: the call fails, nothing at the directory.
+  const strictDir = temporaryDir();
+  const strict = await snapshotted(strictDir, { snapshots: { maxUnpackedBytes: 1024 } }, storage);
+  await expect(envIn(strict, "test:host")).rejects.toThrow("snapshots.maxUnpackedBytes");
+  expect(existsSync(join(strictDir, "agents", "support", chatDir("test:host")))).toBe(false);
+  await strict.app.stop();
 
   // Old snapshots in the bucket go with retentionDays (manifest first); a chat's local directory is the snapshots'.
   const store = storage.namespace(SNAPSHOT_NAMESPACE);

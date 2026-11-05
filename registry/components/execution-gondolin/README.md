@@ -293,8 +293,10 @@ QEMU ("Docker"), and `XDG_CACHE_HOME` in the state volume keeps Gondolin's build
 **Behind execution-serve** (a sandbox host): the same profile goes in the host's
 `"execution-gondolin"` config (execution-serve's README, "A sandbox host"); the clients change
 nothing: execution-remote names each request's agent (`Pikit-Agent: designer`), so the designer's
-sandboxes boot the image and every other agent's the base. The host builds the image at its first
-start (it needs the builder's tools and the two hosts above then; never afterwards) and refuses to
+sandboxes boot the image and every other agent's the base. To give the designer a bigger machine of
+its own, run a second host and route it there (execution-remote's `hosts` and `agents: { designer:
+"render" }`): each host then configures only the agents routed to it. The host builds the image at
+its first start (it needs the builder's tools and the two hosts above then; never afterwards) and refuses to
 start without it. Budget the host's memory as `maxVms` times the largest `memory`: a 16 GB host with
 `maxVms: 4` takes four designers at 2G with room for itself. The render's files stay in the sandbox's
 `/workspace` on the host; the agent's file tools reach them through execution-remote (within
@@ -366,10 +368,17 @@ workspaces in use: replace it, and the next host restores each chat's from the b
 - **With `retentionDays`**, the bucket's snapshots whose newest archive is older than N days are
   deleted (hourly, the manifest first), instead of the local directories, which are released anyway.
 - **`maxBytes`**: an archive larger stays on the host, a warning logged, until its next use.
+- **`maxUnpackedBytes`** (4 GiB) **and `maxEntries`** (1,000,000): what a restore takes at most,
+  counted as the archive unpacks (the tar after gunzip, headers included; files, directories and
+  links). Past either the whole restore is refused (the tool call fails, nothing at the workspace,
+  nothing left half-extracted): a gzip bomb or a huge archive never fills the host's disk. A
+  checkpoint keeps to the same limits (a workspace past them stays on the host, as past `maxBytes`);
+  raise them to restore a snapshot a larger limit saved. execution-cloudflare-sandbox's
+  `maxUnpackedBytes` counts the same bytes.
 - **One writer per chat and agent.** One process holds a sandbox; a second host serving the same
-  chat and agent at the same time (execution-remote's `endpoint` changed while the old host still
-  holds an unreleased copy) is not coordinated: each host's checkpoint replaces the manifest, the
-  last one wins, and the other's files since its restore are lost. Change hosts after the old one
+  chat and agent at the same time (a host's `url` changed in execution-remote's `hosts`, or the agent
+  moved to another host in its `agents`, while the old host still holds an unreleased copy) is not
+  coordinated: each host's checkpoint replaces the manifest, the last one wins, and the other's files since its restore are lost. Change hosts after the old one
   released its sandboxes (`idleMinutes` without use), or stop it first (a stop releases nothing:
   its unreleased workspaces stay on its disk).
 
@@ -399,6 +408,20 @@ export default defineApp({
 Give the bucket a lifecycle rule that aborts incomplete multipart uploads after a day (a host that
 died mid-upload leaves its parts), and no expiration rule on `workspace-snapshots/`: `retentionDays`
 deletes a snapshot's manifest before its archive, an expiration rule may not.
+
+The clients name the host in execution-remote's `hosts`, one entry with its own token, and route
+agents to it (execution-serve's README, "A sandbox host"):
+
+```ts
+"execution-remote": {
+  hosts: {
+    general: { url: "https://general.sandbox.example.com" }, // PIKIT_SANDBOX_TOKEN
+    render: { url: "https://render.sandbox.example.com", tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" },
+  },
+  defaultHost: "general",
+  agents: { designer: "render" },
+}
+```
 
 ## Machines per agent
 
@@ -482,7 +505,7 @@ the rewrite at its next boot.
   workspace: "chat",         // default: a sandbox per chat and agent; "agent": one per agent, every chat
   agents: {},                // default: a machine per agent, each field replacing the base's
   // retentionDays: 30,      // absent by default (kept forever): delete a chat's sandboxes unused this many days
-  // snapshots: { idleMinutes: 10, maxBytes: 10e9, namespace: "workspace-snapshots" }, // absent by default: idle chat sandboxes to storage.blob
+  // snapshots: { idleMinutes: 10, maxBytes: 10e9, maxUnpackedBytes: 4294967296, maxEntries: 1000000, namespace: "workspace-snapshots" }, // absent by default: idle chat sandboxes to storage.blob
 }
 ```
 

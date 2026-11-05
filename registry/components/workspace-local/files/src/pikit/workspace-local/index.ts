@@ -46,7 +46,7 @@ import { defineComponent } from "@pikit/core";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { type ConversationRef, originOf, SNAPSHOT_NAMESPACE } from "@pikit/contracts";
-import { openSnapshotStore, snapshotIdOf, WorkspaceSnapshots } from "@pikit/contracts/snapshots";
+import { openSnapshotStore, SNAPSHOT_MAX_ENTRIES, SNAPSHOT_MAX_UNPACKED_BYTES, snapshotIdOf, WorkspaceSnapshots } from "@pikit/contracts/snapshots";
 import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { atCwd } from "@pikit/pi-adapter/execution";
 import Type from "typebox";
@@ -78,6 +78,10 @@ const Config = Type.Object({
         idleMinutes: Type.Number({ exclusiveMinimum: 0, default: 10 }),
         /** The largest archive (gzip'd) a workspace may have: a larger one stays here, a warning logged. */
         maxBytes: Type.Optional(Type.Integer({ minimum: 1 })),
+        /** A restore refuses an archive that unpacks to more bytes (its tar after gunzip): a gzip bomb never fills the disk. A checkpoint past it keeps the workspace here. */
+        maxUnpackedBytes: Type.Integer({ minimum: 1, default: SNAPSHOT_MAX_UNPACKED_BYTES }),
+        /** A restore refuses an archive with more entries (files, directories, links); a checkpoint past it keeps the workspace here. */
+        maxEntries: Type.Integer({ minimum: 1, default: SNAPSHOT_MAX_ENTRIES }),
         /** The `storage.blob` namespace: the shared format's; another only to keep two fleets apart in one bucket. */
         namespace: Type.String({ default: SNAPSHOT_NAMESPACE, pattern: "^[a-z0-9_.-]{1,100}$" }),
       },
@@ -209,6 +213,8 @@ export default defineComponent({
             state: join(canonical.value, SNAPSHOTS_DIR),
             idleMs: options.idleMinutes * 60_000,
             ...(options.maxBytes !== undefined && { maxBytes: options.maxBytes }),
+            maxUnpackedBytes: options.maxUnpackedBytes,
+            maxEntries: options.maxEntries,
             ...(config.retentionDays !== undefined && { retentionMs: config.retentionDays * DAY }),
             clock: pikit.clock,
             log: ctx.logger,
