@@ -246,7 +246,7 @@ export default defineComponent({
                 const code = /<Code>([^<]{1,100})<\/Code>/.exec(text)?.[1];
                 throw new Error(`storage-blob-s3: S3 refused the completion of the upload of ${JSON.stringify(key)} (HTTP ${response.status}${code === undefined ? "" : ` ${code}`})`);
               }
-            }, { body: new TextEncoder().encode(xml), headers: { "content-type": "application/xml" } });
+            }, { body: new Uint8Array(new TextEncoder().encode(xml)), headers: { "content-type": "application/xml" } });
             upload = undefined;
             return read.stored();
           } catch (error) {
