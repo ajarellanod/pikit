@@ -54,7 +54,7 @@ import {
   type ShellOutputInfo,
   type TextLine,
   type TextLineReader,
-  type WatchChange,
+  type FileChange,
   type WatchTarget,
 } from "@pikit/pi-adapter/execution";
 import { join, resolvePath } from "./paths.ts";
@@ -493,7 +493,7 @@ export class RemoteExecutionEnv implements ExecutionEnv {
   }
 
   /** Not supported: changes in a remote sandbox would have to be polled across the network. */
-  async watch(_targets: readonly WatchTarget[], _onChange: (change: WatchChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
+  async watch(_targets: readonly WatchTarget[], _onChange: (change: FileChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
     if (cancelled(context)) return err(new FileError("aborted", "the operation was cancelled"));
     return err(new FileError("not_supported", "a remote sandbox cannot be watched"));
   }

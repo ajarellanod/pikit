@@ -49,7 +49,7 @@ import {
   type ShellOutputInfo,
   type TextLine,
   type TextLineReader,
-  type WatchChange,
+  type FileChange,
   type WatchTarget,
 } from "@pikit/pi-adapter/execution";
 import { type Files, fsError, nameOf, normalize, parentOf, resolvePath } from "./files.ts";
@@ -352,7 +352,7 @@ class DurableObjectExecutionEnv implements ExecutionEnv {
    * Not supported: only this object changes its files (its tools, its shell, `git`), and pikit loads
    * nothing from a workspace that it would reload on a change, so nothing here needs to be told.
    */
-  async watch(_targets: readonly WatchTarget[], _onChange: (change: WatchChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
+  async watch(_targets: readonly WatchTarget[], _onChange: (change: FileChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
     if (context.abortSignal?.aborted === true) return err(new FileError("aborted", "the operation was cancelled"));
     return err(new FileError("not_supported", "a Durable Object's workspace cannot be watched"));
   }

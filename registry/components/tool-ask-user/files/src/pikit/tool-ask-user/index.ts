@@ -34,10 +34,14 @@ const Option = Type.Object({
   label: Type.String({ minLength: 1, description: "What the person reads." }),
 });
 
+// Tool arguments are typed by pi-schema's `Static`, which cannot read a union built by `map`:
+// `Unsafe` names its type, with the same JSON Schema.
 const Field = Type.Object({
-  kind: Type.Union(
-    QUESTION_FIELD_KINDS.map((kind) => Type.Literal(kind)),
-    { description: "confirm: yes or no. select: one of options. multiselect: any of options. text: free text. date: a day." },
+  kind: Type.Unsafe<(typeof QUESTION_FIELD_KINDS)[number]>(
+    Type.Union(
+      QUESTION_FIELD_KINDS.map((kind) => Type.Literal(kind)),
+      { description: "confirm: yes or no. select: one of options. multiselect: any of options. text: free text. date: a day." },
+    ),
   ),
   name: Type.String({ pattern: QUESTION_FIELD_NAME, description: "The answer's key: a letter, then letters, digits, _ or -; unique in the question." }),
   label: Type.String({ minLength: 1, description: "What the person reads." }),
