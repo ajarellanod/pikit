@@ -220,14 +220,26 @@ export function createExecutionBoat(seams: BoatSeams = {}) {
       pikit.provide("workspace", provider);
 
       let stopped = false;
-      const loop = async (everyMs: number, work: () => Promise<unknown>, what: string, first = false) => {
-        if (first) await work().catch((error: unknown) => log.warn(`execution-boat: ${what} failed`, { reason: error instanceof Error ? error.message : String(error) }));
-        while (!stopped) {
-          await pikit.clock.sleep(everyMs);
-          if (stopped) return;
-          await work().catch((error: unknown) => log.warn(`execution-boat: ${what} failed`, { reason: error instanceof Error ? error.message : String(error) }));
-        }
-      };
+      const wakers = new Set<() => void>();
+      const loops: Promise<void>[] = [];
+      /** Runs `work` every `everyMs` on the app's clock (now first, with `first`), until stop: short sleeps, so stop is never held up. */
+      const loop = (everyMs: number, work: () => Promise<unknown>, what: string, first: boolean) =>
+        (async () => {
+          let next = pikit.clock.now() + (first ? 0 : everyMs);
+          while (!stopped) {
+            if (pikit.clock.now() >= next) {
+              await work().catch((error: unknown) => log.warn(`execution-boat: ${what} failed`, { reason: error instanceof Error ? error.message : String(error) }));
+              next = pikit.clock.now() + everyMs;
+            }
+            let wake!: () => void;
+            const woken = new Promise<void>((resolve) => {
+              wake = resolve;
+              wakers.add(resolve);
+            });
+            await Promise.race([woken, pikit.clock.sleep(Math.max(0, Math.min(1000, next - pikit.clock.now())))]);
+            wakers.delete(wake);
+          }
+        })();
 
       return {
         async start(ctx: AppContext) {
@@ -241,11 +253,13 @@ export function createExecutionBoat(seams: BoatSeams = {}) {
             throw new Error("execution-boat: snapshots is on but no storage.blob provider is installed: add one (storage-blob-s3)");
           }
           // In the background: start does not wait on boat.
-          void loop(Math.min(30_000, (config.idleSeconds * 1000) / 2), () => vms.idleTick(), "the idle check");
-          void loop(HOUR, () => vms.sweep(), "the retention sweep", true);
+          loops.push(loop(Math.min(30_000, (config.idleSeconds * 1000) / 2), () => vms.idleTick(), "the idle check", false));
+          loops.push(loop(HOUR, () => vms.sweep(), "the retention sweep", true));
         },
         async stop() {
           stopped = true;
+          for (const wake of wakers) wake();
+          await Promise.all(loops);
           for (const env of envs.values()) await env.cleanup(BACKGROUND_CONTEXT);
           vms.close();
         },

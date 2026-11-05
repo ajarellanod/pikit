@@ -260,7 +260,12 @@ Germany, Finland and France, snapshot copies may be stored outside the EU, per [
   next gateway adopts and idles them.
 - **Snapshots are whole values**: larger than `storage.blob`'s `maxBytes`, a workspace stays on boat
   (and is never deleted unsaved); after boat's 14 days of a stopped VM, boat may delete it.
-- **`retentionDays` counts from the stop**, which comes `idleSeconds` after the last use.
+- **`retentionDays` counts from the stop**, which comes `idleSeconds` after the last use. A VM
+  resumed by retention to be exported first is not counted against `maxVms`.
+- **boat's command history**: boat keeps every command and its output 90 days, readable while the
+  VM is stopped, and file contents travel through commands here (inline up to 48 KiB). Deleting the
+  VM deletes its content-bearing records, per boat. boat's `monitoring: false` would keep none, but
+  is not set until it is checked that a detached command's status still answers without it.
 - **Freshness of a snapshot** compares the gateway's clock (`createdAt`) with boat's (`createdAt`,
   `hydratedAt` of the VM): skew of more than the time between a VM's start and its first export would
   make a deletion resume and export once more, never skip it.
