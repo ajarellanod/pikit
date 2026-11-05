@@ -10,8 +10,8 @@
  * - A user signs up (`open`) and in with a password (better-auth in the accounts actor: its bundle,
  *   AsyncLocalStorage, scrypt from `node:crypto` under the `workerd` condition, Web Crypto), gets the
  *   `pikit_chat` cookies (path `/chat/`, `Secure` only on https), talks to the agent and reads the
- *   answer in the transcript, follows the live view (the dashboard's shapes: a run's `message_end`
- *   announces the entry the transcript then has, same id, same messages, on pi-durable's real events).
+ *   answer in the transcript, follows the live view (state: its `ChatLive` whole, then ops, folded with
+ *   `applyOps`; a run's `entries` are the ones the transcript then has, same id, same messages).
  *   Another user with the first's chat id gets `404` on every route; an operator's follow-up (admin-api,
  *   the admin token) never reaches the user's transcript or live view. The accounts' tables are only in
  *   the accounts actor.
@@ -32,7 +32,7 @@
  */
 
 import { type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import type { EmailMessage, EmailSender } from "@pikit/contracts";
+import { applyOps, type EmailMessage, type EmailSender, type JsonOp, type JsonValue } from "@pikit/contracts";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
@@ -40,7 +40,7 @@ import actorsDo from "../../../registry/components/actors-do/files/src/pikit/act
 import adminApi, { worker as adminApiWorker } from "../../../registry/components/admin-api/files/src/pikit/admin-api/index.ts";
 import { INDEX_KEY } from "../../../registry/components/admin-api/files/src/pikit/admin-api/conversation-index.ts";
 import adminAuthToken from "../../../registry/components/admin-auth-token/files/src/pikit/admin-auth-token/index.ts";
-import type { ChatConfig, ChatConversation, ChatEvent, ChatPage, ChatTranscriptEntry } from "../../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
+import type { ChatConfig, ChatConversation, ChatEvent, ChatLive, ChatPage, ChatTranscriptEntry } from "../../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
 import channelWeb, { ACCOUNTS_KEY, worker as channelWebWorker } from "../../../registry/components/channel-web/files/src/pikit/channel-web/index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerHost } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
@@ -178,17 +178,29 @@ async function answered(who: Browser, chat: string, count: number): Promise<stri
   );
 }
 
-/** The server-sent events of a live view, read as they come. */
+/** The server-sent events of a live view, read as they come; `live` events folded into `state` (`ChatLive`). */
 function live(response: Response) {
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toContain("text/event-stream");
   const reader = (response.body as ReadableStream<Uint8Array>).getReader();
   const decoder = new TextDecoder();
   const events: ChatEvent[] = [];
+  let state: JsonValue = null;
+  let wasBusy = false;
+  const fold = (event: ChatEvent) => {
+    events.push(event);
+    if (event.type !== "live") return;
+    state = applyOps(state, event.ops as readonly JsonOp[]);
+    wasBusy ||= (state as unknown as ChatLive).busy;
+  };
   let text = "";
   let reading: Promise<ReadableStreamReadResult<Uint8Array>> | undefined;
   return {
     events,
+    /** The live state as the ops made it. */
+    state: () => state as unknown as ChatLive,
+    /** Whether a run was seen going. */
+    wasBusy: () => wasBusy,
     /** Reads until `done(events)` holds; rejects past `ms`. */
     async until(done: (seen: ChatEvent[]) => boolean, ms = 15_000): Promise<void> {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -205,7 +217,7 @@ function live(response: Response) {
           for (let end = text.indexOf("\n\n"); end !== -1; end = text.indexOf("\n\n")) {
             const frame = text.slice(0, end);
             text = text.slice(end + 2);
-            for (const line of frame.split("\n")) if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as ChatEvent);
+            for (const line of frame.split("\n")) if (line.startsWith("data: ")) fold(JSON.parse(line.slice(6)) as ChatEvent);
           }
         }
       } finally {
@@ -272,23 +284,24 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   const listed = (await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string }>;
   expect(listed.items.map((each) => each.id)).toEqual([chat]);
 
-  // Live: a snapshot first; the next answer as written, announced with the entry the transcript then has.
+  // Live: the user's state whole first; the next answer as written, then the entries the transcript has.
   const view = live(await ana.send(`/chat/api/conversations/${chat}/events`));
   await view.until((seen) => seen.length > 0);
-  expect(view.events[0]).toEqual({ type: "snapshot", tools: [] });
+  expect(view.events[0]).toEqual({ type: "live", ops: [["r", { busy: false, tools: [] }]] });
   expect((await ana.send(`/chat/api/conversations/${chat}/messages`, { json: { text: "second" } })).status).toBe(202);
-  /** The run's answer as `message_end` announced it. */
-  const announced = (seen: ChatEvent[]) =>
-    seen.flatMap((e) => (e.type === "message_end" && e.entry !== undefined ? [e.entry as { id: string; kind: string; model: Message[] }] : [])).find((entry) => entry.model.some((m) => m.role === "assistant" && textOf(m) === "faux: second"));
+  /** The entries the view announced. */
+  const entriesOf = (seen: ChatEvent[]) => seen.flatMap((e) => (e.type === "entries" ? e.entries : []));
+  /** The run's answer, as an `entries` event announced it. */
+  const announced = (seen: ChatEvent[]) => entriesOf(seen).find((entry) => (entry.messages as Message[]).some((m) => m.role === "assistant" && textOf(m) === "faux: second"));
   // The user's message, as the transcript has it (a quick run may end before its admission returns: in any order).
-  const sentShown = (seen: ChatEvent[]) => seen.some((e) => e.type === "entry_appended" && e.entry !== undefined && (e.entry as { model: Message[] }).model.map(textOf).join() === "second");
-  await view.until((seen) => announced(seen) !== undefined && seen.some((e) => e.type === "run_end") && sentShown(seen));
-  expect(view.events.map((e) => e.type)).toContain("run_start");
+  const sentShown = (seen: ChatEvent[]) => entriesOf(seen).some((entry) => (entry.messages as Message[]).map(textOf).join() === "second");
+  await view.until((seen) => announced(seen) !== undefined && view.wasBusy() && !view.state().busy && sentShown(seen));
+  expect(view.state()).toEqual({ busy: false, tools: [] });
   expect(await answered(ana, chat, 4)).toEqual(["user: hello (answered)", "assistant: faux: hello", "user: second (answered)", "assistant: faux: second"]);
-  // Stable: the transcript's entry for that answer is the one announced live, same id, same messages (pi-durable's own events).
-  const live2 = announced(view.events) as { id: string; kind: string; model: Message[] };
+  // Stable: the transcript's entry for that answer is the one announced live, same id, same messages.
+  const live2 = announced(view.events) as ChatTranscriptEntry;
   const stored = (await transcriptOf(ana, chat)).find((entry) => entry.id === live2.id);
-  expect(stored).toEqual({ id: live2.id, kind: live2.kind, messages: live2.model });
+  expect(stored).toEqual(live2);
   expect(JSON.stringify(view.events)).not.toMatch(/usage|cost|"provider"|"model":"/);
 
   // Another user, with Ana's chat id: 404 on every route, as a chat that never was.
@@ -364,7 +377,7 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   expect(((await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string; archived: boolean }>).items).toMatchObject([{ id: chat, archived: false }]);
   expect(lines.slice(4)).toEqual(["user: third (answered)", "assistant: faux: third"]);
   expect(JSON.stringify(lines)).not.toContain("operator only");
-  await view.until((seen) => seen.slice(before).some((e) => e.type === "message_end" && JSON.stringify(e.entry ?? null).includes("faux: third")));
+  await view.until((seen) => entriesOf(seen.slice(before)).some((entry) => JSON.stringify(entry.messages).includes("faux: third")));
   const since = view.events.slice(before);
   expect(JSON.stringify(since)).not.toContain("operator only");
   expect(JSON.stringify(benView.events)).not.toContain("operator only");

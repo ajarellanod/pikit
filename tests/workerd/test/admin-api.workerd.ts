@@ -5,7 +5,7 @@
  * and admin-api's default export), and the Worker's App serves admin-api's Worker half through
  * deployment-cloudflare's own server. Messages reach two chats; then the Worker lists them from the
  * index object (`admin-api:index`), reads one and its transcript, follows it live (the object's stream:
- * its snapshot, then a run's events as they happen),
+ * its state whole, then the ops that change it and the entries a run adds),
  * resets one and is refused an action on the one left behind, while the new one takes a message at
  * once; the operator starts a conversation of the
  * dashboard's own, listed first as soon as its message is dispatched, and its agent answers there. The
@@ -134,20 +134,22 @@ it("the Worker lists the objects' conversations from the index, reads and follow
     expect(transcript.items.flatMap((entry) => entry.messages.map((message) => message.role))).toEqual(expect.arrayContaining(["user", "assistant"]));
     expect((await worker.fetch(`/admin/api/conversations/${id(`${a}~9`)}`)).status).toBe(404);
 
-    // Live: the object's stream (one RPC), as server-sent events: its snapshot, then a run's events as they happen.
+    // Live: the object's stream (one RPC), as server-sent events: its state whole, then the ops that change it,
+    // folded by the dashboard's own reducer; entries the transcript gained, the same as the transcript gives.
     const client = new AbortController();
     const events = await worker.fetch(`/admin/api/conversations/${id(`${a}~1`)}/events`, { signal: client.signal });
     expect(events.headers.get("content-type")).toContain("text/event-stream");
     const reader = (events.body as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     let text = "";
-    const seen: string[] = [];
+    const seen: LiveEvent[] = [];
     const partials: string[] = [];
+    let wasBusy = false;
     let liveState = INITIAL;
-    const until = async (type: string) => {
-      while (!seen.includes(type)) {
-        const { value, done } = await reader.read();
-        if (done) throw new Error(`the live events ended before a "${type}" (seen: ${seen.join(", ")})`);
+    const until = async (done: () => boolean, what: string) => {
+      while (!done()) {
+        const { value, done: ended } = await reader.read();
+        if (ended) throw new Error(`the live events ended before ${what} (seen: ${JSON.stringify(seen)})`);
         text += decoder.decode(value, { stream: true });
         for (let end = text.indexOf("\n\n"); end !== -1; end = text.indexOf("\n\n")) {
           const frame = text.slice(0, end);
@@ -155,25 +157,28 @@ it("the Worker lists the objects' conversations from the index, reads and follow
           for (const line of frame.split("\n")) {
             if (!line.startsWith("data: ")) continue;
             const event = JSON.parse(line.slice(6)) as LiveEvent;
-            seen.push(event.type);
+            seen.push(event);
             liveState = reduce(liveState, { type: "event", event });
+            wasBusy ||= liveState.busy;
             const partial = liveState.partial?.content.map((block) => block.type === "text" ? block.text : "").join("");
             if (partial) partials.push(partial);
           }
         }
       }
     };
+    const answeredLive = () =>
+      liveState.entries.some((entry) => entry.messages.some((m) => JSON.stringify(m).includes('"text":"answer: followed live"')));
     try {
-      await until("snapshot");
-      expect(seen[0]).toBe("snapshot");
+      await until(() => seen.length > 0, "the first event");
+      // The first event is the state whole: idle.
+      expect(seen[0]).toEqual({ type: "live", ops: [["r", expect.objectContaining({ busy: false, tools: [] })]] });
       await worker.send(a, "m-live", "followed live");
-      await until("run_end");
+      await until(() => wasBusy && !liveState.busy && answeredLive(), "the run's answer and its end");
       // The real UI consumer must understand Pi's JSON, not merely recognize event names.
-      expect(seen).toEqual(expect.arrayContaining(["run_start", "message_start", "message_end", "run_end"]));
-      expect(seen.filter((type) => type === "snapshot")).toEqual(["snapshot"]);
-      expect(partials.some((text) => "answer: followed live".startsWith(text))).toBe(true);
-      expect(liveState.busy).toBe(false);
+      expect(seen.filter((event) => event.type === "live" && event.ops.some((op) => op[0] === "r"))).toHaveLength(1);
+      for (const partial of partials) expect("answer: followed live".startsWith(partial)).toBe(true);
       expect(liveState.partial).toBeUndefined();
+      expect(liveState.failure).toBeUndefined();
       expect(liveState.entries.flatMap((entry) => entry.messages)).toEqual(expect.arrayContaining([
         expect.objectContaining({ role: "assistant", content: expect.arrayContaining([{ type: "text", text: "answer: followed live" }]) }),
       ]));
