@@ -56,7 +56,7 @@ own sandbox (no conversation, no agent) is on `defaultHost`.
   Routing never changes which sandbox an agent gets on a host, and **moving an agent to another host
   starts it there in a new, empty sandbox** of the same id: its files on the old host stay there (until
   that host's provider removes them) and come back only through workspace snapshots
-  ([features/workspace-snapshots.md](../../../features/workspace-snapshots.md)), not through this
+  ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)), not through this
   component. Moving the default host moves `execution`'s own sandbox and every unnamed agent's.
 - **One host down is that host's agents' failure only**: their operations fail as below (`unknown`, no
   answer), the other hosts' agents keep working. No health check is reported per host (none is today
