@@ -25,11 +25,21 @@
  *   `sandbox` of the config (`shared`), with no agent.
  * The host makes the sandbox on its first request (its provider's `workspace.resolve`) and keeps it.
  *
- * - **The token** (`PIKIT_SANDBOX_TOKEN`, `tokenSecret`) is read through `secrets` at start: missing,
- *   or shorter than 32 characters, the App does not start. It goes in each request's `Authorization`
- *   header to `endpoint` and nowhere else.
- * - **`endpoint`** is `https://`, or `http://` to the machine itself (`localhost`, `127.0.0.1`,
+ * - **Which host** (`hosts`, `agents`, `defaultHost`): a conversation's sandbox is on its agent's host,
+ *   `agents[ConversationRef.agent]`, or the default host for an agent `agents` does not name. A
+ *   delegated child is its own agent's (`ConversationRef.agent` is the child's): a child of another
+ *   agent works on that agent's host, a same-agent child on its parent's. `execution`'s own sandbox
+ *   (no conversation, no agent) is on the default host. The sandbox id does not depend on the host:
+ *   moving an agent to another host starts it there, in a sandbox of the same id that host makes new.
+ * - **The tokens**, one secret per host (`tokenSecret`, `PIKIT_SANDBOX_TOKEN` by default), are read
+ *   through `secrets` at start: missing, shorter than 32 characters, or two hosts with the same token
+ *   (one secret, or two of one value), the App does not start. Each goes in the `Authorization` header of its own host's requests and
+ *   nowhere else: never to another host.
+ * - **A host's `url`** is `https://`, or `http://` to the machine itself (`localhost`, `127.0.0.1`,
  *   `[::1]`): the token never crosses a network in clear.
+ * - **Fail closed at start**: `agents` or `defaultHost` naming a host `hosts` has not, several hosts and
+ *   no `defaultHost`, a key of `agents` that is not an agent's name (or of `hosts` not a host's): the
+ *   App does not start, the error naming it.
  * - **Credentials (SPEC C7).** Nothing secret goes to the sandbox through this component: no
  *   variable, no file, no command carries the token or any other secret of the App. A sandbox that
  *   needs a credential gets it from its host, injected outside the sandbox (execution-gondolin does it
@@ -43,21 +53,45 @@ import { defineComponent } from "@pikit/core";
 import { originOf } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
-import Type from "typebox";
+import Type, { type Static } from "typebox";
 import { RemoteExecutionEnv } from "./env.ts";
-import { DEFAULT_TOKEN_SECRET, isAgentName, isSandboxId, MAX_AGENT_LENGTH, MAX_SANDBOX_ID_LENGTH, MIN_TOKEN_LENGTH, SANDBOX_ID } from "./protocol.ts";
-import { createTransport } from "./transport.ts";
+import { AGENT_NAME, DEFAULT_TOKEN_SECRET, isAgentName, isSandboxId, MAX_AGENT_LENGTH, MAX_SANDBOX_ID_LENGTH, MIN_TOKEN_LENGTH, SANDBOX_ID } from "./protocol.ts";
+import { createTransport, type Transport } from "./transport.ts";
 
 const NAME = "execution-remote";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+/** A host's name in `hosts`: kebab-case, as an agent's. */
+const HOST_NAME = { pattern: AGENT_NAME.source, maxLength: 100 };
+
+const Host = Type.Object(
+  {
+    url: Type.String({
+      minLength: 1,
+      description: "Where the host's execution-serve is served (`https://sandbox.example.com`, a path prefix allowed). https://, or http:// to this machine only; checked at start.",
+    }),
+    // Optional, its default applied in `start`: a record's values get no schema defaults.
+    tokenSecret: Type.Optional(
+      Type.String({ minLength: 1, description: `The name of the secret holding this host's token, not the token: config is never secret. Each host its own; default ${DEFAULT_TOKEN_SECRET}.` }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
 const Config = Type.Object(
   {
-    endpoint: Type.String({
-      minLength: 1,
-      description: "The sandbox host: where execution-serve is served (`https://sandbox.example.com`, a path prefix allowed). https://, or http:// to this machine only; checked at start.",
+    hosts: Type.Record(Type.String(), Host, {
+      minProperties: 1,
+      propertyNames: HOST_NAME,
+      description: "The sandbox hosts, by name: each runs execution-serve, with its own token.",
     }),
-    tokenSecret: Type.String({ minLength: 1, default: DEFAULT_TOKEN_SECRET, description: "The name of the secret holding the shared token, not the token: config is never secret." }),
+    defaultHost: Type.Optional(
+      Type.String({ ...HOST_NAME, description: "The host of `execution`'s own sandbox and of every agent `agents` does not name. Required with several hosts; the only one otherwise." }),
+    ),
+    agents: Type.Record(Type.String(), Type.String(HOST_NAME), {
+      default: {},
+      propertyNames: { pattern: AGENT_NAME.source, maxLength: MAX_AGENT_LENGTH },
+      description: "The host of each agent named (`ConversationRef.agent` → a name in `hosts`); any other agent is on the default host.",
+    }),
     sandbox: Type.String({
       pattern: SANDBOX_ID.source,
       maxLength: MAX_SANDBOX_ID_LENGTH,
@@ -66,8 +100,28 @@ const Config = Type.Object(
     }),
   },
   // A full config: `registry generate` describes setup with it too.
-  { examples: [{ endpoint: "https://sandbox.example.com" }] },
+  { examples: [{ hosts: { general: { url: "https://sandbox.example.com" } } }] },
 );
+
+type RemoteConfig = Static<typeof Config>;
+
+/**
+ * The host each agent is on, and the default one, or why the config cannot be used (every problem,
+ * each naming what is wrong). The grammar of the names is the schema's.
+ */
+function routing(config: Pick<RemoteConfig, "hosts" | "defaultHost" | "agents">): { ok: true; defaultHost: string; hostOf(agent: string): string } | { ok: false; problems: string[] } {
+  const names = Object.keys(config.hosts);
+  const problems: string[] = [];
+  const has = (name: string) => Object.hasOwn(config.hosts, name);
+  const defaultHost = config.defaultHost ?? (names.length === 1 ? names[0] : undefined);
+  if (defaultHost === undefined) problems.push(`hosts has ${names.length} hosts (${names.join(", ")}): name the default one (defaultHost)`);
+  else if (!has(defaultHost)) problems.push(`defaultHost ${JSON.stringify(defaultHost)} is not a host of hosts (${names.join(", ")})`);
+  for (const [agent, host] of Object.entries(config.agents)) {
+    if (!has(host)) problems.push(`agents.${agent} names the host ${JSON.stringify(host)}, which hosts has not (${names.join(", ")})`);
+  }
+  if (problems.length > 0 || defaultHost === undefined) return { ok: false, problems };
+  return { ok: true, defaultHost, hostOf: (agent) => (Object.hasOwn(config.agents, agent) ? (config.agents[agent] as string) : defaultHost) };
+}
 
 async function sha256Hex(text: string): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
@@ -84,18 +138,18 @@ export async function objectSandbox(objectId: string, agent: string): Promise<st
   return `o-${await sha256Hex(`${objectId}\n${agent}`)}`;
 }
 
-/** Why `endpoint` cannot be used, or `undefined`. */
-function endpointProblem(endpoint: string): string | undefined {
+/** Why a host's `url` cannot be used, or `undefined`. */
+function urlProblem(host: string, endpoint: string): string | undefined {
   let url: URL;
   try {
     url = new URL(endpoint);
   } catch {
-    return `endpoint ${JSON.stringify(endpoint)} is not a URL`;
+    return `hosts.${host}.url ${JSON.stringify(endpoint)} is not a URL`;
   }
-  if (url.search !== "" || url.hash !== "" || url.username !== "" || url.password !== "") return "endpoint has a query, a fragment or credentials: give the origin and path only";
+  if (url.search !== "" || url.hash !== "" || url.username !== "" || url.password !== "") return `hosts.${host}.url has a query, a fragment or credentials: give the origin and path only`;
   if (url.protocol === "https:") return undefined;
   if (url.protocol === "http:" && LOOPBACK.has(url.hostname)) return undefined;
-  return `endpoint must be https:// (http:// only to this machine): the token must not cross a network in clear`;
+  return `hosts.${host}.url must be https:// (http:// only to this machine): the token must not cross a network in clear`;
 }
 
 export default defineComponent({
@@ -104,14 +158,25 @@ export default defineComponent({
   setup(pikit, config) {
     const secrets = pikit.use("secrets");
 
-    let token: string | undefined;
+    /** Each host's token, by host name, read at start: a host's transport reads its own only. */
+    const tokens = new Map<string, string>();
     let running = false;
     /** In a Durable Object, the object's id. */
     let objectId: string | undefined;
-    const transport = createTransport({ endpoint: config.endpoint, token: () => token });
+    const transports = new Map<string, Transport>(Object.entries(config.hosts).map(([name, host]) => [name, createTransport({ endpoint: host.url, token: () => tokens.get(name) })]));
+    const route = routing(config);
+    /** The transport of the host `agent` is on (`undefined`: `execution`'s own sandbox, the default host's). */
+    const transportOf = (agent: string | undefined): Transport => {
+      if (!route.ok) throw new Error(`${NAME}: ${route.problems.join("; ")}`);
+      return transports.get(agent === undefined ? route.defaultHost : route.hostOf(agent)) as Transport;
+    };
 
-    // Built now; the sandbox is known at start (the object's id), and calls before answer that it is not running. No agent.
-    const execution = new RemoteExecutionEnv({ transport, sandbox: () => (running ? (objectId === undefined ? config.sandbox : `o-${objectId}`) : undefined) });
+    // Built now, on the default host; the sandbox is known at start (the object's id), and calls before answer that it is not running. No agent.
+    const defaultName = route.ok ? route.defaultHost : (Object.keys(config.hosts)[0] as string);
+    const execution = new RemoteExecutionEnv({
+      transport: transports.get(defaultName) as Transport,
+      sandbox: () => (running ? (objectId === undefined ? config.sandbox : `o-${objectId}`) : undefined),
+    });
     pikit.provide("execution", execution);
     pikit.provide("execution.shell", execution);
 
@@ -124,7 +189,8 @@ export default defineComponent({
         if (!isAgentName(agent)) throw new Error(`${NAME}: the conversation's agent ${JSON.stringify(agent.slice(0, 40))} is not an agent name (kebab-case, at most ${MAX_AGENT_LENGTH} characters)`);
         // On a server, the chat: the origin's key, the same through resets and for its delegated children.
         const sandbox = objectId === undefined ? await keySandbox(originOf(conversation).key, agent) : await objectSandbox(objectId, agent);
-        const env = bySandbox.get(sandbox) ?? new RemoteExecutionEnv({ transport, agent, sandbox: () => (running ? sandbox : undefined) });
+        // On its agent's host: the sandbox id is the same on every host, the host is chosen by the agent alone.
+        const env = bySandbox.get(sandbox) ?? new RemoteExecutionEnv({ transport: transportOf(agent), agent, sandbox: () => (running ? sandbox : undefined) });
         bySandbox.set(sandbox, env);
         // Opened before it is handed out: its `cwd` is the sandbox's, and a host that refuses fails this call.
         const opened = await env.open(toChord(ctx));
@@ -140,14 +206,26 @@ export default defineComponent({
         if (host !== undefined && host.object === undefined) {
           throw new Error(`${NAME}: this App is not a Durable Object's (WORKERS_HOST has no object): install execution-remote in the default export of pikit.config.ts, the conversation object's App, not in the Worker's.`);
         }
-        const problem = endpointProblem(config.endpoint);
-        if (problem !== undefined) throw new Error(`${NAME}: ${problem}`);
+        if (!route.ok) throw new Error(`${NAME}: ${route.problems.join("; ")}`);
+        for (const [name, { url }] of Object.entries(config.hosts)) {
+          const problem = urlProblem(name, url);
+          if (problem !== undefined) throw new Error(`${NAME}: ${problem}`);
+        }
         const sandbox = host?.object === undefined ? undefined : `o-${host.object.id}`;
         if (sandbox !== undefined && !isSandboxId(sandbox)) throw new Error(`${NAME}: the Durable Object's id makes no sandbox id (${JSON.stringify(sandbox.slice(0, 40))})`);
-        const secret = await secrets.get().get(config.tokenSecret);
-        if (secret === undefined) throw new Error(`${NAME}: the secret ${config.tokenSecret} is not set (the token of the sandbox host, execution-serve's)`);
-        if (secret.length < MIN_TOKEN_LENGTH) throw new Error(`${NAME}: the secret ${config.tokenSecret} is shorter than ${MIN_TOKEN_LENGTH} characters`);
-        token = secret;
+        const read = new Map<string, string>();
+        const secretOf = (name: string) => config.hosts[name]?.tokenSecret ?? DEFAULT_TOKEN_SECRET;
+        for (const name of Object.keys(config.hosts)) {
+          const tokenSecret = secretOf(name);
+          const secret = await secrets.get().get(tokenSecret);
+          if (secret === undefined) throw new Error(`${NAME}: the secret ${tokenSecret} is not set (the token of the sandbox host ${name}, its execution-serve's)`);
+          if (secret.length < MIN_TOKEN_LENGTH) throw new Error(`${NAME}: the secret ${tokenSecret} (host ${name}) is shorter than ${MIN_TOKEN_LENGTH} characters`);
+          // A host never holds a token another host takes: one secret per host, and no two of the same value.
+          const twin = [...read].find(([, other]) => other === secret)?.[0];
+          if (twin !== undefined) throw new Error(`${NAME}: the hosts ${twin} and ${name} have the same token (${secretOf(twin)}, ${tokenSecret}): give each host its own (tokenSecret), so neither can use the other's`);
+          read.set(name, secret);
+        }
+        for (const [name, secret] of read) tokens.set(name, secret);
         objectId = host?.object?.id;
         running = true;
       },
@@ -158,7 +236,7 @@ export default defineComponent({
         await Promise.all([execution, ...bySandbox.values()].map((env) => env.cleanup(context)));
         bySandbox.clear();
         running = false;
-        token = undefined;
+        tokens.clear();
       },
     };
   },
