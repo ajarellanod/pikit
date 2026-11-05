@@ -308,8 +308,9 @@ export function createAgentObserveConformance(
       expect([w.state.requests, w.state.partial, w.state.tools], [undefined, undefined, []], "no requests, partial or tools once it ended");
 
       const from = w.states.length;
-      await s.send(conversation, "r-f2", "answer this one");
+      const answered = s.send(conversation, "r-f2", "answer this one");
       await w.until(() => w.states.slice(from).some((state) => state.busy) && !w.state.busy, "the next run to start and end");
+      await answered;
       const next = w.states.slice(from).filter((state) => state.requests?.includes("r-f2") === true);
       check(next.length > 0 && next.every((state) => state.failure === undefined), `no failure while the next run goes, saw ${JSON.stringify(next)}`);
       expect(w.state, { busy: false, tools: [] }, "the state once the next run answered");

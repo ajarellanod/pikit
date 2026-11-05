@@ -6,7 +6,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import { applyOps, defineAgent, type JsonValue, type ObservedLive } from "@pikit/contracts";
+import { applyOps, defineAgent, type JsonValue, type ObservedEvent, type ObservedLive } from "@pikit/contracts";
 import { createAgentObserveConformance } from "@pikit/contracts/testing";
 import { createObserver } from "./observe.ts";
 import { modelsFrom } from "./models.ts";
@@ -111,6 +111,34 @@ test("a conversation is busy while its run goes, and idle once it ends; its tool
   expect(idle?.busy).toBe(false);
   expect(live).toEqual({ busy: false, tools: [] });
   while (!(await events.next()).done);
+});
+
+test("a consumer behind by more than pi-durable's window (100 entries) is told to read the transcript again", async () => {
+  const w = await worker();
+  const conversation = await w.conversation();
+  const stop = new AbortController();
+  const events = w.observe.watch(conversation.conversationId, w.ctx.derive((inner) => withAbortSignal(stop.signal, inner)))[Symbol.asyncIterator]();
+  expect((await events.next()).value?.type).toBe("live");
+
+  // Not read while 60 runs add twice as many entries: the window drops some unsent.
+  for (let i = 0; i < 60; i++) {
+    await w.dispatch(`r${i}`, `message ${i}`, conversation);
+    await w.result(`r${i}`);
+  }
+  const types: string[] = [];
+  const sent: string[] = [];
+  while (!types.includes("transcript")) {
+    const event: ObservedEvent | undefined = (await events.next()).value;
+    if (event === undefined) throw new Error(`the stream ended before a transcript event, saw ${JSON.stringify(types)}`);
+    types.push(event.type);
+    if (event.type === "entries") sent.push(...event.entries.map((entry) => entry.id));
+  }
+  stop.abort();
+  while (!(await events.next()).done);
+
+  const transcript = await w.observe.transcript(conversation.conversationId, { limit: 500 }, w.ctx);
+  expect(sent.length).toBeLessThan(transcript?.items.length ?? 0);
+  expect(new Set(sent).size).toBe(sent.length);
 });
 
 test("a cursor the observer did not give, or a page of 0, is refused", async () => {
