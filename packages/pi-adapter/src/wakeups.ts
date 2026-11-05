@@ -25,10 +25,8 @@
 
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withoutAbortSignal } from "@earendil-works/chord/context";
-import type { Harness, HarnessInspection, TaskInspection } from "@earendil-works/pi-durable";
+import type { Harness, HarnessInspection } from "@earendil-works/pi-durable";
 
-/** Unused since `WakeOptions.dueAt` went: goes with its export in index.ts, which this change does not own. */
-export type LiveTaskRecord = TaskInspection["record"];
 
 export interface WakeOptions {
   /** The clock the Harness was opened with (`HarnessOptions.now`). Default: `Date.now`. */

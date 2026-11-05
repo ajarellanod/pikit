@@ -272,12 +272,6 @@ class Unopenable extends Error {
 /** `pi.live`, whose `run` says a conversation is busy. */
 const LIVE = "pi.live";
 
-/**
- * Unused since pi-durable places what a failed run left queued (`afterFailedRun`): goes with its export in
- * index.ts, which this change does not own.
- */
-export const INBOX_KICK = "pikit.inbox-kick";
-
 /** How often `agent.partial` is emitted at most, per conversation, by default: a preview's pace, not a stream's. */
 export const PARTIAL_EVERY_MS = 1_000;
 

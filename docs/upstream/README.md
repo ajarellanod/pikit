@@ -139,7 +139,7 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   and since 1.5.0 `interrupted`, `restart_limit`, `nothing_to_answer` and `turn_limit`. With
   `continue` the commit that ends the run places what is queued, so no crash can come between. The
   runtime sets it (its own, like the queue modes) and its `reconcileInbox`, the `pikit.inbox-kick`
-  write, is gone (`INBOX_KICK` stays exported only until `index.ts` drops it). Left by design: a run
+  write, is gone. Left by design: a run
   whose task faults (a bug) or is orphaned (its code gone) keeps its inbox until the next message, or
   until runtime-pi abandons the messages (`abandonPendingAfterHours`). `pi-facts.test.ts` asserts
   the setting.

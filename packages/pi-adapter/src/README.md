@@ -61,14 +61,15 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 
 `createDurableRuntime(options)` is `agent.runtime` (`dispatch`, `abort`, `resume`) and
 `agent.submissions` (`submissions`, "Submissions" below), plus what a host uses: `createConversation`,
-`recover`, `abandon`, `holds`, `whenIdle`, `suspend`, `state`, `inspect`, `close`. The contracts and events are as consumers see them: `Admission` (`started`/`queued`/
+`recover`, `abandon`, `holds`, `whenIdle`, `state`, `inspect`, `close`. The contracts and events are as consumers see them: `Admission` (`started`/`queued`/
 `duplicate`), `agent.dispatched`, `agent.started` (`resumed` for a run a previous worker left open),
 `agent.settled`/`agent.failed` with `AgentResult`, and `agent.partial` while a run streams (below).
 
 - **One Harness per storage**, opened at first use over `db` (`storage.sql`, `openDurableStorage`)
   and owned until `close`. Opening reconfigures every conversation with live work, resumes the scheduler (it is
-  global: every conversation's work runs), announces the runs it resumes, and starts runs for inputs a
-  failed run left queued. `suspend` closes it and keeps the runtime: the next call reopens it. A
+  global: every conversation's work runs) and announces the runs it resumes. Inputs a failed run
+  left queued start the next run in the commit that ends it (`afterFailedRun: "continue"`, set by
+  the runtime). A
   storage error closes pi-durable's Harness for good (`SessionFailed` on every later call): the call
   that hit it rejects, the runtime drops the Harness at once (`subscribeClose`), and the next call
   opens another once the failed one has closed, which finds what the failure left as after a crash.
@@ -98,11 +99,13 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   (`pi.live.run.inputs`): no `agent.started`, and the run's result lists them after its inputs; a run
   that answers before another tool round leaves them to the next run, as follow-ups.
 - **The answer as it is written** (`agent.partial`). pi-durable commits the response being generated
-  to the conversation's `pi.live` (`generation.message`, throttled by `progress.partialIntervalMs`);
-  the runtime re-emits its text from those commits (`observe`), named after the run's first request,
+  to the conversation's `pi.live` (`generation.message`, throttled by `progress.partialIntervalMs`),
+  deferred since 1.5.0: stored with the next commit or within `progress.persistWithinMs`. The runtime
+  reads it from memory, through an observer of `pi.live` (`observeDoc`) attached while a run goes,
+  and re-emits its text, named after the run's first request,
   at most once per `partialEveryMs` (`PARTIAL_EVERY_MS`, 1 s) and only when it changed. A commit with
   no run ends it: an emit still on its way is dropped, so none comes after the run's end.
-- **Settlement.** Read from pi-durable's commits (`subscribeCommits`): a run's inputs settle in the
+- **Settlement.** Read from pi-durable's stored commits (`observeCommits`): a run's inputs settle in the
   commit that ends it, and are one result (`runsOf`); one an abort withdrew while queued is its own.
   `done` → `agent.settled` `completed` with the answer's text; `unanswered`/`aborted` → `agent.settled`
   `aborted`; any other reason (`model_error`, `no_model`, `faulted`, `orphaned`, `reset`) →
@@ -143,10 +146,11 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   definition must be one too. `models` is pi-ai's `Models`. Each tool call's environment is
   `harnessEnv` over `workspace()` (the call's conversation's) and `execution()`, unless `env` is given.
 - **Hosts that live per event.** `whenIdle` resolves once no task is driven and nothing is being
-  recorded or announced; work that only waits for a time (a generation's `retry`/`poll`, a
-  compaction's `retry`) does not count, and `onIdleWithPendingWork(inspection, ctx)` is called so the
-  host schedules a wake-up (`nextWakeAtOf`). A reopened Harness continues the wait from its checkpoint,
-  on the Harness clock (`now`).
+  recorded or announced; a task sleeping until a time (a generation's retry backoff or deferred
+  poll, a compaction's retry) does not count, and `onIdleUntil(at, ctx)` is called so the host asks
+  to be woken then. With `onIdleUntil` the Harness is opened with `onWake`: pi-durable keeps no timer
+  for a sleep (which would keep a Durable Object alive), the sleep stays in storage, and the next
+  `whenIdle`, from the host's wake-up, resumes what is due, on the Harness clock (`now`).
 - **Contexts.** `toChord` re-attaches a pikit context's signal for Chord. Tasks run in the
   Harness's context (the app's values); a dispatching caller's values reach the run's events, not its
   tools.
@@ -218,29 +222,23 @@ pi-durable is the only record of what became of each message; `agent.submissions
   more failure notice). Live and answered runs stay exact. The fix: mark steers in `pikit.admissions`
   at admission and assign each to the run it joined, or pi-durable's run identity (upstream proposal 13).
 
-### Gaps bridged (asserted in `pi-facts.test.ts`)
+### Gaps closed upstream (asserted in `pi-facts.test.ts`)
 
-- A run that ends unanswered leaves follow-ups queued in the inbox until the next submission. The
-  runtime submits a write of kind `pikit.inbox-kick` (an entry without model messages) to an idle
-  conversation with queued inputs: the admission boundary places them and starts their run. Its
-  empty `edits` make it a queued write: since 1.2.0 one of only `kind` and `data` is display-only,
-  appended at once without a boundary.
-- On Workers, pi-durable's idle-context and document-cache timers would keep a Durable Object alive
-  (workerd's `unref` does nothing): `contextRetentionMs` and `documentRetentionMs` are `0` there
-  (`WORKERS_SETTINGS`; upstream proposal 18; proven by the workerd lane, not here).
-
-Closed upstream: since pi-durable 1.0.2 each conversation sends the provider its own persisted
-session id (`pi.provider`), the same on every turn, so prompt caches keyed on it hit (pi-facts.test.ts).
+Since pi-durable 1.4.0 a failed run's queued inputs start the next run (`afterFailedRun`, upstream
+proposal 2; a run whose task faults or is orphaned still keeps them until the next message), a
+sleeping task reports its time and a host can wake for it (`onWake`, proposal 1), and Workers decline
+the idle timers that kept a Durable Object alive (proposal 18): the inbox kick and the Workers
+retention settings are gone. Since pi-durable 1.0.2 each conversation sends the provider its own
+persisted session id (`pi.provider`), the same on every turn, so prompt caches keyed on it hit.
 
 ## Wake-ups (`wakeups.ts`)
 
-pi-durable 1.0 waits with in-process timers and reports no next due time. `nextWakeAt(harness)` reads
-`harness.inspect()`: a `ready` or `running` task is due now, except the built-in waits, whose due time
-is in the task's checkpoint (`pi.generation` phase `retry` `until`, phase `poll` `pollAt`;
-`pi.compaction` phase `retry` `until`). `driveSlice(harness, { signal, now, until })` drives one bounded
-slice and returns when the host must come back. runtime-pi uses the runtime's `whenIdle` and
-`onIdleWithPendingWork` with `nextWakeAtOf`, and `suspend`s the runtime inside the wake-up's event
-when only timed work is left (a pending timer keeps a Durable Object from being evicted).
+pi-durable sleeps durably since 1.4.0: a task waiting for a time ends its phase asleep, and
+`harness.inspect()` reports it `sleeping` with its `until`. `nextWakeAt(harness)` reads the
+inspection: a `pending` or `running` task is due now, a `sleeping` one at its `until`, nothing else by
+itself (`Harness.wake()` says the same from memory, but counts the recovery pass of a fresh open as
+work). `driveSlice(harness, { signal, now, until })` drives one bounded slice and returns when the
+host must come back. runtime-pi uses the runtime's `whenIdle` and `onIdleUntil`.
 
 ## Models, providers and credentials
 
@@ -268,9 +266,9 @@ when only timed work is left (a pending timer keeps a Durable Object from being 
 
 `*.test.ts` here: `runtime` (answers, busy conversations and batching, duplicates, abort, contexts),
 `recovery` (restarts, `agent.submissions`: a batch whose log a crash never wrote, logged once by a
-redelivery or the next start, retention and `gap`, abandoning; retries, `suspend`), `answers` (the
+redelivery or the next start, retention and `gap`, abandoning; retries), `answers` (the
 log's feed suite, idempotent appends), `prepare` (and
 `agent.state`'s conformance), `usage`, `conformance` (the contracts' `agent.runtime` suite, every
 case), `pi-facts` (the pi-durable behaviours relied on: duplicate admission, follow-up batching,
-checkpoint shapes, inbox kick…), `sql`, `wakeups`, `models`, `credentials`, `execution`, `mcp`,
+checkpoint shapes, `afterFailedRun`, sleeping tasks, previews before storage…), `sql`, `wakeups`, `models`, `credentials`, `execution`, `mcp`,
 `tools/*`. `test-support.ts` (not exported) is the scripted runtime worker they share.

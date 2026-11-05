@@ -745,7 +745,8 @@ first), `watch(id)`, `usage(id)`. It runs in the App that runs the runtime: on C
 object's conversations.
 
 `watch(id)` is the conversation live, as state: an async iterable of `ObservedEvent`s, until `ctx` is
-cancelled or the runtime closes (`break` releases it; an unknown id rejects).
+cancelled or the runtime closes (`break` releases it; an unknown id rejects; it throws when the
+runtime fails under it).
 
 | Event | What |
 |---|---|
@@ -755,7 +756,8 @@ cancelled or the runtime closes (`break` releases it; an unknown id rejects).
 | `transcript` | the transcript changed beyond the `entries` events (some went past unsent, a compaction): read it again |
 
 `ObservedLive` is what a live view shows: `busy`; `requests`, the request ids of the run's inputs
-(absent while idle, empty for a run no request started); `partial`, the answer being written; `tools`,
+(absent while idle; empty for a run no request started, and once a run has answered and only finishes
+its own work); `partial`, the answer being written; `tools`,
 the current round's calls (`callId`, `name`, `status` `pending`, `running` or `done`, `output` as far as
 the runtime keeps it); `failure`, why the newest run ended without an answer (`reason`, `detail`),
 until a run starts again. The ops are [json-ops.ts](../packages/contracts/src/json-ops.ts)'s, the subset
@@ -775,7 +777,9 @@ Pages are `Page<T>` (`{ items, next? }`) asked for with a `PageRequest`
 (`{ limit?, cursor? }`), both in [page.ts](../packages/contracts/src/page.ts): a view of now, not a
 feed (`outbound.queue`'s `pending` pages the same way). Provider: runtime-pi (`createObserver` in the
 adapter). Suite:
-`createAgentObserveConformance` (in the adapter's tests and workerd).
+`createAgentObserveConformance` (in the adapter's tests and workerd): it reads a watch as a view
+does, folding every `live` op, and needs a `streaming` agent in its fixture (one whose answers take a
+second or more to write) to see a partial grow.
 
 `TranscriptEntry.messages` and `ObservedLive.partial` are Pi's runtime JSON (pi-ai's `Message` and
 `AssistantMessage`), not an engine-independent wire format; the rest of `ObservedLive` is the

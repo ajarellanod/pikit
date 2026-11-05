@@ -175,8 +175,8 @@ The shared pieces (`bui`, `message`, `error-note`, `image-viewer`, `markdown`, `
 other than the dashboard (channel-web's chat page) carries them without the admin client. A
 conversation's view (`ConversationView`, features/completed/chat-parity.md) reads through a
 `ConversationSource` each app implements (the dashboard's: `views/conversations/source.ts`, over
-`/admin/api/conversations/:id/...`): its transcript's entries, its live events (`lib/transcript.ts`
-folds them), a message and a stop; the app fills its slots (the header's actions, the side panel, its
+`/admin/api/conversations/:id/...`): its transcript's entries, its live state (`lib/transcript.ts`
+applies its ops with `lib/json-ops.ts`, a verbatim copy of the contracts' `applyOps`), a message and a stop; the app fills its slots (the header's actions, the side panel, its
 notes, what replaces the composer). `scripts/ui-shared.test.ts` fails when one of them
 reaches `@/lib/api`, `@/lib/admin-api`, `@/lib/chats`, `@/lib/settings`, `@/lib/views`,
 `@/lib/router`, `@/lib/shell` or any other file that is not shared. `ErrorNote` takes any
