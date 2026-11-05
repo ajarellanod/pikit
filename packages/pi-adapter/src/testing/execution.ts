@@ -353,6 +353,7 @@ export async function callTool(tool: ToolRegistration, args: unknown, options: C
     conversationId: "conversation-1",
     callId: "call-1",
     env: options.env,
+    now: () => Date.now(),
     output: (chunk: string | Uint8Array) => void (output += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)),
     retainedOutput: () => ({ text: output, truncated: false }),
     diagnostic: (diagnostic: ToolDiagnostic) => void diagnostics.push(diagnostic),
