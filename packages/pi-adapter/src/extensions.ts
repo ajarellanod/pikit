@@ -5,7 +5,13 @@
  * (`hook(GenerationTask, { beforeRequest, afterResponse, onYield, afterTools })`,
  * `hook(ToolTask, { beforeTool, afterTool })`, `hook(CompactionTask, { beforeCompact })`), `wraps`
  * (`wrapTool`, `wrapSection`), durable `tasks` (`defineTask`) and `tools` (`defineTool`). Its state is
- * a document (`defineDoc`), committed with the transcript, or the app's `storage.sql`.
+ * a document (`defineDoc`, with its `checkpointWhen`), committed with the transcript, or the app's
+ * `storage.sql`.
+ *
+ * `afterTool` sees every result a tool task writes, also those pi-durable writes for a call that never
+ * ran or was cut off (`blocked`, `invalid_arguments`, `tool_unavailable`, `interrupted`,
+ * `restart_limit`, `aborted`, `abandoned`: the code of its `result.diagnostics`). A hook that assumes
+ * the tool ran (casts `call.arguments`, reads `structuredOutput`) checks the diagnostics first.
  *
  * A component provides one under its name, and agents run with it by naming it:
  *

@@ -1,7 +1,7 @@
 /**
  * `wakeups.ts` on Bun: a pi-durable Harness over a SQLite file on an injected clock. A closed Harness
- * reopened over the same file is the host evicted and woken again: whatever slept in-process is gone,
- * only what `nextWakeAt` reported brings it back.
+ * reopened over the same file is the host evicted and woken again: a task that sleeps stays asleep in
+ * the storage, and what `nextWakeAt` reported brings the host back for it.
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
@@ -34,39 +34,23 @@ function manualClock(start = T0) {
 }
 
 describe("nextWakeAtOf: the rules over an inspection", () => {
-  const task = (kind: string, state: TaskInspection["state"], checkpoint: unknown, extra: Record<string, unknown> = {}): TaskInspection =>
-    ({ record: { kind, state: { status: state.kind === "running" ? "running" : "pending", checkpoint }, ...extra }, state }) as unknown as TaskInspection;
-  const ready = { kind: "ready", migrates: false } as const;
+  const task = (state: TaskInspection["state"]): TaskInspection => ({ record: { kind: "pi.generation" }, state }) as unknown as TaskInspection;
   const of = (...tasks: TaskInspection[]) => nextWakeAtOf({ tasks } as Pick<HarnessInspection, "tasks">, { now: () => T0 });
 
   test("no live task: undefined", () => expect(of()).toBeUndefined());
 
-  test("the built-in waits report their checkpointed time; the earliest wins", () => {
-    expect(of(task("pi.generation", ready, { phase: "retry", attempt: 1, until: T0 + 5 }))).toBe(T0 + 5);
-    expect(of(task("pi.generation", { kind: "running" }, { phase: "poll", attempt: 1, pollAt: T0 + 7 }))).toBe(T0 + 7);
-    expect(of(task("pi.compaction", ready, { phase: "retry", until: T0 + 9 }), task("pi.generation", ready, { phase: "retry", until: T0 + 8 }))).toBe(T0 + 8);
+  test("a sleeping task is due at its time; the earliest wins", () => {
+    expect(of(task({ kind: "sleeping", until: T0 + 5 }))).toBe(T0 + 5);
+    expect(of(task({ kind: "sleeping", until: T0 + 9 }), task({ kind: "sleeping", until: T0 + 8 }))).toBe(T0 + 8);
   });
 
-  test("any other ready or running task, or an abort-marked wait, is due now", () => {
-    expect(of(task("pi.generation", { kind: "running" }, { phase: "request", attempt: 1 }), task("pi.compaction", ready, { phase: "retry", until: T0 + 9 }))).toBe(T0);
-    expect(of(task("my.task", ready, { phase: "sleeping", until: T0 + 9 }))).toBe(T0);
-    expect(of(task("pi.generation", ready, { phase: "retry", until: T0 + 9 }, { abortRequested: true }))).toBe(T0);
+  test("a running or pending task is due now, whatever sleeps", () => {
+    expect(of(task({ kind: "running" }), task({ kind: "sleeping", until: T0 + 9 }))).toBe(T0);
+    expect(of(task({ kind: "sleeping", until: T0 + 9 }), task({ kind: "pending", migrates: false }))).toBe(T0);
   });
 
   test("waiting, completing and blocked tasks are never due by themselves", () => {
-    expect(
-      of(
-        task("pi.generation", { kind: "waiting", on: [] }, { phase: "tools" }),
-        task("pi.tool", { kind: "completing" }, undefined),
-        task("gone.task", { kind: "blocked", reason: "missing_task" }, { phase: "x" }),
-      ),
-    ).toBeUndefined();
-  });
-
-  test("dueAt reports a custom task's checkpointed time", () => {
-    const custom = task("my.task", ready, { phase: "sleeping", until: T0 + 9 });
-    const dueAt = (record: TaskInspection["record"]) => (record.kind === "my.task" ? ((record.state as { checkpoint: { until: number } }).checkpoint.until) : undefined);
-    expect(nextWakeAtOf({ tasks: [custom] }, { now: () => T0, dueAt })).toBe(T0 + 9);
+    expect(of(task({ kind: "waiting", on: [] }), task({ kind: "completing" }), task({ kind: "blocked", reason: "missing_task" } as TaskInspection["state"]))).toBeUndefined();
   });
 });
 
@@ -100,7 +84,7 @@ describe("a Harness evicted while it waits", () => {
       expect(await liveDueTimes(first.harness)).toEqual({ retryAt: T0 + RETRY_MS });
       expect(first.faux.state.callCount).toBe(1);
     } finally {
-      // Evicted: the in-process sleep dies with it.
+      // Evicted: the sleep's timer dies with it, the sleeping task stays.
       await first.harness.close(context);
     }
 

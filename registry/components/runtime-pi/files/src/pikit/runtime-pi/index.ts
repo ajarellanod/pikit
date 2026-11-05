@@ -90,7 +90,6 @@ import {
   type DurableRuntimeOptions,
   type Models,
   modelsFrom,
-  nextWakeAtOf,
   parseModelName,
 } from "@pikit/pi-adapter";
 import Type from "typebox";
@@ -457,7 +456,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             execution: () => execution.get(),
             workspace: () => workspace.get(),
             ...(options.settings !== undefined && { settings: options.settings }),
-            ...(drives !== undefined && { onIdleWithPendingWork: (inspection) => drives.later(nextWakeAtOf(inspection, { now })) }),
+            ...(drives !== undefined && { onIdleUntil: (at) => drives.later(at) }),
             onFailure: () => (drives !== undefined ? drives.failed() : reopens?.failed()),
           });
           runtime = created;
@@ -512,11 +511,10 @@ interface Driver {
   /** Asks for the handler at or after `time`, unless a request as soon or sooner is already made. */
   wake(time: number, ctx: AppContext): Promise<void>;
   /**
-   * The runtime's `onIdleWithPendingWork`: nothing is driven, and live work waits for a time (a model
-   * retry's backoff): asks for the handler when it is due (`nextWakeAtOf`), and the handler suspends the
-   * runtime so the host can go meanwhile.
+   * The runtime's `onIdleUntil`: nothing is driven, and a task sleeps until `time` (a model retry's
+   * backoff): asks for the handler then, and the handler suspends the runtime so the host can go meanwhile.
    */
-  later(time: number | undefined): Promise<void>;
+  later(time: number): Promise<void>;
   /**
    * The runtime's `onFailure`: a storage error closed pi-durable. Asks for the handler, whose
    * `inspect` opens it again, after the backoff's next wait (reopen.ts). An open that fails there
@@ -537,9 +535,10 @@ interface Driver {
  * 1. opens pi-durable if it is not open (a new instance after an eviction): what it finds resumes;
  * 2. resumes the conversations holding pending messages that this worker does not drive (a message
  *    nobody answered: as at start, `resume.ts`);
- * 3. waits until this worker drives no run, or its context is cancelled (the provider's slice deadline,
- *    or the App stopping);
- * 4. asks again at once if runs are still going; when what is left only waits for a time (a model
+ * 3. waits until this worker drives no run (`whenIdle`, which first resumes the sleeping tasks now due:
+ *    pi-durable keeps no timer for them here), or its context is cancelled (the provider's slice
+ *    deadline, or the App stopping);
+ * 4. asks again at once if runs are still going; when what is left only sleeps until a time (a model
  *    retry's backoff), the runtime asked for a wakeup at that time (`later`), and the handler closes
  *    pi-durable (`suspend`, inside the event) so the host can be evicted until then.
  * A request carries nothing: what to do is read from pi-durable each time, so
@@ -613,7 +612,7 @@ function createDriver(
     wake,
     async later(time) {
       waiting = true;
-      if (time !== undefined) await wakeLater(time);
+      await wakeLater(time);
     },
     failed: () => wakeLater(background.clock.now() + backoff()),
     attach(runtime) {

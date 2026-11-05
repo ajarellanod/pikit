@@ -489,7 +489,7 @@ test("suspend closes the Harness and keeps the runtime: the next call reopens it
   let clock = Date.now();
   const w = await db.worker({
     providers: [scriptedProvider({ fail: overloaded })],
-    runtime: { now: () => clock, settings: { retry: { baseDelayMs: 600_000, maxAgentDelayMs: 600_000 } }, onIdleWithPendingWork: async () => {} },
+    runtime: { now: () => clock, settings: { retry: { baseDelayMs: 600_000, maxAgentDelayMs: 600_000 } }, onIdleUntil: async () => {} },
   });
   const conversation = await w.conversation();
   await w.dispatch("r1", "hello", conversation);
@@ -609,18 +609,17 @@ test("recover abandons the queued requests of a conversation whose agent is gone
   expect(w.results().map((r) => r.requestId)).toEqual(["r2", "r1"]);
 });
 
-test("a run waiting out a model retry: whenIdle reports it as pending work, and a later worker answers it", async () => {
+test("a run waiting out a model retry: whenIdle reports when its sleep ends, and a later worker answers it", async () => {
   const db = records();
   let calls = 0;
   const overloaded = () => (calls++ === 0 ? Promise.resolve("overloaded") : undefined);
-  const told: { kind: string; phase: unknown }[] = [];
+  const told: number[] = [];
+  const before = Date.now();
   const first = await db.worker({
     providers: [scriptedProvider({ fail: overloaded })],
     runtime: {
       settings: { retry: { baseDelayMs: 600_000, maxAgentDelayMs: 600_000 } },
-      onIdleWithPendingWork: async (inspection) => {
-        for (const task of inspection.tasks) told.push({ kind: task.record.kind, phase: (task.record.state as { checkpoint?: { phase?: string } }).checkpoint?.phase });
-      },
+      onIdleUntil: async (at) => void told.push(at),
     },
   });
   const conversation = await first.conversation();
@@ -628,7 +627,9 @@ test("a run waiting out a model retry: whenIdle reports it as pending work, and 
   while (calls === 0) await Bun.sleep(1);
 
   expect(await first.runtime.whenIdle(first.ctx)).toBe(true);
-  expect(told).toEqual([{ kind: "pi.generation", phase: "retry" }]);
+  expect(told).toHaveLength(1);
+  expect(told[0]).toBeGreaterThanOrEqual(before + 600_000);
+  expect(told[0]).toBeLessThan(Date.now() + 600_000);
   expect(first.results()).toEqual([]);
   await first.close();
 

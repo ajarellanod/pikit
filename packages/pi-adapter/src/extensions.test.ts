@@ -7,7 +7,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { AGENT_STATE, defineAgent } from "@pikit/contracts";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { type DurableExtension, type DurableTool, RESERVED_EXTENSION_PREFIX } from "./agent.ts";
 import { defineExtension, defineTool, section } from "./extensions.ts";
 import { databaseFile, type ModelRequest, openWorker, scriptedProvider } from "./test-support.ts";

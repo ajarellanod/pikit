@@ -4,58 +4,40 @@
  * (`nextWakeAt`), and one bounded slice of driving it (`driveSlice`). Host-agnostic: the host turns
  * `nextWakeAt` into its own timer (an object's alarm, pikit's `wakeups`).
  *
- * Why: pi-durable 1.0 waits with in-process timers (the scheduler's `runtime.sleep`, a `setTimeout`)
- * and reports no next due time. An object evicted while a task sleeps keeps the task durably, but
- * nothing wakes the object to run it. See docs/upstream/pi-durable-next-wake.md. Upstream:
- * earendil-works/pi#10325; when it ships, `checkpointedDue` here and `timed` in runtime.ts go
- * (docs/upstream/README.md, proposal 1, "To delete when it ships").
+ * pi-durable (1.4.0) sleeps durably: a model retry's backoff, a deferred response's poll and a
+ * compaction's retry end their phase asleep until a time, which survives an eviction, and
+ * `harness.inspect()` reports each such task `sleeping` with its `until`. A Harness opened with
+ * `onWake` keeps no timer for them (one would keep the object alive): the host wakes the process and
+ * calls `resume()`, which `driveSlice` does. `Harness.wake()` says the same from memory, but counts the
+ * recovery pass a fresh open runs as work, which no commit may end; this reads the inspection.
  *
- * What `nextWakeAt` reads: `harness.inspect()`, the live tasks with their records, and nothing else.
+ * What `nextWakeAt` reads: `harness.inspect()`, the live tasks, and nothing else.
  *
- * - A `ready` or `running` task is due now: the scheduler reserves a ready one at once (after
- *   `resume()`), and a running one (a model stream, a tool) needs the process until it commits.
- * - Except the built-in waits, which keep their due time in the task's checkpoint, the very value the
- *   phase sleeps on, so the time survives an eviction:
- *   - `pi.generation` at phase `retry` (model error backoff): `until`;
- *   - `pi.generation` at phase `poll` (a deferred response): `pollAt`;
- *   - `pi.compaction` at phase `retry` (summary model error backoff): `until`.
- *   `pi.live` mirrors these (`generation.retry.at`, `generation.deferred.pollAt`,
- *   `compactions[].retry.at`) for presentation; it is not read here, because the checkpoint is what
- *   the phase actually waits for, and a stale presentation value could only wake the host early.
- * - An abort-marked ready or running task is due now (its abort handler runs at once).
+ * - A `running` task is due now: it needs the process until it commits.
+ * - A `pending` task is due now: the scheduler reserves it at once (after `resume()`). A sleeping task
+ *   past its time, or an abort-marked one, is pending.
+ * - A `sleeping` task is due at its `until`.
  * - `waiting`, `completing` and `blocked` tasks are never due by themselves: what they wait for is a
  *   live task counted on its own, and a blocked task (no definition can take it) waits for a code
  *   change, not a time. Unsettled submissions are not read: a queued one waits for a live task of its
  *   conversation, a placed one has one.
- *
- * What it cannot see: a custom task's `runtime.sleep(until)` that is not checkpointed. While its
- * invocation runs it is `running` (due now: the host keeps driving, in slices, until the deadline);
- * after an eviction it is `ready` again (due now: its phase runs again and sleeps again). Correct, but
- * the host spends a slice per wake-up on it. A custom task that checkpoints its due time can report it
- * through `dueAt`.
  */
 
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withoutAbortSignal } from "@earendil-works/chord/context";
 import type { Harness, HarnessInspection, TaskInspection } from "@earendil-works/pi-durable";
 
-/** A live task's record, as `harness.inspect()` lists it. */
+/** Unused since `WakeOptions.dueAt` went: goes with its export in index.ts, which this change does not own. */
 export type LiveTaskRecord = TaskInspection["record"];
 
 export interface WakeOptions {
   /** The clock the Harness was opened with (`HarnessOptions.now`). Default: `Date.now`. */
   now?: (() => number) | undefined;
-  /**
-   * The due time of a ready or running task the built-in rules do not know: a custom task that keeps
-   * the time it sleeps until in its checkpoint. `undefined`: the built-in rules (due now, unless it is
-   * one of the built-in waits). Not called for an abort-marked task, which is due now.
-   */
-  dueAt?: ((record: LiveTaskRecord) => number | undefined) | undefined;
 }
 
 /**
  * The earliest time, on `now`'s clock, at which the Harness's pending work needs the process:
- * `now()` when a task is ready or running, else the earliest checkpointed due time, else
+ * `now()` when a task is running or pending, else the earliest sleeping task's time, else
  * `undefined` (nothing to wake for). A time at or before `now()` means at once. Writes nothing.
  */
 export async function nextWakeAt(harness: Harness, context: Context, options: WakeOptions = {}): Promise<number | undefined> {
@@ -66,28 +48,12 @@ export async function nextWakeAt(harness: Harness, context: Context, options: Wa
 export function nextWakeAtOf(inspection: Pick<HarnessInspection, "tasks">, options: WakeOptions = {}): number | undefined {
   const now = options.now ?? Date.now;
   let earliest: number | undefined;
-  for (const { record, state } of inspection.tasks) {
-    if (state.kind !== "ready" && state.kind !== "running") continue;
-    const due = record.abortRequested === true ? undefined : (options.dueAt?.(record) ?? checkpointedDue(record));
+  for (const { state } of inspection.tasks) {
     // Due now is the earliest anything can be.
-    if (due === undefined) return now();
-    if (earliest === undefined || due < earliest) earliest = due;
+    if (state.kind === "running" || state.kind === "pending") return now();
+    if (state.kind === "sleeping" && (earliest === undefined || state.until < earliest)) earliest = state.until;
   }
   return earliest;
-}
-
-/** The time a built-in task's current phase sleeps until, from its checkpoint. */
-function checkpointedDue(record: LiveTaskRecord): number | undefined {
-  if (!("checkpoint" in record.state)) return undefined;
-  const checkpoint = record.state.checkpoint;
-  if (checkpoint === null || typeof checkpoint !== "object" || Array.isArray(checkpoint)) return undefined;
-  const time = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
-  if (record.kind === "pi.generation") {
-    if (checkpoint.phase === "retry") return time(checkpoint.until);
-    if (checkpoint.phase === "poll") return time(checkpoint.pollAt);
-  }
-  if (record.kind === "pi.compaction" && checkpoint.phase === "retry") return time(checkpoint.until);
-  return undefined;
 }
 
 export interface DriveSliceOptions extends WakeOptions {
@@ -115,14 +81,10 @@ export interface SliceResult {
 }
 
 /**
- * One slice of driving the Harness inside a host event: `resume()`, then let the scheduler run until
- * nothing is due, or until what is due comes after the slice (a retry backoff longer than what is
- * left), or the slice ends. Returns when the host must come back. Leaves the Harness open and
- * scheduling: if the host lives on, an in-process timer may run a wait before the host's wake-up does,
- * and the wake-up then finds less to do. But on workerd a pending timer also keeps the object from
- * being evicted: a host that wants to go between wake-ups closes the Harness after a slice whose
- * `nextWakeAt` is later than now, and reopens it at its next event. Rejects when the Harness closes
- * during the slice.
+ * One slice of driving the Harness inside a host event: `resume()` (which also wakes the sleeping
+ * tasks now due), then let the scheduler run until nothing is due, or until what is due comes after
+ * the slice (a retry backoff longer than what is left), or the slice ends. Returns when the host must
+ * come back. Leaves the Harness open and scheduling. Rejects when the Harness closes during the slice.
  */
 export async function driveSlice(harness: Harness, options: DriveSliceOptions): Promise<SliceResult> {
   const now = options.now ?? Date.now;
@@ -131,30 +93,36 @@ export async function driveSlice(harness: Harness, options: DriveSliceOptions): 
   const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
   const context = withoutAbortSignal(options.context ?? BACKGROUND_CONTEXT);
   let changed: (() => void) | undefined;
-  // Every task transition is a commit: wait for those, not for a poll.
-  const unsubscribe = harness.subscribeCommits((publication) => {
-    if (publication.changes.some((change) => change.type === "task")) changed?.();
+  // A task's transitions are stored commits: wait for those. Its invocation ends after its last one,
+  // without a commit of its own (a phase that ends asleep): what runs now is looked at again shortly.
+  const observation = harness.observeCommits({
+    advance: (publication) => {
+      if (publication.changes.some((change) => change.type === "task")) changed?.();
+    },
+    end: () => changed?.(),
   });
   try {
-    harness.resume();
     for (;;) {
       // Armed before the read, so that a change right after it is not missed.
       const change = new Promise<void>((resolve) => (changed = resolve));
+      harness.resume();
       const next = await nextWakeAt(harness, context, options);
       if (next === undefined) return { idle: true };
       const current = now();
       const left = until === undefined ? Number.POSITIVE_INFINITY : until - current;
       if (left <= 0 || signal?.aborted === true || next > (until ?? current)) return { idle: false, nextWakeAt: next };
       // Due within the slice: wait for a task to change, its time to come, or the slice to end.
-      await settled(change, next > current ? Math.min(left, next - current) : left, signal);
+      await settled(change, next > current ? Math.min(left, next - current) : Math.min(left, RECHECK_MS), signal);
     }
   } finally {
     changed = undefined;
-    unsubscribe();
+    observation.detach();
   }
 }
 
 const MAX_TIMER_DELAY = 2 ** 31 - 1;
+/** How long a slice waits for a commit while work runs before it looks again (`driveSlice`). */
+const RECHECK_MS = 50;
 
 /** Resolves when `promise` resolves, after `ms` (never, when infinite), or when `signal` aborts. */
 function settled(promise: Promise<void>, ms: number, signal: AbortSignal | undefined): Promise<void> {
