@@ -3,6 +3,7 @@ import {
   BACKGROUND_CONTEXT,
   type Context,
   createContextKey,
+  NOOP_TELEMETRY,
   withAbortSignal,
   withCancel,
   withContextValue,
@@ -42,6 +43,7 @@ test("a foreign context of the same shape keeps its cancellation when derived", 
   const controller = new AbortController();
   const foreign: Context = {
     abortSignal: controller.signal,
+    telemetry: NOOP_TELEMETRY,
     value: () => undefined,
     toString: () => "foreign",
   };

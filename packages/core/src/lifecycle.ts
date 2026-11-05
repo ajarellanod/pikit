@@ -222,6 +222,9 @@ function follow(signal: AbortSignal | undefined, target: AbortController): void 
 function withoutCancel(parent: Context): Context {
   return {
     abortSignal: undefined,
+    get telemetry() {
+      return parent.telemetry;
+    },
     value: (key) => parent.value(key),
     toString: () => `${parent}.WithoutCancel`,
   };

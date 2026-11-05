@@ -187,7 +187,7 @@ export default defineComponent({
         const signal = stop.signal;
         // The start context's values, with the app's stop as the only cancellation: start's own
         // deadline must not cut a handler that runs an hour later.
-        const base = ctx.derive((inner) => ({ abortSignal: signal, value: (key) => inner.value(key), toString: () => `${inner}.Wakeup` }));
+        const base = ctx.derive((inner) => ({ abortSignal: signal, telemetry: inner.telemetry, value: (key) => inner.value(key), toString: () => `${inner}.Wakeup` }));
         running = { stop, loop: loop(base, signal) };
       },
       async stop(ctx) {

@@ -551,7 +551,7 @@ export function createMemoryWakeups(options: { retryMs?: number; durable?: boole
           stopping = new AbortController();
           const signal = stopping.signal;
           // The start context's values, cancelled only when the app stops.
-          const running = ctx.derive((inner) => ({ abortSignal: signal, value: (key) => inner.value(key), toString: () => `${inner}.Wakeup` }));
+          const running = ctx.derive((inner) => ({ abortSignal: signal, telemetry: inner.telemetry, value: (key) => inner.value(key), toString: () => `${inner}.Wakeup` }));
           loop = (async () => {
             while (!signal.aborted) {
               const changed = woken;
