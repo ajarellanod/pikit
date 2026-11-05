@@ -132,6 +132,7 @@ request) restores it before the tool runs. The disk holds only the workspaces in
 - **With `retentionDays`**, the bucket's snapshots whose newest archive is older than N days are
   deleted (hourly, the manifest first) instead of the local directories, which are released anyway.
 - **`maxBytes`**: an archive larger stays here, a warning logged, until its next use.
+- **`maxUnpackedBytes`** (4 GiB) **and `maxEntries`** (1,000,000): what a restore takes at most, counted as the archive unpacks (the tar after gunzip, headers included; files, directories and links). Past either the whole restore is refused (the tool call fails, nothing at the directory, nothing left half-extracted): a gzip bomb or a huge archive never fills the disk. A checkpoint keeps to the same limits (a directory past them stays here, as past `maxBytes`); raise them to restore a snapshot a larger limit saved.
 - Its own files are in `<root>/.workspace-local-snapshots/` (archives on their way, restores, the index
   of the directories on disk, which a restart reads: each counts as used at start). A stop releases
   nothing.
@@ -157,7 +158,7 @@ Until then, give `bash` only to the agents that need it, and see `execution-loca
   root: "agents", // default; relative to execution's working directory, or absolute
   per: "chat",    // default; "agent" for one directory per agent, "channel" for one per channel of each agent
   // retentionDays: 30, // absent by default (kept forever): delete a chat's directories unused this many days
-  // snapshots: { idleMinutes: 10, maxBytes: 10e9 }, // absent by default: idle chat directories to storage.blob
+  // snapshots: { idleMinutes: 10, maxBytes: 10e9, maxUnpackedBytes: 4294967296, maxEntries: 1000000 }, // absent by default: idle chat directories to storage.blob
 }
 ```
 

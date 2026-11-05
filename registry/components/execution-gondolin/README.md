@@ -366,6 +366,7 @@ workspaces in use: replace it, and the next host restores each chat's from the b
 - **With `retentionDays`**, the bucket's snapshots whose newest archive is older than N days are
   deleted (hourly, the manifest first), instead of the local directories, which are released anyway.
 - **`maxBytes`**: an archive larger stays on the host, a warning logged, until its next use.
+- **`maxUnpackedBytes`** (4 GiB) **and `maxEntries`** (1,000,000): what a restore takes at most, counted as the archive unpacks (the tar after gunzip, headers included; files, directories and links). Past either the whole restore is refused (the tool call fails, nothing at the workspace, nothing left half-extracted): a gzip bomb or a huge archive never fills the host's disk. A checkpoint keeps to the same limits (a workspace past them stays on the host, as past `maxBytes`); raise them to restore a snapshot a larger limit saved. execution-cloudflare-sandbox's `maxUnpackedBytes` counts the same bytes.
 - **One writer per chat and agent.** One process holds a sandbox; a second host serving the same
   chat and agent at the same time (execution-remote's `endpoint` changed while the old host still
   holds an unreleased copy) is not coordinated: each host's checkpoint replaces the manifest, the
@@ -482,7 +483,7 @@ the rewrite at its next boot.
   workspace: "chat",         // default: a sandbox per chat and agent; "agent": one per agent, every chat
   agents: {},                // default: a machine per agent, each field replacing the base's
   // retentionDays: 30,      // absent by default (kept forever): delete a chat's sandboxes unused this many days
-  // snapshots: { idleMinutes: 10, maxBytes: 10e9, namespace: "workspace-snapshots" }, // absent by default: idle chat sandboxes to storage.blob
+  // snapshots: { idleMinutes: 10, maxBytes: 10e9, maxUnpackedBytes: 4294967296, maxEntries: 1000000, namespace: "workspace-snapshots" }, // absent by default: idle chat sandboxes to storage.blob
 }
 ```
 
