@@ -11,16 +11,27 @@
  * | `lastActivity`  | the newest message's `timestamp` |
  * | `usage`         | `pi.usage`: every model call and tool, summed (pi-ai's `Usage`) |
  * | `transcript`    | `Conversation.entries`, newest first; an entry's `model` messages are pi-ai's `Message`s |
- * | `watch`         | `watchEvents` (pi-durable's agent events, spec §9.4): a `snapshot`, then a batch per commit; one that falls behind is sent a new `snapshot` |
+ * | `watch`         | `Conversation.watch` (the view, spec §9.3): `pi.live` projected as `ObservedLive` and diffed, the window's new entries, `pi.usage` changing; a slow consumer gets the values folded |
  *
  * Neutral: on a server it sees every conversation of the storage; in a Cloudflare Durable Object, the
  * object's own (features/cloudflare-conversation-index.md).
  */
 
-import type { Context as ChordContext } from "@earendil-works/chord";
-import { type AgentEvent, type ConversationId, type Harness, LiveDoc, type Storage, UsageDoc, type UsageState, watchEvents } from "@earendil-works/pi-durable";
+import type { Context as ChordContext, WatchEnd } from "@earendil-works/chord";
+import {
+  type ConversationId,
+  type ConversationView,
+  type EntryRecord,
+  type Harness,
+  LiveDoc,
+  type LiveState,
+  type Storage,
+  type SubmissionId,
+  UsageDoc,
+  type UsageState,
+} from "@earendil-works/pi-durable";
 import type { AppContext } from "@pikit/core";
-import type { AgentObserver, ObservedConversation, ObservedEvent, Page, PageRequest, TranscriptEntry, Usage } from "@pikit/contracts";
+import { type AgentObserver, diffOps, type JsonValue, type ObservedConversation, type ObservedEvent, type ObservedLive, type Page, type PageRequest, type TranscriptEntry, type Usage } from "@pikit/contracts";
 import { ConversationDoc } from "./agent.ts";
 import { toChord } from "./context.ts";
 import { durableId } from "./submissions.ts";
@@ -88,7 +99,7 @@ export function createObserver(current: () => ObservedRuntime): AgentObserver {
       const conversation = await harness.conversation(id, chord);
       if (conversation === undefined) return undefined;
       const entries = await conversation.entries({}, limitOf(page), cursorOf(page), chord);
-      const items: TranscriptEntry[] = entries.items.map((entry) => ({ id: String(entry.id), kind: entry.kind, messages: json(entry.model ?? []) }));
+      const items: TranscriptEntry[] = entries.items.map(entryOf);
       return pageOf(items, entries.next);
     },
 
@@ -107,58 +118,132 @@ export function createObserver(current: () => ObservedRuntime): AgentObserver {
   };
 }
 
-/** One conversation's events, from `watchEvents`, until `ctx` is cancelled or the stream ends. */
+/**
+ * One conversation live, from `Conversation.watch` (its view: a window over the transcript and the
+ * `pi.*` documents), until `ctx` is cancelled or the watch ends. Each value the watch delivers is
+ * held until the consumer has taken every event made of it, so a consumer that falls behind makes
+ * pi-durable fold the values meanwhile into the newest one: memory stays one value and its events.
+ */
 async function* follow(open: (ctx: AppContext) => Promise<{ harness: Harness }>, conversationId: string, ctx: AppContext): AsyncGenerator<ObservedEvent> {
   const id = durableId(conversationId);
   const { harness } = await open(ctx);
   const chord = toChord(ctx);
-  if (id === undefined || (await harness.conversation(id, chord)) === undefined) throw new Error(`agent.observe: no conversation ${JSON.stringify(conversationId)}`);
-  const stream = await watchEvents(harness, id, chord);
+  const conversation = id === undefined ? undefined : await harness.conversation(id, chord);
+  if (conversation === undefined) throw new Error(`agent.observe: no conversation ${JSON.stringify(conversationId)}`);
+  // Cancelling `ctx` ends the watch (`aborted`).
+  const watch = await conversation.watch(chord);
+  const first = watch.value;
 
-  /** Batches delivered and not yet taken, each with what tells pi-durable it was taken. */
-  const batches: { events: readonly AgentEvent[]; taken(): void }[] = [];
-  let ended = false;
+  /** The newest value delivered and not yet taken, with what releases pi-durable's watch. */
+  let pending: { view: ConversationView; taken(): void } | undefined;
+  let ended: WatchEnd | undefined;
   let wake: (() => void) | undefined;
   const signal = (): void => {
     const waiting = wake;
     wake = undefined;
     waiting?.();
   };
-  // The listener resolves once its batch is taken, so a slow consumer makes pi-durable hold its
-  // batches, and past its bound replace them with one snapshot: memory stays bounded.
-  stream.start((events) => new Promise<void>((taken) => (batches.push({ events, taken }), signal())));
-  void stream.closed.then(() => ((ended = true), signal()));
+  watch.start(async (call) => {
+    // pi-durable never sends `failed` calls: its failures end the watch.
+    if (call.kind !== "value") return;
+    await new Promise<void>((taken) => {
+      pending = { view: call.value, taken };
+      signal();
+    });
+  });
+  void watch.closed.then((end) => ((ended ??= end), signal()));
   const cancelled = ctx.abortSignal;
-  const onAbort = () => ((ended = true), signal());
+  const onAbort = () => ((ended ??= { kind: "aborted" }), signal());
   cancelled?.addEventListener("abort", onAbort, { once: true });
 
+  const live = liveOf(harness, chord);
   try {
-    yield event(stream.snapshot);
+    let shown = await live(first);
+    yield { type: "live", ops: [["r", shown as unknown as JsonValue]] };
+    let last = first.entries.at(-1)?.id ?? first.before;
+    let usage = first.docs["pi.usage"];
     for (;;) {
       if (cancelled?.aborted === true) return;
-      const batch = batches.shift();
-      if (batch !== undefined) {
-        batch.taken();
-        for (const each of batch.events) yield event(each);
+      const next = pending;
+      if (next === undefined) {
+        if (ended !== undefined) break;
+        await new Promise<void>((resolve) => (wake = resolve));
         continue;
       }
-      if (ended) return;
-      await new Promise<void>((resolve) => (wake = resolve));
+      pending = undefined;
+      try {
+        const { view } = next;
+        // Entry ids ascend in the window: what is past the newest one sent is new.
+        const from = view.entries.findIndex((entry) => last === undefined || entry.id > last);
+        if (from !== -1) {
+          // The entry the window has before the new ones is the newest one sent, unless some went past unsent.
+          const continues = (from > 0 ? view.entries[from - 1]?.id : view.before) === last;
+          last = view.entries.at(-1)?.id;
+          yield { type: "entries", entries: view.entries.slice(from).map(entryOf) };
+          if (!continues) yield { type: "transcript" };
+        }
+        // pi-durable applies documents immutably: an unchanged one is the same object.
+        if (view.docs["pi.usage"] !== usage) {
+          usage = view.docs["pi.usage"];
+          yield { type: "usage" };
+        }
+        const now = await live(view);
+        const ops = diffOps(shown as unknown as JsonValue, now as unknown as JsonValue);
+        shown = now;
+        if (ops.length > 0) yield { type: "live", ops };
+      } finally {
+        next.taken();
+      }
     }
+    if (ended?.kind === "failed" || ended?.kind === "listener_error") throw ended.error;
   } finally {
     cancelled?.removeEventListener("abort", onAbort);
-    for (const batch of batches.splice(0)) batch.taken();
-    await stream.stop().catch(() => {});
+    pending?.taken();
+    await watch.stop().catch(() => {});
   }
+}
+
+/**
+ * What a view shows live (`pi.live`), as the contract's `ObservedLive`. A run's inputs are
+ * submissions: their request ids are read once each, and kept while the run lists them.
+ */
+function liveOf(harness: Harness, chord: ChordContext): (view: ConversationView) => Promise<ObservedLive> {
+  let known = new Map<SubmissionId, string | undefined>();
+  const requestOf = async (submission: SubmissionId): Promise<string | undefined> => {
+    if (known.has(submission)) return known.get(submission);
+    const record = await (await harness.submission(submission, chord))?.status(chord);
+    return record?.requestId;
+  };
+  return async (view) => {
+    const state = view.docs["pi.live"] as LiveState | undefined;
+    const run = state?.run;
+    let requests: string[] | undefined;
+    if (run !== undefined) {
+      const next = new Map<SubmissionId, string | undefined>();
+      for (const submission of run.inputs) next.set(submission, await requestOf(submission));
+      known = next;
+      requests = [...next.values()].filter((requestId) => requestId !== undefined);
+    }
+    const message = state?.generation?.message;
+    const failure = state?.runFailure;
+    return {
+      busy: run !== undefined,
+      ...(requests !== undefined && { requests }),
+      ...(message !== undefined && { partial: message as unknown as JsonValue }),
+      tools: (state?.tools ?? []).map((slot) => ({ callId: slot.callId, name: slot.name, status: slot.status, ...(slot.output !== undefined && { output: slot.output }) })),
+      ...(failure !== undefined && { failure: { reason: failure.reason, ...(failure.detail !== undefined && { detail: failure.detail }) } }),
+    };
+  };
+}
+
+/** A transcript entry as the contract carries it. */
+function entryOf(entry: EntryRecord): TranscriptEntry {
+  return { id: String(entry.id), kind: entry.kind, messages: json(entry.model ?? []) };
 }
 
 /** A pi-durable value as plain JSON: what the contract carries (no `undefined`, no class). */
 function json<T>(value: T): never {
   return JSON.parse(JSON.stringify(value)) as never;
-}
-
-function event(value: AgentEvent): ObservedEvent {
-  return json(value);
 }
 
 /** Every bucket of `pi.usage` summed: what the conversation cost. */
