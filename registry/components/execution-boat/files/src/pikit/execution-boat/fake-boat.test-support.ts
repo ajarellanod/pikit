@@ -52,8 +52,8 @@ export interface Recorded {
   query?: string;
 }
 
-const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-const failure = (status: number, code: string, message: string) => json(status, { ok: false, type: "sandbox.error", status, code, message, requestId: "req_fake", error: { code, message, status } });
+export const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+export const failure = (status: number, code: string, message: string) => json(status, { ok: false, type: "sandbox.error", status, code, message, requestId: "req_fake", error: { code, message, status } });
 
 export class FakeBoat {
   readonly sandboxes = new Map<string, FakeSandbox>();
@@ -65,7 +65,7 @@ export class FakeBoat {
   down = false;
   hang = false;
   /** Answers one route (method and a path regex) with what it returns, while set. */
-  override: { method: string; path: RegExp; answer: () => Response } | undefined;
+  override: { method: string; path: RegExp; answer: () => Response | Promise<Response> } | undefined;
   createMs = 0;
   resumeMs = 0;
   /** The page size of the sandbox list (tests paging). */

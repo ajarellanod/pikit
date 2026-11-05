@@ -19,7 +19,7 @@ import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@pikit/pi-adapter/execution";
 import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
 import { createWorkspaceConformance } from "@pikit/pi-adapter/testing";
-import { FakeBoat } from "./fake-boat.test-support.ts";
+import { FakeBoat, failure, json } from "./fake-boat.test-support.ts";
 import { createExecutionBoat, workspaceOf } from "./index.ts";
 
 export const KEY = "boat_live_0123456789abcdefSECRET";
@@ -193,7 +193,317 @@ test("a chat's agent gets a VM of its own, labelled, made noEnv, with its files 
   await stopApp(s);
 });
 
-void writeFileSync;
-void withAbortSignal;
+const SECOND = 1000;
+const HOUR = 3600 * SECOND;
+const DAY = 24 * HOUR;
+const IDLE = 600 * SECOND;
+
+const until = async (condition: () => boolean | Promise<boolean>, what = "a condition", ms = 8000) => {
+  const deadline = Date.now() + ms;
+  while (!(await condition())) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await Bun.sleep(10);
+  }
+};
+
+const stateOf = (s: Started, id: string, agent = "support") => s.fake.of(workspace(id, agent)).map((vm) => vm.state);
+const text = async (env: ExecutionEnv, path: string) => {
+  const read = await env.readTextFile(path, ctx);
+  return read.ok ? read.value : `error ${read.error.code}: ${read.error.message}`;
+};
+
+// --- Keying: a VM per chat and agent -------------------------------------------------------------
+
+test("keyed by chat and agent: a reset and a same-agent delegated child share the VM; another chat or agent gets its own", async () => {
+  const s = await started();
+  const parent = (await s.workspace.resolve({ key: "telegram:1", agent: "support", conversationId: "1", channel: "telegram" }, s.app.context())).env;
+  expect((await parent.writeFile("a.txt", "chat 1", ctx)).ok).toBe(true);
+  // /new: a new conversationId under the same key; conversationId and channel choose nothing.
+  const reset = (await s.workspace.resolve({ key: "telegram:1", agent: "support", conversationId: "9" }, s.app.context())).env;
+  expect(await text(reset, "a.txt")).toBe("chat 1");
+  const child = (await s.workspace.resolve({ key: "delegate:1:x:t", agent: "support", conversationId: "c", origin: { key: "telegram:1", agent: "orchestrator", conversationId: "1" } }, s.app.context())).env;
+  expect(await text(child, "a.txt")).toBe("chat 1");
+  const otherChat = (await s.workspace.resolve({ key: "telegram:2", agent: "support", conversationId: "2" }, s.app.context())).env;
+  const otherAgent = (await s.workspace.resolve({ key: "telegram:1", agent: "ops", conversationId: "1" }, s.app.context())).env;
+  expect(await otherChat.exists("a.txt", ctx)).toEqual({ ok: true, value: false });
+  expect(await otherAgent.exists("a.txt", ctx)).toEqual({ ok: true, value: false });
+  expect(s.fake.sandboxes.size).toBe(3);
+  expect(child.id).toBe(`execution-boat:${workspaceOf("telegram:1", "support")}`);
+  await stopApp(s);
+});
+
+test("unsafe agent names and empty chat keys are refused before any call", async () => {
+  const s = await started();
+  for (const agent of ["../x", "Dev", "", "a/b"]) {
+    await expect(s.workspace.resolve({ key: "k", agent, conversationId: "1" }, s.app.context())).rejects.toThrow(/not an agent's name/);
+  }
+  await expect(s.workspace.resolve({ key: "", agent: "support", conversationId: "1" }, s.app.context())).rejects.toThrow(/non-empty key/);
+  expect(s.fake.calls.filter((call) => call.path.startsWith("/sandboxes/") || call.method === "POST")).toEqual([]);
+  await stopApp(s);
+});
+
+test("the machine is the agent's profile, field by field over the base; an agent it does not name gets the base", async () => {
+  const s = await started({ size: "default", agents: { designer: { size: "large", template: "designer" }, writer: { template: "writer-tools" } } });
+  mkdirSync(join(s.root, "templates", "designer", "workspace"), { recursive: true });
+  writeFileSync(join(s.root, "templates", "designer", "workspace", "fonts.txt"), "prepared");
+  s.fake.templates.set("designer", join(s.root, "templates", "designer"));
+  s.fake.templates.set("writer-tools", join(s.root, "templates", "designer"));
+  const designer = await s.env("1", "designer");
+  expect(await text(designer, "fonts.txt")).toBe("prepared");
+  await (await s.env("1", "writer")).exists(".", ctx);
+  await (await s.env("1", "support")).exists(".", ctx);
+  await (await s.env("1", "constructor")).exists(".", ctx);
+  const creates = s.fake.calls.filter((call) => call.method === "POST" && call.path === "/sandboxes").map((call) => call.body as Record<string, unknown>);
+  expect(creates.map((body) => [body.labels && (body.labels as Record<string, string>)["pikit-agent"], body.type, body.from])).toEqual([
+    ["designer", "large", "designer"],
+    ["writer", "default", "writer-tools"],
+    ["support", "default", undefined],
+    ["constructor", "default", undefined],
+  ]);
+  await stopApp(s);
+});
+
+// --- No secrets, no promised egress, the key ------------------------------------------------------
+
+test("a profile (or the base) asking for secrets or allowedHosts is refused at setup, saying why", async () => {
+  await expect(started({ agents: { developer: { secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com"] }] } } })).rejects.toThrow(/"developer" asks for secrets: no secret reaches a boat VM/);
+  await expect(started({ secrets: [{ name: "X", hosts: ["x"] }] })).rejects.toThrow(/base machine asks for secrets/);
+  await expect(started({ agents: { analyst: { allowedHosts: ["*.googleapis.com"] } } })).rejects.toThrow(/boat cannot restrict a VM's network/);
+  await expect(started({ allowedHosts: [] })).rejects.toThrow(/allowedHosts/);
+  // An empty list asks for nothing.
+  await stopApp(await started({ agents: { developer: { secrets: [] } } }));
+});
+
+test("start refuses without the API key; snapshots without storage.blob", async () => {
+  const why = (attempt: Promise<unknown>) => attempt.then(() => "started", (error: unknown) => String(((error as Error).cause as Error | undefined)?.message));
+  expect(await why(started({}, { key: undefined }))).toMatch(/BOAT_API_KEY \(boat's API key\) is not set/);
+  expect(await why(started({ snapshots: true }))).toMatch(/no storage.blob provider/);
+});
+
+test("the API key goes to boat's API only: never to a signed file URL, a VM, a log or an error", async () => {
+  const s = await started();
+  const env = await s.env("1");
+  const big = "x".repeat(200 * 1024);
+  expect((await env.writeFile("big.txt", big, ctx)).ok).toBe(true);
+  expect(await text(env, "big.txt")).toBe(big);
+  const seen = await run(env, "env");
+  expect(seen.stdout).not.toContain(KEY);
+  expect(s.fake.leaks).toEqual([]);
+  expect(JSON.stringify(s.fake.calls)).not.toContain(KEY);
+  // boat echoing the key in an error: redacted before it leaves the client.
+  s.fake.override = { method: "POST", path: /\/commands$/, answer: () => failure(400, "bad_request", `the key ${KEY} is wrong`) };
+  const failed = await env.readTextFile("big.txt", ctx);
+  expect(failed.ok).toBe(false);
+  const message = failed.ok ? "" : failed.error.message;
+  expect(message).toContain("[redacted]");
+  expect(message).not.toContain(KEY);
+  const exec = await run(env, "true");
+  expect(exec.result.ok ? "" : exec.result.error.message).not.toContain(KEY);
+  s.fake.override = undefined;
+  expect(JSON.stringify(s.logs)).not.toContain(KEY);
+  await stopApp(s);
+});
+
+// --- Lifecycle on a manual clock ------------------------------------------------------------------
+
+test("idle: stopped after idleSeconds with nothing running, resumed by the next use with its files (resume latency logged)", async () => {
+  const clock = createManualClock();
+  const s = await started({}, { clock });
+  s.fake.resumeMs = 80;
+  const env = await s.env("1");
+  expect((await env.writeFile("kept.txt", "before the stop", ctx)).ok).toBe(true);
+  await clock.advance(IDLE - 60 * SECOND);
+  await Bun.sleep(50);
+  expect(stateOf(s, "1")).toEqual(["ready"]);
+  await clock.advance(60 * SECOND);
+  await until(() => stateOf(s, "1")[0] === "archived", "the idle stop");
+  expect(s.fake.count("POST", /\/stop$/)).toBe(1);
+  expect(await text(env, "kept.txt")).toBe("before the stop");
+  expect(s.fake.count("POST", /\/resume$/)).toBe(1);
+  expect((s.fake.calls.find((call) => call.path.endsWith("/resume"))?.body as Record<string, unknown>).noEnv).toBe(true);
+  const resumed = s.logs.find((log) => log.message === "execution-boat: VM resumed");
+  expect(resumed?.fields?.ms as number).toBeGreaterThanOrEqual(80);
+  await stopApp(s);
+});
+
+test("idle stop never during a command: a long command keeps its VM, which stops once idle after it", async () => {
+  const clock = createManualClock();
+  const s = await started({}, { clock });
+  const env = await s.env("1");
+  const running = run(env, "sleep 1; echo done");
+  await until(() => (s.fake.of(workspace("1"))[0]?.processes.size ?? 0) > 0, "the command");
+  await clock.advance(2 * IDLE);
+  await Bun.sleep(100);
+  expect(stateOf(s, "1")).toEqual(["ready"]);
+  const done = await running;
+  expect(done.result).toEqual({ ok: true, value: { exitCode: 0 } });
+  expect(done.stdout).toBe("done\n");
+  await clock.advance(IDLE);
+  await until(() => stateOf(s, "1")[0] === "archived", "the idle stop after the command");
+  await stopApp(s);
+});
+
+test("idle stop never while a process a command left is running (marked PIKIT_BOAT_COMMAND, found in /proc)", async () => {
+  const clock = createManualClock();
+  const s = await started({}, { clock });
+  const env = await s.env("1");
+  const marker = await run(env, 'printf %s "$PIKIT_BOAT_COMMAND"');
+  expect(marker.stdout).toBe("1");
+  // What `sleep 600 &` leaves in a VM: a process whose environment carries the marker.
+  mkdirSync(join(s.proc, "4242"), { recursive: true });
+  writeFileSync(join(s.proc, "4242", "environ"), "PATH=/usr/bin\0PIKIT_BOAT_COMMAND=1\0HOME=/home/user\0");
+  mkdirSync(join(s.proc, "4243"), { recursive: true });
+  writeFileSync(join(s.proc, "4243", "environ"), "PATH=/usr/bin\0NOT_PIKIT_BOAT_COMMAND=1\0");
+  await clock.advance(IDLE);
+  await until(() => s.logs.some((log) => log.message.includes("left processes running; kept")), "the probe");
+  expect(stateOf(s, "1")).toEqual(["ready"]);
+  expect(s.logs.find((log) => log.message.includes("left processes running"))?.fields?.processes).toBe(1);
+  rmSync(join(s.proc, "4242"), { recursive: true });
+  await clock.advance(30 * SECOND);
+  await until(() => stateOf(s, "1")[0] === "archived", "the stop once the process ended");
+  await stopApp(s);
+});
+
+test("retention: a VM stopped for retentionDays is deleted (and only then); the next use gets a new, empty one", async () => {
+  const clock = createManualClock();
+  const s = await started({ retentionDays: 2 }, { clock });
+  const env = await s.env("1");
+  await env.writeFile("old.txt", "x", ctx);
+  await clock.advance(IDLE);
+  await until(() => stateOf(s, "1")[0] === "archived", "the idle stop");
+  const fresh = await s.env("2");
+  await fresh.writeFile("new.txt", "y", ctx);
+  await clock.advance(DAY + HOUR);
+  await Bun.sleep(100);
+  expect(stateOf(s, "1")).toEqual(["archived"]);
+  await clock.advance(DAY);
+  await until(() => stateOf(s, "1").length === 0, "the deletion");
+  expect(s.fake.count("DELETE", /^\/sandboxes\/[^/]+$/)).toBe(1);
+  expect(s.logs.some((log) => log.message === "execution-boat: deleted VMs unused for retentionDays" && log.fields?.vms === 1)).toBe(true);
+  // VM 2 was used more recently: stopped, kept.
+  expect(stateOf(s, "2")).toEqual(["archived"]);
+  expect(await env.exists("old.txt", ctx)).toEqual({ ok: true, value: false });
+  expect(stateOf(s, "1")).toEqual(["ready"]);
+  await stopApp(s);
+});
+
+test("a use that arrives while its VM is being deleted waits, then works in a new VM", async () => {
+  const clock = createManualClock();
+  const s = await started({ retentionDays: 1 }, { clock });
+  const env = await s.env("1");
+  await env.writeFile("old.txt", "x", ctx);
+  await clock.advance(IDLE);
+  await until(() => stateOf(s, "1")[0] === "archived", "the idle stop");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let deleting = false;
+  const original = s.fake.fetch;
+  s.fake.override = {
+    method: "DELETE",
+    path: /^\/sandboxes\/[^/]+$/,
+    answer: async () => {
+      deleting = true;
+      await held;
+      s.fake.override = undefined;
+      return original(`https://boat.dev/api/v1/sandboxes/${s.fake.of(workspace("1"))[0]?.id}`, { method: "DELETE", headers: { authorization: `Bearer ${KEY}`, "x-ascii-confirm-delete": s.fake.of(workspace("1"))[0]?.id as string } });
+    },
+  };
+  await clock.advance(DAY + HOUR);
+  await until(() => deleting, "the deletion to start");
+  const write = env.writeFile("new.txt", "after", ctx);
+  await Bun.sleep(50);
+  release();
+  expect((await write).ok).toBe(true);
+  expect(await text(env, "new.txt")).toBe("after");
+  expect(await env.exists("old.txt", ctx)).toEqual({ ok: true, value: false });
+  expect(s.fake.of(workspace("1")).length).toBe(1);
+  await stopApp(s);
+});
+
+test("a restarted gateway adopts the VMs it left running, and stops them once idle", async () => {
+  const clock = createManualClock();
+  const root = temporaryDir();
+  const first = await started({}, { clock, root });
+  await (await first.env("1")).writeFile("a.txt", "x", ctx);
+  await first.app.stop();
+  const second = await started({}, { clock, root, fake: first.fake });
+  await until(() => second.logs.some((log) => log.message === "execution-boat: retention sweep" && log.fields?.adopted === 1), "the adoption");
+  await clock.advance(IDLE);
+  await until(() => stateOf(second, "1")[0] === "archived", "the adopted VM's idle stop");
+  await stopApp(second);
+});
+
+// --- Bounds ---------------------------------------------------------------------------------------
+
+test("maxVms: a new VM stops the idlest; when all are in use, the use waits queueSeconds, then fails saying so", async () => {
+  const s = await started({ maxVms: 1, queueSeconds: 0.3 });
+  const one = await s.env("1");
+  const two = await s.env("2");
+  await one.writeFile("a.txt", "1", ctx);
+  await two.writeFile("b.txt", "2", ctx);
+  expect(stateOf(s, "1")).toEqual(["archived"]);
+  expect(stateOf(s, "2")).toEqual(["ready"]);
+  const controller = new AbortController();
+  const long = run(two, "sleep 5", {}, withAbortSignal(controller.signal, ctx));
+  await until(() => (s.fake.of(workspace("2"))[0]?.processes.size ?? 0) > 0, "the long command");
+  const began = Date.now();
+  const read = await one.readTextFile("a.txt", ctx);
+  expect(Date.now() - began).toBeGreaterThanOrEqual(250);
+  expect(read.ok ? "" : read.error.message).toMatch(/all 1 VMs \(maxVms\) are in use/);
+  const exec = await one.exec("true", undefined, ctx);
+  expect(exec.ok ? "" : exec.error.code).toBe("spawn_error");
+  controller.abort();
+  const stopped = (await long).result;
+  expect(stopped.ok ? "ok" : stopped.error.code).toBe("aborted");
+  expect(await text(one, "a.txt")).toBe("1");
+  await stopApp(s);
+});
+
+test("every boat call has a deadline: an API that never answers fails the call after callSeconds", async () => {
+  const s = await started({ callSeconds: 1 });
+  const env = await s.env("1");
+  await env.writeFile("a.txt", "x", ctx);
+  s.fake.hang = true;
+  const began = Date.now();
+  const read = await env.readTextFile("a.txt", ctx);
+  expect(Date.now() - began).toBeLessThan(8000);
+  expect(read.ok ? "" : read.error.message).toMatch(/no answer within/);
+  const exec = await env.exec("true", undefined, ctx);
+  expect(exec.ok ? "" : exec.error.code).toBe("shell_unavailable");
+  s.fake.hang = false;
+  await stopApp(s);
+}, 20_000);
+
+test("a boat outage: commands answer shell_unavailable, files unknown, each saying why; the next use tries again", async () => {
+  const s = await started();
+  const env = await s.env("1");
+  s.fake.down = true;
+  const exec = await env.exec("echo hi", undefined, ctx);
+  expect(exec.ok ? "" : `${exec.error.code}: ${exec.error.message}`).toMatch(/^shell_unavailable: .*boat API unreachable/);
+  const read = await env.readTextFile("a.txt", ctx);
+  expect(read.ok ? "" : `${read.error.code}: ${read.error.message}`).toMatch(/^unknown: .*boat API unreachable/);
+  s.fake.down = false;
+  expect((await run(env, "echo back")).stdout).toBe("back\n");
+  await stopApp(s);
+});
+
+test("a malformed answer is an error, never a guess", async () => {
+  const s = await started();
+  const env = await s.env("1");
+  s.fake.override = { method: "GET", path: /^\/sandboxes$/, answer: () => json(200, { ok: true, items: [] }) };
+  const read = await env.readTextFile("a.txt", ctx);
+  expect(read.ok ? "" : read.error.message).toMatch(/malformed|without `sandboxes`/);
+  s.fake.override = undefined;
+  await env.writeFile("a.txt", "x", ctx);
+  s.fake.override = { method: "GET", path: /\/commands\/[0-9]+$/, answer: () => json(200, { ok: true, running: "yes" }) };
+  const exec = await env.exec("echo hi", undefined, ctx);
+  expect(exec.ok ? "" : `${exec.error.code}: ${exec.error.message}`).toMatch(/^shell_unavailable: .*status without its state/);
+  s.fake.override = { method: "POST", path: /\/commands$/, answer: () => json(200, { ok: true, stdout: 5 }) };
+  const info = await env.fileInfo("a.txt", ctx);
+  expect(info.ok ? "" : info.error.message).toMatch(/without its exit code/);
+  s.fake.override = undefined;
+  await stopApp(s);
+});
+
 void createManualClock;
 export type { ManualClock };
