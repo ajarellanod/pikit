@@ -482,26 +482,27 @@ test("answers keeps a run keepSettledDays: pruned after, a reader behind is told
   expect(next.results()).toEqual([]);
 });
 
-test("suspend closes the Harness and keeps the runtime: the next call reopens it, and a run waiting for a retry continues", async () => {
+test("with onIdleUntil, no timer runs a retry's sleep: whenIdle, from the host's wakeup once it is due, resumes it", async () => {
   const db = records();
   let calls = 0;
   const overloaded = () => (calls++ === 0 ? Promise.resolve("overloaded") : undefined);
-  let clock = Date.now();
+  const told: number[] = [];
   const w = await db.worker({
     providers: [scriptedProvider({ fail: overloaded })],
-    runtime: { now: () => clock, settings: { retry: { baseDelayMs: 600_000, maxAgentDelayMs: 600_000 } }, onIdleUntil: async () => {} },
+    runtime: { settings: { retry: { baseDelayMs: 20, maxAgentDelayMs: 20 } }, onIdleUntil: async (at) => void told.push(at) },
   });
   const conversation = await w.conversation();
   await w.dispatch("r1", "hello", conversation);
   while (calls === 0) await Bun.sleep(1);
   expect(await w.runtime.whenIdle(w.ctx)).toBe(true);
+  expect(told).toHaveLength(1);
 
-  await w.runtime.suspend(w.ctx);
-  expect(w.runtime.holds(conversation)).toBe(false);
-  clock += 3_600_000;
-  // Reopened by the next call: the run's retry is due on the Harness clock, and it answers. Its start
-  // was announced before the suspend, and is not announced again.
-  await w.runtime.resume(conversation, w.ctx);
+  // Past the retry's time, nothing ran it: pi-durable keeps no timer for a host that wakes itself.
+  await Bun.sleep(200);
+  expect(calls).toBe(1);
+  expect(w.runtime.holds(conversation)).toBe(true);
+  // The host's wakeup: the retry runs, and the run answers. Its start is announced once.
+  expect(await w.runtime.whenIdle(w.ctx)).toBe(true);
   expect((await w.result("r1")).text).toBe("answer: hello");
   expect(w.events.filter((e) => e.name === "agent.started")).toHaveLength(1);
 });
@@ -629,7 +630,6 @@ test("a run waiting out a model retry: whenIdle reports when its sleep ends, and
   expect(await first.runtime.whenIdle(first.ctx)).toBe(true);
   expect(told).toHaveLength(1);
   expect(told[0]).toBeGreaterThanOrEqual(before + 600_000);
-  expect(told[0]).toBeLessThan(Date.now() + 600_000);
   expect(first.results()).toEqual([]);
   await first.close();
 

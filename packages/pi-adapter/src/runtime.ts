@@ -181,7 +181,8 @@ export interface DurableRuntimeOptions {
    * `whenIdle` when nothing is driven but a task sleeps until `at` (a model retry's backoff, a deferred
    * response's poll, a compaction's retry), so the host asks to be woken then; its next `whenIdle`
    * resumes what is due. With it, pi-durable keeps no timer for sleeping tasks (`HarnessOptions.onWake`),
-   * which would keep the host alive. A rejection is logged.
+   * which would keep the host alive: with nothing running, a Durable Object can be evicted with the
+   * Harness open, and the sleep stays in its storage. A rejection is logged.
    */
   onIdleUntil?(at: number, ctx: AppContext): Promise<void>;
   /**
@@ -205,13 +206,6 @@ export interface DurableRuntime extends AgentRuntime {
    * `ConversationRef.conversationId` of every message to it.
    */
   createConversation(ctx: AppContext): Promise<string>;
-  /**
-   * Close the Harness but keep the runtime: the next call opens it again (and resumes what it finds).
-   * For a host that is evicted between events (a Durable Object), once what is left only sleeps: it
-   * leaves nothing in memory to the object, and the wake-up the host asked for (`onIdleUntil`) reopens
-   * it. Waits for the steps and announcements under way first. Call it inside an event of the host.
-   */
-  suspend(ctx: AppContext): Promise<void>;
   /**
    * Bring back a conversation with requests pending (`submissions.pending`), as a host does at start:
    * it is reconfigured, its work resumed, and what pi-durable settled without the run being logged is
@@ -328,9 +322,9 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   let opening: Promise<Harness> | undefined;
   /** The storage under the open Harness (read directly: scans and entry commit sequences). */
   let storage: Storage | undefined;
-  /** A `suspend` closing the Harness, or a failed one closing: the next open waits for it (one Harness per storage). */
-  let suspending: Promise<void> | undefined;
-  /** The Harness `opening` gives, from when it opened until `suspend`, `close` or a failure drops it. */
+  /** A Harness a storage error failed, closing: the next open waits for it (one Harness per storage). */
+  let failing: Promise<void> | undefined;
+  /** The Harness `opening` gives, from when it opened until `close` or a failure drops it. */
   let current: Harness | undefined;
   /** Detaches the open Harness's commit observer. */
   let unsubscribe: (() => void) | undefined;
@@ -441,7 +435,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   const harnessOf = (ctx: AppContext): Promise<Harness> => {
     if (closed) return Promise.reject(new Error("agent.runtime is closed"));
     if (opening !== undefined) return opening;
-    const attempt: Promise<Harness> = (suspending ?? Promise.resolve())
+    const attempt: Promise<Harness> = (failing ?? Promise.resolve())
       .then(() => openHarness(ctx))
       .catch((error: unknown) => {
         // A Harness that failed while opening was dropped already, and another may be opening.
@@ -518,7 +512,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
   /**
    * A storage error closes pi-durable's Harness for good: every later call rejects with `SessionFailed`.
-   * When the open Harness begins closing and neither `suspend` nor `close` closes it, drop it at once:
+   * When the open Harness begins closing and `close` does not close it, drop it at once:
    * the next call opens another over the storage, which finds what the failure left as after a crash
    * (commits are atomic). That open waits until the failed one has closed (one Harness per storage).
    */
@@ -530,10 +524,10 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     forget();
     // `whenIdle` waiting for a commit: none comes from a failed Harness.
     wakeWaiters();
-    const before = suspending;
+    const before = failing;
     const done: Promise<void> = Promise.all([before, harness.closed]).then(
       ([, end]) => {
-        if (suspending === done) suspending = undefined;
+        if (failing === done) failing = undefined;
         if (end.kind !== "failed" || closed) return;
         logger.error("pi-durable's Harness failed on a storage error; the next call opens it again", {
           error: end.error instanceof Error ? end.error.message : String(end.error),
@@ -544,10 +538,10 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           .catch(logFailure("onFailure failed"));
       },
       () => {
-        if (suspending === done) suspending = undefined;
+        if (failing === done) failing = undefined;
       },
     );
-    suspending = done;
+    failing = done;
   };
 
   /** What opening does once the Harness is open: see `openHarness`. */
@@ -585,7 +579,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       if ((leadOf.get(submission.id) ?? submission.id) !== submission.id) continue;
       const requestId = submission.requestId;
       const key = keyOf(submission.conversationId, requestId);
-      // Announced by this runtime before a `suspend`: not announced again.
+      // Announced by this runtime before its Harness failed and was opened again: not announced again.
       if (runs.has(key)) continue;
       runs.set(key, { ctx: events, announced: emit(events, "agent.started", { conversation: ref, requestId, resumed: true }) });
     }
@@ -1291,7 +1285,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         if (options.onIdleUntil !== undefined && current === harness) harness.resume();
         const inspection = await harness.inspect(toChord(ctx)).catch(() => undefined);
         if (inspection === undefined) {
-          // Dropped meanwhile (a storage error, a suspend): look again, at what is open now.
+          // Dropped meanwhile (a storage error): look again, at what is open now.
           if (current !== harness) continue;
           return false;
         }
@@ -1312,36 +1306,13 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
     opened,
 
-    async suspend(ctx: AppContext): Promise<void> {
-      if (closed || opening === undefined) return;
-      await untilAborted(Promise.allSettled([...inflight]), ctx.abortSignal, closedSignal);
-      const open = opening;
-      if (closed || open === undefined || inflight.size > 0) return;
-      opening = undefined;
-      const stopping = (async () => {
-        const harness = await open.catch(() => undefined);
-        current = undefined;
-        storage = undefined;
-        forget();
-        // Tasks sleeping until a time stay pending in the storage; the next open continues them.
-        if (harness !== undefined) await harness.close(toChord(ctx));
-      })();
-      const done: Promise<void> = stopping
-        .catch(() => {})
-        .then(() => {
-          if (suspending === done) suspending = undefined;
-        });
-      suspending = done;
-      await stopping;
-    },
-
     async close(ctx: AppContext): Promise<void> {
       if (closed) return;
       closed = true;
       resolveClosed();
       for (const waiters of handled.values()) for (const wake of waiters) wake();
       handled.clear();
-      await suspending;
+      await failing;
       const open = opening;
       if (open !== undefined) {
         const harness = await open.catch(() => undefined);

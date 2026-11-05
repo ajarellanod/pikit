@@ -512,7 +512,7 @@ interface Driver {
   wake(time: number, ctx: AppContext): Promise<void>;
   /**
    * The runtime's `onIdleUntil`: nothing is driven, and a task sleeps until `time` (a model retry's
-   * backoff): asks for the handler then, and the handler suspends the runtime so the host can go meanwhile.
+   * backoff): asks for the handler then. pi-durable keeps no timer for it, so the host can go meanwhile.
    */
   later(time: number): Promise<void>;
   /**
@@ -539,8 +539,8 @@ interface Driver {
  *    pi-durable keeps no timer for them here), or its context is cancelled (the provider's slice
  *    deadline, or the App stopping);
  * 4. asks again at once if runs are still going; when what is left only sleeps until a time (a model
- *    retry's backoff), the runtime asked for a wakeup at that time (`later`), and the handler closes
- *    pi-durable (`suspend`, inside the event) so the host can be evicted until then.
+ *    retry's backoff), the runtime asked for a wakeup at that time (`later`): nothing in-process waits
+ *    for it, so the host can be evicted until then.
  * A request carries nothing: what to do is read from pi-durable each time, so
  * a handler that runs twice, or late, or after the object was evicted, does the right thing.
  */
@@ -553,8 +553,6 @@ function createDriver(
 ): Driver {
   /** The earliest time asked for and not yet taken by a run of the handler, in this App. */
   let requested: number | undefined;
-  /** Set by `later` during a run of the handler: what is left only waits for a time. */
-  let waiting = false;
   /** Cancels the handler's run in progress when the App stops. */
   const stopping = new AbortController();
   const logger = background.logger;
@@ -581,7 +579,6 @@ function createDriver(
   const handler = (runtime: DurableRuntime) => async (handlerCtx: AppContext): Promise<void> => {
     // This run took the request: whatever is asked from now on stands after it.
     requested = undefined;
-    waiting = false;
     const signal = handlerCtx.abortSignal === undefined ? stopping.signal : AbortSignal.any([handlerCtx.abortSignal, stopping.signal]);
     const ctx = handlerCtx.derive((inner) => withAbortSignal(signal, inner));
     // The agents' overrides before anything is opened: a reopened Harness rebuilds each agent with them.
@@ -602,18 +599,12 @@ function createDriver(
       // The slice ended (or the App is stopping) with runs going: the next run of the handler, in this
       // App or the next one, picks them up, from pi-durable if this one is gone.
       await wakeLater(background.clock.now());
-      return;
     }
-    // Nothing is driven, and what is left waits for a time: the wakeup at that time reopens pi-durable.
-    if (waiting) await runtime.suspend(ctx);
   };
 
   return {
     wake,
-    async later(time) {
-      waiting = true;
-      await wakeLater(time);
-    },
+    later: (time) => wakeLater(time),
     failed: () => wakeLater(background.clock.now() + backoff()),
     attach(runtime) {
       wakeups.handle(DRIVE, handler(runtime));

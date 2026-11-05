@@ -516,7 +516,7 @@ test("with wakeups, a storage error that closes pi-durable mid-run asks for a wa
   }
 }, 30_000);
 
-test("with wakeups, a model retry's backoff is a wakeup at its time, not a timer: the slice suspends pi-durable, and the run answers when it fires", async () => {
+test("with wakeups, a model retry's backoff is a wakeup at its time, not a timer: nothing runs the retry before the wakeup, and the run answers when it fires", async () => {
   let failed = false;
   const { agents, provider, storage } = testComponents({
     // The first model call fails with an error pi-durable retries after its backoff.
@@ -542,7 +542,7 @@ test("with wakeups, a model retry's backoff is a wakeup at its time, not a timer
   expect(seen.results).toEqual([]);
 
   await Bun.sleep(Math.max(0, due - Date.now()) + 50);
-  // Suspended: nothing ran the retry in the meantime; the wakeup reopens pi-durable and the run answers.
+  // No timer: nothing ran the retry in the meantime; the wakeup resumes it and the run answers.
   expect(seen.results).toEqual([]);
   await wakeups.run(app).done;
   expect(seen.results.map((r) => [r.requestId, r.kind, r.text])).toEqual([["r1", "completed", "answer: hello"]]);
