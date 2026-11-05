@@ -211,8 +211,32 @@ function concatTwo(a: Uint8Array, b: Uint8Array): Uint8Array {
   return bytes;
 }
 
-/** The entries of a gzip'd tar archive, or `ArchiveRefused` (bad gzip included). */
-export async function inspectArchive(gzipped: Uint8Array, maxUnpackedBytes: number): Promise<TarEntry[]> {
+/**
+ * The entries of a gzip'd tar archive, and how many of its bytes are the gzip member (`length`): a tar
+ * writing to a pipe may pad its compressed output with zeros to a whole record (bsdtar's 10240 bytes),
+ * which some gunzips refuse; the member is then found by trimming them (its own last bytes may be zeros
+ * too: ISIZE). `ArchiveRefused` for anything else (bad gzip included).
+ */
+export async function inspectArchive(gzipped: Uint8Array, maxUnpackedBytes: number): Promise<{ entries: TarEntry[]; length: number }> {
+  try {
+    return { entries: await inspect(gzipped, maxUnpackedBytes), length: gzipped.length };
+  } catch (error) {
+    if (!(error instanceof GzipFailed)) throw error;
+    if (gzipped.at(-1) !== 0) throw new ArchiveRefused(error.message);
+    let end = gzipped.length;
+    while (end > 0 && gzipped[end - 1] === 0) end--;
+    for (let length = end; length <= Math.min(gzipped.length - 1, end + 8); length++) {
+      try {
+        return { entries: await inspect(gzipped.subarray(0, length), maxUnpackedBytes), length };
+      } catch (again) {
+        if (!(again instanceof GzipFailed)) throw again;
+      }
+    }
+    throw new ArchiveRefused(error.message);
+  }
+}
+
+async function inspect(gzipped: Uint8Array, maxUnpackedBytes: number): Promise<TarEntry[]> {
   const inspector = new TarInspector(maxUnpackedBytes);
   const source = new Blob([gzipped as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream("gzip"));
   const reader = source.getReader();
@@ -225,7 +249,9 @@ export async function inspectArchive(gzipped: Uint8Array, maxUnpackedBytes: numb
   } catch (error) {
     await reader.cancel().catch(() => {});
     if (error instanceof ArchiveRefused) throw error;
-    throw new ArchiveRefused(`the archive is not gzip'd tar: ${error instanceof Error ? error.message : String(error)}`);
+    throw new GzipFailed(`the archive is not gzip'd tar: ${error instanceof Error ? error.message : String(error)}`);
   }
   return inspector.end();
 }
+
+class GzipFailed extends Error {}

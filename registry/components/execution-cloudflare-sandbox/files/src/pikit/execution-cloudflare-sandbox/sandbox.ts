@@ -356,13 +356,15 @@ export class Sandbox {
       return;
     }
     if (made.exitCode !== 0) throw new Error(`tar -c exited ${made.exitCode}: ${new TextDecoder().decode(made.stderr).slice(0, 500)}`);
+    let archive: Uint8Array;
     try {
-      await inspectArchive(made.stdout, maxUnpackedBytes);
+      // The gzip member alone, without a tar's padding (bsdtar pads what it writes to a pipe).
+      archive = made.stdout.subarray(0, (await inspectArchive(made.stdout, maxUnpackedBytes)).length);
     } catch (error) {
       if (error instanceof ArchiveRefused) throw new Error(`the archive made is not one a restore takes: ${error.message}`);
       throw error;
     }
-    const written = await writeSnapshot({ store: snapshots, prefix: await snapshotPrefix(chatKey(identity.sandbox), agent), agent, archive: made.stdout, createdAt: this.options.now(), maxBytes: maxBlobBytes });
+    const written = await writeSnapshot({ store: snapshots, prefix: await snapshotPrefix(chatKey(identity.sandbox), agent), agent, archive, createdAt: this.options.now(), maxBytes: maxBlobBytes });
     if ("skipped" in written) {
       logger.error(`execution-cloudflare-sandbox: the workspace is not saved: ${written.skipped}; the container is kept until the platform's inactivity timeout`, { sandbox: identity.sandbox, agent });
       return;

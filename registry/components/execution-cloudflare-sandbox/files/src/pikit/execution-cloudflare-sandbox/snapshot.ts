@@ -141,9 +141,10 @@ export async function readSnapshot(store: BlobStore, prefix: string, agent: stri
   if (archive.length !== manifest.size) throw new SnapshotRefused(`${manifest.object} is ${archive.length} bytes, the manifest says ${manifest.size}`);
   if ((await sha256Hex(archive)) !== manifest.sha256) throw new SnapshotRefused(`${manifest.object}'s SHA-256 is not the manifest's`);
   try {
-    await inspectArchive(archive, maxUnpackedBytes);
+    // The gzip member alone: a tar may have padded it with zeros, which some gunzips refuse.
+    const { length } = await inspectArchive(archive, maxUnpackedBytes);
+    return { manifest, archive: archive.subarray(0, length) };
   } catch (error) {
     throw new SnapshotRefused(`${manifest.object}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return { manifest, archive };
 }
