@@ -110,6 +110,21 @@ export {
   checkBlobNamespace,
   checkBlobPut,
 } from "./blob.ts";
+export type { SnapshotManifest } from "./workspace-snapshot.ts";
+export {
+  deleteSnapshotsBefore,
+  deleteSupersededSnapshots,
+  parseSnapshotArchiveKey,
+  parseSnapshotManifest,
+  SNAPSHOT_CONTENT_TYPE,
+  SNAPSHOT_MANIFEST,
+  SNAPSHOT_NAMESPACE,
+  SNAPSHOT_VERSION,
+  snapshotArchiveKey,
+  snapshotId,
+  snapshotManifestJson,
+  snapshotManifestKey,
+} from "./workspace-snapshot.ts";
 export type { Feed, FeedItem, FeedPage } from "./feed.ts";
 export type {
   ActorCallErrorCode,

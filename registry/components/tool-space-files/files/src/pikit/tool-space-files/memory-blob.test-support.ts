@@ -23,6 +23,8 @@ export function createMemoryBlobStorage(options: { maxBytes?: number; data?: Mem
   };
   return {
     maxBytes,
+    // Streams are not tool-space-files' (whole values only): taken whole, up to maxBytes.
+    maxStreamBytes: maxBytes,
     data,
     namespace(name: string): BlobStore {
       return {
@@ -39,6 +41,21 @@ export function createMemoryBlobStorage(options: { maxBytes?: number; data?: Mem
         async delete(key) {
           checkBlobKey(key);
           values(name).delete(key);
+        },
+        async putStream(key, body, put) {
+          let bytes = new Uint8Array(0);
+          for await (const chunk of body) {
+            const joined = new Uint8Array(bytes.byteLength + chunk.byteLength);
+            joined.set(bytes);
+            joined.set(chunk, bytes.byteLength);
+            bytes = joined;
+          }
+          await this.put(key, bytes, put?.contentType === undefined ? {} : { contentType: put.contentType });
+          return { size: bytes.byteLength, sha256: [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("") };
+        },
+        async getStream(key) {
+          const value = await this.get(key);
+          return value === undefined ? undefined : { body: new Blob([new Uint8Array(value.bytes)]).stream(), size: value.bytes.byteLength, ...(value.contentType !== undefined && { contentType: value.contentType }) };
         },
         async list(prefix, list): Promise<BlobPage> {
           const limit = Math.min(Math.max(list?.limit ?? PAGE_MAX, 1), PAGE_MAX);

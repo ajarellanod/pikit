@@ -126,6 +126,8 @@ export const SERVER_ONLY_EXPORTS: readonly string[] = [
   "@pikit/pi-adapter/node",
   // The test fixtures on SQLite files.
   "@pikit/pi-adapter/testing",
+  // Workspace snapshots of a server's directories (`node:fs`, `node:zlib`); the format itself is neutral, in `@pikit/contracts`.
+  "@pikit/contracts/snapshots",
   // pi-ai's Bedrock: its API loads the AWS SDK and its Node HTTP handler through a specifier no
   // bundler follows (`bedrock-converse-stream.lazy`), so a Worker cannot load it.
   "@pikit/pi-adapter/providers/amazon-bedrock",
