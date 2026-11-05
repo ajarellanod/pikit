@@ -471,6 +471,24 @@ test("a restarted gateway adopts the VMs it left running (every page of the list
   await stopApp(second);
 });
 
+test("a stop while the idle check works returns once that work ended: no loop sleeps on with no one to wake it", async () => {
+  const clock = createManualClock();
+  const s = await started({}, { clock });
+  await (await s.env("1")).writeFile("a.txt", "x", ctx);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  s.fake.override = { method: "POST", path: /\/stop$/, answer: async () => (await held, failure(500, "internal", "later")) };
+  await clock.advance(IDLE);
+  await until(() => s.fake.count("POST", /\/stop$/) > 0, "the idle check's stop");
+  const stopping = s.app.stop();
+  // The stop reached the component (its flag set) while the tick still works; then the tick ends.
+  await Bun.sleep(100);
+  release();
+  expect(await Promise.race([stopping.then(() => "stopped"), Bun.sleep(5000).then(() => "still stopping")])).toBe("stopped");
+  s.fake.override = undefined;
+  await s.fake.settle();
+});
+
 // --- Bounds ---------------------------------------------------------------------------------------
 
 test("maxVms: a new VM stops the idlest; when all are in use, the use waits queueSeconds, then fails saying so", async () => {

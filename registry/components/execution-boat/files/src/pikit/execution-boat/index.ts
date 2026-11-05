@@ -231,6 +231,8 @@ export function createExecutionBoat(seams: BoatSeams = {}) {
               await work().catch((error: unknown) => log.warn(`execution-boat: ${what} failed`, { reason: error instanceof Error ? error.message : String(error) }));
               next = pikit.clock.now() + everyMs;
             }
+            // A stop during the work woke no one: it must not wait for this sleep.
+            if (stopped) break;
             let wake!: () => void;
             const woken = new Promise<void>((resolve) => {
               wake = resolve;
