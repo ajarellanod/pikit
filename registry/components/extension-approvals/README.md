@@ -23,8 +23,9 @@ export const config = {
 defineAgent({ name: "ops", model: "…", tools: ["bash"], extensions: ["approvals"] });
 ```
 
-Name it **last** among extensions whose hooks block or rewrite tool calls (a later hook that blocks a
-call it claimed leaves that approval claimed and unexecuted).
+Name it **last** among extensions whose hooks block or rewrite tool calls (a later hook that rewrites a
+call it claimed runs a call other than the one approved; one that blocks it settles the approval
+`failed`, not run).
 
 ## What happens
 1. The model calls `bash`: refused, `"bash" needs a person's approval of this exact call. Call
@@ -52,8 +53,11 @@ conversation the person talks in. Its question reaches that chat with the delega
 (the task's report, or the `delegate` call's result, carries it); admin-approvals tells that
 conversation an operator's decision; and any conversation of that tree (the chat, a new delegation
 from it) may claim it, none of another tree.
-5. `afterTool` settles it: `executed`, or `failed` with the error's first line. A call interrupted
-   after its intent (an `unsafe` tool) is not run again and its approval stays `claimed`.
+5. `afterTool` settles it: `executed`, or `failed` with the error's first line. pi-durable runs it on
+   the error results it writes itself too, told apart by their diagnostic code: a call that certainly
+   did not run (`blocked`, `invalid_arguments`, `tool_unavailable`, `abandoned`) is settled `failed`,
+   `not run (<code>): ...`; one that may have partly run (`interrupted` after its intent, an `unsafe`
+   tool not run again; `aborted`; `restart_limit`) leaves its approval `claimed`.
 
 ## Tests
 `extension-approvals.test.ts` (copied with it): what setup declares, tools without approvers refused,

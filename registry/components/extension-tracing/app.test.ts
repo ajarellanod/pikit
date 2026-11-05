@@ -317,8 +317,9 @@ test("a call another extension's hook blocks is an error span, whatever the exte
     await posts(collector, index + 1);
     const tools = byName(collector.batches()[index] ?? [], "execute_tool bash");
     expect(tools).toHaveLength(1);
-    expect(tools[0]?.status).toEqual({ code: 2, message: "the call did not run" });
-    expect(tools[0]?.attributes["error.type"]).toBe("not_run");
+    // pi-durable's own error result, which afterTool sees too: its code, not the tool's error.
+    expect(tools[0]?.status).toEqual({ code: 2, message: "blocked" });
+    expect(tools[0]?.attributes["error.type"]).toBe("blocked");
   }
   expect(s.ran).toEqual([]);
 });

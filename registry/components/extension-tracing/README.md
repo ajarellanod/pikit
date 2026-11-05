@@ -63,7 +63,7 @@ Spans follow OpenTelemetry's GenAI conventions:
 |---|---|---|
 | `invoke_agent <agent>` (the root) | `agent.started` to `agent.settled` / `agent.failed` | `gen_ai.operation.name`, `gen_ai.agent.name`, `pikit.conversation.key`, `pikit.conversation.id`, `pikit.request.id`, `pikit.request.ids`, `pikit.run.kind`, `pikit.run.resumed`, the run's totals `gen_ai.usage.input_tokens`, `output_tokens`, `cache_read.input_tokens`, `cache_creation.input_tokens`, `gen_ai.usage.cost`; `error.type` (the error's code) and an error status for a failed run |
 | `chat <model>` (client), a child of the root | `beforeRequest` to `afterResponse`, one per request attempt (a retry is another span) | `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, the request's tokens and cost; `error.type` and an error status when it ended in `error` or `aborted` |
-| `execute_tool <name>`, a child of the root (a nested call: of the call that made it) | `beforeTool` to `afterTool` | `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`; `error.type: tool_error` for an error result; `error.type: not_run` for a call that never ran (blocked by a hook, refused arguments, unavailable), ended at its round's end |
+| `execute_tool <name>`, a child of the root (a nested call: of the call that made it) | `beforeTool` to `afterTool` | `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`; `error.type: tool_error` for the tool's error result; for an error result pi-durable wrote itself (it runs `afterTool` on those too), its diagnostic code: `blocked` (by a hook), `invalid_arguments`, `tool_unavailable`, `interrupted`, `aborted`, `abandoned`, `restart_limit`; `error.type: not_run` for a call whose `afterTool` never came (past pi-durable's restart limit), ended at its round's end |
 
 Every span also carries `session.id` and `langfuse.session.id` (the conversation key: a chat is a
 Langfuse session), `user.id` and `langfuse.user.id` (the sender of the run's first message,
@@ -109,7 +109,7 @@ recognizes: a password typed in prose is not one of them.
   rule; an eviction during that POST loses the batch. A run that fails before its first model request
   is not traced (no hook saw it). A call interrupted by an eviction and not run again has no span.
 - **Extension order does not matter**: a call another extension's `beforeTool` blocks still gets its
-  `not_run` span, from the model's response and the round's end.
+  `blocked` span, started at the model's response when this `beforeTool` did not see it.
 
 ## Tests
 
