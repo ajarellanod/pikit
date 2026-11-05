@@ -20,6 +20,12 @@ the decisions and limits.
 for a server or a Durable Object, in a sandbox of a host; their protocol is execution-remote's own
 (`protocol.ts`, copied in both). The sandboxes themselves are a `workspace` provider's on the host
 (execution-gondolin's micro-VMs). `execution-docker` and hosted sandboxes: not built.
+`execution-boat` built (`registry/components/execution-boat`): a boat.dev VM (persistent Ubuntu in
+boat's cloud) per chat and agent behind a sandbox host, stopped when idle, resumed on use, deleted
+after `retentionDays`, exported to and restored from the shared snapshot format with `snapshots`. No
+secret reaches a VM (`noEnv`, a profile with `secrets` refused), and boat cannot restrict egress, so
+`allowedHosts` is refused. Tested over a fake boat API (pi-durable's suite with a real shell); its
+live test waits for a key.
 
 **Needed by:** self-improvement requires `execution-cloudflare-sandbox` (SPEC §6): that one is
 required work, specified there, not here. On the server, SPEC §6's rule that the workspace's network
@@ -43,6 +49,10 @@ remote host, with their own user, filesystem and network.
     and agent, or per chat key and agent on a server, each request naming its agent
     (`Pikit-Agent`) so the host's profiles apply; a command started, then read from a cursor, never one long
     request (alarm slices, evictions, subrequest limits). Credentials stay on the host (C7).
+  - `execution-boat` (server, built): a boat.dev VM per chat and agent, behind `execution-serve`
+    (a gateway host execution-remote names per agent); sizes and a saved-snapshot template per
+    agent's profile; idle VMs stopped (disk kept, billing stopped), deleted after `retentionDays`,
+    their workspaces in the shared snapshot format with `snapshots`. Open egress, no secrets.
   - Hosted sandboxes (Modal, Daytona, E2B…) as `execution-*` components of their own.
 - A `workspace` provider over a sandbox gives each agent its own ([workspace snapshots](workspace-snapshots.md)).
 - An idle conversation holds no sandbox: started on demand, stopped when idle.
