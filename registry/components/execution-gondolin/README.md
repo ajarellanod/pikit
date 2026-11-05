@@ -21,6 +21,8 @@ host, no network but the hosts you allow, and secrets the guest never sees.
 - **Machine:** QEMU (`qemu-system-aarch64` on arm64, `qemu-system-x86_64` elsewhere) and `qemu-img`
   on `PATH`; on Linux, `/dev/kvm`. `pikit doctor` checks them (its `doctor` hook). The guest image
   (Alpine, about 200 MB) is downloaded on the first boot into `~/.cache/gondolin` (`$XDG_CACHE_HOME`).
+  An `image: { packages }` ("The image") is built on this machine: e2fsprogs (`mke2fs`), `lz4` and
+  `cpio` too (`brew install e2fsprogs lz4`; `apt install e2fsprogs lz4 cpio`).
 - **Instead of:** `execution-local`, and `workspace-local` (both provide what this provides: install one
   set). `tool-read`, `tool-write`, `tool-edit` and `tool-bash` work unchanged. Two providers of
   `execution` do not compose, so the old ones go with `--force` once this one is in:
@@ -97,9 +99,10 @@ mount (`RealFSProvider`) over the host directory, so the files outlive the VM, a
 chat is the host's alone
 ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)).
 `<root>/.execution-gondolin-tmp` is emptied at start (no VM and no tool refers to an earlier
-process's), and `<root>/.execution-gondolin-image/` holds the images with `packages` (below), whose
-checkpoints of an older Gondolin image are removed when a new one is made: the only things this
-component deletes, unless `retentionDays` is set ("Retention" below). Start refuses a `root` that is the working directory, one of its ancestors, or `/`.
+process's), and `<root>/.execution-gondolin-image/` holds the images built here and the checkpoints
+with `packages` ("The image"), of which those no machine of the configuration uses are removed when
+a new one is made: the only things this component deletes, unless `retentionDays` is set
+("Retention" below). Start refuses a `root` that is the working directory, one of its ancestors, or `/`.
 
 Each directory from `root` down to a sandbox's two (`chats`, `<chat>`, `<agent>`, or `agents`,
 `<agent>`, and their counterparts under `.execution-gondolin-tmp`) must be a directory of its own,
@@ -134,19 +137,21 @@ rebuilt at its next `resolve`, its files untouched.
 - **A VM per sandbox, only while it is used.** It boots at the first command (about a second once the
   image is cached), serves the next ones, and is closed after `idleSeconds` with no command running.
   What a command wrote outside `/workspace` and `/tmp/pikit` (`apk add`, `/root`) goes with it.
-- **The image.** Gondolin's (Alpine with bash, curl, wget, python3 and node), or, with `packages`, a
-  checkpoint of it with those Alpine packages added: made at the first boot that needs it (a VM whose
-  only reachable host is `dl-cdn.alpinelinux.org` runs `apk add`, a few seconds), kept in
-  `<root>/.execution-gondolin-image/` by the image's build id and the packages, and every VM starts
-  from it (copy-on-write: nothing a VM writes reaches it). Each machine (the base, an agent's profile)
-  with its own packages has its own checkpoint; making one removes the files of another Gondolin
-  build and every partial one of another process, never another machine's checkpoint. A partial one
+- **The image.** The machine's ("The image" below: Gondolin's, one you built, or one built here from
+  a list of Alpine packages), or, with `packages`, a checkpoint of it with those Alpine packages
+  added: made at the first boot that needs it (a VM whose only reachable host is
+  `dl-cdn.alpinelinux.org` runs `apk add`, a few seconds), kept in
+  `<root>/.execution-gondolin-image/` by the image's build id, the packages and `rootfsSize`, and
+  every VM starts from it (copy-on-write: nothing a VM writes reaches it). Each machine (the base, an
+  agent's profile) with its own packages has its own checkpoint; making one removes the checkpoints
+  of a build no machine of the configuration boots (an older Gondolin image, an image you replaced)
+  and every partial one of another process, never another machine's checkpoint. A partial one
   is removed even while a live process writes it (two servers sharing a `root`): that build then
   fails, and is made again at its next command. The VM that makes an image is not the pool's: it does
   not count against `maxVms` (one per distinct set of packages, once). `git` is added whenever
   `proposals` is installed. If `apk add` fails (no route to the mirror), the command answers
-  `shell_unavailable` saying why, and the next one tries again; the image's root disk has about 80 MB
-  free once git is in.
+  `shell_unavailable` saying why, and the next one tries again. Gondolin's image leaves about 80 MB
+  free on its root disk once git is in: `rootfsSize` gives more.
 - **Bounded.** At most `maxVms` VMs run at once, every agent's together (an image build's VM, above,
   is not counted). A new one closes the VM idle
   the longest; when all are running commands, the command waits up to `queueSeconds`, then fails with
@@ -165,6 +170,135 @@ rebuilt at its next `resolve`, its files untouched.
 - `watch` is `not_supported`, as in execution-do: the agent's own tools and commands change these
   files, and pikit reloads nothing from them.
 - `stop()` closes every VM; a command still running then fails.
+
+## The image
+
+Each machine (the base, or an agent's profile, field by field) boots the image its `image` names,
+with its `packages` over it, on a root disk of at least `rootfsSize`:
+
+| `image` | What boots | Made by |
+|---|---|---|
+| absent (the default) | Gondolin's (`alpine-base:latest`, or `GONDOLIN_DEFAULT_IMAGE`): Alpine 3.23 with bash, curl, python3, uv, node and npm | Gondolin: downloaded at the first boot |
+| a string, `"designer:1"` | an image you built with Gondolin, by its selector: a `name:tag` of its local store (`gondolin build --config designer.json --tag designer:1`), a build id, or an asset directory (relative to the server's working directory) | you: any build config Gondolin takes (an OCI image as the base, `postBuild` commands, its own `rootfs.sizeMb`) |
+| `{ packages: [...] }` | Gondolin's default build with those Alpine packages added to its rootfs | this component, on the host, at the first start that needs it |
+
+- **Built once, by its content.** An `image: { packages }` is built by Gondolin's builder
+  (`buildAssets`) in the server's process, without a VM: the packages come from
+  `dl-cdn.alpinelinux.org`, Gondolin's guest helpers from its release, both cached in
+  `~/.cache/gondolin/`. It is kept in `<root>/.execution-gondolin-image/build-<digest>/`, the digest of
+  Gondolin's version and the whole build config (Gondolin's default for this architecture, the
+  packages sorted, each once), written to `build-<digest>.<pid>.partial/` and renamed when complete.
+  Every later start finds it and builds nothing; two machines with the same packages, in any order,
+  share one. A changed list is another image, built at the next start; once it is built, the images
+  no machine uses any more, and every partial build of another process, are removed. Reproducible as
+  a config, not bit for bit: the same Gondolin and packages build the same image up to the Alpine
+  branch's updates, under another build id.
+- **Checked at start.** Every machine's image is found, or built, before the app starts. A selector
+  that names no image, an image built for another architecture, a build that fails (a misspelled
+  package: Alpine's own message), or an image without a build id under `packages` refuses the start
+  with one error naming the machines that use it: `execution-gondolin: the image of agent "designer"
+  ("designer:1") cannot be used: ...`. A start that builds waits for it, logged at `info` before and
+  after (with the time). A selector is resolved at start: a retagged `designer:1` boots from the next
+  start on.
+- **`packages` over it** stay a checkpoint ("What a sandbox is"), now of the machine's image: for a
+  few small packages. Put the big ones in `image: { packages }`: built on the host, no mirror at the
+  first command, no checkpoint VM.
+- **`rootfsSize`** (`"4G"`; M or G) is Gondolin's `rootfs.size`: each VM's copy-on-write root disk is
+  made that large and the guest's filesystem grown at boot (`resize2fs`: Gondolin's images and those
+  built here have it; an image of yours without it fails to boot, saying so). Sparse: the host keeps
+  only what a VM writes, gone with the VM. The VM that makes a `packages` checkpoint gets it too, so
+  packages larger than the image's free space fit (it is part of the checkpoint's name). Without it, a
+  built image's disk is its content plus a fifth and 64 MB (Gondolin's sizing): little room for
+  renders outside `/workspace`.
+- **Gondolin's limits.** Alpine only for `{ packages }` (Gondolin builds Alpine rootfs; an OCI base
+  or `postBuild` commands are `gondolin build`'s, so a selector's). An image of the host's
+  architecture only (QEMU would emulate another: refused). The files of a built image belong to the
+  user that built it (as in Gondolin's own image); commands run as root.
+
+### A designer: Chromium, ffmpeg, ImageMagick
+
+```ts
+"execution-gondolin": {
+  agents: {
+    designer: {
+      image: { packages: ["chromium", "ffmpeg", "imagemagick", "font-noto"] }, // node is Gondolin's
+      rootfsSize: "4G", // room outside /workspace (Chromium's profiles, ffmpeg's temporary files)
+      memory: "2G",     // two headless Chromiums at once; "4G" and cpus: 4 for four
+      cpus: 2,
+    },
+  },
+}
+```
+
+Its network stays closed: Chromium renders local files (its own attempts to reach Google are refused
+by Gondolin, and harmless). The agent writes `banner.html`, a page that draws frame `#n` from its URL:
+
+```html
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  html, body { margin: 0; width: 1200px; height: 628px; overflow: hidden; }
+  body { font-family: "Noto Sans", sans-serif; background: linear-gradient(135deg, #0f172a, #1e3a8a); color: white; }
+  h1 { position: absolute; top: 220px; font-size: 96px; margin: 0; white-space: nowrap; }
+  p { position: absolute; top: 360px; left: 80px; font-size: 40px; margin: 0; }
+</style></head><body>
+<h1 id="title">Launch day</h1><p id="tag">pikit, on small machines</p>
+<script>
+  // The frame comes in the URL (#0 to #23): every frame is rendered from its number alone.
+  const t = Number(location.hash.slice(1) || 0) / 23;
+  document.getElementById("title").style.left = `${-700 + t * 780}px`;
+  document.getElementById("tag").style.opacity = String(Math.max(0, t * 2 - 1));
+</script></body></html>
+```
+
+and runs `JOBS=2 sh render.sh` in its `/workspace`: 24 PNG frames, then an MP4 and a GIF.
+
+```sh
+#!/bin/sh
+# banner.html -> 24 PNG frames (headless Chromium) -> banner.mp4 and banner.gif (ffmpeg).
+set -e
+mkdir -p frames
+seq 0 23 | xargs -P "${JOBS:-2}" -I{} chromium-browser --headless --no-sandbox --disable-gpu \
+  --disable-dev-shm-usage --disable-background-networking --disable-component-update --no-first-run \
+  --user-data-dir=/tmp/chromium-{} --hide-scrollbars --window-size=1200,628 \
+  --screenshot=frames/{}.png "file://$PWD/banner.html#{}" 2>/dev/null
+ffmpeg -loglevel error -y -framerate 12 -i frames/%d.png -c:v libx264 -pix_fmt yuv420p banner.mp4
+ffmpeg -loglevel error -y -framerate 12 -i frames/%d.png \
+  -vf "scale=600:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" banner.gif
+```
+
+`--no-sandbox` because commands run as root (the VM is the sandbox); a `--user-data-dir` each, or
+parallel Chromiums share one profile and fail. ImageMagick (`magick`) is there for stills
+(`magick frames/23.png -resize 600x banner.jpg`).
+
+**Measured** (2026-11-05, Apple M3, macOS 27 with HVF, QEMU 11.1.2, Gondolin 0.13.0, through this
+component unless said):
+
+| | |
+|---|---|
+| Build, first on the machine (Alpine's minirootfs, every package and Gondolin's helpers downloaded) | 42 s |
+| Build, Gondolin's cache warm (another list, or another `root`) | 7.6 to 8.7 s |
+| Start with the image built (found, nothing built) | 5 ms |
+| The image | 857 MB on disk (`rootfs.ext4` 1.07 GB); Gondolin's own: 324 MB |
+| First boot (the first command) | 0.6 to 0.7 s |
+| The render above, 2 CPUs and 2G, `JOBS=2`, in `/workspace` | 9.5 s (7.7 s in `/root`: `/workspace` is a VFS mount) |
+| The same in Gondolin directly, 4 CPUs and 4G, `JOBS=4`, in `/root` | 4.8 s |
+| Memory in use after a render | 194 MB of 2G (the peak while the Chromiums run was not measured) |
+
+**On Linux with KVM** the same build runs natively (no container: `{ packages }` has no `postBuild`)
+and boots with KVM in about the same time; not measured here. Without KVM (most cloud VMs without
+nested virtualization, Docker Desktop) QEMU emulates (TCG): boots take tens of seconds and Chromium
+is many times slower, too slow for renders. In Docker, the image needs `e2fsprogs lz4 cpio` besides
+QEMU ("Docker"), and `XDG_CACHE_HOME` in the state volume keeps Gondolin's build cache.
+
+**Behind execution-serve** (a sandbox host): the same profile goes in the host's
+`"execution-gondolin"` config (execution-serve's README, "A sandbox host"); the clients change
+nothing: execution-remote names each request's agent (`Pikit-Agent: designer`), so the designer's
+sandboxes boot the image and every other agent's the base. The host builds the image at its first
+start (it needs the builder's tools and the two hosts above then; never afterwards) and refuses to
+start without it. Budget the host's memory as `maxVms` times the largest `memory`: a 16 GB host with
+`maxVms: 4` takes four designers at 2G with room for itself. The render's files stay in the sandbox's
+`/workspace` on the host; the agent's file tools reach them through execution-remote (within
+execution-serve's limits: a read of 4 MiB at most).
 
 ## Retention
 
@@ -207,7 +341,8 @@ only each other's markers (at most an hour late).
 
 Each agent may get its own machine: `agents` maps an agent's name (`ConversationRef.agent`, in the
 agent grammar `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 100 characters; any other key is refused at
-start) to a profile of `packages`, `allowedHosts`, `secrets`, `memory`, `cpus` and `workspace`. The 100-character
+start) to a profile of `packages`, `allowedHosts`, `secrets`, `memory`, `cpus`, `workspace`, `image`
+and `rootfsSize`. The 100-character
 limit is this component's own: `defineAgent` in `@pikit/contracts` has none, so an agent with a
 longer name cannot have a profile (it gets the base, and past 128 characters `resolve` refuses it,
 above). A secret's name is a variable name, never
@@ -278,13 +413,16 @@ the rewrite at its next boot.
   memory: "1G",              // default: each VM's memory (QEMU syntax: "512M", "2G")
   cpus: 2,                   // default: each VM's CPUs
   packages: [],              // Alpine packages added to the image, once (git comes with `proposals`)
+  // image: "designer:1",    // absent by default (Gondolin's): a Gondolin selector you built, or
+  //                         //   { packages: ["chromium"] }, built here at start, once ("The image")
+  // rootfsSize: "4G",       // absent by default (the image's): each VM's root disk at least this
   workspace: "chat",         // default: a sandbox per chat and agent; "agent": one per agent, every chat
   agents: {},                // default: a machine per agent, each field replacing the base's
   // retentionDays: 30,      // absent by default (kept forever): delete a chat's sandboxes unused this many days
 }
 ```
 
-`allowedHosts`, `secrets`, `memory`, `cpus`, `packages` and `workspace` are the base machine. A team where the
+`allowedHosts`, `secrets`, `memory`, `cpus`, `packages`, `image`, `rootfsSize` and `workspace` are the base machine. A team where the
 developer has `gh` and a GitHub token, the analyst Python and Google's APIs, and no other agent either:
 
 ```ts
@@ -345,7 +483,15 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 - **Secret hosts are reachable** without repeating them in `allowedHosts`: a secret whose host is
   blocked would be useless.
 - **One image per build and packages**: two machines with different packages each keep their own
-  checkpoint; only a newer Gondolin image makes the older ones stale.
+  checkpoint; only an image no machine boots any more (a newer Gondolin image, one you replaced)
+  makes its checkpoints stale.
+- **An image per machine, two ways** (2026-11-05): a selector, for whatever `gondolin build` can make
+  (an OCI base, `postBuild`), and `{ packages }`, the common case in a few lines, built by Gondolin's
+  own builder from its own default config, so the image is Gondolin's plus the packages, and keyed by
+  that config and Gondolin's version: never rebuilt for a restart, always rebuilt for a change. Built
+  and checked at start, where the operator is looking, rather than at a first command in a chat.
+  `packages` stays the checkpoint it was, over either. Not a field per Gondolin option (`env`, `oci`,
+  `postBuild`): those are a selector's.
 - **Gondolin's import.** `registry validate` refuses `@earendil-works/*` outside the adapter, since
   only the adapter imports Pi. Gondolin is Earendil Works' but not Pi (no Pi inside), so the CLI's
   `isPiImport` (`packages/cli/src/registry/imports.ts`) names it as not Pi; the component declares it
@@ -361,8 +507,12 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   not work.
 - **The image with `packages` is made over the network**: its first boot needs
   `dl-cdn.alpinelinux.org` (that VM reaches nothing else). A machine without it boots no VM while
-  `packages` (or `proposals`) asks for one: set `packages: []` and leave `proposals` out, or use a
-  custom image of Gondolin's (`GONDOLIN_DEFAULT_IMAGE`, `gondolin build`), not configured here.
+  `packages` (or `proposals`) asks for one: set `packages: []` and leave `proposals` out, or put the
+  packages in an `image` built where the network is (`gondolin build`, a selector).
+- **An image built at start holds the start**: 42 s for the designer's on a cold machine, seconds
+  once Gondolin's cache is warm; a start that cannot reach the mirror or Gondolin's release fails
+  (once built, nothing is fetched again). Built images take disk under `root` (the designer's:
+  857 MB); `gondolin image rm` is for the selectors' store, not these.
 - **The sync after the file tools' changes** covers the guest's next command, not one already running:
   a command running while the `write` tool changes a file may see the old one.
 - **Proposals over `serve` are bounded**: a request (a push's pack) at most 64 MB, and Gondolin keeps
@@ -409,6 +559,18 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   secret; bad profile keys, global-only fields and secrets named `__proto__`, `constructor` or
   `prototype` refused; the warning for a profile no agent has, only where agents are defined, and no
   cycle with an `agent.directory` provider that uses a tool on `execution.shell`; images of two machines kept side by side (`imageFile`, `staleImages`);
+- images: a machine's `image` and `rootfsSize` in its VMs' spec, field by field (a profile's built
+  image, the base's selector under another profile's `packages`, `default` on the base), every
+  machine's image in each spec (what a checkpoint keeps); the build config (Gondolin's default plus
+  the packages, sorted); two machines with two images side by side, a changed one rebuilt and the
+  unused one removed, another machine's image and checkpoints kept, another process's partial
+  build removed (`staleBuilds`); a built image found again by the next start and shared by two
+  machines (never built twice); a missing selector, a failing build (nothing half-built kept), an
+  image with no build id under `packages`, each refusing the start naming its machines; the fields'
+  shapes; an image of another architecture refused (`archProblem`); checkpoints of every machine's
+  build kept, and the disk size in their names. Each was checked against a mutation (the cache hit
+  removed, `staleImages` and `staleBuilds` keeping too little, a profile's `image` or `rootfsSize`
+  ignored, the build-id check, the partial's removal dropped): each makes a case fail;
 - retention: at start, a chat unused for `retentionDays` loses every agent's sandbox (counts and
   bytes logged, no chat), a fresh one, a shared agent's, `default` and one never noted (its count
   starting) stay, across a restart; without it nothing is noted or deleted, however old; a use
@@ -426,7 +588,12 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 whole `execution` conformance suite with a real shell (pi-durable's cases too: argv, streams,
 timeouts, symbolic links), a chat's shell seeing none of another's files nor the host's, the
 network closed (403), a secret's placeholder in the guest, a timeout killing what the command started,
-and an idle VM closed while its files stay for the next one, and for a reset of the chat.
+and an idle VM closed while its files stay for the next one, and for a reset of the chat. And, where
+`mke2fs`, `lz4` and `cpio` are on `PATH` too (skipped, saying so, elsewhere), an agent's
+`image: { packages: ["ffmpeg"] }` built at start: its VM runs `ffmpeg`, has the 2G root disk asked
+for and `jq` from `packages` over the image (a checkpoint of it), the base agent has no ffmpeg, and
+a second start on the same `root` builds nothing (7 s with Gondolin's cache warm; dropping
+`rootfs.size` or the image's path from Gondolin's options fails it).
 
 `proposals.test.ts` (a repository test, not copied: it composes proposals-local) runs over real VMs
 too: `createWorkspaceGitConformance`, the steward's git flow against proposals-local's repository
