@@ -12,7 +12,8 @@ import { createAssets, type DashboardFiles } from "../registry/components/admin-
 import { capitalizeFirst } from "../registry/dashboard/files/src/lib/format.ts";
 import { assistantName } from "../registry/dashboard/files/src/lib/names.ts";
 import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/lib/sources.ts";
-import { INITIAL, type LiveState, reduce } from "../registry/dashboard/files/src/lib/transcript.ts";
+import type { JsonOp } from "../registry/dashboard/files/src/lib/json-ops.ts";
+import { failureText, INITIAL, type LiveEvent, type LiveState, reduce, type RunFailure } from "../registry/dashboard/files/src/lib/transcript.ts";
 import type { ApiPendingPiece, ApiReceipt } from "../registry/dashboard/files/src/lib/admin-api.ts";
 import { groupsOf, placeOf, providersOf, summaryOf, usersOf, wiringOf } from "../registry/dashboard/files/src/lib/composition.ts";
 import { EMPTY_TALLY, needsAttention, problemsOf, RECENT_MS, STUCK_AFTER_MS, tallyReceipts } from "../registry/dashboard/files/src/lib/delivery.ts";
@@ -219,29 +220,58 @@ test('the "/" menu lists only the commands the App registered; titles are the AP
   expect(chats).toContain("conversation.title");
 });
 
-test("an answer that ended between two snapshots (a reconnect) stays as last seen; one that ended with its event is its entry", () => {
+test("the live state is the stream's value with its ops applied: the answer as written, the tools not done, why a run gave no answer; entries kept by id; whole values, entries and hints read again", () => {
   const partial = (text: string) => ({ role: "assistant" as const, content: [{ type: "text" as const, text }], timestamp: 7 });
-  const snapshot = (fields: Record<string, unknown>) => ({ type: "event" as const, event: { type: "snapshot", ...fields } });
-  const fold = (events: Parameters<typeof reduce>[1][]): LiveState => events.reduce(reduce, INITIAL);
+  const event = (value: LiveEvent) => ({ type: "event" as const, event: value });
+  const live = (...ops: JsonOp[]) => event({ type: "live", ops });
+  const fold = (actions: Parameters<typeof reduce>[1][], from: LiveState = INITIAL): LiveState => actions.reduce(reduce, from);
 
-  // Reconnected: the next snapshot no longer has the answer, and the transcript is not read again yet.
-  const polled = fold([snapshot({ run: {}, generation: { message: partial("Hel") } }), snapshot({})]);
-  expect(polled.busy).toBe(false);
-  expect(polled.partial).toBeUndefined();
-  expect(polled.ended).toEqual([partial("Hel")]);
-  // The same answer, still written: not ended.
-  expect(fold([snapshot({ run: {}, generation: { message: partial("Hel") } }), snapshot({ run: {}, generation: { message: partial("Hello") } })]).ended).toEqual([]);
-
-  // Streamed: its end brings the entry, as the transcript will give it.
-  const streamed = fold([
-    snapshot({ run: {} }),
-    { type: "event", event: { type: "message_start", message: partial("") } },
-    { type: "event", event: { type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: "Hello" }] } },
-    { type: "event", event: { type: "message_end", entry: { id: 12, kind: "message", model: [partial("Hello")] } } },
+  // Whole first, then ops: the answer's new text appended, the same object while nothing changes it.
+  const writing = fold([
+    live(["r", { busy: true, requests: ["r1"], tools: [] }]),
+    live(["s", ["partial"], partial("Hel")]),
+    live(["a", ["partial", "content", 0, "text"], "lo"]),
   ]);
-  expect(streamed.partial).toBeUndefined();
-  expect(streamed.ended).toEqual([]);
-  expect(streamed.entries).toEqual([{ id: "12", kind: "message", messages: [partial("Hello")] }]);
+  expect([writing.busy, writing.partial, writing.changes]).toEqual([true, partial("Hello"), 1]);
+  const toolsAdded = reduce(writing, live(["p", ["tools"], 0, 0, [{ callId: "t1", name: "bash", status: "running", output: "a" }, { callId: "t2", name: "read", status: "done" }]]));
+  expect(toolsAdded.partial).toBe(writing.partial as never);
+  // A tool done is left out (its result is in the entries), one running has its output so far.
+  expect(toolsAdded.tools).toEqual([{ callId: "t1", name: "bash", output: "a" }]);
+  expect(reduce(toolsAdded, live(["a", ["tools", 0, "output"], "b"], ["t", ["tools", 0, "output"], 1])).tools).toEqual([{ callId: "t1", name: "bash", output: "b" }]);
+
+  // Its entry comes before the change that ends it: the thread has it all along. Each entry once.
+  const entry = { id: "e12", kind: "message", messages: [partial("Hello")] };
+  const ended = fold([event({ type: "entries", entries: [entry] }), event({ type: "entries", entries: [entry] }), live(["s", ["busy"], false], ["d", ["partial"]], ["d", ["requests"]])], writing);
+  expect([ended.busy, ended.partial, ended.entries, ended.changes]).toEqual([false, undefined, [entry], 3]);
+  expect(fold([event({ type: "usage" }), event({ type: "transcript" })], ended).changes).toBe(5);
+
+  // A run that ended without an answer says why until one starts; connecting again gets the value whole, read again.
+  const failed = reduce(ended, live(["s", ["failure"], { reason: "model_error", detail: "529 overloaded" }]));
+  expect(failed.failure).toEqual({ reason: "model_error", detail: "529 overloaded" });
+  expect(failureText(failed.failure as RunFailure)).toBe("The model failed: 529 overloaded");
+  expect(failureText({ reason: "aborted" })).toBe("The run was stopped.");
+  expect(failureText({ reason: "something_new" })).toBe("It ended: something_new.");
+  const again = fold([{ type: "disconnected" }, { type: "connected" }, live(["r", { busy: true, tools: [] }])], failed);
+  expect([again.busy, again.failure, again.entries, again.changes]).toEqual([true, undefined, [entry], failed.changes + 1]);
+
+  // Ops that do not apply to what is held: nothing is applied until the value comes whole again.
+  const broken = reduce(again, live(["a", ["partial", "content", 0, "text"], "x"]));
+  expect([broken.value, broken.busy]).toEqual([undefined, true]);
+  expect(reduce(broken, live(["s", ["busy"], false])).busy).toBe(true);
+  expect(reduce(broken, live(["r", { busy: false, tools: [] }])).busy).toBe(false);
+  expect(reduce(again, { type: "reset" })).toBe(INITIAL);
+});
+
+test("the dashboard's json-ops.ts is @pikit/contracts' applyOps and JsonOp, as they are", () => {
+  const source = readFileSync(join(REPO, "packages/contracts/src/json-ops.ts"), "utf8");
+  const copy = read("src/lib/json-ops.ts");
+  const applying = source.slice(source.indexOf("/** Keys and indexes from the root"), source.indexOf("/**\n * The ops that turn"));
+  expect(applying.length).toBeGreaterThan(1000);
+  expect(copy).toContain(applying.trimEnd());
+  const json = readFileSync(join(REPO, "packages/contracts/src/json.ts"), "utf8");
+  const jsonValue = json.split("\n").find((line) => line.startsWith("export type JsonValue"));
+  expect(copy).toContain(`${jsonValue}\n`);
+  expect(copy).not.toMatch(/^import /m);
 });
 
 test("Settings' App section groups the components by what they are for, sums the App up in a line, and shows only the wiring worth a look", () => {

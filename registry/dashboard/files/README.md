@@ -116,9 +116,9 @@ key, the pointer, a scroll): polling and live streams pause otherwise, and resum
 (`src/lib/activity.ts`). On Cloudflare that is the budget: every Worker request and Durable Object
 request counts in the day's (Workers Free: 100,000 Worker requests and 100,000 Durable Object requests
 a day), shared with the bot. There the list is read every 30 s (1 Worker request and up to 21 object
-requests), and an open conversation's live stream asks its object for a snapshot every 2 s (about 30
-object requests a minute, one Worker request each 80 s). An hour of watching one conversation costs
-about 2,000 requests; a tab left open costs none after 5 minutes.
+requests), and an open conversation's live stream is one stream from its object (one request, its
+state whole and then its changes as they happen), which keeps the object in memory while it is open.
+A tab left open costs none after 5 minutes.
 
 ## Run it
 
