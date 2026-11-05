@@ -93,7 +93,8 @@ export interface ObservedLive {
   busy: boolean;
   /**
    * The request ids (`RunRequest.requestId`) of the run's inputs that have one, in order: whose
-   * messages the run answers. Absent while idle; empty for a run no request started (a continue).
+   * messages the run answers. Absent while idle; empty for a run no request started (a continue),
+   * and once the run answered while it finishes its own work (runtime-pi: `afterRun` tasks).
    */
   requests?: string[];
   /** The answer being written, in the runtime's JSON (pi-ai's `AssistantMessage` for runtime-pi). */
@@ -124,7 +125,7 @@ export interface AgentObserver {
   /**
    * The conversation live: a `live` event with its whole `ObservedLive` first, then its changes, until
    * `ctx` is cancelled or the runtime closes. Rejects when the runtime has no such conversation.
-   * Stopping early (`break` in a `for await`) releases it.
+   * Stopping early (`break` in a `for await`) releases it. It throws when the runtime fails under it.
    */
   watch(conversationId: string, ctx: AppContext): AsyncIterable<ObservedEvent>;
   /** `undefined` when the runtime has no such conversation. */
