@@ -133,7 +133,8 @@ export class Runtime {
     const onAbort = () => wake?.();
     ctx.abortSignal?.addEventListener("abort", onAbort);
     try {
-      yield { type: "snapshot", conversationId: id };
+      // What it shows now, whole: idle, unless the conversation runs.
+      yield { type: "live", ops: [["r", { busy: this.conversations.get(id)?.busy === true, tools: [] }]] };
       for (;;) {
         if (ctx.abortSignal?.aborted === true) return;
         const event = queue.shift();

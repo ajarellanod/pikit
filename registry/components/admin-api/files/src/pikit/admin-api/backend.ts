@@ -136,7 +136,7 @@ export interface AdminBackend {
   /** Newest first. Throws `not_found`, `invalid_cursor`. */
   transcript(id: string, page: PageRequest, ctx: AppContext): Promise<ApiPage<ApiTranscriptEntry>>;
   /**
-   * Its live events, a `snapshot` first, until `ctx` is cancelled or they end. Throws `not_found`
+   * Its live events, its whole live state first (a `live` event, `[["r", value]]`), until `ctx` is cancelled or they end. Throws `not_found`
    * before the first one, so a route answers `404` rather than an empty stream.
    */
   live(id: string, ctx: AppContext): Promise<AsyncIterable<ApiEvent>>;

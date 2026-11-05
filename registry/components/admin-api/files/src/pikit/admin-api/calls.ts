@@ -22,7 +22,7 @@
  * | `admin-api.hide` | `{ key, conversationId, how? }` (`archived`, `deleted`; absent: back in the list) | `{}` (the index object's; `not_found` when it has no such conversation) |
  *
  * And one stream: `admin-api.live` `{ conversationId }`, the conversation's live events (`ApiEvent`s,
- * a `snapshot` first), refused `not_found` before the first; it ends when the Worker closes it.
+ * its whole live state first), refused `not_found` before the first; it ends when the Worker closes it.
  *
  * And one message (`send`, `actor.inbox.handle`): `admin-api.seen` `{ entries: [{ key,
  * conversationId, agent, at, title? }] }`, to the index: activity, and the title the conversation is
