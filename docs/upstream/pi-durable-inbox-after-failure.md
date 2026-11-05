@@ -1,7 +1,11 @@
 # Proposal for pi-durable: place queued inputs when a run fails
 
-Status: draft for upstream (`@earendil-works/pi-durable`, against 1.3.0). From pikit, which runs Pi
-agents behind chat channels.
+Status: **shipped** in pi-durable 1.4.0 as `settings.afterFailedRun` (`keep` | `continue` |
+`withdraw`), not sent by pikit: with `continue` the commit that ends a run failed by the model
+(`model_error`, `no_model`; since 1.5.0 also `interrupted`, `restart_limit`, `nothing_to_answer`,
+`turn_limit`) places what is queued. A faulted or orphaned run keeps its inbox (Pi's spec, section 6).
+pikit's runtime sets `continue` and its workaround below is removed. Kept as the record of what was
+asked. From pikit, which runs Pi agents behind chat channels.
 
 ## Problem
 

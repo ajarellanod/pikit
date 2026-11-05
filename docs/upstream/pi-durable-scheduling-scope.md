@@ -1,6 +1,6 @@
 # Proposal for pi-durable: resume one conversation, not every one
 
-Status: draft for upstream (`@earendil-works/pi-durable`, against 1.3.0). From pikit, which keeps
+Status: draft for upstream (`@earendil-works/pi-durable`, written against 1.3.0; still so in 1.5.0). From pikit, which keeps
 many conversations in one storage on a server, and one per Durable Object on Cloudflare.
 
 ## Problem
