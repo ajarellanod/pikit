@@ -297,7 +297,7 @@ class TarExtractor {
   private headerFilled = 0;
   private ended = false;
   /** The body being read: its bytes left, its padding, and where it goes. */
-  private body: { left: number; pad: number; file?: Awaited<ReturnType<typeof open>>; text?: Uint8Array[]; done: (text: string) => void } | undefined;
+  private body: { left: number; pad: number; file?: Awaited<ReturnType<typeof open>>; text?: Uint8Array[]; done: (bytes: Uint8Array) => void } | undefined;
   private paxPath: string | undefined;
   private paxLink: string | undefined;
   private paxSize: number | undefined;
@@ -369,7 +369,7 @@ class TarExtractor {
       bytes.set(part, offset);
       offset += part.byteLength;
     }
-    body.done(decoder.decode(bytes));
+    body.done(bytes);
   }
 
   private checkPlace(segments: string[], what: string): string {
@@ -400,7 +400,7 @@ class TarExtractor {
     const linkname = this.paxLink ?? this.longLink ?? readText(block, 157, 100);
     const pad = (BLOCK - (size % BLOCK)) % BLOCK;
     // Records for the next entry.
-    const text = (done: (value: string) => void) => {
+    const text = (done: (value: Uint8Array) => void) => {
       if (size > 1024 * 1024) throw new SnapshotArchiveError("the archive has a header record of more than 1 MiB");
       this.body = { left: size, pad, text: [], done };
     };
@@ -414,8 +414,8 @@ class TarExtractor {
       });
     }
     if (type === "g") return text(() => {});
-    if (type === "L") return text((value) => void (this.longName = value.replace(/\0+$/, "")));
-    if (type === "K") return text((value) => void (this.longLink = value.replace(/\0+$/, "")));
+    if (type === "L") return text((value) => void (this.longName = decoder.decode(value).replace(/\0+$/, "")));
+    if (type === "K") return text((value) => void (this.longLink = decoder.decode(value).replace(/\0+$/, "")));
     this.paxPath = this.paxLink = this.paxSize = this.longName = this.longLink = undefined;
     if (!Number.isSafeInteger(size) || size < 0) throw new SnapshotArchiveError("the archive has an entry with no valid size");
 
@@ -454,6 +454,12 @@ class TarExtractor {
     throw new SnapshotArchiveError(`the archive has an entry of type ${JSON.stringify(type)} (only files, directories and links inside are taken)`);
   }
 
+  /** Closes the file being written, after a failure. */
+  async abort(): Promise<void> {
+    await this.body?.file?.close().catch(() => {});
+    this.body = undefined;
+  }
+
   /** Once the bytes ended: the links (none had anything under it), then the directories' modes and times, deepest first. */
   async end(): Promise<void> {
     if (this.body !== undefined || this.headerFilled !== 0) throw new SnapshotArchiveError("the archive ends in the middle of an entry");
@@ -473,9 +479,8 @@ class TarExtractor {
   }
 }
 
-function parsePax(text: string): [string, string][] {
+function parsePax(bytes: Uint8Array): [string, string][] {
   const out: [string, string][] = [];
-  const bytes = encoder.encode(text);
   for (let at = 0; at < bytes.byteLength; ) {
     const space = bytes.indexOf(0x20, at);
     const length = Number(decoder.decode(bytes.subarray(at, space)));
@@ -491,10 +496,15 @@ function parsePax(text: string): [string, string][] {
 /** Extracts the gzip'd tar `compressed` into `dest` (an empty directory), refusing any entry that could leave it. */
 export async function extractSnapshotArchive(compressed: AsyncIterable<Uint8Array>, dest: string): Promise<void> {
   const extractor = new TarExtractor(dest);
-  await pipeline(Readable.from(compressed), createGunzip(), async (tar: AsyncIterable<Uint8Array>) => {
-    for await (const chunk of tar) await extractor.write(chunk);
-  });
-  await extractor.end();
+  try {
+    await pipeline(Readable.from(compressed), createGunzip(), async (tar: AsyncIterable<Uint8Array>) => {
+      for await (const chunk of tar) await extractor.write(chunk);
+    });
+    await extractor.end();
+  } catch (error) {
+    await extractor.abort();
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
