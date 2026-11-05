@@ -54,14 +54,15 @@ export default defineApp({
 
 `.env`: `BOAT_API_KEY`, `PIKIT_SANDBOX_TOKEN`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Deploy it
 behind TLS like any host. A client sends some agents here and others to a Gondolin host with
-execution-remote's `hosts` (its README has the exact shape; another change adds it):
+execution-remote's `hosts` (its README has the whole shape):
 
 ```ts
 "execution-remote": {
   hosts: {
-    gondolin: { endpoint: "https://sandbox.example.com" },   // the default host
-    boat: { endpoint: "https://boat-gateway.example.com" },  // this one: its own PIKIT_SANDBOX_TOKEN
+    gondolin: { url: "https://sandbox.example.com" },                                    // PIKIT_SANDBOX_TOKEN
+    boat: { url: "https://boat-gateway.example.com", tokenSecret: "PIKIT_SANDBOX_BOAT_TOKEN" }, // this gateway's own token
   },
+  defaultHost: "gondolin",
   agents: { designer: "boat" },
 }
 ```

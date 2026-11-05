@@ -82,12 +82,13 @@ so it needs Docker where wrangler runs.
 names an execution-serve host:
 
 ```ts
-"execution-remote": { endpoint: "https://my-sandboxes.<subdomain>.workers.dev" } // the same PIKIT_SANDBOX_TOKEN
+"execution-remote": { hosts: { cloud: { url: "https://my-sandboxes.<subdomain>.workers.dev" } } } // the same PIKIT_SANDBOX_TOKEN
 ```
 
-With several hosts in execution-remote (its `hosts`, when that lands), this one is one entry, `hosts:
-{ cloud: { endpoint: "https://my-sandboxes.<subdomain>.workers.dev" } }`, and the agents routed there
-work in Cloudflare containers. Routing happens on the client; this host takes any agent.
+With several hosts this one is one entry of execution-remote's `hosts`, with a token of its own
+(`cloud: { url: "https://my-sandboxes.<subdomain>.workers.dev", tokenSecret: "PIKIT_SANDBOX_CLOUD_TOKEN" }`,
+the same value as this host's `PIKIT_SANDBOX_TOKEN`), `defaultHost` naming another, and the agents
+`agents` routes here work in Cloudflare containers. Routing happens on the client; this host takes any agent.
 
 ## What it does
 
