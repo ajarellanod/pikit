@@ -1,7 +1,7 @@
 /**
  * provider-failover's logic, apart from the component (index.ts) so that its tests need no App:
  * which failures move a request to the next model (`classify`), how long a model that failed is
- * skipped (`createCooldowns`), the model a chain is (`chainModel`), and the provider that answers
+ * skipped (`createCooldowns`: this App's copy, which `shared.ts` shares), the model a chain is (`chainModel`), and the provider that answers
  * a chain's request through its models in turn (`failoverProvider`).
  *
  * A request goes to the chain's models in order, those not cooling down first. A model that fails
