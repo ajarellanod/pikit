@@ -7,13 +7,19 @@
  *
  * The suite reaches the storage through the capability, as a component would. It writes a value of
  * the provider's `maxBytes` (and one byte more): configure a fixture's provider with the smallest it
- * allows, `BLOB_MIN_MAX_BYTES`, so a case holds no more than about 50 MiB.
+ * allows, `BLOB_MIN_MAX_BYTES`, so a case holds no more than about 50 MiB. The stream cases put a
+ * stream of `maxBytes` + 5 MiB and one of `maxStreamBytes` + 1: give the fixture's provider a small
+ * `maxStreamBytes` too (`BLOB_CONFORMANCE_STREAM_BYTES`, 40 MiB).
  */
 
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
 import {
   BLOB_LIST_LIMIT,
+  BlobChecksumError,
+  blobStreamChunks,
+  checkBlobPutStream,
+  createBlobHash,
   BLOB_MAX_KEY,
   BLOB_MIN_MAX_BYTES,
   type BlobEntry,
@@ -61,6 +67,11 @@ export const BLOB_CASES = {
   defaultLimit: "a page holds at most 1000 keys, whatever the limit asked; a limit that is not an integer from 1 is refused",
   size: "a value of maxBytes is kept; one byte more is refused and stores nothing",
   restart: "values, content types and listings survive a new app over the same storage",
+  streamBytes: "a stream reads back as it was put, from chunks of any shape (none, empty, views, a reused buffer); put resolves with its size and SHA-256",
+  streamLarge: "a stream larger than maxBytes is kept and listed with its size; get refuses it whole, getStream gives it, also after a restart",
+  streamInterrupted: "a stream that fails partway stores nothing: the old value stays whole, nothing partial is read or listed",
+  streamChecksum: "a stream whose SHA-256 is not the one given is refused and stores nothing; with the right one it is kept",
+  streamSize: "a stream of maxStreamBytes + 1 is refused and stores nothing",
 } as const;
 
 const rejection = (promise: Promise<unknown>): Promise<unknown> =>
@@ -119,6 +130,74 @@ function pattern(n: number, seed = 0): Uint8Array {
 }
 
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
+
+/** The `maxStreamBytes` to configure a fixture's provider with: the suite streams one byte more. */
+export const BLOB_CONFORMANCE_STREAM_BYTES = 40 * 1024 * 1024;
+
+const MiB = 1024 * 1024;
+
+/** The byte of `pattern(…, seed)` at `i`, for streams too large to hold. */
+const patternByte = (i: number, seed: number): number => (i * 31 + seed * 7 + (i >> 8)) & 0xff;
+
+/**
+ * `total` bytes of the pattern `seed`, in chunks of `chunk` (from a buffer reused for every chunk:
+ * a provider that keeps a chunk without copying it stores garbage); throws `fail` once `failAfter`
+ * bytes were given.
+ */
+async function* patternStream(total: number, seed: number, chunk = MiB + 17, fail?: { after: number; error: Error }): AsyncGenerator<Uint8Array> {
+  const buffer = new Uint8Array(chunk);
+  for (let at = 0; at < total; ) {
+    if (fail !== undefined && at >= fail.after) throw fail.error;
+    const n = Math.min(chunk, total - at);
+    for (let i = 0; i < n; i++) buffer[i] = patternByte(at + i, seed);
+    yield buffer.subarray(0, n);
+    buffer.fill(0xee);
+    at += n;
+  }
+  if (fail !== undefined) throw fail.error;
+}
+
+/** The hex SHA-256 of `pattern(total, seed)`, made a chunk at a time. */
+async function patternSha256(total: number, seed: number): Promise<string> {
+  const hash = createBlobHash();
+  for await (const chunk of patternStream(total, seed)) hash.update(chunk);
+  return hash.digest();
+}
+
+/** What `body` gives: its size and hex SHA-256, read without holding it. */
+async function readStream(body: ReadableStream<Uint8Array>): Promise<{ size: number; sha256: string }> {
+  const hash = createBlobHash();
+  let size = 0;
+  const reader = body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    check(value instanceof Uint8Array, "a stream's chunks as Uint8Arrays");
+    size += value.byteLength;
+    hash.update(value);
+  }
+  return { size, sha256: hash.digest() };
+}
+
+const sha256Of = (bytes: Uint8Array): string => {
+  const hash = createBlobHash();
+  hash.update(bytes);
+  return hash.digest();
+};
+
+/** `store.getStream(key)` gives `bytes` (by SHA-256) with `contentType`. */
+async function expectStream(store: BlobStore, key: string, expected: { size: number; sha256: string }, contentType: string | undefined, what: string): Promise<void> {
+  const value = await store.getStream(key);
+  check(value !== undefined, `${what}: a stream at ${JSON.stringify(key)}`);
+  if (value === undefined) return;
+  expect(value.size, expected.size, `${what}: the size getStream states at ${JSON.stringify(key)}`);
+  expect(value.contentType, contentType, `${what}: the content type getStream gives at ${JSON.stringify(key)}`);
+  expect(await readStream(value.body), expected, `${what}: the bytes getStream gives at ${JSON.stringify(key)} (size and SHA-256)`);
+}
+
+async function* chunksOf(...chunks: Uint8Array[]): AsyncGenerator<Uint8Array> {
+  for (const chunk of chunks) yield chunk;
+}
 
 export function createBlobConformance(factory: () => BlobFixture | Promise<BlobFixture>): readonly ConformanceCase[] {
   const blobCase = (name: string, run: (s: Subject) => Promise<void>): ConformanceCase => ({
@@ -369,6 +448,111 @@ export function createBlobConformance(factory: () => BlobFixture | Promise<BlobF
       expect((await listAll(store, "")).entries, [{ key: "kept/one", size: 3 }, { key: "kept/two", size: 300 }], "the listing after a restart");
       await expectValue(again.namespace("other"), "kept/one", text("other's"), undefined, "another namespace after a restart");
     }),
+
+    blobCase(BLOB_CASES.streamBytes, async (s) => {
+      const store = (await s.open()).namespace("conformance");
+      const empty = await store.putStream("s/empty", chunksOf());
+      expect(empty, { size: 0, sha256: sha256Of(new Uint8Array(0)) }, "an empty stream's size and SHA-256");
+      await expectValue(store, "s/empty", new Uint8Array(0), undefined, "an empty stream, which is a value");
+      const bytes = pattern(3000, 4);
+      const backing = new Uint8Array(4000);
+      backing.set(bytes, 500);
+      const view = backing.subarray(500, 3500);
+      // One byte, an empty chunk, views into a larger buffer.
+      const stored = await store.putStream("s/k", chunksOf(view.subarray(0, 1), new Uint8Array(0), view.subarray(1, 700), view.subarray(700)), { contentType: "application/gzip", sha256: sha256Of(bytes) });
+      expect(stored, { size: 3000, sha256: sha256Of(bytes) }, "the size and SHA-256 putStream resolves with");
+      await expectValue(store, "s/k", bytes, "application/gzip", "a stream read back whole");
+      await expectStream(store, "s/k", stored, "application/gzip", "a stream read back as a stream");
+      // A reused buffer: each chunk is copied as it is read.
+      const reused = await store.putStream("s/reused", patternStream(200_000, 9, 4096));
+      expect(reused, { size: 200_000, sha256: await patternSha256(200_000, 9) }, "a stream from a reused buffer");
+      await expectValue(store, "s/reused", pattern(200_000, 9), undefined, "a stream from a reused buffer, read back");
+      // A ReadableStream is a body too.
+      await store.putStream("s/readable", new Blob([bytes]).stream());
+      await expectValue(store, "s/readable", bytes, undefined, "a ReadableStream's bytes");
+      // A value put whole is read as a stream, and replaced by one.
+      await store.put("s/whole", bytes, { contentType: "text/plain" });
+      await expectStream(store, "s/whole", { size: 3000, sha256: sha256Of(bytes) }, "text/plain", "a value put whole, as a stream");
+      await store.putStream("s/whole", chunksOf(text("streamed")));
+      await expectValue(store, "s/whole", text("streamed"), undefined, "a stream with no content type over a value with one");
+      expect(await store.getStream("s/missing"), undefined, "getStream of a key never put");
+      expect((await listAll(store, "s/")).entries, [
+        { key: "s/empty", size: 0 },
+        { key: "s/k", size: 3000 },
+        { key: "s/readable", size: 3000 },
+        { key: "s/reused", size: 200_000 },
+        { key: "s/whole", size: 8 },
+      ], "every stream listed with its size");
+      // Refused before anything is read: a key, a body, a content type, a SHA-256; a chunk that is no Uint8Array as it comes.
+      await refused(store.putStream("../k", chunksOf(text("x"))), "blob_key", "a stream at a refused key");
+      await refused(store.getStream("a//b"), "blob_key", "getStream at a refused key");
+      await refused(store.putStream("r", text("x") as unknown as AsyncIterable<Uint8Array>), TypeError, "a body that is bytes, not a stream");
+      await refused(store.putStream("r", chunksOf(text("x")), { contentType: " text/plain" }), TypeError, "a stream's content type with a space");
+      await refused(store.putStream("r", chunksOf(text("x")), { sha256: "ABC" }), TypeError, "a sha256 that is not 64 lowercase hex");
+      await refused(store.putStream("r", chunksOf(text("x"), "y" as unknown as Uint8Array)), TypeError, "a chunk that is a string");
+      expect(await store.get("r"), undefined, "no value after the refused streams");
+    }),
+
+    blobCase(BLOB_CASES.streamLarge, async (s) => {
+      const storage = await s.open();
+      const size = storage.maxBytes + 5 * MiB + 3;
+      check(Number.isInteger(storage.maxStreamBytes) && storage.maxStreamBytes >= size, `maxStreamBytes of at least ${size} for this case (configure BLOB_CONFORMANCE_STREAM_BYTES), not ${storage.maxStreamBytes}`);
+      const store = storage.namespace("conformance");
+      const sha256 = await patternSha256(size, 6);
+      const stored = await store.putStream("large", patternStream(size, 6), { contentType: "application/gzip" });
+      expect(stored, { size, sha256 }, `the size and SHA-256 of a stream of ${size} bytes`);
+      expect((await listAll(store, "")).entries, [{ key: "large", size }], "the large value listed with its size");
+      await refused(store.get("large"), "blob_too_large", "a whole get of a value larger than maxBytes");
+      await expectStream(store, "large", { size, sha256 }, "application/gzip", "a value larger than maxBytes, as a stream");
+      await s.stopAll();
+      await expectStream((await s.open()).namespace("conformance"), "large", { size, sha256 }, "application/gzip", "a large value after a restart");
+    }),
+
+    blobCase(BLOB_CASES.streamInterrupted, async (s) => {
+      const storage = await s.open();
+      const store = storage.namespace("conformance");
+      await store.put("k", text("old"), { contentType: "text/plain" });
+      // Past maxBytes before it fails: a provider that uploads in parts has sent several.
+      const failing = () => patternStream(storage.maxBytes + 2 * MiB, 7, MiB, { after: storage.maxBytes + MiB, error: new Error("the body failed") });
+      check((await rejection(store.putStream("k", failing()))) !== undefined, "a stream that failed partway to reject the put");
+      await expectValue(store, "k", text("old"), "text/plain", "the old value after a stream over it failed");
+      await expectStream(store, "k", { size: 3, sha256: sha256Of(text("old")) }, "text/plain", "the old value as a stream after a stream over it failed");
+      check((await rejection(store.putStream("fresh", failing()))) !== undefined, "a stream that failed partway to a new key to reject the put");
+      expect(await store.get("fresh"), undefined, "no value where a stream failed");
+      expect(await store.getStream("fresh"), undefined, "no stream where a stream failed");
+      expect((await listAll(store, "")).entries, [{ key: "k", size: 3 }], "nothing partial listed");
+      // Nothing left over gets in the way of the next put.
+      await store.putStream("fresh", chunksOf(text("whole")));
+      await expectValue(store, "fresh", text("whole"), undefined, "a stream put where one failed");
+    }),
+
+    blobCase(BLOB_CASES.streamChecksum, async (s) => {
+      const storage = await s.open();
+      const store = storage.namespace("conformance");
+      const size = storage.maxBytes + 1;
+      const sha256 = await patternSha256(size, 8);
+      const wrong = await patternSha256(size, 9);
+      await store.put("c", text("old"));
+      const error = await rejection(store.putStream("c", patternStream(size, 8), { sha256: wrong }));
+      check(error instanceof BlobChecksumError && error.expected === wrong && error.actual === sha256, `a BlobChecksumError with the SHA-256 given and the bytes', not ${describe(error)}`);
+      await expectValue(store, "c", text("old"), undefined, "the old value after a stream with another SHA-256");
+      await refused(store.putStream("fresh", patternStream(1000, 8), { sha256: wrong }), "blob_checksum", "a small stream with another SHA-256");
+      expect((await listAll(store, "")).entries, [{ key: "c", size: 3 }], "nothing stored by the refused streams");
+      expect(await store.putStream("c", patternStream(size, 8), { sha256 }), { size, sha256 }, "a stream with its own SHA-256");
+      await expectStream(store, "c", { size, sha256 }, undefined, "the stream with its own SHA-256");
+    }),
+
+    blobCase(BLOB_CASES.streamSize, async (s) => {
+      const storage = await s.open();
+      check(Number.isInteger(storage.maxStreamBytes) && storage.maxStreamBytes >= storage.maxBytes, `maxStreamBytes to be an integer of at least maxBytes (${storage.maxBytes}), not ${storage.maxStreamBytes}`);
+      const store = storage.namespace("conformance");
+      await store.put("big", text("old"));
+      const error = await rejection(store.putStream("big", patternStream(storage.maxStreamBytes + 1, 3, 4 * MiB)));
+      check(error instanceof BlobTooLargeError && error.maxBytes === storage.maxStreamBytes && error.size > storage.maxStreamBytes, `a BlobTooLargeError naming maxStreamBytes, not ${describe(error)}`);
+      await expectValue(store, "big", text("old"), undefined, "the old value after a stream too large");
+      await refused(store.putStream("other", patternStream(storage.maxStreamBytes + 1, 3, 4 * MiB)), "blob_too_large", "a stream of maxStreamBytes + 1 to a new key");
+      expect((await listAll(store, "")).entries, [{ key: "big", size: 3 }], "nothing stored by the streams too large");
+    }),
   ];
 }
 
@@ -415,11 +599,13 @@ function createSubject(fixture: BlobFixture, apps: App[]): Subject {
  * after the other over it see the same values, as they would over a directory. It checks what every
  * provider checks (`checkBlobPut`, `checkBlobNamespace`, `blobListLimit`) and copies in and out.
  */
-export function createMemoryBlobStorage(options: { maxBytes?: number } = {}): BlobStorage {
+export function createMemoryBlobStorage(options: { maxBytes?: number; maxStreamBytes?: number } = {}): BlobStorage {
   const maxBytes = options.maxBytes ?? BLOB_MIN_MAX_BYTES;
+  const maxStreamBytes = options.maxStreamBytes ?? BLOB_CONFORMANCE_STREAM_BYTES;
   const namespaces = new Map<string, Map<string, { bytes: Uint8Array; contentType?: string }>>();
   return {
     maxBytes,
+    maxStreamBytes,
     namespace(name) {
       checkBlobNamespace(name);
       const values = (): Map<string, { bytes: Uint8Array; contentType?: string }> => {
@@ -435,7 +621,38 @@ export function createMemoryBlobStorage(options: { maxBytes?: number } = {}): Bl
         async get(key) {
           checkBlobKey(key);
           const value = values().get(key);
+          if (value !== undefined && value.bytes.byteLength > maxBytes) throw new BlobTooLargeError(value.bytes.byteLength, maxBytes);
           return value === undefined ? undefined : { bytes: value.bytes.slice(), ...(value.contentType !== undefined && { contentType: value.contentType }) };
+        },
+        async putStream(key, body, putOptions) {
+          checkBlobPutStream(key, body, putOptions);
+          const read = blobStreamChunks(body, { maxStreamBytes, ...(putOptions?.sha256 !== undefined && { sha256: putOptions.sha256 }) });
+          const chunks: Uint8Array[] = [];
+          for await (const chunk of read.chunks) chunks.push(chunk);
+          const stored = read.stored();
+          const bytes = new Uint8Array(stored.size);
+          let at = 0;
+          for (const chunk of chunks) {
+            bytes.set(chunk, at);
+            at += chunk.byteLength;
+          }
+          values().set(key, { bytes, ...(putOptions?.contentType !== undefined && { contentType: putOptions.contentType }) });
+          return stored;
+        },
+        async getStream(key) {
+          checkBlobKey(key);
+          const value = values().get(key);
+          if (value === undefined) return undefined;
+          const bytes = value.bytes;
+          let at = 0;
+          const body = new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (at >= bytes.byteLength) return controller.close();
+              controller.enqueue(bytes.slice(at, at + 1024 * 1024));
+              at += 1024 * 1024;
+            },
+          });
+          return { body, size: bytes.byteLength, ...(value.contentType !== undefined && { contentType: value.contentType }) };
         },
         async delete(key) {
           checkBlobKey(key);

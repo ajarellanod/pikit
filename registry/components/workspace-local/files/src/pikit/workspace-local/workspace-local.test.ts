@@ -5,12 +5,14 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type Clock, defineApp, defineComponent, type Logger, silentLogger, systemClock } from "@pikit/core";
-import { type ConversationRef, defineAgent } from "@pikit/contracts";
-import { createLifecycleConformance } from "@pikit/core/testing";
+import { type BlobStorage, type ConversationRef, defineAgent, SNAPSHOT_NAMESPACE } from "@pikit/contracts";
+import { snapshotIdOf } from "@pikit/contracts/snapshots";
+import { createMemoryBlobStorage } from "@pikit/contracts/testing";
+import { createLifecycleConformance, createManualClock, type ManualClock } from "@pikit/core/testing";
 import { createDurableRuntime, modelsFrom, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
@@ -110,7 +112,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     name: "workspace-local",
     provides: ["workspace"],
     requires: ["execution"],
-    optional: [],
+    optional: ["storage.blob"],
   });
 });
 
@@ -599,4 +601,146 @@ test("retention: a use and a retirement of one chat never overlap: a use first k
 
 test("retention: retentionDays is a whole number of days, at least 1", async () => {
   for (const retentionDays of [0, 1.5, -3]) await expect(retained(temporaryDir(), { retentionDays })).rejects.toThrow();
+});
+
+// Snapshots (`snapshots`): a chat's directory of an agent goes to storage.blob when idle, and comes back at its next use.
+
+interface Snapshotted {
+  app: App;
+  workspace: WorkspaceProvider;
+  clock: ManualClock;
+  storage: BlobStorage;
+  logs: { level: string; message: string; fields?: Record<string, unknown> }[];
+}
+
+/** A started app over `execution` in `dir` with snapshots on (`config`), a manual clock and `storage` (memory) as storage.blob. */
+async function snapshotted(dir: string, config: Record<string, unknown> = { snapshots: {} }, storage: BlobStorage = createMemoryBlobStorage({ maxStreamBytes: 2 ** 30 }), withBlob = true): Promise<Snapshotted> {
+  let found: WorkspaceProvider | undefined;
+  const reader = defineComponent({
+    name: "workspace-reader",
+    setup(pikit) {
+      const workspace = pikit.use("workspace");
+      return { start: () => void (found = workspace.get()) };
+    },
+  });
+  const blob = defineComponent({ name: "storage-blob-test", setup: (pikit) => void pikit.provide("storage.blob", storage) });
+  const logs: Snapshotted["logs"] = [];
+  const push = (level: string) => (message: string, fields?: Record<string, unknown>) => void logs.push({ level, message, ...(fields !== undefined && { fields }) });
+  const clock = createManualClock(Date.now());
+  const app = await defineApp({
+    components: [executionAt(dir), workspaceLocal, reader, ...(withBlob ? [blob] : [])],
+    config: { "workspace-local": config },
+    logger: { debug: push("debug"), info: push("info"), warn: push("warn"), error: push("error") },
+    clock,
+  }).create();
+  await app.start();
+  if (found === undefined) throw new Error("workspace was not resolved");
+  return { app, workspace: found, clock, storage, logs };
+}
+
+const snapshotKeys = async (s: Snapshotted, key: string, agent = "support") =>
+  (await s.storage.namespace(SNAPSHOT_NAMESPACE).list(`${snapshotIdOf(key, agent)}/`)).entries.map((entry) => entry.key.slice(65));
+const envIn = async (s: Snapshotted, key: string, agent = "support") => (await s.workspace.resolve({ key, agent, conversationId: `${agent}-${key}` }, s.app.context())).env;
+/** Moves the clock `minutes` on, a minute at a time (the sweep's period), letting each sweep finish. */
+async function idle(s: Snapshotted, minutes: number): Promise<void> {
+  for (let i = 0; i < minutes; i++) {
+    await s.clock.advance(60_000);
+    await Bun.sleep(20);
+  }
+}
+
+// With snapshots on, it is still a workspace, and an agent's directory still pi-durable's whole ExecutionEnv.
+for (const c of createWorkspaceConformance(async () => {
+  const s = await snapshotted(temporaryDir());
+  return { provider: s.workspace, dispose: () => s.app.stop() };
+})) {
+  test(`workspace-local with snapshots ${c.group}: ${c.name}`, () => c.run());
+}
+for (const c of createDurableExecutionConformance(async () => {
+  const s = await snapshotted(temporaryDir());
+  return { env: await envIn(s, "test:conformance"), dispose: () => s.app.stop() };
+}, { expect })) {
+  test(`workspace-local with snapshots ${c.group}: ${c.name}`, () => c.run(), c.timeoutMs);
+}
+
+test("snapshots: a chat's directory idle for 10 minutes goes to the bucket and is deleted here; the next use restores the same bytes and modes", async () => {
+  const dir = temporaryDir();
+  const s = await snapshotted(dir);
+  const env = await envIn(s, "test:snap");
+  expect((await env.writeFile("notes.md", "# notes", s.app.context())).ok).toBe(true);
+  expect((await env.exec("mkdir -p bin && printf 'echo run' > bin/run.sh && chmod 750 bin/run.sh && ln -s bin/run.sh run", undefined, s.app.context())).ok).toBe(true);
+  const other = await envIn(s, "test:snap", "ops");
+  expect((await other.writeFile("ops.md", "ops", s.app.context())).ok).toBe(true);
+  const local = join(dir, "agents", "support", chatDir("test:snap"));
+
+  await idle(s, 9);
+  expect(existsSync(local)).toBe(true);
+  await idle(s, 3);
+  await until(() => !existsSync(local));
+  // Every agent's of the chat, each its own snapshot: the manifest and one archive.
+  expect(existsSync(join(dir, "agents", "ops", chatDir("test:snap")))).toBe(false);
+  expect(await snapshotKeys(s, "test:snap")).toEqual(["manifest.json", expect.stringMatching(/^snapshot-\d+-[0-9a-f]{16}\.tar\.gz$/) as unknown as string]);
+  expect(await snapshotKeys(s, "test:snap", "ops")).toHaveLength(2);
+  expect(s.logs.some((log) => log.message === "workspace-local: saved idle workspaces to the bucket and released them here (snapshots)")).toBe(true);
+  expect(JSON.stringify(s.logs)).not.toContain("test:snap");
+
+  // The next tool call: restored before it runs, as it was.
+  const again = await envIn(s, "test:snap");
+  expect(await again.readTextFile("notes.md", s.app.context())).toEqual({ ok: true, value: "# notes" });
+  expect(statSync(join(local, "bin", "run.sh")).mode & 0o777).toBe(0o750);
+  expect(readlinkSync(join(local, "run"))).toBe("bin/run.sh");
+  expect(await again.exec("test -x run", undefined, s.app.context())).toEqual({ ok: true, value: { exitCode: 0 } });
+  // A chat never snapshotted starts empty.
+  expect(await (await envIn(s, "test:new")).listDir(".", s.app.context())).toEqual({ ok: true, value: [] });
+  await s.app.stop();
+});
+
+test("snapshots: a directory with a command running is never released; it goes once the command ended", async () => {
+  const dir = temporaryDir();
+  const s = await snapshotted(dir);
+  const env = await envIn(s, "test:busy");
+  expect((await env.writeFile("a.txt", "a", s.app.context())).ok).toBe(true);
+  const controller = new AbortController();
+  const command = env.exec("sleep 30", undefined, withAbortSignal(controller.signal, s.app.context()));
+  const local = join(dir, "agents", "support", chatDir("test:busy"));
+  await idle(s, 15);
+  expect(existsSync(local)).toBe(true);
+  expect(await snapshotKeys(s, "test:busy")).toEqual([]);
+  controller.abort();
+  await command;
+  await idle(s, 1);
+  await until(() => !existsSync(local));
+  expect(await snapshotKeys(s, "test:busy")).toHaveLength(2);
+  await s.app.stop();
+});
+
+test("snapshots: across a restart the bucket is the truth; a new host restores the chat; retentionDays deletes the bucket's old snapshots", async () => {
+  const storage = createMemoryBlobStorage({ maxStreamBytes: 2 ** 30 });
+  const first = await snapshotted(temporaryDir(), { snapshots: {} }, storage);
+  expect((await (await envIn(first, "test:host")).writeFile("kept.md", "kept", first.app.context())).ok).toBe(true);
+  await idle(first, 12);
+  await until(() => first.logs.some((log) => log.message.startsWith("workspace-local: saved idle workspaces")));
+  await first.app.stop();
+  // Another host (an empty disk) restores it, never having seen it.
+  const second = await snapshotted(temporaryDir(), { snapshots: {} }, storage);
+  expect(await (await envIn(second, "test:host")).readTextFile("kept.md", second.app.context())).toEqual({ ok: true, value: "kept" });
+  await second.app.stop();
+
+  // Old snapshots in the bucket go with retentionDays (manifest first); a chat's local directory is the snapshots'.
+  const store = storage.namespace(SNAPSHOT_NAMESPACE);
+  const oldId = snapshotIdOf("test:old", "support");
+  await store.put(`${oldId}/snapshot-1000-0123456789abcdef.tar.gz`, new Uint8Array([1]));
+  await store.put(`${oldId}/manifest.json`, new TextEncoder().encode("{}"));
+  const third = await snapshotted(temporaryDir(), { snapshots: {}, retentionDays: 30 }, storage);
+  await until(() => third.logs.some((log) => log.message === "workspace-local: deleted the snapshots of workspaces unused for retentionDays"));
+  expect((await store.list(`${oldId}/`)).entries).toEqual([]);
+  expect(await snapshotKeys(third, "test:host")).toHaveLength(2);
+  await third.app.stop();
+});
+
+test("snapshots: refused without storage.blob, with per agent or channel, or an idleMinutes of 0", async () => {
+  const failure = await snapshotted(temporaryDir(), { snapshots: {} }, undefined, false).then(() => undefined, (error: Error) => error);
+  expect(((failure?.cause as Error | undefined) ?? failure)?.message).toContain("snapshots need a storage.blob provider");
+  await expect(snapshotted(temporaryDir(), { snapshots: {}, per: "agent" })).rejects.toThrow('snapshots save a chat\'s directories (per: "chat")');
+  await expect(snapshotted(temporaryDir(), { snapshots: { idleMinutes: 0 } })).rejects.toThrow();
 });

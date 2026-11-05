@@ -154,7 +154,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   const app = await defineApp({ components: [createExecutionGondolin(new FakeLauncher())], logger: silentLogger }).create();
 
   expect(app.describe().components).toEqual([
-    { name: "execution-gondolin", provides: ["execution", "execution.shell", "workspace"], requires: [], optional: ["secrets", "proposals", "agent.definition"] },
+    { name: "execution-gondolin", provides: ["execution", "execution.shell", "workspace"], requires: [], optional: ["secrets", "proposals", "storage.blob", "agent.definition"] },
   ]);
 });
 

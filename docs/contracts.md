@@ -38,7 +38,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql, tool-mcp-oauth, tool-space-files | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, tool-notify, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `storage.blob` | single | storage-blob-fs, storage-blob-s3 | tool-space-files | `createBlobConformance` |
+| `storage.blob` | single | storage-blob-fs, storage-blob-s3 | tool-space-files, execution-gondolin?, workspace-local? | `createBlobConformance` |
 | `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-mcp-oauth, tool-notify, tool-space-files | `createMailboxConformance` |
 | `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-mcp-oauth, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
@@ -589,12 +589,15 @@ transaction across calls. A component opens the namespace named after it (`regis
 
 ```ts
 interface BlobStorage {
-  readonly maxBytes: number;                 // at least BLOB_MIN_MAX_BYTES (25 MiB)
+  readonly maxBytes: number;                 // at least BLOB_MIN_MAX_BYTES (25 MiB): put and get, whole
+  readonly maxStreamBytes: number;           // at least maxBytes: putStream
   namespace(name: string): BlobStore;        // a component opens the one named after it
 }
 interface BlobStore {
   put(key, bytes: Uint8Array, options?: { contentType? }): Promise<void>;
   get(key): Promise<{ bytes: Uint8Array; contentType? } | undefined>;
+  putStream(key, body: AsyncIterable<Uint8Array>, options?: { contentType?; sha256? }): Promise<{ size; sha256 }>;
+  getStream(key): Promise<{ body: ReadableStream<Uint8Array>; size; contentType? } | undefined>;
   delete(key): Promise<void>;
   list(prefix, options?: { cursor?; limit? }): Promise<{ entries: { key; size }[]; cursor? }>;
 }
@@ -609,16 +612,29 @@ content type that is not 1 to 255 printable ASCII characters with no space at ei
 over `maxBytes` (`BlobTooLargeError`). `put` replaces a value whole (old bytes or new, never a mix) and
 copies its bytes when called; `get` returns a copy and the content type as it was put. `list` gives the
 keys starting with a prefix in code-unit order, at most `limit` (1 to 1000, default 1000) a page, with
-a cursor when there may be more; a page may hold fewer, even none. Values are whole in memory: no
-streaming. Every provider checks with the same helpers (`checkBlobNamespace`, `checkBlobPut`,
-`checkBlobKey`, `blobListLimit`).
+a cursor when there may be more; a page may hold fewer, even none. `put` and `get` hold a value whole
+(a `get` of one larger than `maxBytes` is refused); larger values stream: `putStream` takes what an
+async iterable yields (a `ReadableStream`, a file's stream), each chunk copied, up to
+`maxStreamBytes`, and replaces the value only once all of it arrived and was checked: a body that
+fails partway, is too large (`BlobTooLargeError`) or has another SHA-256 than the `sha256` given
+(`BlobChecksumError`) leaves the key as it was, nothing partial visible; it resolves with the size and
+SHA-256 stored. `getStream` gives one value whole as a stream, with its size. Every provider checks
+with the same helpers (`checkBlobNamespace`, `checkBlobPut`, `checkBlobPutStream`, `checkBlobKey`,
+`blobListLimit`) and reads a stream through `blobStreamChunks` (copy, count, hash with
+`createBlobHash` or a faster one, refuse). A format several components share names its own namespace:
+`workspace-snapshots` ([workspace snapshots](../features/workspace-snapshots.md): `snapshotId`,
+`snapshotArchiveKey`, `parseSnapshotManifest` in `@pikit/contracts`; the server's directories in
+`@pikit/contracts/snapshots`, server only).
 
 Providers: storage-blob-fs (a directory, one per namespace, atomic rename, server) and
-storage-blob-s3 (any S3-compatible bucket over `fetch` and SigV4, a namespace a key prefix; server
-and durable, the suite run in workerd too). Suite: `createBlobConformance` (bytes, copies, replace,
-concurrent puts, delete, case and nesting, long keys, refused input, namespaces one of whose names
-starts another's, order, paging, `maxBytes` and one byte more, restarts), each of its guarantees
-checked against a broken double; double: `createMemoryBlobStorage`.
+storage-blob-s3 (any S3-compatible bucket over `fetch` and SigV4, a namespace a key prefix, streams
+as multipart uploads aborted on failure; server and durable, the suite run in workerd too). Suite:
+`createBlobConformance` (bytes, copies, replace, concurrent puts, delete, case and nesting, long keys,
+refused input, namespaces one of whose names starts another's, order, paging, `maxBytes` and one byte
+more, restarts; streams: chunks of any shape, one larger than `maxBytes` refused whole and streamed
+back, one that fails partway, one with another SHA-256, one of `maxStreamBytes` + 1), each of its
+guarantees checked against a broken double; double: `createMemoryBlobStorage` (configure a fixture's
+`maxStreamBytes` with `BLOB_CONFORMANCE_STREAM_BYTES`).
 
 ---
 

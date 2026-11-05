@@ -4,7 +4,8 @@ Each agent's tools work in a directory of their own in each chat, inside executi
 isolation.
 
 - **Provides:** `workspace`.
-- **Requires:** `execution` (`execution-local`): the agents' directories are in it.
+- **Requires:** `execution` (`execution-local`): the agents' directories are in it. With `snapshots`,
+  a `storage.blob` too (storage-blob-s3, storage-blob-fs).
 - **Target:** `server`.
 - **Installs to:** `src/pikit/workspace-local/`.
 - **npm dependencies:** `@pikit/contracts`, `@pikit/pi-adapter` (pinned with Pi), `typebox`.
@@ -106,6 +107,38 @@ deleted: deleting what agents wrote must be asked for. Everything goes through `
 The live state is this process's: two servers sharing a directory do not see each other's commands,
 only each other's markers (at most an hour late).
 
+## Snapshots
+
+With `snapshots` (and a `storage.blob`), a chat's directory of an agent
+(`<root>/<agent>/_chats/<chat>/`) unused for `idleMinutes` (10) is saved to the bucket and deleted
+here; the next `resolve` of that chat and agent (the runtime's next tool call, execution-serve's next
+request) restores it before the tool runs. The disk holds only the workspaces in use.
+
+- **The shared format** ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)): namespace `workspace-snapshots`, keys under
+  the hex SHA-256 of `"<chat key>\n<agent>"`, a gzip'd tar, then `manifest.json` written last. What
+  execution-gondolin (or another backend) saved, this restores, and the other way round.
+- **What counts as use** is what retention counts: a `resolve`, noted in memory at once. **Never in
+  use**: a call of an environment given for the directory running (a command until it ends, a file
+  operation) keeps it; so does a use or a call that starts during the checkpoint. Commands left
+  running in the background (`nohup ... &`) are not seen: they may write while it is archived.
+- **Nothing lost on the way**: the directory is deleted only after the manifest naming the new archive
+  is written and read back; a failure leaves it, tried again after `idleMinutes`. A restore checks the
+  archive's SHA-256 and size, extracts into a directory of its own and swaps it in; an archive with an
+  entry that would leave the directory is refused whole, and the tool call fails with nothing made.
+  Files (bytes, modes, times), directories and links that stay inside are kept; links that lead out,
+  owners and special files are not.
+- **Only `per: "chat"`**: an agent's or a channel's directory is shared, never released (`snapshots`
+  with another `per` is refused). Only on this host's disk: `execution` must be execution-local.
+- **With `retentionDays`**, the bucket's snapshots whose newest archive is older than N days are
+  deleted (hourly, the manifest first) instead of the local directories, which are released anyway.
+- **`maxBytes`**: an archive larger stays here, a warning logged, until its next use.
+- Its own files are in `<root>/.workspace-local-snapshots/` (archives on their way, restores, the index
+  of the directories on disk, which a restart reads: each counts as used at start). A stop releases
+  nothing.
+- **One writer per chat and agent**: two processes serving the same chat and agent (a host changed
+  while the old one still holds an unreleased copy) are not coordinated; the last checkpoint's
+  manifest wins.
+
 ## Order, not isolation
 
 A directory per agent keeps the agents' files apart when they behave. It is not a wall:
@@ -124,6 +157,7 @@ Until then, give `bash` only to the agents that need it, and see `execution-loca
   root: "agents", // default; relative to execution's working directory, or absolute
   per: "chat",    // default; "agent" for one directory per agent, "channel" for one per channel of each agent
   // retentionDays: 30, // absent by default (kept forever): delete a chat's directories unused this many days
+  // snapshots: { idleMinutes: 10, maxBytes: 10e9 }, // absent by default: idle chat directories to storage.blob
 }
 ```
 
@@ -152,7 +186,15 @@ directories. It covers:
   restart; without it nothing is noted or deleted, however old; a use refreshes the count, the sweep
   runs hourly on the app's clock; a chat with a command running is kept, and goes once it ended; a
   command issued during the start sweep works; a use and a retirement of one chat never overlap
-  (either order), nor a call in flight and a retirement; bad values refused.
+  (either order), nor a call in flight and a retirement; bad values refused;
+- snapshots: the `workspace` and `execution` suites with them on; a chat's directories (every agent's)
+  idle 10 minutes on a manual clock go to the bucket (a manifest and an archive each) and are deleted
+  here, and the next use restores the same bytes, modes and links; a chat never saved starts empty;
+  a command running keeps a directory, which goes once it ended; another host restores a chat from the
+  bucket; `retentionDays` deletes the bucket's old snapshots; refused without `storage.blob`, with
+  `per` other than `chat`, with `idleMinutes` 0. Mutation-checked: without waiting for the restore, a
+  case fails. The helper's own cases (crash points, path tricks, checksums) are in
+  `@pikit/contracts`' `snapshots.test.ts`.
 
 `component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
 the test "what setup declares" pins it.

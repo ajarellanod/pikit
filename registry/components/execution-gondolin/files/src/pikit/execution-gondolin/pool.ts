@@ -99,6 +99,19 @@ export class Pool {
     await this.close(slot);
   }
 
+  /**
+   * Closes `slot`'s VM when no command holds it (its workspace's snapshot comes next, `snapshots.ts`):
+   * whether it has none now.
+   */
+  async closeIdle(slot: Slot): Promise<boolean> {
+    if (slot.busy > 0) return false;
+    if (slot.guest !== undefined) {
+      this.options.log.info("execution-gondolin: closing an idle VM, for its workspace's snapshot", { sandbox: slot.name });
+      await this.close(slot);
+    }
+    return slot.guest === undefined && slot.busy === 0;
+  }
+
   /** Closes every VM and refuses new ones. Commands running in them end (their VM is gone). */
   async stop(): Promise<void> {
     this.stopped = true;

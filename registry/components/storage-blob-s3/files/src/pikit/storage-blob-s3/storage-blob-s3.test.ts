@@ -12,9 +12,9 @@ import { afterEach, expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type BlobStorage, type SecretStore } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createBlobConformance } from "@pikit/contracts/testing";
+import { BLOB_CONFORMANCE_STREAM_BYTES, createBlobConformance } from "@pikit/contracts/testing";
 import { createFakeS3, type FakeS3, type FakeS3Options } from "./fake-s3.test-support.ts";
-import storageBlobS3, { CONTENT_TYPE_META } from "./index.ts";
+import storageBlobS3, { CONTENT_TYPE_META, S3_MIN_PART } from "./index.ts";
 
 const ACCESS_KEY = "AKIAEXAMPLE0BLOB0S3T";
 const SECRET_KEY = "blob-test-secret/0123456789+abcdefghijklmn";
@@ -51,7 +51,7 @@ for (const c of createBlobConformance(() => {
   const { endpoint, stop } = served();
   return {
     components: [secrets(KEYS), storageBlobS3],
-    config: { "storage-blob-s3": { endpoint, region: FAKE.region, bucket: FAKE.bucket } },
+    config: { "storage-blob-s3": { endpoint, region: FAKE.region, bucket: FAKE.bucket, partBytes: S3_MIN_PART, maxStreamBytes: BLOB_CONFORMANCE_STREAM_BYTES } },
     dispose: stop,
   };
 })) {
@@ -63,7 +63,7 @@ for (const c of createBlobConformance(() => {
   behindFetch({ ...FAKE, sessionToken: "session-token", pageSize: 3 });
   return {
     components: [secrets({ ...KEYS, S3_SESSION_TOKEN: "session-token" }), storageBlobS3],
-    config: { "storage-blob-s3": { region: FAKE.region, bucket: FAKE.bucket, prefix: "/pikit/test/" } },
+    config: { "storage-blob-s3": { region: FAKE.region, bucket: FAKE.bucket, prefix: "/pikit/test/", partBytes: 7 * 1024 * 1024, maxStreamBytes: BLOB_CONFORMANCE_STREAM_BYTES } },
   };
 })) {
   test(`storage-blob-s3 virtual-hosted ${c.group}: ${c.name}`, () => c.run(), 60_000);
@@ -185,6 +185,89 @@ test("a prefix that is not a path of keys' characters is refused when the app is
   );
 });
 
+const MiB = 1024 * 1024;
+
+/** `total` bytes of a pattern, in chunks of `chunk`; throws `fail` once `failAfter` bytes were given. */
+async function* bytes(total: number, chunk = MiB, failAfter?: number): AsyncGenerator<Uint8Array> {
+  for (let at = 0; at < total; at += chunk) {
+    if (failAfter !== undefined && at >= failAfter) throw new Error("the body failed");
+    const piece = new Uint8Array(Math.min(chunk, total - at));
+    for (let i = 0; i < piece.length; i++) piece[i] = (at + i) % 251;
+    yield piece;
+  }
+}
+
+const expected = (total: number) => Uint8Array.from({ length: total }, (_, i) => i % 251);
+
+const paths = (fake: FakeS3) => fake.requests.map((r) => `${r.method} ${r.path.replace(/uploadId=[^&]+/, "uploadId=U")} ${r.status}`);
+
+test("a stream larger than a part is a multipart upload: one part held at a time, each signed, the object whole once completed", async () => {
+  const fake = behindFetch(FAKE);
+  const { storage, stop } = await started({ region: FAKE.region, bucket: FAKE.bucket, partBytes: S3_MIN_PART });
+  const stored = await storage.namespace("ns").putStream("big", bytes(12 * MiB + 5, 3 * MiB), { contentType: "application/gzip" });
+  expect(stored.size).toBe(12 * MiB + 5);
+  expect(paths(fake)).toEqual([
+    "POST /ns/big?uploads 200",
+    "PUT /ns/big?partNumber=1&uploadId=U 200",
+    "PUT /ns/big?partNumber=2&uploadId=U 200",
+    "PUT /ns/big?partNumber=3&uploadId=U 200",
+    "POST /ns/big?uploadId=U 200",
+  ]);
+  expect(fake.uploads.size).toBe(0);
+  expect(fake.objects.get("ns/big")?.bytes).toEqual(expected(12 * MiB + 5));
+  expect(fake.objects.get("ns/big")?.headers).toEqual({ "content-type": "application/gzip", [CONTENT_TYPE_META]: "application/gzip" });
+  // A body of exactly one part, and a smaller one, are one PutObject each.
+  fake.requests.length = 0;
+  await storage.namespace("ns").putStream("one", bytes(S3_MIN_PART));
+  await storage.namespace("ns").putStream("small", bytes(10));
+  expect(paths(fake)).toEqual(["PUT /ns/one 200", "PUT /ns/small 200"]);
+  await stop();
+});
+
+test("a stream that fails, a part S3 refuses, a completion S3 answers with an error, or another SHA-256 aborts the upload: nothing is stored", async () => {
+  const fake = behindFetch(FAKE);
+  const { storage, stop } = await started({ region: FAKE.region, bucket: FAKE.bucket, partBytes: S3_MIN_PART });
+  const store = storage.namespace("ns");
+  await expect(store.putStream("k", bytes(20 * MiB, MiB, 11 * MiB))).rejects.toThrow("the body failed");
+  expect(paths(fake)).toEqual(["POST /ns/k?uploads 200", "PUT /ns/k?partNumber=1&uploadId=U 200", "PUT /ns/k?partNumber=2&uploadId=U 200", "DELETE /ns/k?uploadId=U 204"]);
+
+  fake.requests.length = 0;
+  const failing = (async function* () {
+    yield* bytes(6 * MiB);
+    fake.failNext(1, 500, "InternalError");
+    yield* bytes(6 * MiB);
+  })();
+  await expect(store.putStream("k", failing)).rejects.toThrow('S3 refused part 2 of "k" (HTTP 500 InternalError)');
+  expect(paths(fake).at(-1)).toBe("DELETE /ns/k?uploadId=U 204");
+
+  fake.failCompletion("InternalError");
+  await expect(store.putStream("k", bytes(11 * MiB))).rejects.toThrow('S3 refused the completion of the upload of "k" (HTTP 200 InternalError)');
+
+  await expect(store.putStream("k", bytes(11 * MiB), { sha256: "0".repeat(64) })).rejects.toThrow("SHA-256");
+  expect(fake.uploads.size).toBe(0);
+  expect(fake.objects.size).toBe(0);
+  await stop();
+});
+
+test("a get of an object larger than maxBytes is refused from its Content-Length; getStream gives it", async () => {
+  const fake = behindFetch(FAKE);
+  const { storage, stop } = await started({ region: FAKE.region, bucket: FAKE.bucket, partBytes: S3_MIN_PART, maxStreamBytes: 40 * MiB });
+  fake.objects.set("ns/large", { bytes: new Uint8Array(storage.maxBytes + 1), headers: {} });
+  await expect(storage.namespace("ns").get("large")).rejects.toThrow("larger than this provider's");
+  const streamed = await storage.namespace("ns").getStream("large");
+  expect(streamed?.size).toBe(storage.maxBytes + 1);
+  await streamed?.body.cancel();
+  expect(await storage.namespace("ns").getStream("missing")).toBeUndefined();
+  await stop();
+});
+
+test("maxStreamBytes beyond 10,000 parts, or under maxBytes, is refused when the app is defined", async () => {
+  const define = (config: Record<string, unknown>) => (async () => defineApp({ components: [secrets(KEYS), storageBlobS3], config: { "storage-blob-s3": { bucket: "b", ...config } }, logger: silentLogger }).create())();
+  await expect(define({ partBytes: S3_MIN_PART, maxStreamBytes: 10_001 * S3_MIN_PART })).rejects.toThrow("more than 10000 parts");
+  await expect(define({ maxBytes: 30 * MiB, maxStreamBytes: 26 * MiB })).rejects.toThrow("smaller than maxBytes");
+  await expect(define({ partBytes: S3_MIN_PART - 1 })).rejects.toThrow();
+});
+
 const real = {
   endpoint: process.env.PIKIT_S3_TEST_ENDPOINT,
   bucket: process.env.PIKIT_S3_TEST_BUCKET,
@@ -195,7 +278,7 @@ const real = {
 // Opt-in: a real S3-compatible store (MinIO, rustfs, R2, AWS), each case under a prefix of its own, emptied after.
 for (const c of createBlobConformance(() => {
   const prefix = `pikit-conformance/${crypto.randomUUID()}`;
-  const config = { endpoint: real.endpoint, region: real.region, bucket: real.bucket, prefix };
+  const config = { endpoint: real.endpoint, region: real.region, bucket: real.bucket, prefix, partBytes: S3_MIN_PART, maxStreamBytes: BLOB_CONFORMANCE_STREAM_BYTES };
   return {
     components: [secrets({ S3_ACCESS_KEY_ID: real.accessKeyId, S3_SECRET_ACCESS_KEY: real.secretAccessKey }), storageBlobS3],
     config: { "storage-blob-s3": config },

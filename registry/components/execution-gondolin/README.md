@@ -337,6 +337,69 @@ default), nothing is ever deleted: deleting what agents wrote must be asked for.
 The live state is this process's: two servers sharing a `root` do not see each other's commands,
 only each other's markers (at most an hour late).
 
+## Snapshots (disposable hosts)
+
+With `snapshots` and a `storage.blob` (storage-blob-s3: AWS S3, R2, GCS through its XML API with HMAC
+keys, MinIO), a chat's sandbox of an agent (its `/workspace`) unused for `idleMinutes` (10) is saved
+to the bucket and deleted here; the next `resolve` of that chat and agent (the runtime's next tool
+call, execution-serve's next request) restores it before anything runs. A host then holds only the
+workspaces in use: replace it, and the next host restores each chat's from the bucket.
+
+- **The format is shared** ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md), `@pikit/contracts`' `workspace-snapshot.ts`):
+  namespace `workspace-snapshots`, keys under the hex SHA-256 of `"<chat key>\n<agent>"`, a gzip'd
+  tar `snapshot-<ms>-<sha16>.tar.gz`, then `manifest.json` written last. workspace-local and the
+  other backends write the same, so one restores what another saved.
+- **Never while a VM holds it.** The sandbox's VM is closed first if no command runs (a VM up only
+  for `idleSeconds` would else keep it); a sandbox with a command or a file operation running is
+  kept; a VM booted while the checkpoint runs keeps it too. `workspace: "agent"` sandboxes and
+  `default` are never released: they are shared.
+- **Nothing lost on the way**: the directory is deleted only after the manifest naming the new
+  archive is written and read back; a failure at any step leaves it, and the next sweep (every
+  minute) tries again after `idleMinutes`. A restore checks the archive's SHA-256 and size, extracts
+  into a directory of its own, and swaps it in; an archive with a path that would leave the
+  workspace (`..`, absolute, a link out) is refused whole, and the tool call fails with nothing
+  made. What is kept: files (bytes, modes, times), directories, links that stay inside; not links
+  that lead out (absolute ones too: `/workspace/x` is written relative to be kept), owners, sockets.
+- **The temporary files go with it** (`/tmp/pikit`). Its own files are in
+  `<root>/.execution-gondolin-snapshots/` (archives on their way, restores, the index of the
+  workspaces on disk, which a restart reads: each counts as used at start).
+- **With `retentionDays`**, the bucket's snapshots whose newest archive is older than N days are
+  deleted (hourly, the manifest first), instead of the local directories, which are released anyway.
+- **`maxBytes`**: an archive larger stays on the host, a warning logged, until its next use.
+- **One writer per chat and agent.** One process holds a sandbox; a second host serving the same
+  chat and agent at the same time (execution-remote's `endpoint` changed while the old host still
+  holds an unreleased copy) is not coordinated: each host's checkpoint replaces the manifest, the
+  last one wins, and the other's files since its restore are lost. Change hosts after the old one
+  released its sandboxes (`idleMinutes` without use), or stop it first (a stop releases nothing:
+  its unreleased workspaces stay on its disk).
+
+A disposable sandbox host (execution-serve's App) with snapshots in a bucket:
+
+```ts
+import { defineApp } from "@pikit/core";
+import executionGondolin from "./src/pikit/execution-gondolin/index.ts";
+import executionServe from "./src/pikit/execution-serve/index.ts";
+import secretsEnv from "./src/pikit/secrets-env/index.ts";
+import serverBun from "./src/pikit/server-bun/index.ts";
+import storageBlobS3 from "./src/pikit/storage-blob-s3/index.ts";
+
+export default defineApp({
+  components: [secretsEnv, storageBlobS3, executionGondolin, executionServe, serverBun],
+  config: {
+    "server-bun": { port: 3000 },
+    // S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY in .env. GCS: endpoint https://storage.googleapis.com,
+    // region "auto", a service account's HMAC key; R2: https://<account>.r2.cloudflarestorage.com, "auto";
+    // AWS: no endpoint, its region; MinIO: http://127.0.0.1:9000.
+    "storage-blob-s3": { endpoint: "https://storage.googleapis.com", region: "auto", bucket: "my-sandboxes", prefix: "fleet-1/" },
+    "execution-gondolin": { snapshots: { idleMinutes: 10 }, retentionDays: 30 },
+  },
+});
+```
+
+Give the bucket a lifecycle rule that aborts incomplete multipart uploads after a day (a host that
+died mid-upload leaves its parts), and no expiration rule on `workspace-snapshots/`: `retentionDays`
+deletes a snapshot's manifest before its archive, an expiration rule may not.
+
 ## Machines per agent
 
 Each agent may get its own machine: `agents` maps an agent's name (`ConversationRef.agent`, in the
@@ -419,6 +482,7 @@ the rewrite at its next boot.
   workspace: "chat",         // default: a sandbox per chat and agent; "agent": one per agent, every chat
   agents: {},                // default: a machine per agent, each field replacing the base's
   // retentionDays: 30,      // absent by default (kept forever): delete a chat's sandboxes unused this many days
+  // snapshots: { idleMinutes: 10, maxBytes: 10e9, namespace: "workspace-snapshots" }, // absent by default: idle chat sandboxes to storage.blob
 }
 ```
 
@@ -578,6 +642,13 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   chat with a command running or a VM up is kept, and goes once neither; a command issued during the
   start sweep works; a use and a retirement of one chat never overlap (either order); bad values
   and a profile's `retentionDays` refused;
+- snapshots (`snapshots.test.ts`): a chat's sandbox idle 10 minutes has its VM closed, its workspace
+  in the bucket and deleted here with its temporary files, and the next use restores the same bytes,
+  modes and links, the next VM mounting it; a command running keeps it however long, it goes once the
+  command ended; a VM booted during the checkpoint keeps it; a shared (`workspace: "agent"`) one never
+  goes; a new host (an empty root) restores a chat's from the bucket; refused without `storage.blob`.
+  Mutation-checked: without closing the VM first, or without the VM check before the release, a case
+  fails;
 - packages (none by default, `git` first with `proposals`, names refused when not Alpine's), the
   proposals wiring (a `path` remote read at each use), the guest's gitconfig, and the proposals host
   answered by `serve` alone; the sync of what the file tools changed, before the next command, once;

@@ -24,8 +24,20 @@
  *   status and error code, a request that takes longer than `timeoutMs` is cancelled. Nothing is
  *   retried here: the caller decides. A key, a value or a content type the contract refuses is refused
  *   before any request.
- * - Values are sent and read whole, in memory (`maxBytes`, 25 MiB by default): one `PutObject`, no
- *   multipart upload, no streaming.
+ * - `put` and `get` hold a value whole, in memory (`maxBytes`, 25 MiB by default); a `get` of a
+ *   larger object (its `Content-Length`) is refused before its body is read.
+ * - **`putStream` is a multipart upload** once the body is larger than one part (`partBytes`, 16 MiB
+ *   by default, at least S3's 5 MiB): `CreateMultipartUpload`, one `UploadPart` per part (each signed
+ *   with its own SHA-256, which S3 checks), then `CompleteMultipartUpload`, when the object appears
+ *   whole. Only one part is held in memory. A body no larger than a part is one `PutObject`. The
+ *   body's whole SHA-256 is checked (`blobStreamChunks`) before the upload is completed; a body that
+ *   fails, is too large or has another SHA-256, or a part S3 refuses, aborts the upload
+ *   (`AbortMultipartUpload`): the key keeps its old object. A process that dies mid-upload leaves an
+ *   incomplete upload, invisible to `get` and `list`, that S3 keeps (and bills) until a lifecycle rule
+ *   aborts it: give the bucket one (`AbortIncompleteMultipartUpload`, a day). The most a stream takes
+ *   is `maxStreamBytes`, by default S3's 10,000 parts of `partBytes`.
+ * - **`getStream`** is one `GET` whose body is given as it arrives; `timeoutMs` bounds each read of
+ *   it, not the whole.
  *
  * Targets: `server` and `durable`: it uses only `secrets`, `fetch` and Web Crypto.
  */
@@ -36,11 +48,14 @@ import {
   type BlobEntry,
   type BlobStorage,
   type BlobStore,
+  BlobTooLargeError,
   blobKeyProblem,
   blobListLimit,
+  blobStreamChunks,
   checkBlobKey,
   checkBlobNamespace,
   checkBlobPut,
+  checkBlobPutStream,
 } from "@pikit/contracts";
 import Type from "typebox";
 import { type AwsCredentials, sha256Hex, signS3, uriEncode } from "./sigv4.ts";
@@ -49,6 +64,11 @@ export { type AwsCredentials, type S3SignableRequest, sha256Hex, signS3, uriEnco
 
 /** The metadata header the content type is kept in. */
 export const CONTENT_TYPE_META = "x-amz-meta-pikit-content-type";
+
+/** S3's smallest part (but the last) of a multipart upload. */
+export const S3_MIN_PART = 5 * 1024 * 1024;
+/** S3's most parts in one upload. */
+export const S3_MAX_PARTS = 10_000;
 
 const Config = Type.Object({
   /** The store's endpoint (`https://<account>.r2.cloudflarestorage.com`, `http://127.0.0.1:9000`); absent, AWS S3's in `region`. */
@@ -69,8 +89,12 @@ const Config = Type.Object({
   sessionTokenSecret: Type.String({ minLength: 1, default: "S3_SESSION_TOKEN" }),
   /** The largest value it keeps, in bytes: at least 25 MiB. Values are held whole in memory. */
   maxBytes: Type.Integer({ minimum: BLOB_MIN_MAX_BYTES, default: BLOB_MIN_MAX_BYTES }),
-  /** How long one request may take, its body included, in milliseconds. */
+  /** How long one request may take, its body included, in milliseconds (for `getStream`, each read of its body). */
   timeoutMs: Type.Integer({ minimum: 1, default: 60_000 }),
+  /** The size of each part of a multipart upload (`putStream`), in bytes: S3's least is 5 MiB, its most 5 GiB. One is held in memory. */
+  partBytes: Type.Integer({ minimum: S3_MIN_PART, maximum: 5 * 1024 ** 3, default: 16 * 1024 * 1024 }),
+  /** The largest value `putStream` sends, in bytes: at least `maxBytes`, at most 10,000 parts. Absent: 10,000 parts of `partBytes`. */
+  maxStreamBytes: Type.Optional(Type.Integer({ minimum: BLOB_MIN_MAX_BYTES })),
 });
 
 /** Where and as whom it talks to the bucket, from start to stop. */
@@ -96,6 +120,9 @@ export default defineComponent({
   setup(pikit, config) {
     const secrets = pikit.use("secrets");
     const prefix = normalizedPrefix(config.prefix);
+    const maxStreamBytes = config.maxStreamBytes ?? S3_MAX_PARTS * config.partBytes;
+    if (maxStreamBytes < config.maxBytes) throw new Error(`storage-blob-s3: maxStreamBytes (${maxStreamBytes}) is smaller than maxBytes (${config.maxBytes})`);
+    if (maxStreamBytes > S3_MAX_PARTS * config.partBytes) throw new Error(`storage-blob-s3: maxStreamBytes (${maxStreamBytes}) is more than ${S3_MAX_PARTS} parts of partBytes (${config.partBytes})`);
     let bucket: Bucket | undefined;
     const live = (): Bucket => {
       if (bucket === undefined) throw new Error("storage-blob-s3: storage.blob used while the app is not running");
@@ -111,7 +138,7 @@ export default defineComponent({
       const timeout = new AbortController();
       const timer = setTimeout(() => timeout.abort(), config.timeoutMs);
       try {
-        const response = await fetch(url, { method, headers, ...(method === "PUT" && { body }), signal: timeout.signal });
+        const response = await fetch(url, { method, headers, ...((method === "PUT" || method === "POST") && { body }), signal: timeout.signal });
         return await read(response);
       } catch (error) {
         if (timeout.signal.aborted) throw new Error(`storage-blob-s3: ${method} took longer than ${config.timeoutMs} ms`);
@@ -150,9 +177,145 @@ export default defineComponent({
               return undefined;
             }
             if (!response.ok) throw await refused(response, `the get of ${JSON.stringify(key)}`);
+            const size = Number(response.headers.get("content-length") ?? Number.NaN);
+            if (size > config.maxBytes) {
+              await response.body?.cancel();
+              throw new BlobTooLargeError(size, config.maxBytes);
+            }
             const contentType = response.headers.get(CONTENT_TYPE_META) ?? undefined;
             return { bytes: new Uint8Array(await response.arrayBuffer()), ...(contentType !== undefined && { contentType }) };
           });
+        },
+
+        async putStream(key, body, options) {
+          checkBlobPutStream(key, body, options);
+          const contentType = options?.contentType;
+          const read = blobStreamChunks(body, { maxStreamBytes, ...(options?.sha256 !== undefined && { sha256: options.sha256 }) });
+          const url = live().url(`${base}${key}`);
+          const meta: Record<string, string> = contentType === undefined ? {} : { "content-type": contentType, [CONTENT_TYPE_META]: contentType };
+          const part = new Uint8Array(config.partBytes);
+          let filled = 0;
+          let upload: { id: string; parts: string[] } | undefined;
+          /** Sends the part held as the next one, starting the upload at the first. */
+          const flush = async () => {
+            if (upload === undefined) {
+              const xml = await send("POST", `${url}?uploads`, async (response) => {
+                if (!response.ok) throw await refused(response, `the start of the upload of ${JSON.stringify(key)}`);
+                return await response.text();
+              }, { headers: meta });
+              const id = xmlText(xml, "UploadId");
+              if (id === undefined || id === "") throw new Error(`storage-blob-s3: S3 started the upload of ${JSON.stringify(key)} with no UploadId`);
+              upload = { id, parts: [] };
+            }
+            const current = upload;
+            const number = current.parts.length + 1;
+            const etag = await send("PUT", `${url}?partNumber=${number}&uploadId=${uriEncode(current.id)}`, async (response) => {
+              if (!response.ok) throw await refused(response, `part ${number} of ${JSON.stringify(key)}`);
+              await response.body?.cancel();
+              return response.headers.get("etag");
+            }, { body: part.subarray(0, filled) });
+            if (etag === null) throw new Error(`storage-blob-s3: S3 took part ${number} of ${JSON.stringify(key)} with no ETag`);
+            current.parts.push(etag);
+            filled = 0;
+          };
+          try {
+            for await (const chunk of read.chunks) {
+              for (let at = 0; at < chunk.byteLength; ) {
+                // A full part is sent only once more bytes come: a body of one part is one PutObject.
+                if (filled === part.byteLength) await flush();
+                const n = Math.min(part.byteLength - filled, chunk.byteLength - at);
+                part.set(chunk.subarray(at, at + n), filled);
+                filled += n;
+                at += n;
+              }
+            }
+            if (upload === undefined) {
+              await send("PUT", url, async (response) => {
+                if (!response.ok) throw await refused(response, `the put of ${JSON.stringify(key)}`);
+                await response.body?.cancel();
+              }, { body: part.subarray(0, filled), headers: meta });
+              return read.stored();
+            }
+            await flush();
+            const done = upload as { id: string; parts: string[] };
+            const xml = `<CompleteMultipartUpload>${done.parts.map((etag, i) => `<Part><PartNumber>${i + 1}</PartNumber><ETag>${escapeXml(etag)}</ETag></Part>`).join("")}</CompleteMultipartUpload>`;
+            await send("POST", `${url}?uploadId=${uriEncode(done.id)}`, async (response) => {
+              const text = await response.text();
+              // S3 may answer 200 and say in the body that it failed.
+              if (!response.ok || !text.includes("<CompleteMultipartUploadResult")) {
+                const code = /<Code>([^<]{1,100})<\/Code>/.exec(text)?.[1];
+                throw new Error(`storage-blob-s3: S3 refused the completion of the upload of ${JSON.stringify(key)} (HTTP ${response.status}${code === undefined ? "" : ` ${code}`})`);
+              }
+            }, { body: new Uint8Array(new TextEncoder().encode(xml)), headers: { "content-type": "application/xml" } });
+            upload = undefined;
+            return read.stored();
+          } catch (error) {
+            // Nothing visible was written: an upload begun is aborted (best effort; a lifecycle rule ends one that stays).
+            const begun = upload as { id: string } | undefined;
+            if (begun !== undefined) {
+              await send("DELETE", `${url}?uploadId=${uriEncode(begun.id)}`, async (response) => void (await response.body?.cancel())).catch(() => {});
+            }
+            throw error;
+          }
+        },
+
+        async getStream(key) {
+          checkBlobKey(key);
+          const target = live();
+          const url = target.url(`${base}${key}`);
+          const headers = await signS3({ method: "GET", url, headers: {}, payloadHash: EMPTY_SHA256, region: target.region, credentials: target.credentials, date: new Date() });
+          // Each wait (for the answer, then for each piece of its body) is bounded by timeoutMs.
+          const abort = new AbortController();
+          const bounded = async <T>(promise: Promise<T>, what: string): Promise<T> => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              return await Promise.race([
+                promise,
+                new Promise<never>((_, reject) => {
+                  timer = setTimeout(() => {
+                    abort.abort();
+                    reject(new Error(`storage-blob-s3: ${what} took longer than ${config.timeoutMs} ms`));
+                  }, config.timeoutMs);
+                }),
+              ]);
+            } finally {
+              clearTimeout(timer);
+            }
+          };
+          const response = await bounded(fetch(url, { method: "GET", headers, signal: abort.signal }), "GET");
+          if (response.status === 404) {
+            await response.body?.cancel();
+            return undefined;
+          }
+          if (!response.ok) throw await refused(response, `the get of ${JSON.stringify(key)}`);
+          const size = Number(response.headers.get("content-length") ?? Number.NaN);
+          if (!Number.isSafeInteger(size) || size < 0) {
+            await response.body?.cancel();
+            throw new Error(`storage-blob-s3: S3 gave ${JSON.stringify(key)} with no Content-Length`);
+          }
+          const contentType = response.headers.get(CONTENT_TYPE_META) ?? undefined;
+          const reader = (response.body ?? new ReadableStream<Uint8Array>()).getReader();
+          let received = 0;
+          const stream = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              try {
+                const { done, value } = await bounded(reader.read(), "a read of a GET's body");
+                if (done) {
+                  if (received !== size) throw new Error(`storage-blob-s3: ${JSON.stringify(key)} ended after ${received} of its ${size} bytes`);
+                  return controller.close();
+                }
+                received += value.byteLength;
+                controller.enqueue(value);
+              } catch (error) {
+                controller.error(error);
+                await reader.cancel().catch(() => {});
+              }
+            },
+            async cancel(reason) {
+              await reader.cancel(reason).catch(() => {});
+            },
+          });
+          return { body: stream, size, ...(contentType !== undefined && { contentType }) };
         },
 
         async delete(key) {
@@ -189,6 +352,7 @@ export default defineComponent({
 
     const storage: BlobStorage = {
       maxBytes: config.maxBytes,
+      maxStreamBytes,
       namespace(name) {
         checkBlobNamespace(name);
         return store(name);
@@ -233,6 +397,13 @@ export default defineComponent({
     };
   },
 });
+
+/** The hex SHA-256 of nothing: a GET's payload. */
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+function escapeXml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 
 /** The text of the first `<tag>` in `xml`, its entities decoded. */
 function xmlText(xml: string, tag: string): string | undefined {
