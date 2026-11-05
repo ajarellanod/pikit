@@ -156,8 +156,10 @@ answering with its own credential (stored, logged in, or from its own variable),
 provider's; the provider sent the request and the transcript as its own; a chain moving from a
 rate-limited account to the next; refused credentials cooling only that account; and the refusals.
 In the pikit repository, `packages/cli/src/commands/configure-accounts.test.ts` runs
-`pikit configure --login` on an account and finds the login stored under its id. No test runs an
-account against a real provider's API (a ChatGPT login through `openai-2`, say).
+`pikit configure --login` on an account and finds the login stored under its id, and the workerd lane
+(`tests/workerd/test/provider-failover-accounts.workerd.ts`) a chain from a rate-limited Anthropic key
+to an account's own (a Worker secret), through pi-ai's real SDK. No test runs a login through an
+account against a real API (a ChatGPT login of an account of `openai`, say).
 
 `component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
 the test "what setup declares" pins it.
