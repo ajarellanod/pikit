@@ -72,7 +72,7 @@ designer`). Every new VM of that agent starts from it (`from`), copy-on-write.
 
 ## How a VM is keyed
 
-As execution-gondolin's sandboxes ([agent sandboxes](https://github.com/ajarellanod/pikit/blob/main/features/agent-sandboxes.md)): **by
+As execution-gondolin's sandboxes ([features/agent-sandboxes.md](https://github.com/ajarellanod/pikit/blob/main/features/agent-sandboxes.md)): **by
 chat and agent**. The chat is `originOf(ref).key`; behind execution-serve, the sandbox
 (`execution-serve:<id>`), and execution-remote already chooses one sandbox per chat and agent. So a
 reset and a delegated child of the same agent find the same VM; another chat or agent gets its own.
