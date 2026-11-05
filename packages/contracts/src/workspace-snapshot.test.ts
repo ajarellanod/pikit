@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BlobStore } from "./blob.ts";
+import { BlobChecksumError, type BlobStore } from "./blob.ts";
 import { linkStaysInside, writeSnapshotArchive } from "./snapshots.ts";
 import { createMemoryBlobStorage } from "./testing/index.ts";
 import {
@@ -89,10 +89,16 @@ function tar(entries: Entry[], options: { end?: Uint8Array | false } = {}): Uint
 const gzip = (bytes: Uint8Array) => Bun.gzipSync(bytes as Uint8Array<ArrayBuffer>);
 const sha256 = (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 
+/** The check's verdict on `bytes`, the same whether they come in pieces (as a stream does) or whole. */
 async function check(bytes: Uint8Array, options: Parameters<typeof checkSnapshotArchive>[1] = {}): Promise<string> {
+  const pieces = await verdict(bytes, options, 333);
+  expect(await verdict(bytes, options, bytes.length)).toBe(pieces);
+  return pieces;
+}
+
+async function verdict(bytes: Uint8Array, options: Parameters<typeof checkSnapshotArchive>[1], piece: number): Promise<string> {
   const checked = checkSnapshotArchive((async function* () {
-    // In pieces, as a stream comes.
-    for (let at = 0; at < bytes.length; at += 333) yield bytes.subarray(at, at + 333);
+    for (let at = 0; at < bytes.length; at += piece) yield bytes.subarray(at, at + piece);
   })(), options);
   try {
     let size = 0;
@@ -160,6 +166,13 @@ describe("the archive check", () => {
     const smuggled = new Uint8Array(1024);
     smuggled.set(header({ name: "evil", content: "" }, 0), 512);
     expect(await check(gzip(tar([{ name: "a", content: "x" }], { end: new Uint8Array([...new Uint8Array(512), ...smuggled]) })))).toMatch(/^refused: .*after its end-of-archive/);
+    // Found only as the gunzip ends, after every chunk was passed on (its CRC): still refused.
+    const crc = gzip(tar([{ name: "a", content: "x" }]));
+    crc[crc.length - 8] = (crc[crc.length - 8] as number) ^ 0xff;
+    expect(await check(crc)).toMatch(/^refused: .*not gzip/);
+    // Its tar whole, its gzip cut before the trailer: refused as the gunzip closes.
+    const cut = gzip(tar([{ name: "a", content: "x" }]));
+    expect(await check(cut.subarray(0, cut.length - 8))).toMatch(/^refused: .*not gzip/);
     expect(await check(encoder.encode("not gzip at all"))).toMatch(/^refused: .*not gzip/);
     expect(await check(gzip(whole), { maxBytes: 10 })).toMatch(/^refused: .*larger than 10 bytes/);
     expect(await check(gzip(whole), { maxUnpackedBytes: 1024 })).toMatch(/^refused: .*unpacks to more than 1024/);
@@ -254,9 +267,11 @@ describe("a snapshot made elsewhere", () => {
       ["another SHA-256", new Blob([archive as Uint8Array<ArrayBuffer>]).stream() as unknown as AsyncIterable<Uint8Array>, "0".repeat(64)],
     ];
     for (const [what, body, sha] of bodies) {
-      const { store } = recorded();
-      await expect(putSnapshotArchive(store, { id, agent: "dev", createdAt: 1, sha256: sha, body }), what).rejects.toThrow();
+      const { store, log } = recorded();
+      // The provider refuses another SHA-256 itself (`BlobChecksumError`): no value ever stored, none to delete.
+      await expect(putSnapshotArchive(store, { id, agent: "dev", createdAt: 1, sha256: sha, body }), what).rejects.toThrow(what === "another SHA-256" ? BlobChecksumError : Error);
       expect((await store.list("")).entries, what).toEqual([]);
+      expect(log.filter((entry) => !entry.startsWith("putStream ")), what).toEqual([]);
     }
   });
 

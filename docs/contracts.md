@@ -623,7 +623,9 @@ with the same helpers (`checkBlobNamespace`, `checkBlobPut`, `checkBlobPutStream
 `blobListLimit`) and reads a stream through `blobStreamChunks` (copy, count, hash with
 `createBlobHash` or a faster one, refuse). A format several components share names its own namespace:
 `workspace-snapshots` ([workspace snapshots](../features/workspace-snapshots.md): `snapshotId`,
-`snapshotArchiveKey`, `parseSnapshotManifest` in `@pikit/contracts`; the server's directories in
+`snapshotArchiveKey`, `parseSnapshotManifest`, and for an archive made in a container or a VM its
+entries checked as they stream, `checkSnapshotArchive`, `putSnapshotArchive`, `readSnapshotArchive`, in
+`@pikit/contracts`, every backend's one implementation; the server's directories in
 `@pikit/contracts/snapshots`, server only).
 
 Providers: storage-blob-fs (a directory, one per namespace, atomic rename, server) and

@@ -68,17 +68,26 @@ line names its area.
   one more host. One Durable Object and container per sandbox id and agent, the image, instance and
   internet per agent (wrangler's named `images`), every container call under its own deadline, the
   workspace saved to `storage.blob` in the shared snapshot format after 10 idle minutes and restored
-  on the first operation of a new container (archives checked: nothing outside the root). Never given
-  secrets (a profile with `secrets` is refused). `registry validate` allows the shared
-  `workspace-snapshots` namespace (`SHARED_NAMESPACES`).
+  on the first operation of a new container (archives checked: nothing outside the root), streamed
+  from the container to `putStream` and back (up to `maxStreamBytes`; the archive never whole in the
+  object's memory). Never given secrets (a profile with `secrets` is refused). `registry validate`
+  allows the shared `workspace-snapshots` namespace (`SHARED_NAMESPACES`).
 - execution-boat ([features/sandboxed-execution.md](features/sandboxed-execution.md)), new on
   `server`: a sandbox host's `workspace` on boat.dev VMs, one per chat and agent, with a size and a
   saved-snapshot template per agent. Idle VMs are stopped after 10 minutes (never during a command
   or a process a command left), resumed on use, deleted after `retentionDays`; at most `maxVms` up.
   With `snapshots`, workspaces go to `storage.blob` in the shared snapshot format (namespace
-  `workspace-snapshots`, `registry validate` allows it) and come back from it. No secrets in a VM
+  `workspace-snapshots`, `registry validate` allows it) and come back from it, streamed between boat's
+  signed URLs and `putStream`/`getStream` (up to `maxStreamBytes`). No secrets in a VM
   (`noEnv`; `secrets` and `allowedHosts` refused: boat cannot restrict egress); the API key is the
   gateway's own `BOAT_API_KEY`.
+- The workspace snapshot format has one implementation for every backend (`@pikit/contracts`'
+  `workspace-snapshot.ts`): the archive's entries checked as they stream (`SnapshotTarCheck`,
+  `checkSnapshotArchive`, the server restore's rules), and the steps of a backend whose archive is
+  made in a container or a VM (`putSnapshotArchive`, `commitSnapshotManifest`, `readSnapshotArchive`);
+  execution-cloudflare-sandbox and execution-boat dropped their own copies. A repository test
+  (`tests/acceptance/workspace-snapshots.test.ts`) moves one workspace between the server helper,
+  Cloudflare and boat, byte for byte.
 - extension-tracing ([features/tracing.md](features/tracing.md)), new on both targets: agents
   naming `tracing` export their run, model-request and tool-call spans to Langfuse or an OTLP/HTTP
   JSON collector. Credentials come from named secrets; content is off by default, redacted and capped

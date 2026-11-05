@@ -58,7 +58,17 @@ In `storage.blob` namespace `workspace-snapshots`, keys under `<sha256 hex of "<
 - Exported for every backend from `@pikit/contracts` (neutral, Web Crypto): `SNAPSHOT_NAMESPACE`,
   `SNAPSHOT_MANIFEST`, `SNAPSHOT_VERSION`, `SNAPSHOT_CONTENT_TYPE`, `snapshotId`, `snapshotArchiveKey`,
   `parseSnapshotArchiveKey`, `snapshotManifestKey`, `snapshotManifestJson`, `parseSnapshotManifest`,
-  `openSnapshotStore`, `deleteSupersededSnapshots`, `deleteSnapshotsBefore`.
+  `openSnapshotStore`, `deleteSupersededSnapshots`, `deleteSnapshotsBefore`; for a backend whose
+  archive is made in a container or a VM, the entries checked as they stream (`SnapshotTarCheck`,
+  `checkSnapshotArchive`, `snapshotLinkStaysInside`: the server restore's rules, strict wherever a tar
+  program could read an entry otherwise) and its steps (`putSnapshotArchive`, `commitSnapshotManifest`,
+  `readSnapshotArchive`).
+- **One implementation**: every backend uses these (the server helper, execution-cloudflare-sandbox,
+  execution-boat); none has a copy of its own. Behind a sandbox host all key a workspace by
+  execution-serve's chat key and agent (`execution-serve:<sandbox>`, the agent or `_<sandbox>`), so
+  they compute one id. `tests/acceptance/workspace-snapshots.test.ts` proves it: a workspace the server
+  helper checkpointed is restored by Cloudflare's and boat's restore, what each checkpoints then by the
+  server's, byte for byte, and another agent's manifest is refused by all three.
 
 ### The flow, as built
 ```
