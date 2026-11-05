@@ -124,48 +124,67 @@ work in Cloudflare containers. Routing happens on the client; this host takes an
 - **Idle checkpoint.** Each operation pushes the object's alarm to `idleMinutes` ahead, at most every
   30 s. When the alarm fires, no operation has come since and no command runs:
   1. the helper lists what a snapshot keeps (`snapshot-list`): directories, regular files, and
-     symlinks that point inside. Anything else is left out, and the log names it;
-  2. GNU tar archives that list in the container (`tar -czf - --no-recursion --null -T -`). The archive
-     streams to the object and stops past `maxBytes`;
-  3. the archive is checked as a restore would check it (`tar.ts`) and written (`snapshot.ts`, below);
+     symlinks that stay inside by the format's rule (relative, `..` only leading, no higher than the
+     link's directory). Anything else is left out, and the log names it;
+  2. the helper archives that list (`snapshot-make`: GNU tar, `--format=pax --no-recursion --null -T
+     -`, gzip'd by Node into `<root>.snapshot.tar.gz`, one gzip member whatever tar pads), hashing it
+     as it writes. It stops past `storage.blob`'s `maxStreamBytes`;
+  3. the object streams that file from `cat`'s output into `putStream` at the key its SHA-256 names,
+     checked on the way as a restore would check it (`putSnapshotArchive`); the provider checks the
+     SHA-256 (S3 multipart for storage-blob-s3). Then the manifest, read back (`commitSnapshotManifest`),
+     then the superseded archives deleted;
   4. only then is the container destroyed. The platform's own inactivity timeout, `idleMinutes +
      backstopMinutes`, is the backstop.
 - **Restore.** The first operation of an object whose container is new reads the chat and agent's
-  manifest, then the archive. It checks the size, the SHA-256 and every entry. Only then does it
-  extract into `<root>.restore`, an empty directory, and move its entries into the root (entry by
-  entry: overlayfs cannot rename the image's own `/workspace`, a finding of the Docker run below). A container still
-  running (the object was evicted, its container was not) is used as it is: its disk is the truth.
+  manifest, then streams its archive from `getStream` into `<root>.restore.tar.gz` in the container
+  (`snapshot-receive`), checking the size, the SHA-256 and every entry on the way
+  (`readSnapshotArchive`). Only once all of it held does `tar -x` extract it into `<root>.restore`, an
+  empty directory, whose entries move into the root (entry by entry: overlayfs cannot rename the
+  image's own `/workspace`, a finding of the Docker run below). A container still running (the object
+  was evicted, its container was not) is used as it is: its disk is the truth.
 
 ## Snapshots (the shared format)
 
-Other backends read and write the same format, so one restores what another saved.
+Other backends read and write the same format, so one restores what another saved. It has one
+implementation, `@pikit/contracts`' `workspace-snapshot.ts`, which this component uses for everything
+the format defines: the namespace, the id and keys, the manifest and its checks, the archive's entry
+check, the order of the writes, the deletion of superseded archives. Only how the archive is made and
+extracted in the container is this component's (the helper, `tar`).
 
 - `storage.blob` namespace `workspace-snapshots`: shared by design, not this component's name.
   `registry validate` allows that one shared name (`SHARED_NAMESPACES` in `checks.ts`).
-- Keys under `<hex SHA-256 of "<chat key>\n<agent>">/`. Here the chat key is execution-serve's
+- Keys under `<id>/`, `snapshotId` of the chat key and agent. Here the chat key is execution-serve's
   `execution-serve:<sandbox>`, and the agent is the header's, or `_<sandbox>` without one, as
-  execution-serve's `ConversationRef` has it.
-- The archive, `snapshot-<createdAt ms>-<first 16 hex of its SHA-256>.tar.gz`: a gzip'd POSIX tar of
+  execution-serve's `ConversationRef` has it: the same id execution-gondolin, workspace-local and
+  execution-boat compute for that sandbox behind execution-serve, so a workspace moves between them
+  (`tests/acceptance/workspace-snapshots.test.ts`).
+- The archive, `snapshot-<createdAt ms>-<first 16 hex of its SHA-256>.tar.gz`: a gzip'd pax tar of
   the root's contents, with relative paths only.
 - Then, written last, `manifest.json`: `{ "version": 1, "object": "<archive key>", "sha256": "<hex>",
-  "size": <bytes>, "createdAt": <ms>, "agent": "<agent>" }`. The archive is uploaded first, and the
-  bucket must list it at its size before the manifest points at it.
+  "size": <bytes>, "createdAt": <ms>, "agent": "<agent>" }`, once the archive is whole in the bucket
+  (`putStream` resolved, its size and SHA-256 the check's), and read back.
 - The superseded archives are deleted only after the new manifest is written.
 - **Refused on restore**, and the sandbox stays `unavailable` until the snapshot is fixed or
   removed:
-  - a manifest of another version, for another agent, or naming an object outside its prefix, or one
-    whose name does not carry its SHA-256;
+  - a manifest of another version, for another agent, or naming an object outside its id, or one
+    whose name does not carry its time and SHA-256;
   - a size or SHA-256 that does not match;
-  - an absolute path, a `..`, an entry below a symlink of the archive, a symlink leaving the root, a
-    hard link, a device or FIFO, a bad header checksum, a truncated archive, or more than
-    `maxUnpackedBytes` unpacked.
+  - by the shared entry check (`SnapshotTarCheck`, the server restore's rules): an absolute path, a
+    `..`, an entry below a symlink of the archive, a symlink leaving the root, two entries at one
+    path, a hard link, a device or FIFO, a sparse file, a bad header checksum, a truncated archive,
+    bytes after its end, or more than `maxUnpackedBytes` unpacked.
 
-  The archive is never half-extracted.
-- **Whole values today.** `storage.blob` takes values up to its provider's `maxBytes`, 25 MiB by
-  default. An archive over that is not saved: the log says so, the container is kept until the
-  backstop, and its files are lost then. `putArchive` (`snapshot.ts`) is the only upload, kept apart
-  so a streaming or multipart helper can replace it. Cloudflare's own `createBackup` and
-  `DirectoryBackup` (R2 only, a format of their own) are not used.
+  The archive is never half-extracted: nothing is extracted before every byte was checked.
+- **Size.** The largest archive is `storage.blob`'s `maxStreamBytes` (storage-blob-s3: S3's
+  multipart limit), not its `maxBytes`: the archive streams from the container's output to the bucket
+  and back, never whole in the object's memory (a gunzip window, the paths seen and the provider's
+  part, 16 MiB for storage-blob-s3). An archive over it is not saved: the log says so, the container is
+  kept until the backstop, and its files are lost then. The container's disk holds the archive beside
+  the workspace while it is made or received. What bounds a large one is time: `snapshotSeconds` (at
+  most 840), and the object's CPU, since its SHA-256 is plain JavaScript (`createBlobHash`, about 160
+  MB/s in Bun) on upload (the provider's) and on restore (the check's), with the gunzip of the check:
+  a few seconds a GB, within a Worker's CPU limit (`limits.cpu_ms`, 30 s by default, up to 5 min).
+  Cloudflare's own `createBackup` and `DirectoryBackup` (R2 only, a format of their own) are not used.
 
 ## Credentials (SPEC C7): none, by decision
 
@@ -215,8 +234,8 @@ deploy, with Docker.
   is its own: it was lost when the container stopped. That is why snapshots exist.
 - **Commands and readers live in the object's memory.** An evicted object forgets them (`unknown`
   for a command being read). Its container may still run, and its files stay.
-- **A file is read whole** (`readTextFile`, `readBinaryFile`), and an archive is held whole in the
-  object (128 MB of memory).
+- **A file is read whole** (`readTextFile`, `readBinaryFile`) in the object (128 MB of memory); a
+  snapshot's archive is not (it streams, above).
 - **No network policy beyond `internet`**: no per-host allow list (`interceptOutboundHttp` is not
   used).
 - **Per object:** 16 running commands and 64 open readers (`429`).
@@ -240,18 +259,20 @@ Copied with the component:
   - an image that is not configured;
   - a container that never answers, at its start and at a file operation, within the deadlines;
   - the idle checkpoint in the exact format (fields in order, keys, SHA-256, size), the container
-    released, and the restore into a new container (a symlink outside left out, a directory kept);
+    released, and the restore into a new container (symlinks outside, or with `..` after a name,
+    left out; a directory kept);
   - a superseded archive deleted; an evicted object's running container used as it is;
   - no checkpoint while a command runs or after a recent request;
-  - an archive over `maxBytes` skipped with the container kept; a failed upload kept, then retried;
+  - an archive over `maxBytes` streamed out (`putStream`) and back (`getStream`; `get` refuses it);
+    one over `maxStreamBytes` skipped with the container kept;
+  - an upload that fails partway: the container kept, no value, no manifest, then retried; the
+    archive whole before the manifest; an archive the check refuses on its way never named;
   - a snapshot another backend wrote restored;
   - archives leaving the root refused (`..`, absolute, a symlink outside, below a symlink, a hard
     link), with nothing extracted;
   - a size, agent or version mismatch, and a valid archive under another's SHA-256, refused.
-- `snapshot.test.ts` covers the order of the writes (archive, manifest, then deletions), an upload
-  the bucket does not list at its size, each manifest refusal, and each archive refusal. That includes
-  a FIFO, a bad checksum, a truncated archive, gzip that is not, a zip bomb, and zeros a tar padded
-  its gzip with.
+- The format's own cases (each manifest refusal, each archive refusal, the order of the writes, a body
+  that fails partway) are `@pikit/contracts`' `workspace-snapshot.test.ts`, the one implementation's.
 - `execution-cloudflare-sandbox.test.ts` covers:
   - what setup declares;
   - the route: forwarding per sandbox and agent, failures mapped to their status, the token first,
@@ -272,15 +293,20 @@ In the registry:
     `SANDBOX` namespace;
   - the object's App in a real Durable Object: its identity and alarm in real storage, and a
     container that never answers;
-  - the snapshot format through workerd's Web APIs.
+  - the shared snapshot format through workerd's Web APIs (an archive past `maxBytes` streamed and
+    checked into the bucket, read back checked, one leaving the root refused and not stored).
 
   The lane cannot run containers, so its container is a double.
+- `tests/acceptance/workspace-snapshots.test.ts` moves one workspace between the server helper, this
+  host's restore and checkpoint (over the fake container) and execution-boat's, byte for byte, checks
+  the three compute one id, and that another agent's manifest is refused by all.
 
 **Mutation-checked**: each of these was broken in turn, a test failed, and the code was restored:
 - the token check;
 - the `..`, symlink-outside and below-a-symlink refusals;
 - the SHA-256 check and the manifest's agent check;
-- the archive uploaded before the manifest, the upload verified at its size, the current archive
+- the archive uploaded before the manifest (a manifest first, an upload failing partway), the
+  extraction only after the check ended, the helper's link rule, the chat key, the current archive
   kept;
 - the container released only after the upload;
 - the Worker's and the start's deadlines;
@@ -291,8 +317,9 @@ In the registry:
 
 - `docker.test.ts` is opt-in (`PIKIT_DOCKER_IMAGE`, the base image built for linux/amd64). It runs
   the object's logic against the real image through `docker exec`: Alpine, Node, GNU tar, `uname -m`
-  x86_64, no network. It covers a checkpoint and a restore into a new container. It found that
-  overlayfs refuses renaming the image's own `/workspace`, hence the entry-by-entry move.
+  x86_64, no network. It covers a checkpoint (GNU tar's pax archive, through the shared check) and a
+  restore into a new container. It found that overlayfs refuses renaming the image's own
+  `/workspace`, hence the entry-by-entry move. Run again 2026-11-05 with the streamed archives.
 
 **Checked by hand** (2026-11-05): `wrangler deploy --dry-run` (wrangler 4.143) of a Worker exporting
 `createSandboxClass`, with this container config. It built both images for linux/amd64 (designer
