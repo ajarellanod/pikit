@@ -9,7 +9,7 @@
  *   (`open`); after it, `cwd` is known and every path is resolved here (`paths.ts`), so
  *   `absolutePath` and `joinPath` cost no request. Before it, reading `cwd` throws: `workspace`
  *   resolves an environment opened already.
- * - **`id`** is `execution-remote:<endpoint>#<sandbox>`: each sandbox is its own file namespace.
+ * - **`id`** is `execution-remote:<url of its host>#<sandbox>`: each sandbox is its own file namespace.
  * - **`agent`**, when given, goes with every request (`Pikit-Agent`): the host resolves the sandbox for it.
  * - **Readers.** `openBinaryReader` brings a file of up to 1 MiB whole in its answer and serves it from
  *   memory (the file as it was opened, through a rename, as Node's does); a larger one stays open on

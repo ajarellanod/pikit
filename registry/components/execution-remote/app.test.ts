@@ -44,7 +44,7 @@ async function startClient(wrap: (components: ReturnType<typeof defineComponent>
   });
   const app = await defineApp({
     components: [secretsOf({ PIKIT_SANDBOX_TOKEN: TOKEN }), ...wrap([executionRemote]), reader],
-    config: { "execution-remote": { endpoint: on.url.origin } },
+    config: { "execution-remote": { hosts: { general: { url: on.url.origin } } } },
     logger: silentLogger,
   }).create();
   await app.start();
@@ -253,7 +253,7 @@ test("a host that refuses the token: the client's operations fail as permission_
         },
       }),
     ],
-    config: { "execution-remote": { endpoint: host.url.origin } },
+    config: { "execution-remote": { hosts: { general: { url: host.url.origin } } } },
     logger: silentLogger,
   }).create();
   await reading.start();
@@ -265,6 +265,52 @@ test("a host that refuses the token: the client's operations fail as permission_
     await expect((workspace as WorkspaceProvider).resolve(conversation("refused"), ctx)).rejects.toThrow("unauthorized");
   } finally {
     await reading.stop();
+  }
+});
+
+test("two real hosts, each with its own token: an agent's files are on its host's disk only, a delegated child of another agent's on that agent's host, execution's own on the default host", async () => {
+  const RENDER = "sandbox-token-of-the-render-host-abcdef";
+  const render = await startSandboxHost({ token: RENDER });
+  let workspace: Handle<WorkspaceProvider> | undefined;
+  let execution: Handle<ExecutionEnv> | undefined;
+  const reader = defineComponent({
+    name: "reader-test",
+    setup(pikit) {
+      workspace = pikit.use("workspace");
+      execution = pikit.use("execution.shell");
+    },
+  });
+  const app = await defineApp({
+    components: [secretsOf({ PIKIT_SANDBOX_TOKEN: TOKEN, PIKIT_SANDBOX_RENDER_TOKEN: RENDER }), executionRemote, reader],
+    config: {
+      "execution-remote": {
+        hosts: { general: { url: host.url.origin }, render: { url: render.url.origin, tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" } },
+        defaultHost: "general",
+        agents: { designer: "render" },
+      },
+    },
+    logger: silentLogger,
+  }).create();
+  await app.start();
+  try {
+    const origin = { ...conversation("two-hosts", "trader"), channel: "telegram" };
+    const trader = (await (workspace as Handle<WorkspaceProvider>).get().resolve(origin, ctx)).env;
+    const designer = (await (workspace as Handle<WorkspaceProvider>).get().resolve({ key: "delegate:1:trader:t-1", agent: "designer", conversationId: "c-child", channel: "delegate", origin }, ctx)).env;
+    expect(await trader.writeFile("trader.txt", "t", ctx)).toMatchObject({ ok: true });
+    expect(await designer.writeFile("designer.txt", "d", ctx)).toMatchObject({ ok: true });
+    expect(await (execution as Handle<ExecutionEnv>).get().writeFile("shared.txt", "s", ctx)).toMatchObject({ ok: true });
+
+    const traderSandbox = `remote-${await keySandbox("two-hosts", "trader")}`;
+    const designerSandbox = `remote-${await keySandbox("two-hosts", "designer")}`;
+    expect(readFileSync(join(host.root, "sandboxes", traderSandbox, "trader", "trader.txt"), "utf8")).toBe("t");
+    expect(readFileSync(join(render.root, "sandboxes", designerSandbox, "designer", "designer.txt"), "utf8")).toBe("d");
+    expect(existsSync(join(host.root, "sandboxes", designerSandbox))).toBe(false);
+    expect(existsSync(join(render.root, "sandboxes", traderSandbox))).toBe(false);
+    expect(existsSync(join(host.root, "sandboxes", "remote-shared", "_shared", "shared.txt"))).toBe(true);
+    expect(existsSync(join(render.root, "sandboxes", "remote-shared"))).toBe(false);
+  } finally {
+    await app.stop();
+    await render.stop();
   }
 });
 

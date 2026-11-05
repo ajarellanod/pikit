@@ -5,7 +5,9 @@
  * each case in an object of its own (`execution`'s sandbox `o-<object id>`); pi-durable's own tools
  * through the `tool-*` components; the sandbox kept across a new App on the same object (an
  * eviction); two agents of one object in two sandboxes, each found again by a reset of the chat and by
- * a delegated child of the same agent; the Worker's App refused.
+ * a delegated child of the same agent; two agents of one object on two hosts (`general`, the default,
+ * and `render`, each its own process and token), each found again on its host by a reset in a new App;
+ * the Worker's App refused.
  */
 
 import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
@@ -21,10 +23,20 @@ import toolEdit from "../../../registry/components/tool-edit/files/src/pikit/too
 import toolRead from "../../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
 import toolWrite from "../../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
 import { inObject, objectHost } from "./host.ts";
-import { SANDBOX_HOST, SANDBOX_TOKEN } from "./sandbox-host.ts";
+import { RENDER_SANDBOX_HOST, RENDER_SANDBOX_TOKEN, SANDBOX_HOST, SANDBOX_TOKEN } from "./sandbox-host.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const ENDPOINT = `https://${SANDBOX_HOST}`;
+const RENDER_ENDPOINT = `https://${RENDER_SANDBOX_HOST}`;
+/** Two hosts: `general` (the default) and `render`, the designer's. */
+const CONFIG = {
+  "execution-remote": {
+    hosts: { general: { url: ENDPOINT }, render: { url: RENDER_ENDPOINT, tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" } },
+    defaultHost: "general",
+    agents: { designer: "render" },
+  },
+};
+const SECRETS = { PIKIT_SANDBOX_TOKEN: SANDBOX_TOKEN, PIKIT_SANDBOX_RENDER_TOKEN: RENDER_SANDBOX_TOKEN };
 
 function secrets(values: Record<string, string>) {
   const store: SecretStore = { get: async (name) => values[name] };
@@ -55,8 +67,8 @@ async function started(host: WorkersHost, components: ReturnType<typeof defineCo
     },
   });
   const app: App = await defineApp({
-    components: [secrets({ PIKIT_SANDBOX_TOKEN: SANDBOX_TOKEN }), executionRemote, ...components, reader],
-    config: { "execution-remote": { endpoint: ENDPOINT } },
+    components: [secrets(SECRETS), executionRemote, ...components, reader],
+    config: CONFIG,
     logger: silentLogger,
   }).create();
   await app.start(withContextValue(WORKERS_HOST, host, ctx));
@@ -135,10 +147,40 @@ it("two agents of one object (a delegated child of another agent) work in two sa
     await next.app.stop();
   }));
 
+it("two agents of one object reach two hosts: the designer's sandbox on render, the developer's and execution's own on the default host, each found again there by a reset in a new App", () =>
+  inObject(async (host) => {
+    const { app, workspace, env: execution } = await started(host);
+    const objectId = host.object?.id as string;
+    const origin = { key: "telegram:2", agent: "developer", conversationId: "c-1", channel: "telegram" };
+    const developer = (await workspace.resolve(origin, ctx)).env;
+    const designer = (await workspace.resolve({ key: "delegate:1:developer:t-1", agent: "designer", conversationId: "c-2", channel: "delegate", origin }, ctx)).env;
+    await designer.writeFile("frame.txt", "designer's", ctx);
+
+    const designerSandbox = `o-${await sha256Hex(`${objectId}\ndesigner`)}`;
+    expect(designer.id).toBe(`execution-remote:${RENDER_ENDPOINT}#${designerSandbox}`);
+    expect(developer.id).toBe(`execution-remote:${ENDPOINT}#o-${await sha256Hex(`${objectId}\ndeveloper`)}`);
+    expect(execution.id).toBe(`execution-remote:${ENDPOINT}#o-${objectId}`);
+    // Each host its own process and directory (`<root>/sandboxes/remote-<sandbox>/<agent>`): two roots.
+    const root = (cwd: string) => cwd.slice(0, cwd.indexOf("/sandboxes/"));
+    expect(root(designer.cwd)).not.toBe(root(developer.cwd));
+    expect(root(developer.cwd)).toBe(root(execution.cwd));
+    expect(designer.cwd.endsWith(`/remote-${designerSandbox}/designer`)).toBe(true);
+    const renderRoot = root(designer.cwd);
+    await app.stop();
+
+    // A reset of the chat in a new App: the designer's file is on render, where it is routed again.
+    const next = await started(host);
+    const reset = (await next.workspace.resolve({ key: "telegram:2", agent: "designer", conversationId: "c-3", channel: "telegram" }, ctx)).env;
+    expect(reset.id).toBe(`execution-remote:${RENDER_ENDPOINT}#${designerSandbox}`);
+    expect(root(reset.cwd)).toBe(renderRoot);
+    expect(await reset.readTextFile("frame.txt", ctx)).toEqual({ ok: true, value: "designer's" });
+    await next.app.stop();
+  }));
+
 it("it refuses to start in the Worker's App, which has no object", async () => {
   const app = await defineApp({
-    components: [secrets({ PIKIT_SANDBOX_TOKEN: SANDBOX_TOKEN }), ...withWorkersHost({ env: {} }, [executionRemote])],
-    config: { "execution-remote": { endpoint: ENDPOINT } },
+    components: [secrets(SECRETS), ...withWorkersHost({ env: {} }, [executionRemote])],
+    config: CONFIG,
     logger: silentLogger,
   }).create();
   const error = await app.start().then(

@@ -55,7 +55,7 @@ of that agent. An agentless sandbox's agent is `_<sandbox id>`, a directory of i
 Deploy it like any server project (`pikit up`: deployment-docker publishes the port on
 `127.0.0.1` only). Clients require `https://`, so put TLS in front: `expose-cloudflare-tunnel` (no
 open port), or a reverse proxy. The clients' config is then
-`"execution-remote": { endpoint: "https://sandbox.example.com" }` with the same `PIKIT_SANDBOX_TOKEN`
+`"execution-remote": { hosts: { general: { url: "https://sandbox.example.com" } } }` with the same `PIKIT_SANDBOX_TOKEN`
 (execution-remote's README).
 
 ## What it does

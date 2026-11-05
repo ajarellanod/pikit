@@ -3,7 +3,7 @@
   "name": "execution-remote",
   "version": "0.0.1",
   "title": "Remote sandbox: your agent's files and shell in a sandbox on another machine (execution-serve)",
-  "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per chat and agent, from a server or a Cloudflare Durable Object.",
+  "description": "The agent's files and a real shell in a sandbox of a host running execution-serve, over HTTP: one sandbox per chat and agent, from a server or a Cloudflare Durable Object; several hosts, each agent routed to its own.",
   "targets": [
     "server",
     "durable"
@@ -40,7 +40,7 @@
       "name": "PIKIT_SANDBOX_TOKEN",
       "secret": true,
       "required": true,
-      "description": "The sandbox host's token, the same value as the host's (execution-serve); at least 32 characters (for example `openssl rand -hex 32`). Sent only to `endpoint`; never reaches a sandbox."
+      "description": "The sandbox host's token, the same value as the host's (execution-serve); at least 32 characters (for example `openssl rand -hex 32`). The default `tokenSecret` of a host in `hosts`; each further host names a secret of its own. Sent only to its host; never reaches a sandbox."
     }
   ]
 }

@@ -211,8 +211,53 @@ and execution-serve's own.
   `Pikit-Agent` and get its machine: the token is the fleet's, as the bucket is celld's. Readers and
   commands are scoped by sandbox and agent, so two agents never share one.
 
+## Several sandbox hosts (built 2026-11-05)
+Agents run on machines fitted to them: a host `general` (a small machine: trader, notm, developer), a
+host `render` (a bigger one with KVM for the designer, a Chromium and ffmpeg image), later a host
+`cloud` (a Cloudflare Sandbox Worker, a gateway to boat.dev VMs). Every one speaks execution-serve's
+protocol, unchanged, so each is one more entry of execution-remote's `hosts`:
+
+```ts
+"execution-remote": {
+  hosts: {
+    general: { url: "https://general.sandbox.example.com" }, // tokenSecret PIKIT_SANDBOX_TOKEN
+    render: { url: "https://render.sandbox.example.com", tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" },
+  },
+  defaultHost: "general", // required with several hosts
+  agents: { designer: "render" },
+}
+```
+
+- **Config** (replacing `endpoint` and `tokenSecret`; no compatibility): `hosts: Record<host, { url,
+  tokenSecret? }>` (at least one; host names kebab-case, `tokenSecret` `PIKIT_SANDBOX_TOKEN` by
+  default), `defaultHost` (required with several hosts, the only host otherwise), `agents:
+  Record<agent, host>` (default `{}`; keys in the agent-name grammar, at most 100 characters).
+- **Routing by `ConversationRef.agent`**, the agent `Pikit-Agent` names: `agents[agent]` (an own key,
+  exact), else `defaultHost`. A delegated child is its own agent's (decision 1: a child of another
+  agent works in that agent's workspace, so on that agent's host; a same-agent child on its parent's).
+  `execution`'s own sandbox (no conversation) is on `defaultHost`.
+- **Sandbox ids are unchanged** (`o-`/`k-` hashes of the chat or object and the agent, above): the host
+  never enters them, so routing never changes which sandbox an agent gets on a host. **Moving an agent
+  to another host starts it there**, in a new, empty sandbox of the same id; its files come back only
+  through [workspace snapshots](workspace-snapshots.md), restored on first use.
+- **Each host's token is its own secret** and goes only in that host's requests. The App does not
+  start (one error naming it) on: a host `agents` or `defaultHost` names and `hosts` has not; several
+  hosts without `defaultHost`; a key of `agents` outside the agent grammar, of `hosts` outside
+  kebab-case; a host's secret unset or short; two hosts with the same token (one secret name, or two
+  of one value: a host could otherwise act on another).
+- **Health:** execution-remote reports none, for one host or several; one host down fails only its
+  agents' operations (`unknown`, no answer), the others keep working.
+- **Cloud hosts never receive secrets** (owner's decision "a"): a `cloud` host's execution-serve runs
+  with no `secrets` for its sandboxes; the agents routed there get none, whatever their profile on
+  another host says. Profiles are the host's (execution-gondolin's `agents`), so each host configures
+  only the agents routed to it.
+- **Tests:** execution-remote's unit tests (two fake hosts: routing, a child of another agent, the
+  default host for `execution` and unnamed agents, tokens never crossing, every start refusal, each
+  mutation-checked), `app.test.ts` (two real hosts, files on the right disk), the workerd lane (two
+  agents of one Durable Object on two real hosts, two processes and tokens, found again by a reset).
+
 ## Open questions
-- Several sandbox hosts (a GPU machine for one agent): `execution-remote` taking `hosts` and a host per
-  agent, when a real case asks for it.
+- Several sandbox hosts: built, above ("Several sandbox hosts").
+- A health check per sandbox host (a dashboard row per host), when one is needed.
 - Editing profiles from the dashboard.
 - Files shared between agents (a read-only reference mount).

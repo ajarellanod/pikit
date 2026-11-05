@@ -8,12 +8,13 @@ a real Linux, as a server's does. pi-durable's own `read`, `write`, `edit` and `
 
 - **Provides:** `execution` and `execution.shell` (pi-durable's `ExecutionEnv`, `env.ts`) and
   `workspace` (a sandbox per chat and agent).
-- **Requires:** `secrets` (the token).
+- **Requires:** `secrets` (the hosts' tokens).
 - **Targets:** `server` and `durable` (only `fetch` and Web Crypto). On Cloudflare it belongs in the
   conversation object's App (the default export of `pikit.config.ts`), not the Worker's.
 - **Installs to:** `src/pikit/execution-remote/`.
 - **npm dependencies:** `@pikit/contracts`, `@pikit/pi-adapter` (pinned with Pi), `typebox`.
-- **Secret:** `PIKIT_SANDBOX_TOKEN`: the host's token, at least 32 characters.
+- **Secret:** `PIKIT_SANDBOX_TOKEN`: a host's token, at least 32 characters; each further host names
+  its own (`tokenSecret`).
 
 ```sh
 pikit add execution-remote tool-bash tool-read tool-write tool-edit
@@ -21,20 +22,51 @@ pikit add execution-remote tool-bash tool-read tool-write tool-edit
 
 ```ts
 "execution-remote": {
-  endpoint: "https://sandbox.example.com", // required: where execution-serve is served
-  tokenSecret: "PIKIT_SANDBOX_TOKEN",       // default: the secret's name, never the token
+  hosts: {                                   // required: the sandbox hosts, each running execution-serve
+    general: { url: "https://general.sandbox.example.com" }, // tokenSecret: "PIKIT_SANDBOX_TOKEN", the default
+    render: { url: "https://render.sandbox.example.com", tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" },
+  },
+  defaultHost: "general",                   // required with several hosts (the only one otherwise)
+  agents: { designer: "render" },           // default {}: an agent not named is on defaultHost
   sandbox: "shared",                        // default: on a server, the sandbox `execution` alone works in
 }
 ```
 
-`endpoint` is `https://`, or `http://` to the machine itself (`localhost`, `127.0.0.1`, `[::1]`); the
-app does not start otherwise, nor without the token. How to run the host: execution-serve's README.
+With one host, `hosts: { general: { url } }` is all. A host's `url` is `https://`, or `http://` to the
+machine itself (`localhost`, `127.0.0.1`, `[::1]`); the app does not start otherwise, nor without
+every host's token. How to run a host: execution-serve's README.
+
+## Which host
+
+Every host speaks execution-serve's protocol, whatever runs the sandboxes behind it (execution-gondolin
+micro-VMs on a machine of your own, or later a gateway to a cloud sandbox): they are just entries in
+`hosts`, each with its own token. A conversation's sandbox is on its agent's host,
+`agents[ConversationRef.agent]`, or on `defaultHost` when `agents` does not name the agent (by its
+exact name). A delegated child is its own agent's: a child of another agent works on that agent's
+host (in that agent's sandbox, as below), a child of the same agent on its parent's. `execution`'s
+own sandbox (no conversation, no agent) is on `defaultHost`.
+
+- **The app does not start**, the error naming what is wrong, when `agents` or `defaultHost` names a
+  host `hosts` has not, several hosts have no `defaultHost`, a key of `agents` is not an agent's name
+  (or of `hosts` not kebab-case), a host's secret is unset or shorter than 32 characters, or two hosts
+  have the same token (one secret, or two secrets of one value).
+- **Each host's token goes to that host only**, in its requests' `Authorization` header: a host never
+  sees another's, so one host compromised cannot act on another.
+- **The sandbox id does not depend on the host** (below: a hash of the chat or object and the agent).
+  Routing never changes which sandbox an agent gets on a host, and **moving an agent to another host
+  starts it there in a new, empty sandbox** of the same id: its files on the old host stay there (until
+  that host's provider removes them) and come back only through workspace snapshots
+  ([features/workspace-snapshots.md](https://github.com/ajarellanod/pikit/blob/main/features/workspace-snapshots.md)), not through this
+  component. Moving the default host moves `execution`'s own sandbox and every unnamed agent's.
+- **One host down is that host's agents' failure only**: their operations fail as below (`unknown`, no
+  answer), the other hosts' agents keep working. No health check is reported per host (none is today
+  for the one host either).
 Replace `execution-do` (Cloudflare) or `execution-local` (server) with it; with `workspace-local`
 installed too, remove that one (this component is the `workspace`). Two providers of `execution` do
 not compose, so the old one goes with `--force` once this one is in:
 
 ```sh
-pikit add execution-remote --yes      # then set "execution-remote": { endpoint } in pikit.config.ts
+pikit add execution-remote --yes      # then set "execution-remote": { hosts: { general: { url } } } in pikit.config.ts
 pikit remove execution-do --force     # execution-local on a server; workspace-local too, if installed
 pikit doctor                          # execution, execution.shell, workspace: execution-remote
 ```
@@ -82,7 +114,7 @@ host, never migrated.
 ## The protocol
 
 `protocol.ts`, an identical copy in execution-serve (change both together; the registry's test fails
-while they differ): `POST <endpoint>/execution/v1/sandboxes/<sandbox>/<operation>`, a JSON body,
+while they differ): `POST <url>/execution/v1/sandboxes/<sandbox>/<operation>`, a JSON body,
 `Authorization: Bearer <token>`, and `Pikit-Agent: <agent>` for a conversation's sandbox (an agent's
 name, at most 100 characters; a malformed one is `400`; a header because every body is strict). The
 100-character bound is these components' own, not pikit's (`defineAgent` has none): a conversation
@@ -103,7 +135,8 @@ Every `ExecutionEnv` operation is one request; the environment's failures come b
   local environment does) and sent absolute, so `absolutePath` and `joinPath` cost no request.
   `workspace` hands out an environment opened already; reading `cwd` of `execution` before its first
   operation throws.
-- **`id`** is `execution-remote:<endpoint>#<sandbox>`: each sandbox its own file namespace.
+- **`id`** is `execution-remote:<url>#<sandbox>`, the url of its host: each sandbox its own file
+  namespace.
 - **Readers.** A file of up to 1 MiB comes whole with `openBinaryReader`'s answer and is read from
   memory (as it was opened, through a rename); a larger one is read on the host behind a handle, in
   requests of at most 4 MiB. Directory readers are the host's (an entry removed meanwhile is skipped).
@@ -128,8 +161,8 @@ object's App, one more (`open`).
 
 ## Credentials (SPEC C7)
 
-Nothing secret goes to the sandbox through this component. The token is read through `secrets`,
-kept in memory, and sent only in the `Authorization` header to `endpoint`: no variable, file,
+Nothing secret goes to the sandbox through this component. Each host's token is read through
+`secrets`, kept in memory, and sent only in the `Authorization` header to that host: no variable, file,
 command or output of the sandbox carries it, nor any other secret of the App. A command's variables
 are the calling tool's own. A sandbox that needs a credential (a model key, a git token) gets it from
 its host's provider, injected outside the sandbox: execution-gondolin does it at its network layer.
@@ -161,7 +194,7 @@ removes them.
 ## Tests
 
 Copied with the component (`execution-remote.test.ts`), against a fake host speaking the protocol
-on a local `Bun.serve`: what setup declares; the start refused without the token, with a short one,
+on a local `Bun.serve`: what setup declares; the start refused without a host's token, with a short one,
 over http to another machine, or in the Worker's App; the sandbox of a conversation on a server
 (`k-<SHA-256 of the chat's key and agent>`, the same through a reset; a delegated child, and
 grandchild, of the same agent in its parent's, of another agent in its own of the chat, of another
@@ -172,7 +205,17 @@ a conversation's sandbox and never on `execution`'s, two agents of one key or ob
 (a delegated child of another agent), the same agent always in the same, an agent that is not an
 agent's name refused before any request (101 characters too, saying so); the protocol's failures as results; output chunk by chunk from the cursor, with `skipped`; a read retried, a command lost;
 cancellation stopping the command by its id, during its start too, and a throwing `onOutput`; a
-small file whole, a large one in pieces; stop.
+small file whole, a large one in pieces; stop. Several hosts (two fake hosts, `general` the default
+and `render` the designer's, `render` listed first): each agent's requests on its host only, an
+unnamed agent (`constructor`, `designer-two` too) and `execution`'s own sandbox on the default host,
+on a server and in a Durable Object; a delegated child of another agent on its own agent's host, a
+same-agent child on its parent's; each host's token in its own requests only; refused at start: a host
+`agents` or `defaultHost` names and `hosts` has not, several hosts without `defaultHost`, no host, bad
+agent and host names, an unknown key in a host, a host's secret unset, an http url, two hosts naming
+one secret or two secrets of one value (the value never in the error). Each of these was
+mutation-checked (routing every agent to the default host, `agents` matched without `hasOwn`, one
+token for every host, `execution` on the first host, each start check removed): a test fails for
+each.
 
 In the registry (`app.test.ts`, beside `files/`): against a real execution-serve (server-bun, a
 provider keyed by conversation and agent as execution-gondolin's is, over execution-local) on
@@ -182,9 +225,13 @@ sandbox per chat and agent (a delegated child of the same agent in its parent's,
 that agent's of the chat), per object and agent (a child of the same agent in its parent's), each
 resolved on the host for its agent and `execution`'s for none; behind workspace-local, a directory per
 chat and agent (a reset in the same); a quick command and a small
-read cost one request each; a cancelled command's process does not run on; a wrong token.
+read cost one request each; a cancelled command's process does not run on; a wrong token; two real
+hosts with their own tokens, an agent's files on its host's disk only (a delegated child of another
+agent's on that agent's host), `execution`'s on the default host's.
 `gondolin.test.ts` runs remote, serve and execution-gondolin together on real micro-VMs (skipped
 without QEMU), a reset of the chat and a same-agent child finding a file, another agent's child not.
 pikit also runs the suite in workerd, in a real Durable Object reaching a real host, with two agents
-of one object in two sandboxes, each found again by a same-agent child and, in a new App, by a reset
+of one object in two sandboxes, each found again by a same-agent child and, in a new App, by a reset,
+and two agents of one object on two real hosts (`general`, `render`: two processes, two tokens), the
+designer's found again on `render` by a reset in a new App
 (`tests/workerd/test/execution-remote.workerd.ts`).

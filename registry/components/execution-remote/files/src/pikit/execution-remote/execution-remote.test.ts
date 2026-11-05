@@ -74,7 +74,7 @@ async function started(endpoint: string, options: { values?: Record<string, stri
   const remote = object === undefined ? [executionRemote] : withWorkersHost({ env: {}, object }, [executionRemote]);
   const app = await defineApp({
     components: [secrets(options.values ?? { PIKIT_SANDBOX_TOKEN: TOKEN }), ...remote, reader],
-    config: { "execution-remote": { endpoint, ...options.config } },
+    config: { "execution-remote": { hosts: { main: { url: endpoint } }, ...options.config } },
     logger: silentLogger,
   }).create();
   await app.start();
@@ -82,9 +82,16 @@ async function started(endpoint: string, options: { values?: Record<string, stri
   return { app, execution: (execution as Handle<ExecutionEnv>).get(), workspace: (workspace as Handle<WorkspaceProvider>).get() };
 }
 
-async function startError(endpoint: string, options: { values?: Record<string, string>; host?: Parameters<typeof withWorkersHost>[0] } = {}) {
+async function startError(endpoint: string, options: { values?: Record<string, string>; host?: Parameters<typeof withWorkersHost>[0]; config?: Record<string, unknown> } = {}) {
   const remote = options.host === undefined ? [executionRemote] : withWorkersHost(options.host, [executionRemote]);
-  const app = await defineApp({ components: [secrets(options.values ?? { PIKIT_SANDBOX_TOKEN: TOKEN }), ...remote], config: { "execution-remote": { endpoint } }, logger: silentLogger }).create();
+  const config = options.config ?? { hosts: { main: { url: endpoint } } };
+  // An invalid config (a name outside the grammar) is refused as the App is defined, before start.
+  let app: Awaited<ReturnType<ReturnType<typeof defineApp>["create"]>>;
+  try {
+    app = await defineApp({ components: [secrets(options.values ?? { PIKIT_SANDBOX_TOKEN: TOKEN }), ...remote], config: { "execution-remote": config }, logger: silentLogger }).create();
+  } catch (error) {
+    return String(error);
+  }
   return app.start().then(
     () => app.stop().then(() => "started"),
     (error: unknown) => String((error as Error).cause),
@@ -92,7 +99,7 @@ async function startError(endpoint: string, options: { values?: Record<string, s
 }
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
-  const app = await defineApp({ components: [secrets({}), executionRemote], config: { "execution-remote": { endpoint: "https://sandbox.example.com" } }, logger: silentLogger }).create();
+  const app = await defineApp({ components: [secrets({}), executionRemote], config: { "execution-remote": { hosts: { main: { url: "https://sandbox.example.com" } } } }, logger: silentLogger }).create();
 
   expect(app.describe().components.find((c) => c.name === "execution-remote")).toEqual({
     name: "execution-remote",
@@ -114,6 +121,107 @@ test("it refuses to start without its token, with a short one, over http to anot
 });
 
 const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
+
+const RENDER_TOKEN = "execution-remote-render-token-abcdefghij";
+
+/** Two fake hosts, `general` (the default) and `render` (the designer's), each with its own token, and an App reaching both. */
+async function twoHosts(options: { object?: string; agents?: Record<string, string> } = {}) {
+  const general = fakeHost({ open: OPEN, exists: true });
+  const render = fakeHost({ open: { cwd: "/render", home: "/home/agent" }, exists: true });
+  const app = await started(general.url, {
+    values: { PIKIT_SANDBOX_TOKEN: TOKEN, PIKIT_SANDBOX_RENDER_TOKEN: RENDER_TOKEN },
+    // render first: the default host is the one named, not the first.
+    config: { hosts: { render: { url: render.url, tokenSecret: "PIKIT_SANDBOX_RENDER_TOKEN" }, general: { url: general.url } }, defaultHost: "general", agents: options.agents ?? { designer: "render" } },
+    ...(options.object !== undefined && { object: options.object }),
+  });
+  const lines = (host: typeof general) => host.seen.map((request) => `${request.sandbox} ${request.operation} ${request.agent}`);
+  return { ...app, general, render, lines };
+}
+
+test("several hosts: each agent's requests go to its host, an agent agents does not name and execution's own sandbox to the default host; the sandbox ids are the host-independent ones", async () => {
+  const { workspace, execution, general, render, lines } = await twoHosts();
+
+  const designer = (await workspace.resolve({ key: "telegram:42", agent: "designer", conversationId: "c-1" }, ctx)).env;
+  await designer.exists("x", ctx);
+  const trader = (await workspace.resolve({ key: "telegram:42", agent: "trader", conversationId: "c-1" }, ctx)).env;
+  await trader.exists("x", ctx);
+  await execution.exists("x", ctx);
+
+  const designerSandbox = await keySandbox("telegram:42", "designer");
+  const traderSandbox = await keySandbox("telegram:42", "trader");
+  expect(lines(render)).toEqual([`${designerSandbox} open designer`, `${designerSandbox} exists designer`]);
+  expect(lines(general)).toEqual([`${traderSandbox} open trader`, `${traderSandbox} exists trader`, "shared open null", "shared exists null"]);
+  expect(designer.id).toBe(`execution-remote:${render.url}#${designerSandbox}`);
+  expect(designer.cwd).toBe("/render");
+  expect(trader.id).toBe(`execution-remote:${general.url}#${traderSandbox}`);
+  // Each host's token in its own requests only: never the other's, anywhere in a request.
+  expect(render.seen.every((request) => request.authorization === `Bearer ${RENDER_TOKEN}`)).toBe(true);
+  expect(general.seen.every((request) => request.authorization === `Bearer ${TOKEN}`)).toBe(true);
+  expect(JSON.stringify(render.seen)).not.toContain(TOKEN);
+  expect(JSON.stringify(general.seen)).not.toContain(RENDER_TOKEN);
+});
+
+test("several hosts: a delegated child works on its own agent's host (another agent's on that agent's, a same-agent one on its parent's), on a server and in a Durable Object", async () => {
+  for (const object of [undefined, "a1b2c3"]) {
+    const { workspace, general, render, lines } = await twoHosts(object === undefined ? {} : { object });
+    const origin = { key: "gchat:spaces/AAA", agent: "trader", conversationId: "c-1", channel: "google-chat" };
+    const sandboxOf = (agent: string) => (object === undefined ? keySandbox(origin.key, agent) : objectSandbox(object, agent));
+
+    const parent = (await workspace.resolve(origin, ctx)).env;
+    const child = (await workspace.resolve({ key: "delegate:1:trader:t-1", agent: "designer", conversationId: "c-2", channel: "delegate", origin }, ctx)).env;
+    const same = (await workspace.resolve({ key: "delegate:1:trader:t-2", agent: "trader", conversationId: "c-3", channel: "delegate", origin }, ctx)).env;
+    const grandchild = (await workspace.resolve({ key: "delegate:2:trader.designer:t-3", agent: "designer", conversationId: "c-4", channel: "delegate", origin }, ctx)).env;
+    await child.exists("x", ctx);
+
+    expect(same).toBe(parent);
+    expect(grandchild).toBe(child);
+    expect(lines(general)).toEqual([`${await sandboxOf("trader")} open trader`]);
+    expect(lines(render)).toEqual([`${await sandboxOf("designer")} open designer`, `${await sandboxOf("designer")} exists designer`]);
+    for (const step of cleanup.splice(0).reverse()) await step();
+  }
+});
+
+test("several hosts: in a Durable Object, execution's own o-<object id> is on the default host, and two agents of one object on two hosts", async () => {
+  const { workspace, execution, general, render, lines } = await twoHosts({ object: "a1b2c3" });
+  await execution.exists("x", ctx);
+  await (await workspace.resolve({ key: "telegram:1", agent: "designer", conversationId: "c-1" }, ctx)).env.exists("x", ctx);
+  await (await workspace.resolve({ key: "telegram:1", agent: "notm", conversationId: "c-1" }, ctx)).env.exists("x", ctx);
+
+  expect(lines(general)).toEqual(["o-a1b2c3 open null", "o-a1b2c3 exists null", `${await objectSandbox("a1b2c3", "notm")} open notm`, `${await objectSandbox("a1b2c3", "notm")} exists notm`]);
+  expect(lines(render)).toEqual([`${await objectSandbox("a1b2c3", "designer")} open designer`, `${await objectSandbox("a1b2c3", "designer")} exists designer`]);
+});
+
+test("several hosts: the App does not start on a host agents or defaultHost names and hosts has not, several hosts without defaultHost, a name outside the grammar, a host's secret unset, or two hosts with one token", async () => {
+  const url = "https://sandbox.example.com";
+  const values = { PIKIT_SANDBOX_TOKEN: TOKEN, RENDER_TOKEN };
+  const two = { general: { url }, render: { url: "https://render.example.com", tokenSecret: "RENDER_TOKEN" } };
+  const refused = (config: Record<string, unknown>, options: { values?: Record<string, string> } = {}) => startError(url, { values: options.values ?? values, config });
+
+  expect(await refused({ hosts: two, defaultHost: "general", agents: { designer: "render" } })).toBe("started");
+  expect(await refused({ hosts: two, defaultHost: "general", agents: { designer: "gpu" } })).toContain(`agents.designer names the host "gpu", which hosts has not (general, render)`);
+  expect(await refused({ hosts: two, defaultHost: "cloud" })).toContain(`defaultHost "cloud" is not a host of hosts`);
+  expect(await refused({ hosts: two })).toContain("hosts has 2 hosts (general, render): name the default one (defaultHost)");
+  expect(await refused({ hosts: {} })).toContain("hosts is empty");
+  expect(await refused({})).toContain("invalid config");
+  expect(await refused({ hosts: two, defaultHost: "general", agents: { Designer: "render" } })).toContain("/execution-remote/agents/Designer");
+  expect(await refused({ hosts: two, defaultHost: "general", agents: { [`a${"b".repeat(MAX_AGENT_LENGTH)}`]: "render" } })).toContain("invalid config");
+  expect(await refused({ hosts: { ...two, Render: { url } }, defaultHost: "general" })).toContain("/execution-remote/hosts/Render");
+  expect(await refused({ hosts: { main: { url, token: "PIKIT_SANDBOX_TOKEN" } } })).toContain("invalid config");
+  expect(await refused({ hosts: two, defaultHost: "general" }, { values: { PIKIT_SANDBOX_TOKEN: TOKEN } })).toContain("the secret RENDER_TOKEN is not set (the token of the sandbox host render");
+  expect(await refused({ hosts: { ...two, render: { url: "http://render.example.com", tokenSecret: "RENDER_TOKEN" } }, defaultHost: "general" })).toContain("hosts.render.url must be https://");
+  const shared = await refused({ hosts: { general: { url }, render: { url: "https://render.example.com" } }, defaultHost: "general" });
+  expect(shared).toContain("the hosts general and render have the same token (PIKIT_SANDBOX_TOKEN, PIKIT_SANDBOX_TOKEN)");
+  const sameValue = await refused({ hosts: two, defaultHost: "general" }, { values: { PIKIT_SANDBOX_TOKEN: TOKEN, RENDER_TOKEN: TOKEN } });
+  expect(sameValue).toContain("the hosts general and render have the same token (PIKIT_SANDBOX_TOKEN, RENDER_TOKEN)");
+  expect(sameValue).not.toContain(TOKEN);
+});
+
+test("several hosts: an agent's key in agents is matched exactly (an own key: `constructor` is no agent's), any other agent on the default host", async () => {
+  const { workspace, general, render, lines } = await twoHosts({ agents: { designer: "render" } });
+  for (const agent of ["constructor", "designer-two", "design"]) await workspace.resolve({ key: "telegram:1", agent, conversationId: "c-1" }, ctx);
+  expect(render.seen).toEqual([]);
+  expect(lines(general).map((line) => line.split(" ").slice(1).join(" "))).toEqual(["open constructor", "open designer-two", "open design"]);
+});
 
 test("on a server, a conversation's sandbox is k-<SHA-256 of its chat's key and agent>, the same through resets, every request naming the agent; execution alone works in `sandbox`, naming none", async () => {
   const host = fakeHost({ open: OPEN, exists: true });
