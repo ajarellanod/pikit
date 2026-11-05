@@ -37,7 +37,7 @@ export interface FakeSandbox {
   labels: Record<string, string>;
   type: string;
   createdAt: number;
-  stoppedAt?: number;
+  stoppedAt?: number | undefined;
   hydratedAt?: number;
   readyAt: number;
   dir: string;
@@ -316,7 +316,7 @@ export class FakeBoat {
     }
     await mkdir(resolve(grant.path, ".."), { recursive: true });
     const body = init?.body;
-    const bytes = body instanceof Uint8Array ? body : new Uint8Array(await new Response(body as BodyInit).arrayBuffer());
+    const bytes = body instanceof Uint8Array ? body : new Uint8Array(await new Response(body as ConstructorParameters<typeof Response>[0]).arrayBuffer());
     await writeFile(grant.path, bytes);
     return new Response(null, { status: 200 });
   }
