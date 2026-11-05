@@ -25,12 +25,13 @@
  * - **`list`, `steer`, `cancel`** control the background tasks of the calling conversation, and only
  *   those: they read its own `pikit.delegations`, so another conversation's id is `not_found`. A task's
  *   result is recorded there (bounded) in the commit that fixes what the reporter reports, so `list`
- *   survives restarts. A steer is recorded before it is sent, and refused once the result is fixed; the
- *   reporter waits for every recorded steer before it fixes it, so a steer that could not join the
- *   child's run (it came after its last tool round, and started a run of its own) is reported, never
- *   lost: the report is the last run's answer. A cancel marks the task and aborts the child; a marked
- *   task is reported stopped whatever the child answered, once; each submit to the child checks the
- *   mark after it, so no run started by a submit escapes a cancel.
+ *   survives restarts. A steer is recorded and admitted to the child in one commit (`submit(tx, draft)`),
+ *   and refused once the result is fixed; the reporter waits for every recorded steer before it fixes
+ *   it, so a steer that could not join the child's run (it came after its last tool round, and started
+ *   a run of its own) is reported, never lost: the report is the last run's answer. A cancel marks the
+ *   task, then aborts the child; a marked task is reported stopped whatever the child answered, once.
+ *   Each admission to the child reads the mark in its own commit (`admitTo`), so it either sees the
+ *   mark and admits nothing, or comes before it and the cancel's abort stops its run.
  * - **`progress`** reads where one of those tasks is: its status and the child's last steps (assistant
  *   text, tool calls and how they ended), bounded, from the child's entries (`tx.scanEntries` in a
  *   commit that writes nothing), read in the parent's storage. Scoped as `list` (its `pikit.delegations`
@@ -204,7 +205,7 @@ export const STEP_ARGUMENTS_LIMIT = 120;
 const PROGRESS_SCAN = 200;
 
 type JsonSender = { channel: string; id: string };
-/** A steer, recorded before it is sent: the reporter sends it too if a crash came between. */
+/** A steer, recorded in the commit that admits it to the child (`steer`). */
 type Steer = { requestId: string; message: string };
 /** What a background start created, and what became of it. */
 type Delegation = {
@@ -379,13 +380,14 @@ async function createChild(
 const statusOf = (record: Delegation): DelegationStatus => record.result?.kind ?? (record.cancelled === true ? "aborted" : "running");
 
 /**
- * Submits `draft` to a background task's child, then aborts the child if the task was cancelled: a
- * cancel either aborted the run this submit started, or committed before this read.
+ * Admits `draft` to a background task's child in `tx`, unless the task is cancelled: whether it is
+ * admitted. A cancel commits its mark before it aborts the child, so it either comes first (nothing is
+ * admitted) or aborts the run this admission starts. A request id already admitted is a duplicate.
  */
-async function submitTo(reader: Pick<ToolExecutionApi, "snapshot">, parent: ConversationId, id: string, child: ConversationHandle, draft: InputSubmissionDraft, context: ChordContext) {
-  const submission = await child.submit(draft, context);
-  if ((await reader.snapshot(DelegationsDoc, parent, context))?.[id]?.cancelled === true) await child.abort(context);
-  return submission;
+async function admitTo(tx: Tx, parent: ConversationId, id: string, child: ConversationHandle, draft: InputSubmissionDraft): Promise<boolean> {
+  if ((await tx.doc(DelegationsDoc, parent))[id]?.cancelled === true) return false;
+  await child.submit(tx, draft);
+  return true;
 }
 
 /** The background tasks of `records` (`pikit.delegations`' entries), as `list` gives them. */
@@ -422,8 +424,12 @@ export function createDelegation(options: DelegationOptions) {
         const child = reporter.input.child as ConversationId;
         const parent = runtime.conversationId;
         const handle = await runtime.conversation(child, context);
-        // `start` submitted it; its request id makes this find the same submission.
-        if (handle !== undefined) await (await submitTo(runtime, parent, id, handle, inputOf(task, `delegate:${id}`, sender), context)).wait(context);
+        // `start` admitted it unless a crash came first; its request id makes this a duplicate then.
+        const input = inputOf(task, `delegate:${id}`, sender);
+        let admitted = false;
+        if (handle !== undefined) await runtime.commit(async (tx) => void (admitted = await admitTo(tx, parent, id, handle, input)), context);
+        // The submission admitted, to wait for: a duplicate submit returns it.
+        if (admitted && handle !== undefined) await (await handle.submit(input, context)).wait(context);
         for (;;) {
           // The outcome is fixed only once every steer recorded is answered: the last one's run is the report.
           let pending = undefined as Steer | undefined;
@@ -455,7 +461,8 @@ export function createDelegation(options: DelegationOptions) {
             return { status: "running", checkpoint: { phase: "report", outcome } };
           }, context);
           if (pending === undefined || handle === undefined) return;
-          await (await submitTo(runtime, parent, id, handle, steerOf(pending, sender), context)).wait(context);
+          // Admitted when it was recorded (`steer`): this submit is a duplicate, to wait for it.
+          await (await handle.submit(steerOf(pending, sender), context)).wait(context);
         }
       },
       report: async (reporter, runtime, context) => {
@@ -579,9 +586,9 @@ export function createDelegation(options: DelegationOptions) {
         return child;
       }, context);
       await api.details({ conversationId: child } as JsonValue, context);
-      // Submitted before the id is returned, so no steer reaches the child before its task.
+      // Admitted before the id is returned, so no steer reaches the child before its task.
       const handle = await api.conversation(child, context);
-      if (handle !== undefined) await submitTo(api, api.conversationId, id, handle, inputOf(task.task, `delegate:${id}`, sender), context);
+      if (handle !== undefined) await api.commit((tx) => admitTo(tx, api.conversationId, id, handle, inputOf(task.task, `delegate:${id}`, sender)), context);
       return id;
     },
 
@@ -591,21 +598,23 @@ export function createDelegation(options: DelegationOptions) {
 
     async steer(api, id, message, context) {
       const requestId = `delegate-steer:${String(api.taskId)}`;
-      const found = await api.commit(async (tx) => {
+      // A record's child never changes: its handle is taken before the commit that admits to it.
+      const child = (await api.snapshot(DelegationsDoc, api.conversationId, context))?.[id]?.child;
+      if (child === undefined) return "not_found";
+      const handle = await api.conversation(child as ConversationId, context);
+      return api.commit(async (tx): Promise<DelegationStatus | "not_found"> => {
         const record = (await tx.doc(DelegationsDoc, api.conversationId))[id];
-        if (record === undefined) return "not_found" as const;
+        if (record === undefined) return "not_found";
         const sent = record.steers?.some((steer) => steer.requestId === requestId) === true;
         // Once its outcome is fixed nothing joins it: the reporter fixes it only after every steer recorded.
         if (!sent && statusOf(record) !== "running") return statusOf(record);
+        if (handle === undefined) return "failed";
+        // Recorded and admitted together: the reporter only waits for it. A rerun's admission is a duplicate.
+        await admitTo(tx, api.conversationId, id, handle, steerOf({ requestId, message }, plainSender(record.sender)));
         // A new array: a draft copies what is assigned to it, so a push after `??=` would be lost.
         if (!sent) record.steers = [...(record.steers ?? []), { requestId, message }];
-        return { child: record.child as ConversationId, sender: plainSender(record.sender) };
+        return "running";
       }, context);
-      if (typeof found === "string") return found;
-      const handle = await api.conversation(found.child, context);
-      if (handle === undefined) return "failed";
-      await submitTo(api, api.conversationId, id, handle, steerOf({ requestId, message }, found.sender), context);
-      return "running";
     },
 
     cancel: (api, id, context) => tasksOf(api, api.conversationId).cancel(id, context),
