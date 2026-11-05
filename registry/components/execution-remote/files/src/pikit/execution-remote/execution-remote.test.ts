@@ -9,12 +9,12 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { BACKGROUND_CONTEXT, defineApp, defineComponent, type Handle, silentLogger } from "@pikit/core";
+import { BACKGROUND_CONTEXT, defineApp, defineComponent, type Handle, type Logger, silentLogger } from "@pikit/core";
 import type { SecretStore } from "@pikit/contracts";
 import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { withAbortSignal } from "@pikit/pi-adapter/execution";
-import executionRemote, { keySandbox, objectSandbox } from "./index.ts";
+import executionRemote, { AGENTS_WARNING, keySandbox, objectSandbox } from "./index.ts";
 import { AGENT_HEADER, MAX_AGENT_LENGTH, PROTOCOL_PATH, PROTOCOL_STATUS, type ProtocolErrorCode, type WireExecState } from "./protocol.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -105,7 +105,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     name: "execution-remote",
     provides: ["execution", "execution.shell", "workspace"],
     requires: ["secrets"],
-    optional: [],
+    optional: ["agent.definition"],
   });
 });
 
@@ -214,6 +214,43 @@ test("several hosts: the App does not start on a host agents or defaultHost name
   const sameValue = await refused({ hosts: two, defaultHost: "general" }, { values: { PIKIT_SANDBOX_TOKEN: TOKEN, RENDER_TOKEN: TOKEN } });
   expect(sameValue).toContain("the hosts general and render have the same token (PIKIT_SANDBOX_TOKEN, RENDER_TOKEN)");
   expect(sameValue).not.toContain(TOKEN);
+});
+
+test("several hosts: two hosts at one url (the same origin and path, a trailing / or not) do not start; one origin with two paths does", async () => {
+  const values = { PIKIT_SANDBOX_TOKEN: TOKEN, RENDER_TOKEN };
+  const hosts = (render: string) => ({ general: { url: "https://sandbox.example.com/a" }, render: { url: render, tokenSecret: "RENDER_TOKEN" } });
+  const refused = (render: string) => startError("", { values, config: { hosts: hosts(render), defaultHost: "general" } });
+  expect(await refused("https://sandbox.example.com/a")).toContain("the hosts general and render have the same url (https://sandbox.example.com/a)");
+  expect(await refused("https://SANDBOX.example.com:443/a/")).toContain("the hosts general and render have the same url");
+  expect(await refused("https://sandbox.example.com/b")).toBe("started");
+  expect(await refused("https://sandbox.example.com:8443/a")).toBe("started");
+});
+
+test("several hosts: a key of agents no agent.definition has is warned of at start (misspelled?), naming it; none when every key is an agent's, or when no definitions are known", async () => {
+  const definitions = defineComponent({
+    name: "agents-test",
+    setup(pikit) {
+      pikit.provideKeyed("agent.definition", "designer", { name: "designer" } as never);
+      pikit.provideKeyed("agent.definition", "trader", { name: "trader" } as never);
+    },
+  });
+  const run = async (agents: Record<string, string>, withDefinitions: boolean) => {
+    const logs: { level: string; message: string; fields?: Record<string, unknown> }[] = [];
+    const push = (level: string) => (message: string, fields?: Record<string, unknown>) => void logs.push({ level, message, ...(fields !== undefined && { fields }) });
+    const logger: Logger = { debug: push("debug"), info: push("info"), warn: push("warn"), error: push("error") };
+    const app = await defineApp({
+      components: [secrets({ PIKIT_SANDBOX_TOKEN: TOKEN, RENDER_TOKEN }), executionRemote, ...(withDefinitions ? [definitions] : [])],
+      config: { "execution-remote": { hosts: { general: { url: "https://sandbox.example.com" }, render: { url: "https://render.example.com", tokenSecret: "RENDER_TOKEN" } }, defaultHost: "general", agents } },
+      logger,
+    }).create();
+    await app.start();
+    await app.stop();
+    return logs.filter((log) => log.message === AGENTS_WARNING);
+  };
+  expect(await run({ designr: "render", trader: "render" }, true)).toEqual([{ level: "warn", message: AGENTS_WARNING, fields: { agents: ["designr"], defined: ["designer", "trader"] } }]);
+  expect(await run({ designer: "render" }, true)).toEqual([]);
+  expect(await run({ designr: "render" }, false)).toEqual([]);
+  expect(AGENTS_WARNING).toContain("works on the default host");
 });
 
 test("several hosts: an agent's key in agents is matched exactly (an own key: `constructor` is no agent's), any other agent on the default host", async () => {
