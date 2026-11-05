@@ -20,6 +20,9 @@
  * down (saying why and until when; refused credentials mean someone has to log in again), down
  * while all of them do.
  *
+ * Its `accounts` are more accounts of an installed provider, each a model provider of its own with
+ * its own credential (`anthropic-2/<modelId>`, see accounts.ts), which chains and agents name.
+ *
  * Targets: `server` and `durable`.
  */
 
@@ -28,6 +31,7 @@ import type { HealthReporter } from "@pikit/contracts";
 import { type Models, modelsFrom, parseModelName } from "@pikit/pi-adapter";
 import Type from "typebox";
 import { type Chain, createCooldowns, failoverProvider, PROVIDER_ID } from "./failover.ts";
+import { Accounts, accountProviders, checkAccounts } from "./accounts.ts";
 
 const seconds = (value: number, description: string) => Type.Integer({ minimum: 1, default: value, description });
 
@@ -44,6 +48,8 @@ const Config = Type.Object({
     },
     { default: {} },
   ),
+  /** Account id → the installed provider it is another account of, and the variables it reads instead. */
+  accounts: Accounts,
 });
 
 export default defineComponent({
@@ -79,12 +85,14 @@ export default defineComponent({
       failedOver: (event) => failedOver?.(event),
     });
     pikit.provideKeyed("model.provider", PROVIDER_ID, provider);
+    for (const account of accountProviders(config.accounts, PROVIDER_ID, (id) => providers.get(id))) pikit.provideKeyed("model.provider", account.id, account);
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     return {
       start(ctx) {
         const background = ctx.derive(() => BACKGROUND_CONTEXT);
         now = () => background.clock.now();
+        checkAccounts(config.accounts, PROVIDER_ID, providers.keys());
         const own = providers.keys().flatMap((key) => (key === PROVIDER_ID ? [] : (providers.get(key) ?? [])));
         const made = modelsFrom(own, { credentials: credentials.get(), secrets: secrets.get() });
 
