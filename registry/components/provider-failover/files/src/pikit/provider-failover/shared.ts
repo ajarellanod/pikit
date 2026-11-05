@@ -15,7 +15,7 @@
  *   entry the owner holds, merged into the copy. The copy is read again on a request once it is
  *   `refreshMs` old.
  * - **Idempotent, in any order.** Each entry carries when it was learnt (`at`), and the newest of a key
- *   wins, at the owner as in each copy: a report sent again, or one that arrives after a newer answer,
+ *   wins (`supersedes`), at the owner as in each copy: a report sent again, or one that arrives after a newer answer,
  *   changes nothing. An entry not taken by the owner stays to send with the next sync.
  * - **Never in a request's way.** A sync that fails (no owner, its storage, a timeout) is logged, once
  *   per streak, and the App goes on with its copy.
@@ -24,8 +24,8 @@
  */
 
 import { type AppContext, withAbortSignal } from "@pikit/core";
-import { ActorCallError, type ActorInbox, type ActorMailbox, isJsonObject, type JsonValue, type SqlDatabase } from "@pikit/contracts";
-import type { CooldownEntry, Cooldowns, FailureKind } from "./failover.ts";
+import { ActorCallError, type ActorInbox, type ActorMailbox, isJsonObject, type JsonValue, type SqlDatabase, type SqlRow } from "@pikit/contracts";
+import { type CooldownEntry, type Cooldowns, type FailureKind, supersedes } from "./failover.ts";
 
 /** The actor that owns the cooldowns. */
 export const COOLDOWNS_KEY = "provider-failover:cooldowns";
@@ -78,8 +78,8 @@ export function answerSync(inbox: ActorInbox, db: () => SqlDatabase, now: () => 
     if (entries.length > 0) {
       await sql.transaction(async (tx) => {
         for (const entry of entries) {
-          const [row] = await tx.query(`SELECT at_ms FROM ${TABLE} WHERE name = ?`, [entry.key]);
-          if (row !== undefined && Number(row.at_ms) >= entry.at) continue;
+          const [row] = await tx.query(`SELECT name, kind, until_ms, at_ms FROM ${TABLE} WHERE name = ?`, [entry.key]);
+          if (!supersedes(entry, row === undefined ? undefined : entryOf(row))) continue;
           const values = [entry.kind ?? null, entry.until, entry.at];
           if (row === undefined) await tx.run(`INSERT INTO ${TABLE} (kind, until_ms, at_ms, name) VALUES (?, ?, ?, ?)`, [...values, entry.key]);
           else await tx.run(`UPDATE ${TABLE} SET kind = ?, until_ms = ?, at_ms = ? WHERE name = ?`, [...values, entry.key]);
@@ -88,12 +88,17 @@ export function answerSync(inbox: ActorInbox, db: () => SqlDatabase, now: () => 
         await tx.run(`DELETE FROM ${TABLE} WHERE until_ms < ? AND at_ms < ?`, [old, old]);
       });
     }
-    const rows = await sql.query(`SELECT name, kind, until_ms, at_ms FROM ${TABLE}`);
-    return {
-      entries: rows.map((row) => ({ key: String(row.name), ...(row.kind !== null && { kind: String(row.kind) }), until: Number(row.until_ms), at: Number(row.at_ms) })),
-    };
+    const rows = await sql.query(`SELECT name, kind, until_ms, at_ms FROM ${TABLE} ORDER BY name`);
+    return { entries: rows.map(entryOf) as unknown as JsonValue[] };
   });
 }
+
+const entryOf = (row: SqlRow): CooldownEntry => ({
+  key: String(row.name),
+  ...(row.kind !== null && { kind: String(row.kind) as FailureKind }),
+  until: Number(row.until_ms),
+  at: Number(row.at_ms),
+});
 
 export interface SharingOptions {
   /** `undefined` without `actor.mailbox`: nothing is shared, the copy is all there is. */

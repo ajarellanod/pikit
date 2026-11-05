@@ -111,6 +111,17 @@ export interface CooldownEntry {
 }
 
 /**
+ * Whether `entry` replaces `kept`, wherever two meet (each copy, the owner), so that every order of
+ * arrival ends the same: the newer; learnt at the same time, an answer, then the later end.
+ */
+export function supersedes(entry: CooldownEntry, kept: CooldownEntry | undefined): boolean {
+  if (kept === undefined) return true;
+  if (entry.at !== kept.at) return entry.at > kept.at;
+  const rank = (each: CooldownEntry) => (each.kind === undefined ? Number.POSITIVE_INFINITY : each.until);
+  return rank(entry) > rank(kept);
+}
+
+/**
  * The cooldowns of this App, in memory. Refused credentials cool the whole provider (every model of
  * it fails the same way); any other failure, the one model. `learnt` hears each failure, and each
  * answer that cleared one, as entries: `shared.ts` reports them to the App's owner of the cooldowns,
@@ -144,8 +155,7 @@ export function createCooldowns(durations: CooldownDurations, now: () => number,
     merge(entries) {
       let changed = false;
       for (const entry of entries) {
-        const kept = cooling.get(entry.key);
-        if (kept !== undefined && kept.at >= entry.at) continue;
+        if (!supersedes(entry, cooling.get(entry.key))) continue;
         cooling.set(entry.key, entry.kind === undefined ? { key: entry.key, until: 0, at: entry.at } : { key: entry.key, kind: entry.kind, until: entry.until, at: entry.at });
         changed = true;
       }
