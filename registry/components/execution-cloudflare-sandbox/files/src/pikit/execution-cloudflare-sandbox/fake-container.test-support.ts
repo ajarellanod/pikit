@@ -22,7 +22,7 @@ export interface FakeContainer extends SandboxContainer {
   readonly execs: string[][];
   destroyed: number;
   inactivity: number[];
-  /** While true, `exec` never answers (a container past `max_instances`). */
+  /** While true, `exec` never answers (a container past the account's limit). */
   hang: boolean;
   /** The container stops on its own (the platform's inactivity timeout): its disk is lost. */
   lose(): void;

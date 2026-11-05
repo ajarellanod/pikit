@@ -6,7 +6,7 @@
  *
  * - **Started on demand, restored once.** The first operation of an object whose container is not
  *   running starts it with the agent's image (`profile`), waits until the helper answers, and restores
- *   the chat and agent's snapshot (`snapshot.ts`) into an empty directory swapped in for the root. A
+ *   the chat and agent's snapshot (`snapshot.ts`) into an empty directory, moved into the root. A
  *   container still running (the object was evicted, the container was not) is used as it is: its disk
  *   is the truth. A snapshot that does not hold is never half-restored: the sandbox is `unavailable`,
  *   the log says why.
@@ -20,7 +20,7 @@
  *   archive, writes it (`writeSnapshot`), and only then destroys the container. A failed or skipped
  *   checkpoint keeps the container: the local copy is the truth until the upload is verified.
  * - **Bounded.** Every container call has its own deadline (`within`): past an account's
- *   `max_instances` a start may never happen. At most `MAX_COMMANDS` running commands and
+ *   container limit a start may never happen. At most `MAX_COMMANDS` running commands and
  *   `MAX_HANDLES` open readers. A command nobody reads for `leaseMs` is stopped (checked at each
  *   request and alarm: no timer keeps an object in memory).
  * - **No secrets.** Nothing secret is ever given to the container (owner's decision: this host never
@@ -306,7 +306,7 @@ export class Sandbox {
     if (!opened.ok) {
       logger.error("execution-cloudflare-sandbox: the container did not start", { sandbox: identity.sandbox, agent, error: opened.error.message });
       await within(container.destroy(), callMs, "destroy").catch(() => {});
-      throw new ProtocolError("unavailable", `the sandbox's container did not start within ${startMs} ms (the account's max_instances may be reached; the host's log says more)`);
+      throw new ProtocolError("unavailable", `the sandbox's container did not start within ${startMs} ms (the account's container limit may be reached; the host's log says more)`);
     }
     await within(container.setInactivityTimeout(backstopMs), callMs, "setInactivityTimeout").catch((error: unknown) => logger.warn("execution-cloudflare-sandbox: the container's inactivity timeout was not set", { error: String(error) }));
     if (fresh) {
@@ -324,7 +324,7 @@ export class Sandbox {
     return opened.value;
   }
 
-  /** The chat and agent's snapshot, if any, extracted into an empty directory and swapped in for the root. */
+  /** The chat and agent's snapshot, if any, extracted into an empty directory whose entries are then moved into the root. */
   private async restore(identity: Identity): Promise<void> {
     const { root, snapshots, logger, maxUnpackedBytes, snapshotMs } = this.options;
     const agent = agentOf(identity.sandbox, identity.agent);

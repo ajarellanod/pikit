@@ -243,7 +243,7 @@ describe("the agent's machine", () => {
     container.hang = true;
     const { sandbox } = setup({ container, callMs: 150, startMs: 400 });
     const started = Date.now();
-    expect(await sandbox.serve({ sandbox: "s-1", operation: "open", body: {} })).toMatchObject({ ok: false, code: "unavailable", message: expect.stringContaining("max_instances") });
+    expect(await sandbox.serve({ sandbox: "s-1", operation: "open", body: {} })).toMatchObject({ ok: false, code: "unavailable", message: expect.stringContaining("container limit") });
     expect(Date.now() - started).toBeLessThan(5000);
     expect(container.destroyed).toBe(0 + container.destroyed);
   }, 30_000);

@@ -64,8 +64,10 @@ export const worker = defineApp({
 Two more steps, made by hand once:
 1. **`wrangler.jsonc`**: copy `src/pikit/execution-cloudflare-sandbox/wrangler.host.jsonc` over it.
    It is deployment-cloudflare's, plus the `Sandbox` class (binding `SANDBOX`, migration `v2`) and its
-   container: `scheduling_policy: "durable_object"`, `max_instances`, `instance_type` and the named
-   `images`.
+   container: `scheduling_policy: "durable_object"` and the named `images`. Wrangler 4.143 refuses
+   `max_instances` and `instance_type` on such a container ("Unsupported fields for Durable
+   Object-managed Containers"). The size is the profile's `instance`, given at each start. What caps
+   how many containers run is the account's limit, and every call's deadline bounds a start past it.
 2. **`src/pikit/deployment-cloudflare/worker.ts`** (the project's own file) exports the class:
 
    ```ts
@@ -96,7 +98,7 @@ work in Cloudflare containers. Routing happens on the client; this host takes an
   the sandbox's object over RPC: `getByName("<sandbox>\n<agent>")`, or `_<sandbox>` as the agent
   without a header, so each sandbox id and agent has one object and one container. The object gets
   `callSeconds` past the request's own `wait`. One that never answers is `503` (its container never
-  started: `max_instances`).
+  started: the account's limit).
 - **The object** (`entrypoint.ts` → `durable-object.ts` → `object.ts`) composes the default App of
   `pikit.config.ts` on its first event, with its container and storage in the start context. It keeps
   the sandbox id and agent of its first request in its storage, and refuses any other.
@@ -105,7 +107,7 @@ work in Cloudflare containers. Routing happens on the client; this host takes an
   `instance` (`lite`, `standard-1` to `standard-4`) and `internet`. An agent with no profile gets the
   base, and so does an agentless sandbox. Every container call has its own deadline: the start waits
   `startSeconds` for the helper to answer, and then the sandbox is `unavailable`, its container
-  destroyed (past `max_instances` a start never happens). Each helper call waits `callSeconds`.
+  destroyed (past the account's container limit a start never happens). Each helper call waits `callSeconds`.
 - **Every operation of the protocol**, through one helper in the image (`images/pikit-sandbox`, Node,
   no packages). Each file operation is one short process that answers with pi-durable's `FileError`
   codes, mapped from Node's errno as pi-durable's local environment maps them. Writes create parent
@@ -130,7 +132,8 @@ work in Cloudflare containers. Routing happens on the client; this host takes an
      backstopMinutes`, is the backstop.
 - **Restore.** The first operation of an object whose container is new reads the chat and agent's
   manifest, then the archive. It checks the size, the SHA-256 and every entry. Only then does it
-  extract into `<root>.restore`, an empty directory, and swap that in for the root. A container still
+  extract into `<root>.restore`, an empty directory, and move its entries into the root (entry by
+  entry: overlayfs cannot rename the image's own `/workspace`, a finding of the Docker run below). A container still
   running (the object was evicted, its container was not) is used as it is: its disk is the truth.
 
 ## Snapshots (the shared format)
@@ -218,7 +221,9 @@ deploy, with Docker.
   used).
 - **Per object:** 16 running commands and 64 open readers (`429`).
 - **`watch` and `listFiles`** are not in the protocol (execution-serve's limits).
-- A `max_instances` that is too small shows as `503`s after `startSeconds`. The log says so.
+- **No `max_instances` of its own.** Named images need Durable Object-managed containers, which take
+  none: the account's limit caps them. Past it, starts show as `503`s after `startSeconds`, and the log
+  says so. A cap of pikit's own (a count across objects) is not built.
 
 ## Tests
 
@@ -284,10 +289,21 @@ In the registry:
 - one object per sandbox and agent;
 - validate's shared namespace, allowed while another stays refused.
 
+- `docker.test.ts` is opt-in (`PIKIT_DOCKER_IMAGE`, the base image built for linux/amd64). It runs
+  the object's logic against the real image through `docker exec`: Alpine, Node, GNU tar, `uname -m`
+  x86_64, no network. It covers a checkpoint and a restore into a new container. It found that
+  overlayfs refuses renaming the image's own `/workspace`, hence the entry-by-entry move.
+
+**Checked by hand** (2026-11-05): `wrangler deploy --dry-run` (wrangler 4.143) of a Worker exporting
+`createSandboxClass`, with this container config. It built both images for linux/amd64 (designer
+included), bundled 577 KiB, and listed `Sandbox (durable_object)`. The same run is how wrangler
+refused `max_instances` and `instance_type`.
+
 **Not run:** real Cloudflare Containers (none here). That leaves untested:
-- a deploy with images built and pushed;
-- `ctx.container` itself (`start`, `exec` streams, `destroy`, `setInactivityTimeout`);
-- `max_instances` reached;
-- GNU tar in the Alpine image (the tests use the machine's bsdtar on macOS);
-- the designer image;
-- the real latencies.
+- a real deploy: images pushed, the `v2` migration;
+- `ctx.container` itself (`start`, `exec`'s streams and `kill`, `destroy`, `setInactivityTimeout`,
+  `instance`);
+- the account's container limit reached;
+- the designer image's tools (it builds; Chromium and ffmpeg are not run);
+- the real latencies;
+- a checkpoint racing a platform eviction.

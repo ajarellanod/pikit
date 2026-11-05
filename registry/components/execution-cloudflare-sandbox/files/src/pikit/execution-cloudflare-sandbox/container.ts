@@ -5,7 +5,7 @@
  * well as in workerd. `@cloudflare/sandbox` 1.x has no `getSandbox` any more (0.x had it): a sandbox is a
  * Durable Object that starts and runs its own container.
  *
- * - **Every call has its own deadline** (`within`): past an account's `max_instances` a container may
+ * - **Every call has its own deadline** (`within`): past the account's container limit a container may
  *   never start, and a call on it never answer, so no request waits on the platform without bound.
  * - **One helper**, `/usr/local/bin/pikit-sandbox` (`images/pikit-sandbox`, Node): each file operation
  *   is one short process printing one JSON answer (`helper`).
@@ -55,7 +55,7 @@ export const SIGKILL = 9;
 /** A container call that passed its deadline. */
 export class ContainerTimeout extends Error {
   constructor(what: string, ms: number) {
-    super(`execution-cloudflare-sandbox: ${what} did not answer within ${ms} ms (the container may not have started: the account's max_instances reached, or the platform slow)`);
+    super(`execution-cloudflare-sandbox: ${what} did not answer within ${ms} ms (the container may not have started: the account's container limit reached, or the platform slow)`);
   }
 }
 

@@ -67,7 +67,7 @@ const Config = Type.Object({
   leaseSeconds: Type.Integer({ minimum: 10, maximum: 3600, default: 120 }),
   /** Each call of the helper in the container. */
   callSeconds: Type.Integer({ minimum: 1, maximum: 300, default: 30 }),
-  /** A new container's start, until its helper answers (8 to 10 s measured; past `max_instances`, never). */
+  /** A new container's start, until its helper answers (8 to 10 s measured; past the account's limit, never). */
   startSeconds: Type.Integer({ minimum: 1, maximum: 300, default: 45 }),
   /** Making or restoring a snapshot (tar in the container). */
   snapshotSeconds: Type.Integer({ minimum: 1, maximum: 840, default: 300 }),

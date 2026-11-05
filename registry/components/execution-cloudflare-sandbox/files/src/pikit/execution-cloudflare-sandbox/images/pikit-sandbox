@@ -215,18 +215,16 @@ const operations = {
   async "snapshot-list"({ root }) {
     return await snapshotList(root);
   },
-  /** `from` takes `to`'s place: `to` moved aside, `from` renamed over it, the old one removed. */
+  /**
+   * `from`'s contents take the place of `to`'s: what `to` held removed, each entry of `from` renamed
+   * into it, `from` removed. Entry by entry, not `to` itself: an image's own directory (`/workspace`,
+   * a lower layer of overlayfs) cannot be renamed (EXDEV), while entries made since can.
+   */
   async swap({ from, to }) {
-    const aside = `${to}.old-${randomUUID()}`;
-    let moved = false;
-    try {
-      await fsp.rename(to, aside);
-      moved = true;
-    } catch (error) {
-      if (!error || error.code !== "ENOENT") throw error;
-    }
-    await fsp.rename(from, to);
-    if (moved) await fsp.rm(aside, { recursive: true, force: true });
+    await fsp.mkdir(to, { recursive: true });
+    for (const name of await fsp.readdir(to)) await fsp.rm(path.join(to, name), { recursive: true, force: true });
+    for (const name of await fsp.readdir(from)) await fsp.rename(path.join(from, name), path.join(to, name));
+    await fsp.rm(from, { recursive: true, force: true });
     return null;
   },
 };

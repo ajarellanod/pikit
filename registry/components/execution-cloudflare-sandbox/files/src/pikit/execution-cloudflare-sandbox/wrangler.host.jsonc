@@ -28,12 +28,11 @@
     {
       "class_name": "Sandbox",
       // The object starts and stops its own container (ctx.container), with the image its agent gets.
+      // Durable Object-managed containers take no "max_instances" or "instance_type" here (wrangler
+      // refuses them): the size is the agent's profile's `instance`, given at each start, and what caps
+      // how many run is the account's limit. Past it a start never happens, and the sandbox answers 503
+      // after `startSeconds`.
       "scheduling_policy": "durable_object",
-      // Containers running at once, across every sandbox: past it a start never happens, and the
-      // sandbox answers 503 after `startSeconds`.
-      "max_instances": 10,
-      // The default size; an agent's profile may start a larger one (`instance`).
-      "instance_type": "lite",
       // Names the component's config uses (`image`, `agents.<agent>.image`). Paths are from this file;
       // each build context is its Dockerfile's directory, where the helper (pikit-sandbox) is.
       "images": {
