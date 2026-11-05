@@ -10,9 +10,9 @@
  *   schema), forwarding each operation to the sandbox's object.
  * - **This one, the default export**: in each `Sandbox` Durable Object (`entrypoint.ts`), one per
  *   sandbox id and agent, its container started with the agent's image, its workspace saved to
- *   `storage.blob` when idle and restored when its container is new (`sandbox.ts`, in the shared format of
- *   `@pikit/contracts`' `workspace-snapshot.ts`). In
- *   any other object of the project (deployment-cloudflare's `/health` one), it does nothing.
+ *   `storage.blob` when idle and restored when its container is new (`sandbox.ts`, in the shared
+ *   format of `@pikit/contracts`' `workspace-snapshot.ts`). In any other object of the project
+ *   (deployment-cloudflare's `/health` one), it does nothing.
  *
  * **No secrets** (owner's decision): this host never gets a workspace secret. The config has no
  * `secrets`, and one given (on the base or a profile) is refused at setup, saying so; nothing secret
