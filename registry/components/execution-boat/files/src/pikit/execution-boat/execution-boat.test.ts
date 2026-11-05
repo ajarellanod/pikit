@@ -64,17 +64,17 @@ function secretsOf(values: Record<string, string | undefined>): ComponentDefinit
   });
 }
 
-/** A `storage.blob` in memory, whose namespaces the test reads. */
-export function memoryBlob(maxBytes = 25 * 1024 * 1024) {
+/** A `storage.blob` in memory, whose namespaces the test reads: `get` refuses what is past `maxBytes` (read it with `getStream`). */
+export function memoryBlob(maxBytes = 25 * 1024 * 1024, maxStreamBytes = Math.max(maxBytes, 64 * 1024 * 1024)) {
   const data = new Map<string, Uint8Array>();
   const storage: BlobStorage = {
     maxBytes,
-    maxStreamBytes: maxBytes,
+    maxStreamBytes,
     namespace(name) {
       const at = (key: string) => `${name}/${key}`;
       const store: BlobStore = withStreams({
         async put(key, bytes) {
-          if (bytes.length > maxBytes) throw new Error("too large");
+          if (bytes.length > maxStreamBytes) throw new Error("too large");
           data.set(at(key), bytes.slice());
         },
         async get(key) {
@@ -89,7 +89,7 @@ export function memoryBlob(maxBytes = 25 * 1024 * 1024) {
           entries.sort((a, b) => (a.key < b.key ? -1 : 1));
           return { entries };
         },
-      });
+      }, maxStreamBytes, maxBytes);
       return store;
     },
   };
@@ -565,7 +565,7 @@ test("snapshots: an idle stop exports the workspace in the shared format; a VM d
   const s = await started({ snapshots: true, retentionDays: 1 }, { clock, providers: [blob.component] });
   const env = await s.env("1");
   await env.writeFile("notes/a.txt", "kept", ctx);
-  const made = await run(env, "ln -s notes/a.txt inside && ln -s /etc/hosts outside && ln -s ../.. up && mkfifo fifo");
+  const made = await run(env, "ln -s notes/a.txt inside && ln -s /etc/hosts outside && ln -s ../.. up && ln -s notes/../notes/a.txt climbs && mkfifo fifo");
   expect(made.result).toEqual({ ok: true, value: { exitCode: 0 } });
   await clock.advance(IDLE);
   await until(() => stateOf(s, "1")[0] === "archived", "the idle stop");
@@ -578,9 +578,9 @@ test("snapshots: an idle stop exports the workspace in the shared format; a VM d
   expect(manifest?.size).toBe(archive.length);
   expect(manifest?.sha256).toBe(new Bun.CryptoHasher("sha256").update(archive).digest("hex"));
   expect(object).toContain(String(manifest?.sha256).slice(0, 16));
-  // Relative paths, the workspace's contents only; links out and the FIFO left out.
+  // Relative paths, the workspace's contents only; links out (by the shared rule: `..` after a name too) and the FIFO left out.
   expect(namesIn(archive)).toEqual(["inside", "notes", "notes/a.txt"]);
-  expect(s.logs.find((log) => log.message === "execution-boat: workspace exported")?.fields).toMatchObject({ skipped: 3 });
+  expect(s.logs.find((log) => log.message === "execution-boat: workspace exported")?.fields).toMatchObject({ skipped: 4 });
 
   await clock.advance(DAY + HOUR);
   await until(() => stateOf(s, "1").length === 0, "the deletion");
@@ -603,13 +603,13 @@ test("snapshots: an idle stop exports the workspace in the shared format; a VM d
 
 test("snapshots: a workspace that could not be exported is never deleted unsaved (the VM stays the truth)", async () => {
   const clock = createManualClock();
-  const blob = memoryBlob(10);
+  const blob = memoryBlob(10, 10);
   const s = await started({ snapshots: true, retentionDays: 1 }, { clock, providers: [blob.component] });
   const env = await s.env("1");
   await env.writeFile("a.txt", "too big for a 10-byte store", ctx);
   await clock.advance(IDLE);
   await until(() => stateOf(s, "1")[0] === "archived", "the idle stop");
-  expect(s.logs.some((log) => log.message.includes("could not be exported before its VM stopped") && String(log.fields?.reason).includes("maxBytes"))).toBe(true);
+  expect(s.logs.some((log) => log.message.includes("could not be exported before its VM stopped") && String(log.fields?.reason).includes("maxStreamBytes"))).toBe(true);
   await clock.advance(DAY + HOUR);
   await until(() => s.logs.some((log) => log.message === "execution-boat: a VM past retentionDays was kept"), "the kept VM");
   // Resumed to export again, which failed: stopped again, not deleted.
@@ -623,11 +623,11 @@ test("snapshots: a workspace that could not be exported is never deleted unsaved
 test("snapshots: a workspace with no VM is restored from another backend's snapshot; one escaping the root is refused and no VM kept", async () => {
   const blob = memoryBlob();
   const s = await started({ snapshots: true }, { providers: [blob.component] });
-  const put = async (id: string, archive: Uint8Array) => {
+  const put = async (id: string, archive: Uint8Array, agent = "support") => {
     const sha256 = new Bun.CryptoHasher("sha256").update(archive).digest("hex");
     const object = `${prefixOf(id)}/snapshot-1000-${sha256.slice(0, 16)}.tar.gz`;
     blob.data.set(`workspace-snapshots/${object}`, archive);
-    blob.data.set(`workspace-snapshots/${prefixOf(id)}/manifest.json`, new TextEncoder().encode(JSON.stringify({ version: 1, object, sha256, size: archive.length, createdAt: 1000, agent: "support" })));
+    blob.data.set(`workspace-snapshots/${prefixOf(id)}/manifest.json`, new TextEncoder().encode(JSON.stringify({ version: 1, object, sha256, size: archive.length, createdAt: 1000, agent })));
   };
   await put("1", tarGz([{ name: "src/", type: "5" }, { name: "src/main.py", content: "print('from gondolin')\n" }, { name: "main", type: "2", linkname: "src/main.py" }]));
   const env = await s.env("1");
@@ -636,13 +636,47 @@ test("snapshots: a workspace with no VM is restored from another backend's snaps
 
   await put("2", tarGz([{ name: "ok.txt", content: "x" }, { name: "../escaped.txt", content: "evil" }]));
   const refused = await (await s.env("2")).readTextFile("ok.txt", ctx);
-  expect(refused.ok ? "" : refused.error.message).toMatch(/snapshot could not be restored, so no VM was kept: .*refused/);
+  expect(refused.ok ? "" : refused.error.message).toMatch(/snapshot could not be restored, so no VM was kept: .*a path with \.\./);
   expect(s.fake.of(workspace("2"))).toEqual([]);
   // A tampered archive (its sha256 no longer the manifest's): refused the same way.
   await put("3", tarGz([{ name: "a", content: "a" }]));
   blob.data.set(`workspace-snapshots/${String(manifestOf(blob.data, "3")?.object)}`, tarGz([{ name: "a", content: "b" }]));
   const tampered = await (await s.env("3")).exists("a", ctx);
-  expect(tampered.ok ? "" : tampered.error.message).toMatch(/does not match its manifest|its manifest says/);
+  expect(tampered.ok ? "" : tampered.error.message).toMatch(/not its manifest's/);
   expect(s.fake.of(workspace("3"))).toEqual([]);
+  // Another agent's manifest at this workspace's id: refused, never restored.
+  await put("4", tarGz([{ name: "a", content: "theirs" }]), "ops");
+  const theirs = await (await s.env("4")).exists("a", ctx);
+  expect(theirs.ok ? "" : theirs.error.message).toMatch(/agent is "ops", not "support"/);
+  expect(s.fake.of(workspace("4"))).toEqual([]);
+  await stopApp(s);
+});
+
+test("snapshots: past storage.blob's maxBytes a workspace is streamed out and back (maxStreamBytes is the limit); a download cut partway names nothing", async () => {
+  const clock = createManualClock();
+  const blob = memoryBlob(1024);
+  const s = await started({ snapshots: true, retentionDays: 1 }, { clock, providers: [blob.component] });
+  const env = await s.env("1");
+  const big = Array.from({ length: 400 }, () => crypto.randomUUID()).join("\n");
+  expect((await env.writeFile("big.txt", big, ctx)).ok).toBe(true);
+  // The download breaks partway: no archive, no manifest; the VM stays the truth.
+  s.fake.cutDownloads = true;
+  await clock.advance(IDLE);
+  await until(() => stateOf(s, "1")[0] === "archived", "the idle stop");
+  expect([...blob.data.keys()]).toEqual([]);
+  expect(s.logs.some((log) => log.message.includes("could not be exported before its VM stopped"))).toBe(true);
+
+  s.fake.cutDownloads = false;
+  expect(await text(env, "big.txt")).toBe(big);
+  await clock.advance(IDLE);
+  await until(() => manifestOf(blob.data, "1") !== undefined && stateOf(s, "1")[0] === "archived", "the export");
+  const manifest = manifestOf(blob.data, "1") as { object: string; size: number };
+  expect(manifest.size).toBeGreaterThan(1024);
+  expect(blob.data.get(`workspace-snapshots/${manifest.object}`)?.length).toBe(manifest.size);
+  // Deleted by retention, back from its snapshot: read with getStream, uploaded with its Content-Length.
+  await clock.advance(DAY + HOUR);
+  await until(() => stateOf(s, "1").length === 0, "the deletion");
+  expect(await text(env, "big.txt")).toBe(big);
+  expect(s.fake.uploads.at(-1)).toEqual({ contentLength: String(manifest.size), bytes: manifest.size });
   await stopApp(s);
 });
