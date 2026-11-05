@@ -206,7 +206,7 @@ test("server → Cloudflare and boat, then each → server: byte for byte, archi
   expect(cf.container.destroyed).toBe(1);
   const afterCloudflare = await readSnapshotManifest(store, { id, agent: AGENT });
   expect(afterCloudflare?.object).not.toBe(saved?.manifest.object);
-  expect((await archivesOf(id)).map((entry) => entry.key)).toEqual([afterCloudflare?.object]);
+  expect((await archivesOf(id)).map((entry): string | undefined => entry.key)).toEqual([afterCloudflare?.object]);
   const restoredA = join(base, "restored-a", "ws");
   await restoreSnapshot(store, { id, agent: AGENT, dir: restoredA }, { tmp: join(base, "tmp"), base });
   expect(treeOf(restoredA)).toEqual(fromCloudflare);
@@ -219,7 +219,7 @@ test("server → Cloudflare and boat, then each → server: byte for byte, archi
   await until(async () => (await readSnapshotManifest(store, { id, agent: AGENT }))?.object !== afterCloudflare?.object, "boat's export");
   const afterBoat = await readSnapshotManifest(store, { id, agent: AGENT });
   await until(async () => (await archivesOf(id)).length === 1, "the superseded archive's deletion");
-  expect((await archivesOf(id)).map((entry) => entry.key)).toEqual([afterBoat?.object]);
+  expect((await archivesOf(id)).map((entry): string | undefined => entry.key)).toEqual([afterBoat?.object]);
   const restoredB = join(base, "restored-b", "ws");
   await restoreSnapshot(store, { id, agent: AGENT, dir: restoredB }, { tmp: join(base, "tmp"), base });
   expect(treeOf(restoredB)).toEqual(fromBoat);
@@ -229,7 +229,7 @@ test("server → Cloudflare and boat, then each → server: byte for byte, archi
   // The server's own checkpoint supersedes boat's, as the helper's callers delete: one archive left.
   const again = await checkpointSnapshot(store, { id, agent: AGENT, dir: restoredB }, { tmp: join(base, "tmp"), now: 2000 });
   await deleteSupersededSnapshots(store, id, again?.manifest.object as string);
-  expect((await archivesOf(id)).map((entry) => entry.key)).toEqual([again?.manifest.object]);
+  expect((await archivesOf(id)).map((entry): string | undefined => entry.key)).toEqual([again?.manifest.object]);
   await b.app.stop();
   await b.fake.settle();
 }, 120_000);

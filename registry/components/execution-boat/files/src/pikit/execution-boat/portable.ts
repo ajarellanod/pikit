@@ -25,7 +25,7 @@ import type { Clock } from "@pikit/core";
 import type { BoatApi } from "./api.ts";
 import type { VmPaths } from "./env.ts";
 import { helperCommand } from "./helper.ts";
-import type { Vm, VmLog, VmSnapshots } from "./vms.ts";
+import type { VmLog, VmSnapshots } from "./vms.ts";
 
 /** boat's longest synchronous command: what an export or a restore may take in the VM. */
 const LONG_SECONDS = 600;
