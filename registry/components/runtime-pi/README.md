@@ -74,6 +74,21 @@ with its admission:
 
 `abort()` stops the active run. Any message queued behind it is withdrawn and stays a duplicate.
 
+**After a failed run.** A message queued behind a run that fails (a model error, a model no provider
+has, the process stopping while the model answered, the restart limit below) gets the next run:
+pi-durable starts it in the very commit that ends the failed one (`afterFailedRun: "continue"`, which
+the runtime sets and `settings` cannot change). A run that faulted (a bug) or was orphaned (its task's
+code is gone) keeps them until the next message, or until they are abandoned (below).
+
+**Crash loops.** A task a crash or an eviction cut off 5 times in a row without moving on (pi-durable's
+`restartLimit`, set through `settings`) ends instead of running again: its run fails with code
+`restart_limit`. A model request in flight when the process died is not sent again: it is a failed
+attempt, retried after its backoff, and with no retry left the run fails with code `interrupted`.
+
+**Upgrading from Pi 1.3.** pi-durable 1.4.0 migrates its SQLite tables (`runtime_pi_*`) to schema
+version 2 when it first opens them, automatically and for good: a runtime-pi built on Pi 1.3 cannot
+open them after, so a deploy cannot be rolled back past it with the same database.
+
 Each agent names its model as `provider/modelId`, so different agents can use different providers.
 Install one `model.provider` component per provider.
 
@@ -93,9 +108,11 @@ parts, in order, and the channels deliver them with the answer, drawn or folded 
 that also ends the run (`control: { terminate: true }`) gives an answer of parts and no text.
 
 **The answer as it is written.** While a run goes, `agent.partial` (`{ conversation, requestId, text }`)
-carries the text so far of the response the model is writing, read from pi-durable's live state, at
-most once per `partialEveryMs` per conversation (config, default 1000: once a second; `0` at each of
-pi-durable's commits of the partial answer), and never after the run's end: what a channel's preview (a
+carries the text so far of the response the model is writing, read from pi-durable's live state as
+its memory adopts it (pi-durable stores the partial answer only about once a second,
+`progress.persistWithinMs`, so the stored commits would show it late), at most once per
+`partialEveryMs` per conversation (config, default 1000: once a second; `0` at each of pi-durable's
+commits of the partial answer), and never after the run's end: what a channel's preview (a
 "Thinking…" placeholder edited as it grows) reads. A notice: one lost costs nothing.
 
 ## Nothing admitted goes unanswered
@@ -169,11 +186,11 @@ has work pending. The handler:
 2. resumes the conversations holding pending messages that this App is not driving (a message it
    never answered: as at start, through `recover`, abandoned after `abandonPendingAfterHours`);
 3. waits until this App drives no run, or until its slice ends;
-4. asks again at once when runs are still going. When what is left only waits for a time (a model
-   retry's backoff, a deferred response's poll), the runtime asked for a wakeup at that time
-   (`onIdleWithPendingWork` and `nextWakeAtOf` in `@pikit/pi-adapter`), and the handler closes
-   pi-durable inside its event (`suspend`) so the object can be evicted until then; the wakeup opens
-   it again and the wait continues from its checkpoint.
+4. asks again at once when runs are still going. When what is left only sleeps until a time (a model
+   retry's backoff, a deferred response's poll: pi-durable's sleeping tasks, kept in the storage), the
+   runtime asked for a wakeup at that time (its `onIdleUntil`). pi-durable keeps no timer for a
+   sleeping task here (`onWake`), so the object can be evicted until then; the wakeup's step 3
+   resumes the task once due, in this instance or a new one.
 
 After a storage error closed pi-durable (the runtime's `onFailure`), runtime-pi asks for the handler
 after the backoff above; its step 1 opens pi-durable again, and what the failure left goes on. If the
@@ -380,7 +397,7 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
   that never answers does not hold `stop`;
 - `wakeups`: a run that died mid-way completed by the next App's wakeup; a long run driven over
   several slices, each cut asking again at once; a model retry's backoff as a wakeup at its time, with
-  pi-durable suspended meanwhile; stop cancelling a waiting handler, which asks again;
+  nothing running the retry meanwhile; stop cancelling a waiting handler, which asks again;
 - the start failures above, and a stored credential reaching the provider;
 - an agent's named tools and skills being the installed ones (a skill loaded by name), and the start
   failures for a skill nothing provides or provided under another name;
