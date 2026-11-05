@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AppEvents, defineApp, defineComponent, Halt, silentLogger } from "@pikit/core";
 import { type AgentRuntime, type AgentTool, answerText, type ConversationRef, defineAgent, type QuestionPart, type Sender } from "@pikit/contracts";
+import { defineExtension, hook, ToolTask } from "@pikit/pi-adapter/extensions";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
 import { recordingBash, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import approvalsSql from "../approvals-sql/files/src/pikit/approvals-sql/index.ts";
@@ -33,7 +34,16 @@ const config = { "extension-approvals": { tools: ["bash"], approvers: ["telegram
 
 const agents = defineComponent({
   name: "agents-test",
-  setup: (pikit) => pikit.provideKeyed("agent.definition", "guarded", defineAgent({ name: "guarded", model: "faux/scripted", tools: ["bash"], extensions: ["approvals"] })),
+  setup(pikit) {
+    pikit.provideKeyed("agent.definition", "guarded", defineAgent({ name: "guarded", model: "faux/scripted", tools: ["bash"], extensions: ["approvals"] }));
+    // A later hook blocks the call approvals claimed: pi-durable's own `blocked` result reaches afterTool.
+    pikit.provideKeyed("agent.definition", "overruled", defineAgent({ name: "overruled", model: "faux/scripted", tools: ["bash"], extensions: ["approvals", "blocker"] }));
+    pikit.provideKeyed(
+      "agent.extension",
+      "blocker",
+      defineExtension({ name: "blocker", hooks: [hook(ToolTask, { beforeTool: (call) => (call.name === "bash" ? { block: "no bash here" } : undefined) })] }),
+    );
+  },
 });
 
 /** An App over the SQLite file `db`; `send` dispatches a message (through `inbound.normalize`, as `admitInbound` does) and waits for its run. */
@@ -67,7 +77,7 @@ async function start(db: string, ran: string[]) {
   return {
     app,
     approvals: () => live().approvals,
-    create: async (): Promise<ConversationRef> => ({ key: "telegram:1001", agent: "guarded", conversationId: await live().create() }),
+    create: async (agent = "guarded"): Promise<ConversationRef> => ({ key: "telegram:1001", agent, conversationId: await live().create() }),
     async send(conversation: ConversationRef, id: string, text: string, sender: Sender) {
       const normalized = await app.context().run("inbound.normalize", { id, channel: sender.channel, conversationId: "chat-1", actor: { id: sender.id }, text });
       if (normalized instanceof Halt) throw new Error(`halted: ${normalized.reason}`);
@@ -166,4 +176,26 @@ test("request_approval refuses a tool that needs no approval", async () => {
   const asked = await s.send(await s.create(), "r1", 'call: request_approval {"tool":"read","args":{"path":"x"},"title":"Read","reason":"Why"}', owner);
   expect(JSON.stringify(asked.result?.messages)).toContain('\\"read\\" needs no approval here; only these do: bash');
   expect((await s.approvals().list({}, s.app.context())).items).toEqual([]);
+});
+
+test("a claimed call a later hook blocks never ran: pi-durable's blocked result settles its approval failed, with that code", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pikit-approvals-"));
+  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+  const ran: string[] = [];
+  const s = await start(join(dir, "pikit.db"), ran);
+  cleanup.push(() => s.app.stop());
+  const conversation = await s.create("overruled");
+
+  const asked = await s.send(conversation, "o1", 'call: request_approval {"tool":"bash","args":{"command":"ls"},"title":"List","reason":"Why not"}', owner);
+  const question = asked.result?.parts?.[0] as QuestionPart;
+  await s.send(conversation, "o2", answerText(question, { approve: true }), owner);
+
+  const blocked = await s.send(conversation, "o3", "bash: ls", owner);
+  expect(JSON.stringify(blocked.result?.messages)).toContain("no bash here");
+  expect(ran).toEqual([]);
+  const [record] = (await s.approvals().list({}, s.app.context())).items;
+  expect(record).toMatchObject({ status: "failed", detail: "not run (blocked): Tool call blocked: no bash here" });
+  // Used up: the same call again finds no approval to claim.
+  const again = await s.send(conversation, "o4", "bash: ls", owner);
+  expect(JSON.stringify(again.result?.messages)).toContain("needs a person's approval");
 });

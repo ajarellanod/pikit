@@ -532,7 +532,7 @@ export default defineComponent({
         const stop = new AbortController();
         // The start context's values, with the app's stop as the only cancellation: start's own
         // deadline must not cut a handler that runs later.
-        const own = (name: string) => ctx.derive((inner) => ({ abortSignal: stop.signal, value: (key) => inner.value(key), toString: () => `${inner}.${name}` }));
+        const own = (name: string) => ctx.derive((inner) => ({ abortSignal: stop.signal, telemetry: inner.telemetry, value: (key) => inner.value(key), toString: () => `${inner}.${name}` }));
         const r: Running = { env: host.env, stop, wakeup: own("Wakeup"), inbox: own("Inbox"), inFlight: new Set(), alarm: undefined };
 
         if (host.object === undefined) {

@@ -101,7 +101,7 @@ async function harness(options: HarnessOptions = {}) {
         if (options.sliceMs === undefined) return handler(ctx);
         const cut = new AbortController();
         setTimeout(() => cut.abort(new Error("the slice deadline passed")), options.sliceMs);
-        return handler(ctx.derive((inner) => ({ abortSignal: cut.signal, value: (key) => inner.value(key), toString: () => `${inner}.Slice` })));
+        return handler(ctx.derive((inner) => ({ abortSignal: cut.signal, telemetry: inner.telemetry, value: (key) => inner.value(key), toString: () => `${inner}.Slice` })));
       }),
   });
   const user = defineComponent({

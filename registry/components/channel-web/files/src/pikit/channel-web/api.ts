@@ -24,8 +24,9 @@
  * command ran in it, in its project's space.
  *
  * A conversation reads as the dashboard's does (features/completed/chat-parity.md): a transcript of entries
- * (`ChatTranscriptEntry`, admin-api's `ApiTranscriptEntry`: pi-ai messages) and live events (`ChatEvent`,
- * admin-api's `ApiEvent`), both cut to what the operator lets users see (`ChatConfig.visibility`).
+ * (`ChatTranscriptEntry`, admin-api's `ApiTranscriptEntry`: pi-ai messages) and its live state (`ChatLive`,
+ * a projection of `agent.observe`'s `ObservedLive`, sent as `ChatEvent`s: whole, then as JSON ops), both
+ * cut to what the operator lets users see (`ChatConfig.visibility`).
  *
  * | Route | Answer |
  * |---|---|
@@ -45,7 +46,7 @@
  * | `GET /chat/api/conversations/:id/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`, newest first, at most `PAGE_JSON_MAX` characters of stored JSON (then fewer than `limit`, and `next`) |
  * | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | the bytes of image `n` of the user's message `messageId` (a user message's image part's `url`), its type, cached privately |
  * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`413` past a message's bounds: its images, its files) |
- * | `GET /chat/api/conversations/:id/events` | server-sent events, one `ChatEvent` per `data:` line, a `snapshot` first |
+ * | `GET /chat/api/conversations/:id/events` | server-sent events, one `ChatEvent` per `data:` line, a `live` with `["r", ChatLive]` first |
  * | `POST /chat/api/conversations/:id/abort` | `200 ChatAbortResponse` |
  */
 
@@ -249,7 +250,7 @@ export interface ChatImage {
  *   `state` says what became of it. A message sent while a run goes is in the transcript (and announced
  *   live) once that run ended: it is answered after it.
  * - **A run's message** (an answer, a tool round, a tool's result): `<request id of the run>#<its hash>`,
- *   the same id the live events announced it with (`message_end`'s `entry`): merged by id, nothing is
+ *   the same id the live events announced it with (an `entries` event): merged by id, nothing is
  *   swapped when a run ends. One message each. A run that failed or was stopped keeps what it wrote.
  */
 export interface ChatTranscriptEntry {
@@ -263,31 +264,73 @@ export interface ChatTranscriptEntry {
   state?: "pending" | "answered" | "failed" | "aborted";
 }
 
-/**
- * One live event of a conversation, in the dashboard's shapes (admin-api's `ApiEvent`, pi-durable's
- * agent events), cut by `ChatConfig.visibility`. The first is a `snapshot`; a stream that fell behind
- * gets a new one, so a view is rebuilt from the last `snapshot` and the events after it.
- *
- * - `snapshot`: `run` (`{}`) while a run goes; `generation.message`, the answer being written; `tools`,
- *   `{ callId, name, status, output? }` each.
- * - `run_start`, `run_end`: a run starts, ends (any run: whether the assistant is busy).
- * - `message_start` (`message`), `message_update` (`changes`), `message_end` (`entry`: `{ id, kind, model }`,
- *   the transcript's entry, `model` its messages): the answer as it is written, then stored.
- * - `tool_execution_start` (`toolCallId`, `toolName`, `args` with `full`), `tool_execution_update`
- *   (`output`, with `full` only), `tool_execution_end`.
- * - `entry_appended`: with `entry`, an entry of the user's (a message admitted, or one released after
- *   the run it waited behind); without, something stored changed (a run's messages, a message's
- *   state): read the transcript again.
- *
- * Only a run known to answer one of the user's messages streams its messages and tools (by the request
- * ids its inputs name, or the request that started it): an operator's run streams nothing but its
- * `run_start` and `run_end`. Never an entry of the runtime's own (a system prompt, the user's message as
- * the agent read it, an operator's), usage or cost.
- */
-export interface ChatEvent {
-  type: string;
-  [field: string]: unknown;
+/** A call of the run's current tool round, as users see it (`ChatLive.tools`). */
+export interface ChatLiveTool {
+  callId: string;
+  /** The tool's name. */
+  name: string;
+  status: "pending" | "running" | "done";
+  /** What it printed so far (a bounded output loses its start): with `tools: "full"` only. */
+  output?: string;
 }
+
+/**
+ * What a conversation shows its user live, now (admin-api's `ObservedLive` as users may see it), cut by
+ * `ChatConfig.visibility`. JSON: what `live` events' ops apply to.
+ *
+ * Only a run known to answer one of the user's messages (one of its requests is theirs) shows its
+ * answer, its tools and its failure: an operator's run shows only that the assistant is busy.
+ */
+export interface ChatLive {
+  /** Whether a run goes (any run). */
+  busy: boolean;
+  /**
+   * The answer being written: a pi-ai assistant message (`role`, `content`, `timestamp`, `stopReason`),
+   * its blocks cut as the transcript's are (the one it will be stored as).
+   */
+  partial?: unknown;
+  /** The current tool round's calls, in call order (with `tools: "none"`, none); empty outside one. */
+  tools: ChatLiveTool[];
+  /**
+   * Why the user's last run ended without an answer, until a run starts again: the runtime's word
+   * (`model_error`, `aborted`, `turn_limit`, …), never its error's text.
+   */
+  failure?: { reason: string };
+}
+
+/**
+ * A change to a JSON value: `@pikit/contracts`' `JsonOp` (json-ops.ts, Chord's op vocabulary), a path
+ * the keys and indexes from the root. `["r", value]` replaces it whole; `["s", path, value]` sets a member;
+ * `["d", path]` removes an object's member; `["a", path, text]` appends to a string; `["t", path, count]`
+ * drops a string's first `count` characters; `["p", path, start, deleteCount, items]` splices an array.
+ */
+export type ChatJsonOp =
+  | readonly ["r", unknown]
+  | readonly ["s", readonly (string | number)[], unknown]
+  | readonly ["d", readonly (string | number)[]]
+  | readonly ["a", readonly (string | number)[], string]
+  | readonly ["t", readonly (string | number)[], number]
+  | readonly ["p", readonly (string | number)[], number, number, readonly unknown[]];
+
+/**
+ * One live event of a conversation, in admin-api's shapes (`agent.observe`'s `ObservedEvent`), cut by
+ * `ChatConfig.visibility`. A view applies each `live` event's ops in order to the first one's value
+ * and never counts events: a stream that fell behind gets the newest state, by ops or a new `r`.
+ *
+ * - `live`: `ChatLive` changed, `ops` over its last value; the first event is one, `[["r", ChatLive]]`.
+ * - `entries`: entries of the user's, oldest first, as the transcript will give them (same id, same
+ *   messages: merged by id, nothing is swapped): a message admitted or released after the run it waited
+ *   behind, a message a run of the user's wrote (sent before the `live` change that removes the
+ *   answer it holds).
+ * - `transcript`: something stored changed (a run's messages, a message's state): read it again.
+ *
+ * Never an entry of the runtime's own (a system prompt, the user's message as the agent read it, an
+ * operator's), an operator's run's answer or tools, usage or cost.
+ */
+export type ChatEvent =
+  | { type: "live"; ops: readonly ChatJsonOp[] }
+  | { type: "entries"; entries: ChatTranscriptEntry[] }
+  | { type: "transcript" };
 
 export interface ChatSendRequest {
   /** May be empty when it has images or files. At most `MAX_TEXT` characters. */

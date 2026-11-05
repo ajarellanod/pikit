@@ -303,6 +303,7 @@ export function defineApp(options: AppOptions): AppDefinition {
       const context = (inner: Context = BACKGROUND_CONTEXT): AppContext => {
         const ctx: AppContext = {
           abortSignal: inner.abortSignal,
+          telemetry: inner.telemetry,
           // This App's own description wins over one a parent context carries (another App's, K7).
           value: (key) => (key.token === APP_DESCRIPTION.token && description !== undefined ? (description as never) : inner.value(key)),
           toString: () => inner.toString(),

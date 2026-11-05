@@ -22,7 +22,7 @@
  * | `POST /admin/api/conversations` | `ApiStartRequest` → `201 ApiStartResponse`: a conversation of the dashboard's own |
  * | `GET /admin/api/conversations/:id` | `ApiConversation` |
  * | `GET /admin/api/conversations/:id/transcript?limit&cursor` | `ApiPage<ApiTranscriptEntry>`, newest first |
- * | `GET /admin/api/conversations/:id/events` | server-sent events, one `ApiEvent` per `data:` line; `snapshot` first |
+ * | `GET /admin/api/conversations/:id/events` | server-sent events, one `ApiEvent` per `data:` line: a `live` event with the whole `ApiLive` (`[["r", value]]`) first, then its changes |
  * | `POST /admin/api/conversations/:id/messages` | `ApiSendRequest` → `202 ApiSendResponse` |
  * | `POST /admin/api/conversations/:id/abort` | `200 ApiAbortResponse` |
  * | `POST /admin/api/conversations/:id/reset` | `200 ApiResetResponse` |
@@ -210,15 +210,67 @@ export interface ApiTranscriptEntry {
   messages: unknown[];
 }
 
+/** A JSON value, read-only at every depth. */
+export type ApiJson = null | boolean | number | string | readonly ApiJson[] | { readonly [key: string]: ApiJson };
+
 /**
- * One live event of a conversation, in the runtime's JSON. The first is a `snapshot` of what the
- * conversation is now; a client that fell behind gets a new `snapshot`, so a view is rebuilt from the
- * last `snapshot` and the events after it, never from a count of events.
+ * One change to a JSON value (`agent.observe`'s, @pikit/contracts' `json-ops.ts`); a path is the keys
+ * (objects) and indexes (arrays) from the root. `["r", value]`: the whole value replaced; `["s", path,
+ * value]`: the member at `path` set; `["d", path]`: the object member at `path` removed; `["a", path,
+ * text]`: `text` appended to the string at `path`; `["t", path, count]`: that string loses its first
+ * `count` characters; `["p", path, start, deleteCount, items]`: the array at `path` spliced.
  */
-export interface ApiEvent {
-  type: string;
-  [field: string]: unknown;
+export type ApiJsonOp =
+  | readonly ["r", ApiJson]
+  | readonly ["s", readonly [string | number, ...(string | number)[]], ApiJson]
+  | readonly ["d", readonly [string | number, ...(string | number)[]]]
+  | readonly ["a", readonly [string | number, ...(string | number)[]], string]
+  | readonly ["t", readonly [string | number, ...(string | number)[]], number]
+  | readonly ["p", readonly (string | number)[], number, number, readonly ApiJson[]];
+
+/** A call of the current tool round. */
+export interface ApiLiveTool {
+  callId: string;
+  name: string;
+  status: "pending" | "running" | "done";
+  /** What it printed so far, as far as the runtime keeps it (a bounded output loses its start). */
+  output?: string;
 }
+
+/** Why the newest run ended without an answer, until a run starts again. */
+export interface ApiRunFailure {
+  /** The runtime's word (runtime-pi: `model_error`, `no_model`, `aborted`, `reset`, `interrupted`, `turn_limit`, …). */
+  reason: string;
+  /** What the runtime says of it (an error's text), when it says anything. */
+  detail?: string;
+}
+
+/** What a conversation shows live, now (`agent.observe`'s `ObservedLive`): what `live` events' ops apply to. */
+export interface ApiLive {
+  /** Whether a run is going. */
+  busy: boolean;
+  /** The request ids of the run's inputs that have one, in order: whose messages it answers. Absent while idle. */
+  requests?: string[];
+  /** The answer being written, in the runtime's JSON (pi-ai's `AssistantMessage`). */
+  partial?: ApiJson;
+  /** The current tool round's calls, in call order; empty outside one. */
+  tools: ApiLiveTool[];
+  failure?: ApiRunFailure;
+}
+
+/**
+ * One live event of a conversation (`agent.observe`'s `ObservedEvent`), as state: the first is a `live`
+ * event with the whole `ApiLive` (`[["r", value]]`), each next `live` one the ops that change it, applied
+ * in order; a client that fell behind gets the newest state, by ops or a new `["r", value]`. `entries`
+ * are entries the transcript gained, oldest first, sent before the `live` change that ends the answer
+ * they hold. `usage` and `transcript` say to read those again (`transcript`: entries went past unsent,
+ * a compaction). A view never counts events.
+ */
+export type ApiEvent =
+  | { type: "live"; ops: readonly ApiJsonOp[] }
+  | { type: "entries"; entries: readonly ApiTranscriptEntry[] }
+  | { type: "usage" }
+  | { type: "transcript" };
 
 /** One of the App's agents (`agent.definition`, or a live one of `agent.directory`), as it is defined. */
 export interface ApiAgent {

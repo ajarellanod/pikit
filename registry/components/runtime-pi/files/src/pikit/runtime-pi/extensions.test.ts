@@ -28,6 +28,7 @@ const Notes = defineDoc<{ items: string[] }>({
   scope: "conversation",
   history: "latest",
   fork: "current",
+  checkpointWhen: () => false,
   initial: () => ({ items: [] }),
 });
 

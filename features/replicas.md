@@ -25,7 +25,9 @@ Pi opens a session exclusively inside one process and calls a second process "un
 that true across processes is exactly pikit's job. `pi-durable` 1.0 makes it one process per storage
 (the next id is cached in memory, with no cross-process lock), and its scheduler is global: a
 process cannot drive only the conversations it owns
-(`docs/upstream/pi-durable-scheduling-scope.md`). Pi's `packages/server`, which routed
+(`docs/upstream/pi-durable-scheduling-scope.md`). Since 1.5.0 a second process may open a session
+read-only (`HarnessOptions.readOnly`: it recovers and runs nothing, every write rejects), a viewer,
+not a second writer. Pi's `packages/server`, which routed
 sessions to workers, was removed in Pi 1.2.0: nothing of Pi's to reuse for forwarding between replicas.
 
 ## Open questions

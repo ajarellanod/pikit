@@ -6,7 +6,7 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { type ConversationId, defineExtension, defineTool, hook, section, ToolTask } from "@earendil-works/pi-durable";
 import { CONVERSATION, defineAgent, RUN_REQUESTS, type RunRequest, type Sender } from "@pikit/contracts";
 import type { DurableExtension, DurableTool } from "./agent.ts";

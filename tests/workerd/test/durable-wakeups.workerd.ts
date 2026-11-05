@@ -9,8 +9,9 @@
  * - the handler runs `driveSlice` with the slice's cancellation, and asks again for `nextWakeAt`.
  *
  * A run that hits a model error's backoff leaves the object's alarm at the retry time; the object is
- * evicted (its in-process sleep with it); an early alarm runs nothing; the alarm at the retry time
- * constructs the object again, and the run completes in it.
+ * evicted (the retry is a durable sleep, in storage: only the instance's timer for it goes); an early
+ * alarm runs nothing; the alarm at the retry time constructs the object again, and the run completes
+ * in it.
  *
  * `Date` (the apps' clock: the tests and the objects share one isolate) is moved ahead by the test, so
  * the retry comes due without waiting out the backoff.
@@ -122,9 +123,10 @@ it("a run evicted during a model error's backoff is completed by the alarm nextW
   });
   expect(apps[0]?.faux.state.callCount).toBe(1);
 
-  // Evicted: the instance and its in-process sleep are gone. Locally, a pending timer keeps an object
-  // from being evicted (and the tests share the isolate), so the instance's Harness is closed first,
-  // in an event of its object, which ends the sleep as an eviction would.
+  // Evicted: the instance and its timer are gone; the sleep stays in storage (a durable sleep). This
+  // Harness has no `onWake`, so pi-durable arms a timer for the sleep, and locally a pending timer keeps
+  // an object from being evicted (the tests share the isolate): the instance's Harness is closed first,
+  // in an event of its object, which ends the timer as an eviction would.
   await inside(stub, (app) => app.harness.close(context));
   await evictDurableObject(stub);
 

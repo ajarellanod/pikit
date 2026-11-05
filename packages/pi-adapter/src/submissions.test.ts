@@ -22,7 +22,7 @@ async function open(responses: FauxResponseStep[], model = { provider: "faux", m
   const storage = new MemoryStorage();
   const harness = await Harness.open(storage, { models, registry: createRegistry(), settings: { followUpMode: "all", steeringMode: "all" } }, ctx);
   const commits: CommitChange[][] = [];
-  harness.subscribeCommits((publication) => void commits.push([...publication.changes]));
+  harness.observeCommits({ advance: (publication) => void commits.push([...publication.changes]), end: () => {} });
   const conversation = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model } }, ctx);
   /** The keys of the runs as the runtime groups them live (per commit) and as a reconciliation does (all at once). */
   const keys = async () => {

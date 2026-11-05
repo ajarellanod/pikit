@@ -1,6 +1,7 @@
 /**
  * `agent.partial`: the answer as the model writes it, re-emitted from pi-durable's live state
- * (`pi.live`'s `generation.message`) while the run goes, throttled, and never after the run's end.
+ * (`pi.live`'s `generation.message`, as memory adopts it) while the run goes, throttled, and never
+ * after the run's end.
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -15,7 +16,7 @@ afterEach(async () => {
 /** About 400 characters, streamed 4 at a time, 200 chunks a second: half a second of writing. */
 const ANSWER = Array.from({ length: 60 }, (_, index) => `word${index}`).join(" ");
 
-test("agent.partial carries the answer as written so far while the run streams, throttled, and none comes after the run settled", async () => {
+test("agent.partial carries the answer as written so far while the run streams, throttled, before pi-durable stores it, and none comes after the run settled", async () => {
   const slow = fauxProvider({ provider: "slow", models: [{ id: "model" }], tokensPerSecond: 200, tokenSize: { min: 1, max: 1 } });
   slow.setResponses([fauxAssistantMessage(ANSWER)]);
   const file = databaseFile();
@@ -24,7 +25,8 @@ test("agent.partial carries the answer as written so far while the run streams, 
     agents: [{ name: "slow", model: "slow/model" }],
     providers: [slow.provider],
     partials: true,
-    runtime: { partialEveryMs: 60, settings: { progress: { partialIntervalMs: 10 } } },
+    // The partial commits are stored only with the answer: what the stored commits show would come too late.
+    runtime: { partialEveryMs: 60, settings: { progress: { partialIntervalMs: 10, persistWithinMs: 60_000 } } },
   });
   cleanup.push(w.close);
   const conversation = await w.conversation();

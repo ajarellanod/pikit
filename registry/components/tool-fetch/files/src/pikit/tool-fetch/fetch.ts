@@ -27,9 +27,13 @@ export const FETCH_MAX_OUTPUT = 50_000;
 const MAX_LINKS = 100;
 const USER_AGENT = "pikit-fetch/0 (an AI agent's HTTP tool)";
 
+// Tool arguments are typed by pi-schema's `Static`, which reads no TypeBox `Enum`: `Unsafe` names its
+// type, with the same JSON Schema.
 const Parameters = Type.Object({
   url: Type.String({ description: "The address to request: http:// or https:// only." }),
-  method: Type.Optional(Type.Enum([...FETCH_METHODS], { description: "GET (the default), HEAD, POST, PUT, PATCH or DELETE." })),
+  method: Type.Optional(
+    Type.Unsafe<(typeof FETCH_METHODS)[number]>(Type.Enum([...FETCH_METHODS], { description: "GET (the default), HEAD, POST, PUT, PATCH or DELETE." })),
+  ),
   headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Request headers, by name." })),
   body: Type.Optional(Type.String({ description: "The request body, for POST, PUT, PATCH or DELETE." })),
   raw: Type.Optional(Type.Boolean({ description: "true: HTML as it is, not converted to text." })),

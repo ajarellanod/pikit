@@ -34,7 +34,10 @@ the runtime or outbox, nor make conversations multi-writer.
   default provider runs pi-durable's SQLite core over `storage.sqlite`. Until then it is not added
   (YAGNI): runtime-pi opens the storage over `storage.sqlite` itself.
 - One writer: pi-durable assumes one process owns a storage (its SQLite backend keeps the next id
-  and sequence in memory; there is no cross-process locking). Postgres alone therefore gives a
+  and sequence in memory; there is no cross-process locking). Since 1.5.0 another process may open a
+  session as a viewer (`HarnessOptions.readOnly`: it recovers nothing, and every write, `resume()`
+  and every call that would run tasks reject with `ReadOnlySession`), which reads and watches, never
+  writes. Postgres alone therefore gives a
   managed database and backups, not [several replicas](replicas.md) sharing conversations: those
   need each conversation owned by one process (as one Durable Object per chat does) or multi-writer
   support in pi-durable (to propose upstream).
@@ -43,9 +46,23 @@ the runtime or outbox, nor make conversations multi-writer.
 - Server only: a Worker has Durable Object SQL instead.
 
 ## Pi first
-Conversation storage is Pi's contract: `pi-durable` publishes memory, SQLite and JSONL storage
-backends and a storage conformance suite. A Postgres backend of that contract is the thing to write,
-and upstream, rather than a pikit store.
+Conversation storage is Pi's contract: `pi-durable` 1.5.0 publishes memory, SQLite, JSONL,
+IndexedDB (a browser's, since 1.4.0) and `StoreStorage` (on Chord v2's store, since 1.5.0) backends
+and a storage conformance suite. A Postgres backend of that contract is the thing to write, and
+upstream, rather than a pikit store. What it implements, as of 1.5.0:
+- **Group commit.** `Storage.commit(batches, receive, context)` stores a group of commits in one
+  call, each batch one atomic commit with its own seq, checked against what the batches before it
+  left. The first batch Durable's own checks refuse is not stored, nor anything after it (the call
+  resolves `{ stored, refused }`); any other failure rejects the whole call and stores nothing the
+  backend can roll back. `receive(index, seq)` is called per stored batch, in order, once durable. A
+  Session sends the commits that arrive while one call is in flight in the next, so its
+  conversations share round trips (Pi's measure, storage with a 4 ms round trip and 128
+  conversations: about 5 to 440 runs per second).
+- **Ids.** `mintId()` gives ids greater than every id minted since open and every id stored, also
+  across reopen.
+- **SQLite pieces are Chord's** (`@earendil-works/chord/sqlite` since 1.4.0: the portable
+  interfaces, the migration runner, the prefix check), and `SqliteExecutor` needs `runCounted` (the
+  rows a statement changed) since 1.5.0.
 
 ## Open questions
 - The former scenario 4 removed a sessions provider; today the proof swaps `storage-sqlite`, and

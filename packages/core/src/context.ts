@@ -11,6 +11,10 @@
  * The reverse does not hold: Chord's `withContextValue` looks the signal up by a private key
  * and would drop ours. The Pi adapter therefore bridges once, at its boundary, with Chord's
  * `withAbortSignal` (@pikit/pi-adapter's context.ts).
+ *
+ * Chord's `Context` also carries its telemetry parent (`telemetry`, pi-telemetry's `TelemetrySpan`).
+ * `TelemetrySpan` here has that shape, so a pikit context is a Chord one; the core records nothing:
+ * its root carries a no-op span, and a derived context keeps its parent's.
  */
 
 /** Typed identity for one value carried by a {@link Context}. */
@@ -20,9 +24,35 @@ export interface ContextKey<T> {
   readonly valueType?: (value: T) => T;
 }
 
+/** A telemetry attribute's value (pi-telemetry's `AttributeValue`). */
+export type SpanAttributeValue = string | number | boolean | readonly string[] | readonly number[] | readonly boolean[];
+
+/** A telemetry parent: pi-telemetry's `TelemetrySpan`, by shape. */
+export interface TelemetrySpan {
+  startSpan<T>(
+    options: { name: string; attributes?: Record<string, SpanAttributeValue | undefined>; links?: readonly { context: unknown; attributes?: Record<string, SpanAttributeValue | undefined> }[] },
+    callback: (span: TelemetrySpan) => T | Promise<T>,
+  ): Promise<T>;
+  addLink(link: { context: unknown; attributes?: Record<string, SpanAttributeValue | undefined> }): void;
+  addEvent(name: string, attributes?: Record<string, SpanAttributeValue | undefined>): void;
+  setAttributes(attributes: Record<string, SpanAttributeValue | undefined>): void;
+  setStatus(status: { status: "ok" } | { status: "error"; error?: { name: string; message: string } }): void;
+}
+
+/** The span that records nothing: the root context's. */
+export const NOOP_TELEMETRY: TelemetrySpan = Object.freeze({
+  startSpan: <T>(_options: unknown, callback: (span: TelemetrySpan) => T | Promise<T>): Promise<T> => Promise.resolve().then(() => callback(NOOP_TELEMETRY)),
+  addLink: () => {},
+  addEvent: () => {},
+  setAttributes: () => {},
+  setStatus: () => {},
+});
+
 /** Immutable invocation-scoped values. Same shape as Chord's `Context`. */
 export interface Context {
   readonly abortSignal: AbortSignal | undefined;
+  /** The telemetry parent of what runs in this context (Chord's); a no-op unless a host set one. */
+  readonly telemetry: TelemetrySpan;
   value<T>(key: ContextKey<T>): T | undefined;
   toString(): string;
 }
@@ -31,6 +61,9 @@ class EmptyContext implements Context {
   constructor(private readonly name: string) {}
   get abortSignal(): AbortSignal | undefined {
     return undefined;
+  }
+  get telemetry(): TelemetrySpan {
+    return NOOP_TELEMETRY;
   }
   value<T>(_key: ContextKey<T>): T | undefined {
     return undefined;
@@ -49,6 +82,9 @@ class ValueContext<V> implements Context {
   get abortSignal(): AbortSignal | undefined {
     return this.parent.abortSignal;
   }
+  get telemetry(): TelemetrySpan {
+    return this.parent.telemetry;
+  }
   value<T>(key: ContextKey<T>): T | undefined {
     if (key.token === this.key.token) return this.stored as unknown as T;
     return this.parent.value(key);
@@ -63,6 +99,9 @@ class SignalContext implements Context {
     private readonly parent: Context,
     readonly abortSignal: AbortSignal,
   ) {}
+  get telemetry(): TelemetrySpan {
+    return this.parent.telemetry;
+  }
   value<T>(key: ContextKey<T>): T | undefined {
     return this.parent.value(key);
   }

@@ -14,7 +14,6 @@ import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import {
   type ChatConfig,
   type ChatConversation,
-  type ChatEvent,
   type ChatTranscriptEntry,
   MAX_DURABLE_FILES_BYTES,
   MAX_DURABLE_IMAGE_BYTES,
@@ -30,7 +29,7 @@ import { runEntryId } from "./entries.ts";
 import channelWeb, { createChannelWeb, NAME, usersPagePath } from "./index.ts";
 import { avatarHosts, cspOf } from "./assets.ts";
 import { maxBodyOf } from "./routes.ts";
-import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, OPERATOR, PIXEL, Runtime, router, SECRETS, type Served, secretsOf, serve, sse } from "./runtime.test-support.ts";
+import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, liveReader, OPERATOR, PIXEL, Runtime, router, SECRETS, type Served, secretsOf, serve } from "./runtime.test-support.ts";
 
 const apps: Served[] = [];
 afterEach(async () => {
@@ -381,9 +380,9 @@ async function follow(c: Chat, user: string, id: string) {
   const client = new AbortController();
   const response = await c.served.fetch(`${API}/conversations/${id}/events`, as(user, { signal: client.signal }));
   expect(response.headers.get("content-type")).toContain("text/event-stream");
-  const events = sse(response);
+  const events = liveReader(response);
   return {
-    take: (count: number) => events.take(count) as Promise<ChatEvent[]>,
+    ...events,
     async close() {
       client.abort();
       await events.reader.cancel();
@@ -487,7 +486,7 @@ test("a run that ends before its admission returns (a quick model): the list and
   expect((await listed()).map((each) => each.busy)).toEqual([true]);
 });
 
-test("an operator's follow-up (dashboard:) in a user's conversation and its run never appear in its transcript or its live events", async () => {
+test("an operator's follow-up (dashboard:) in a user's conversation and its run never appear in its transcript or its live view", async () => {
   const c = await chat();
   const { id, requestId } = await start(c, "ana", "hello");
   const key = `web:ana:${id}`;
@@ -496,80 +495,61 @@ test("an operator's follow-up (dashboard:) in a user's conversation and its run 
   await eventually(async () => ((await transcriptOf(c, "ana", id)).length === 2 ? true : undefined), "the user's answer");
 
   const view = await follow(c, "ana", id);
-  expect(await view.take(1)).toEqual([{ type: "snapshot", tools: [] }]);
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
   // What admin-api dispatches for an operator: a follow-up whose request id is the dashboard's.
   const conversation = c.runtime.pointers.get(key)!;
   await c.runtime.runtime.dispatch({ requestId: "dashboard:op-1", conversation, prompt: "[From the operator] how is it going?", whenBusy: "followUp" }, c.served.app.context());
   await c.runtime.start(key, ["dashboard:op-1"]);
-  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [] } });
-  c.runtime.push({ type: "message_update", changes: [{ type: "text_start", contentIndex: 0, block: { type: "text", text: "" } }, { type: "text_delta", contentIndex: 0, delta: "secret operator answer" }] });
-  c.runtime.push({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "ls" } });
-  c.runtime.push({ type: "tool_execution_end", toolCallId: "t1", toolName: "bash" });
-  c.runtime.push({ type: "message_end", entry: { id: 5, kind: "message", model: [answerOf("secret operator answer") as never] } });
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["s", ["busy"], true]] }]);
+  c.runtime.partial(key, answerOf("secret operator answer"));
+  c.runtime.live(key, (live) => ({ ...live, tools: [{ callId: "t1", name: "bash", status: "running" }] }));
+  c.runtime.entries(key, [{ messages: [answerOf("secret operator answer") as never] }]);
   await c.runtime.end(key, ["dashboard:op-1"], { text: "secret operator answer", messages: [{ role: "user", content: "[From the operator] how is it going?" }, answerOf("secret operator answer")] });
-  expect(await view.take(2)).toEqual([{ type: "run_start" }, { type: "run_end" }]);
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["s", ["busy"], false]] }]);
   await view.close();
   await Bun.sleep(1_200);
   const entries = await transcriptOf(c, "ana", id);
   expect(entries.length).toBe(2);
   expect(JSON.stringify(entries)).not.toContain("operator");
+  expect(JSON.stringify(view.seen)).not.toMatch(/operator|bash/);
 });
 
-test("LIVE: a snapshot first; the user's run in the dashboard's shapes, cut by the policy (no thinking, tools by name); message_end's entry is the transcript's, same id, same messages: nothing swapped when the run ends; the client leaving releases the watch", async () => {
+test("LIVE: the live value whole first, then its ops; the user's run cut by the policy (no thinking, tools by name); its entries the transcript's, same id, same messages: nothing swapped when the run ends; the client leaving releases the watch", async () => {
   const c = await chat();
   const { id, requestId } = await start(c, "ana", "hello");
   const key = `web:ana:${id}`;
   const view = await follow(c, "ana", id);
-  expect(await view.take(1)).toEqual([{ type: "snapshot", tools: [] }]);
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
   await c.runtime.start(key, [requestId]);
-  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [], timestamp: 30, usage: { cost: { total: 1 } } } });
-  c.runtime.push({
-    type: "message_update",
-    usage: { cost: { total: 1 } },
-    changes: [
-      { type: "thinking_start", contentIndex: 0, block: { type: "thinking", thinking: "" } },
-      { type: "thinking_delta", contentIndex: 0, delta: "private reasoning" },
-      { type: "text_start", contentIndex: 1, block: { type: "text", text: "" } },
-      { type: "text_delta", contentIndex: 1, delta: "Hel" },
-    ],
-  });
-  c.runtime.push({ type: "message_update", changes: [{ type: "text_delta", contentIndex: 1, delta: "lo" }] });
-  c.runtime.push({ type: "tool_execution_start", toolCallId: "t1", toolName: "websearch", args: { query: "secret args" } });
-  c.runtime.push({ type: "tool_execution_update", toolCallId: "t1", toolName: "websearch", output: { append: "tool output" } });
-  c.runtime.push({ type: "tool_execution_end", toolCallId: "t1", toolName: "websearch" });
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["s", ["busy"], true]] }]);
+  const writing = (text: string) => ({ role: "assistant", content: [{ type: "thinking", thinking: "private reasoning" }, { type: "text", text }], timestamp: 30, usage: { cost: { total: 1 } } });
+  c.runtime.partial(key, writing("Hel"));
+  await view.until({ busy: true, partial: { role: "assistant", content: [{ type: "text", text: "Hel" }], timestamp: 30 }, tools: [] });
+  // The answer streamed: its new text only.
+  c.runtime.partial(key, writing("Hello"));
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["a", ["partial", "content", 0, "text"], "lo"]] }]);
+  c.runtime.live(key, (live) => ({ ...live, tools: [{ callId: "t1", name: "websearch", status: "running", output: "tool output" }] }));
+  c.runtime.live(key, (live) => ({ ...live, tools: [{ callId: "t1", name: "websearch", status: "done", output: "tool output, all" }] }));
+  await view.until({ busy: true, partial: { role: "assistant", content: [{ type: "text", text: "Hello" }], timestamp: 30 }, tools: [{ callId: "t1", name: "websearch", status: "done" }] });
   const final = { role: "assistant", content: [{ type: "thinking", thinking: "private reasoning" }, { type: "text", text: "Hello" }], stopReason: "stop", timestamp: 30, usage: { cost: { total: 1 } } };
-  c.runtime.push({ type: "message_end", entry: { id: 77, kind: "message", model: [final] } });
-  c.runtime.push({ type: "entry_appended", entry: { id: 78, kind: "message", model: [{ role: "system", content: "system prompt" }] } });
-  c.runtime.push({ type: "usage_changed", usage: { cost: 1 } });
-  const seen = await view.take(7);
-  const shownEntry = { id: runEntryId(requestId, final), kind: "message", model: [{ role: "assistant", content: [{ type: "text", text: "Hello" }], timestamp: 30, stopReason: "stop" }] };
-  expect(seen).toEqual([
-    { type: "run_start" },
-    { type: "message_start", message: { role: "assistant", content: [], timestamp: 30 } },
-    {
-      type: "message_update",
-      changes: [
-        { type: "text_start", contentIndex: 0, block: { type: "text", text: "" } },
-        { type: "text_delta", contentIndex: 0, delta: "Hel" },
-      ],
-    },
-    { type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: "lo" }] },
-    { type: "tool_execution_start", toolCallId: "t1", toolName: "websearch" },
-    { type: "tool_execution_end", toolCallId: "t1", toolName: "websearch" },
-    { type: "message_end", entry: shownEntry },
-  ]);
+  c.runtime.entries(key, [{ messages: [final as never] }, { messages: [{ role: "system", content: "system prompt" }] }]);
+  c.runtime.push(key, { type: "usage" });
+  const shownEntry: ChatTranscriptEntry = { id: runEntryId(requestId, final), kind: "message", messages: [{ role: "assistant", content: [{ type: "text", text: "Hello" }], timestamp: 30, stopReason: "stop" }] };
+  expect(await view.next("entries")).toEqual({ type: "entries", entries: [shownEntry] });
   await c.runtime.end(key, [requestId], { messages: [prompt, final] });
   // The run ends; what it wrote is stored: read the transcript again.
-  expect(await view.take(2)).toEqual([{ type: "run_end" }, { type: "entry_appended" }]);
+  await view.until({ busy: false, tools: [] });
+  expect(await view.next("transcript")).toEqual({ type: "transcript" });
   const [stored, user] = await transcriptOf(c, "ana", id);
-  expect(stored).toEqual({ id: shownEntry.id, kind: "message", messages: shownEntry.model });
+  expect(stored).toEqual(shownEntry);
   expect(user).toMatchObject({ id: requestId, state: "answered" });
   // A message sent: its entry, as the transcript has it.
   const sent = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "more" }))).json()) as { requestId: string };
-  const [appended] = await view.take(1);
+  const appended = await view.next("entries");
   const [read] = await transcriptOf(c, "ana", id);
-  expect(appended).toEqual({ type: "entry_appended", entry: { id: sent.requestId, kind: "message", model: read?.messages } });
-  expect(JSON.stringify(seen)).not.toMatch(/private|secret|tool output|system prompt|usage|cost/);
+  expect(read?.id).toBe(sent.requestId);
+  expect(appended).toEqual({ type: "entries", entries: [read as ChatTranscriptEntry] });
+  expect(JSON.stringify(view.seen)).not.toMatch(/private|secret|tool output|system prompt|usage|cost/);
   await view.close();
   for (let i = 0; i < 50 && c.runtime.released < c.runtime.watching; i++) await Bun.sleep(5);
   expect([c.runtime.watching, c.runtime.released]).toEqual([1, 1]);
@@ -581,79 +561,76 @@ test("HELD: a message sent while a run goes is out of the transcript and the liv
   const key = `web:ana:${id}`;
   await c.runtime.start(key, [requestId]);
   const view = await follow(c, "ana", id);
-  // The run going is the user's (its start heard): it streams.
-  expect(await view.take(1)).toEqual([{ type: "snapshot", run: {}, tools: [] }]);
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["r", { busy: true, tools: [] }]] }]);
   const queued = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "two" }))).json()) as { requestId: string; admission: string };
   expect(queued.admission).toBe("queued");
   expect(await linesNow(c, "ana", id)).toEqual(["user: one (pending)"]);
   await c.runtime.end(key, [requestId], { text: "first" });
-  const [ended, changed, released] = await view.take(3);
-  expect([ended, changed]).toEqual([{ type: "run_end" }, { type: "entry_appended" }]);
-  expect(released).toMatchObject({ type: "entry_appended", entry: { id: queued.requestId, kind: "message", model: [{ role: "user", content: [{ type: "text", text: "two" }] }] } });
+  await view.until({ busy: false, tools: [] });
+  expect(await view.next("transcript")).toEqual({ type: "transcript" });
+  expect(await view.next("entries")).toMatchObject({ type: "entries", entries: [{ id: queued.requestId, kind: "message", messages: [{ role: "user", content: [{ type: "text", text: "two" }] }] }] });
   expect(await linesNow(c, "ana", id)).toEqual(["user: one (answered)", "assistant: first", "user: two (pending)"]);
   // Its run's end never heard: the read finds it, and the view hears the state changed.
   await c.runtime.end(key, [queued.requestId], { kind: "aborted", quiet: true });
   expect((await transcriptOf(c, "ana", id))[0]).toMatchObject({ id: queued.requestId, state: "aborted" });
-  expect(await view.take(2)).toEqual([{ type: "run_end" }, { type: "entry_appended" }]);
+  expect(await view.next("transcript")).toEqual({ type: "transcript" });
   await view.close();
 });
 
-test("live: a run is the user's by its inputs' request ids: a fast run whose message is not stored streams; an operator's run streams nothing but its start and end, while the user waits; a run of both streams", async () => {
+test("live: a run is the user's by its request ids: a fast run whose message is not stored streams, and why it ended; an operator's run shows only that it goes, while the user waits; a run of both streams", async () => {
   const c = await chat();
   const { id, requestId } = await start(c, "ana", "hello");
   const key = `web:ana:${id}`;
   await c.runtime.end(key, [requestId], { text: "first" });
   const view = await follow(c, "ana", id);
-  expect(await view.take(1)).toEqual([{ type: "snapshot", tools: [] }]);
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
 
   // A fast run: it starts (and could end) before its user's message is stored.
   const fast = "web:fast-1";
-  await c.runtime.start(key, [fast], c.runtime.submit([fast]));
-  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [] } });
-  c.runtime.push({ type: "message_update", changes: [{ type: "text_start", contentIndex: 0, block: { type: "text", text: "" } }, { type: "text_delta", contentIndex: 0, delta: "Quick" }] });
-  expect(await view.take(3)).toEqual([
-    { type: "run_start" },
-    { type: "message_start", message: { role: "assistant", content: [] } },
-    { type: "message_update", changes: [{ type: "text_start", contentIndex: 0, block: { type: "text", text: "" } }, { type: "text_delta", contentIndex: 0, delta: "Quick" }] },
-  ]);
+  await c.runtime.start(key, [fast]);
+  c.runtime.partial(key, { role: "assistant", content: [{ type: "text", text: "Quick" }] });
+  await view.until({ busy: true, partial: { role: "assistant", content: [{ type: "text", text: "Quick" }] }, tools: [] });
   await c.runtime.end(key, [fast], { kind: "aborted", messages: [] });
-  expect(await view.take(1)).toEqual([{ type: "run_end" }]);
+  await view.until({ busy: false, tools: [], failure: { reason: "aborted" } });
 
   // The user waits (a message pending), but the run going took only the operator's follow-up: nothing streams.
   const waiting = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "and?" }))).json()) as { requestId: string };
-  expect(await view.take(1)).toMatchObject([{ type: "entry_appended", entry: { id: waiting.requestId } }]);
-  await c.runtime.start(key, ["dashboard:op-1"], c.runtime.submit(["dashboard:op-1"]));
-  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "operator only" }] } });
-  c.runtime.push({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash" });
-  c.runtime.push({ type: "run_end" });
+  expect(await view.next("entries")).toMatchObject({ type: "entries", entries: [{ id: waiting.requestId }] });
+  await c.runtime.start(key, ["dashboard:op-1"]);
+  c.runtime.partial(key, answerOf("operator only"));
+  c.runtime.live(key, (live) => ({ ...live, tools: [{ callId: "t1", name: "bash", status: "running" }] }));
+  await view.until({ busy: true, tools: [] });
+  c.runtime.live(key, () => ({ busy: false, tools: [], failure: { reason: "model_error", detail: "operator secret" } }));
+  await view.until({ busy: false, tools: [] });
   // A run of both, the operator's first: the user's.
-  await c.runtime.start(key, ["dashboard:op-2", waiting.requestId], c.runtime.submit(["dashboard:op-2", waiting.requestId]));
-  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "both" }] } });
-  expect(await view.take(4)).toEqual([{ type: "run_start" }, { type: "run_end" }, { type: "run_start" }, { type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "both" }] } }]);
+  await c.runtime.start(key, ["dashboard:op-2", waiting.requestId]);
+  c.runtime.partial(key, answerOf("both"));
+  await view.until({ busy: true, partial: { role: "assistant", content: [{ type: "text", text: "both" }], timestamp: 1000, stopReason: "stop" }, tools: [] });
+  expect(JSON.stringify(view.seen)).not.toMatch(/operator only|bash|operator secret|model_error/);
   await view.close();
 });
 
-test("live: the page opens the view after its first message's run started (a snapshot names no inputs): the run streams, named by its agent.started; an operator's run so opened does not", async () => {
+test("live: a view opened mid-run (the page opens it after its first message) names the run by its requests: the user's streams; an operator's so opened does not", async () => {
   const c = await chat();
   const { id, requestId } = await start(c, "ana", "hello");
   const key = `web:ana:${id}`;
   // The run starts before the page follows it.
-  await c.runtime.start(key, [requestId], null);
+  await c.runtime.start(key, [requestId]);
+  c.runtime.partial(key, { role: "assistant", content: [{ type: "text", text: "Hi" }] });
   const view = await follow(c, "ana", id);
-  expect(await view.take(1)).toEqual([{ type: "snapshot", run: {}, tools: [] }]);
-  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "Hi" }] } });
-  expect(await view.take(1)).toEqual([{ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "Hi" }] } }]);
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["r", { busy: true, partial: { role: "assistant", content: [{ type: "text", text: "Hi" }] }, tools: [] }]] }]);
   await c.runtime.end(key, [requestId], { text: "Hi" });
   await view.close();
 
   // The operator's follow-up starts a run; the page opens the view during it: nothing streams.
-  await c.runtime.start(key, ["dashboard:op-1"], null);
+  await c.runtime.start(key, ["dashboard:op-1"]);
+  c.runtime.partial(key, answerOf("operator only"));
+  c.runtime.live(key, (live) => ({ ...live, tools: [{ callId: "t1", name: "bash", status: "running" }] }));
   const more = await follow(c, "ana", id);
-  expect(await more.take(1)).toEqual([{ type: "snapshot", run: {}, tools: [] }]);
-  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "operator only" }] } });
-  c.runtime.push({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash" });
+  expect(await more.take(1)).toEqual([{ type: "live", ops: [["r", { busy: true, tools: [] }]] }]);
   await c.runtime.end(key, ["dashboard:op-1"], { text: "operator only" });
-  expect(await more.take(1)).toEqual([{ type: "run_end" }]);
+  await more.until({ busy: false, tools: [] });
+  expect(JSON.stringify(more.seen)).not.toMatch(/operator only|bash/);
   await more.close();
 });
 
@@ -680,13 +657,13 @@ test("POLICY: visibility is a live setting, read at each request, applied to his
   settings.set({ visibility: { thinking: false, tools: "none", context: true } });
   expect(await linesNow(c, "ana", id)).toEqual(["user: hello (answered)", "assistant: done"]);
   const view = await follow(c, "ana", id);
-  expect(await view.take(1)).toEqual([{ type: "snapshot", tools: [] }]);
+  expect(await view.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
   const next = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "again" }))).json()) as { requestId: string };
-  await view.take(1);
+  await view.next("entries");
   await c.runtime.start(key, [next.requestId]);
-  c.runtime.push({ type: "tool_execution_start", toolCallId: "t2", toolName: "websearch", args: {} });
-  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "toolCall", id: "t2", name: "websearch", arguments: {} }] } });
-  expect(await view.take(2)).toEqual([{ type: "run_start" }, { type: "message_start", message: { role: "assistant", content: [] } }]);
+  c.runtime.live(key, (live) => ({ ...live, partial: { role: "assistant", content: [{ type: "toolCall", id: "t2", name: "websearch", arguments: {} }] }, tools: [{ callId: "t2", name: "websearch", status: "running" }] }));
+  await view.until({ busy: true, partial: { role: "assistant", content: [] }, tools: [] });
+  expect(JSON.stringify(view.seen)).not.toMatch(/toolCall|t2/);
   await view.close();
 });
 

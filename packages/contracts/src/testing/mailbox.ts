@@ -826,7 +826,7 @@ export function createMemoryMailbox(): ComponentDefinition {
         start(ctx) {
           const stop = new AbortController();
           // The start context's values, cancelled only when the app stops.
-          const context = ctx.derive((inner) => ({ abortSignal: stop.signal, value: (key) => inner.value(key), toString: () => `${inner}.Inbox` }));
+          const context = ctx.derive((inner) => ({ abortSignal: stop.signal, telemetry: inner.telemetry, value: (key) => inner.value(key), toString: () => `${inner}.Inbox` }));
           running = { ctx: context, stop };
         },
         stop() {

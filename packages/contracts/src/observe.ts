@@ -11,11 +11,16 @@
  *   (`conversations.registry`) says which one a key is in now.
  * - **`transcript`** is one conversation's history, newest first, a page at a time: each entry with the
  *   messages it holds, in the runtime's own JSON (pi-ai's messages for runtime-pi).
- * - **`watch`** follows one conversation live: its first event is a `snapshot` of what it is now, then
- *   one event per change (a run starts, text streams, a tool runs, the run ends), in the runtime's own
- *   JSON, each with a `type`. It ends when `ctx` is cancelled (a client went away) or the runtime closes.
- *   Events can be missed (SPEC K3): a consumer that falls behind is sent a new `snapshot`, and a new
- *   `watch` starts with one, so a view is always rebuilt from a snapshot, never from a count of events.
+ * - **`watch`** follows one conversation live, as state: what it shows now (`ObservedLive`: whether
+ *   a run goes and whose requests it answers, the answer being written, the tool round, why the last
+ *   run ended without an answer), sent whole first (`live` with `["r", value]`) and then as the ops
+ *   that change it (json-ops.ts: a streamed answer costs its new text); the entries the transcript
+ *   gains (`entries`, oldest first, before the `live` change that ends the answer they hold); and
+ *   hints to read again (`usage`, `transcript`). It ends when `ctx` is cancelled (a client went away)
+ *   or the runtime closes. Changes are folded, never lost (SPEC K3): a consumer that falls behind gets
+ *   the newest state, by ops or a new `["r", value]`, and when entries went past without their own
+ *   `entries` event, a `transcript` event says to read the transcript again. A view applies the ops
+ *   in order to the first value (`applyOps`) and never counts events.
  * - **`usage`** is one conversation's spend, every model call and tool summed.
  *
  * **Who reads it is the consumer's to authorize, per conversation**: an operator through
@@ -34,6 +39,7 @@
 
 import type { AppContext } from "@pikit/core";
 import type { Usage } from "./agent.ts";
+import type { JsonOp } from "./json-ops.ts";
 import type { JsonValue } from "./json.ts";
 import type { Page, PageRequest } from "./page.ts";
 
@@ -62,8 +68,53 @@ export interface TranscriptEntry {
   messages: JsonValue[];
 }
 
-/** One live event of a conversation: JSON, with its `type` (`snapshot` first). */
-export type ObservedEvent = { readonly type: string; readonly [key: string]: JsonValue };
+/** A call of the current tool round, as a live view shows it. */
+export interface ObservedTool {
+  /** The call's id, unique in the conversation. */
+  callId: string;
+  /** The tool's name. */
+  name: string;
+  status: "pending" | "running" | "done";
+  /** What it printed so far, as far as the runtime keeps it (a bounded output loses its start). */
+  output?: string;
+}
+
+/** Why the newest run ended without an answer: kept until the next run starts. */
+export interface ObservedFailure {
+  /** The runtime's word for it (runtime-pi: pi-durable's `RunFailureReason`: `model_error`, `aborted`, `turn_limit`, …). */
+  reason: string;
+  /** What the runtime says of it (an error's text), when it says anything. */
+  detail?: string;
+}
+
+/** What a conversation shows live, now. JSON: what `live` events' ops apply to. */
+export interface ObservedLive {
+  /** Whether a run is going. */
+  busy: boolean;
+  /**
+   * The request ids (`RunRequest.requestId`) of the run's inputs that have one, in order: whose
+   * messages the run answers. Absent while idle; empty for a run no request started (a continue),
+   * and once the run answered while it finishes its own work (runtime-pi: `afterRun` tasks).
+   */
+  requests?: string[];
+  /** The answer being written, in the runtime's JSON (pi-ai's `AssistantMessage` for runtime-pi). */
+  partial?: JsonValue;
+  /** The current tool round's calls, in call order; empty outside one. */
+  tools: ObservedTool[];
+  /** Why the newest run ended without an answer, until a run starts again. */
+  failure?: ObservedFailure;
+}
+
+/** One live event of a conversation (see `watch` above). */
+export type ObservedEvent =
+  /** What the conversation shows live changed: `ops` over the last value; the first event is one, `[["r", ObservedLive]]`. */
+  | { readonly type: "live"; readonly ops: readonly JsonOp[] }
+  /** Entries the transcript gained, oldest first: `transcript` has them from now on. */
+  | { readonly type: "entries"; readonly entries: readonly TranscriptEntry[] }
+  /** What the conversation cost changed: read `usage` again. */
+  | { readonly type: "usage" }
+  /** The transcript changed beyond the `entries` events (some went past unsent, a compaction): read it again. */
+  | { readonly type: "transcript" };
 
 export interface AgentObserver {
   conversations(page: PageRequest, ctx: AppContext): Promise<Page<ObservedConversation>>;
@@ -72,9 +123,9 @@ export interface AgentObserver {
   /** Newest first. `undefined` when the runtime has no such conversation. */
   transcript(conversationId: string, page: PageRequest, ctx: AppContext): Promise<Page<TranscriptEntry> | undefined>;
   /**
-   * The conversation live: a `snapshot`, then its changes, until `ctx` is cancelled or the runtime
-   * closes. Rejects when the runtime has no such conversation. Stopping early (`break` in a
-   * `for await`) releases it.
+   * The conversation live: a `live` event with its whole `ObservedLive` first, then its changes, until
+   * `ctx` is cancelled or the runtime closes. Rejects when the runtime has no such conversation.
+   * Stopping early (`break` in a `for await`) releases it. It throws when the runtime fails under it.
    */
   watch(conversationId: string, ctx: AppContext): AsyncIterable<ObservedEvent>;
   /** `undefined` when the runtime has no such conversation. */

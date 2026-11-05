@@ -130,6 +130,22 @@ describe("the facade", () => {
     }
   });
 
+  test("runCounted resolves with the rows a statement changed, as SQLite's changes(): rows a trigger changes do not count", async () => {
+    const { db, stop } = await openApp(databasePath());
+    try {
+      const facade = sqliteDatabaseFrom(db);
+      await facade.exec("CREATE TABLE durable_c (v INTEGER); CREATE TABLE durable_log (v INTEGER); CREATE INDEX durable_c_v ON durable_c (v)");
+      await facade.exec("CREATE TRIGGER durable_c_logged AFTER UPDATE ON durable_c BEGIN INSERT INTO durable_log (v) VALUES (new.v); END");
+      expect(await facade.runCounted("INSERT INTO durable_c (v) VALUES (?), (?), (?)", 1, 2, 3)).toBe(3);
+      expect(await facade.runCounted("UPDATE durable_c SET v = v + 10 WHERE v > ?", 1)).toBe(2);
+      expect(await facade.runCounted("DELETE FROM durable_c WHERE v = ?", 99)).toBe(0);
+      expect(await facade.transaction((tx) => tx.runCounted("DELETE FROM durable_c WHERE v > ?", 10))).toBe(2);
+      expect(await facade.all("SELECT v FROM durable_log ORDER BY v")).toEqual([{ v: 12 }, { v: 13 }]);
+    } finally {
+      await stop();
+    }
+  });
+
   test("bigints bind as numbers up to 2^53; past it they throw", async () => {
     const { db, stop } = await openApp(databasePath());
     try {

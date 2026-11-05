@@ -447,13 +447,13 @@ test("live events on the Worker: the object's stream, as server-sent events, eac
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toContain("text/event-stream");
   const stream = sse(response);
-  expect(await stream.take(1)).toEqual([{ type: "snapshot", conversationId: "1" }]);
+  expect(await stream.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
   // Not polled: what the object's runtime emits arrives, every part of it, over the one stream.
-  runtime.push({ type: "message_update", text: "hel" });
-  runtime.push({ type: "message_update", text: "lo" });
+  runtime.push({ type: "live", ops: [["s", ["partial"], { role: "assistant", content: [{ type: "text", text: "hel" }] }]] });
+  runtime.push({ type: "live", ops: [["a", ["partial", "content", 0, "text"], "lo"]] });
   expect(await stream.take(2)).toEqual([
-    { type: "message_update", text: "hel" },
-    { type: "message_update", text: "lo" },
+    { type: "live", ops: [["s", ["partial"], { role: "assistant", content: [{ type: "text", text: "hel" }] }]] },
+    { type: "live", ops: [["a", ["partial", "content", 0, "text"], "lo"]] },
   ]);
   expect(platform.calls.filter((each) => each.startsWith("telegram:1 "))).toEqual(["telegram:1 admin-api.live"]);
   client.abort();

@@ -10,7 +10,7 @@
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type {} from "@pikit/pi-adapter";
-import tracing, { createExtensionTracing, TRACING } from "./index.ts";
+import tracing, { createExtensionTracing, errorTypeOf, HARNESS_RESULTS, TRACING } from "./index.ts";
 import { capText, contentAttribute, encodeSpans, messageOf, newInput, REDACTED, redactText, runSpanIdOf, toolSpanIdOf, traceIdOf } from "./otlp.ts";
 
 const config = { "extension-tracing": { endpoint: "http://collector.test/v1/traces" } };
@@ -128,4 +128,13 @@ test("messages: images dropped, tool calls and results kept; a request's new inp
   ];
   expect(newInput(messages)).toEqual([{ role: "tool", parts: [{ type: "tool_call_response", id: "c1", response: "ran" }] }]);
   expect(messageOf(messages[1])).toEqual({ role: "assistant", parts: [{ type: "tool_call", id: "c1", name: "bash", arguments: { command: "ls" } }] });
+});
+
+test("a tool span's error type: pi-durable's code for a result it wrote, tool_error for the tool's own, none for a success", () => {
+  expect(errorTypeOf({})).toBeUndefined();
+  expect(errorTypeOf({ isError: true })).toBe("tool_error");
+  expect(errorTypeOf({ isError: true, diagnostics: [{ code: "tool_error" }] })).toBe("tool_error");
+  for (const code of HARNESS_RESULTS) expect(errorTypeOf({ isError: true, diagnostics: [{ code: "truncated" }, { code }] })).toBe(code);
+  // A hook that turned it into a success keeps the code: the tool still did not run.
+  expect(errorTypeOf({ diagnostics: [{ code: "blocked" }] })).toBe("blocked");
 });

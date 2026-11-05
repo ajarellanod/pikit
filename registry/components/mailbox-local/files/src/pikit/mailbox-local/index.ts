@@ -166,7 +166,7 @@ export default defineComponent({
         const stop = new AbortController();
         // The start context's values (the platform's, on some targets), with the app's stop as its
         // only cancellation: start's own deadline must not cut a handler that runs later.
-        const handlers = ctx.derive((inner) => ({ abortSignal: stop.signal, value: (key) => inner.value(key), toString: () => `${inner}.Inbox` }));
+        const handlers = ctx.derive((inner) => ({ abortSignal: stop.signal, telemetry: inner.telemetry, value: (key) => inner.value(key), toString: () => `${inner}.Inbox` }));
         running = { handlers, stop, inFlight: new Set() };
       },
       async stop(ctx) {

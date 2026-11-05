@@ -41,7 +41,7 @@ import {
   type ShellSpillOptions,
   StreamDecoder,
   type TextLineReader,
-  type WatchChange,
+  type FileChange,
   type WatchTarget,
 } from "@pikit/pi-adapter/execution";
 import { NodeExecutionEnv } from "@pikit/pi-adapter/node";
@@ -290,7 +290,7 @@ class GondolinExecutionEnv implements ExecutionEnv {
   }
 
   /** Not supported: the agent's own tools and commands are what changes these files, and pikit reloads nothing from them. */
-  async watch(_targets: readonly WatchTarget[], _onChange: (change: WatchChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
+  async watch(_targets: readonly WatchTarget[], _onChange: (change: FileChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
     if (context.abortSignal?.aborted === true) return abortedFile();
     return err(new FileError("not_supported", "execution-gondolin does not watch files"));
   }

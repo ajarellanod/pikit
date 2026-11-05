@@ -8,7 +8,7 @@ Esta guía parte de conocimientos básicos de programación. Primero explica qu�
 cómo SQLite protege los datos, cómo pi-durable guarda el trabajo y cómo Cloudflare Durable Objects
 y Rivet permiten separar ese trabajo de una máquina concreta.
 
-**Alcance:** pi-durable 1.2.0, la versión fijada por este proyecto. Cloudflare está implementado en
+**Alcance:** pi-durable 1.5.0, la versión fijada por este proyecto. Cloudflare está implementado en
 pikit. Rivet se explica como tecnología investigada, **no como un despliegue disponible en pikit**:
 la [propuesta de integración](../features/deployment-rivet.md) se estudió sobre Rivet 2.3.27,
 commit `aa8800b`. Los detalles internos de estas plataformas pueden cambiar.
@@ -179,7 +179,9 @@ Su regla central es:
 > Solo es observable el estado que ya se ha confirmado en almacenamiento.
 
 Esto no quiere decir que cada cálculo interno sea persistente. Quiere decir que las vistas y los
-eventos del Harness publican **estado confirmado**, no avances que solo existen en RAM.
+eventos del Harness publican **estado confirmado**, no avances que solo existen en RAM. Con una
+excepción declarada: el progreso en streaming (el texto a medio generar, la salida de una herramienta
+en marcha) se confirma de forma **diferida** (véase el apartado sobre el texto a medio generar).
 
 ### Sus piezas
 
@@ -238,6 +240,17 @@ Si el proceso desaparece durante running:
 Es un esquema de recuperación normal; también existen esperas de tareas hijas, cancelaciones y
 trabajo que se abandona deliberadamente tras reiniciar.
 
+Una tarea también puede **dormir** hasta una hora (estado `sleeping`): el reintento de un modelo
+tras un error, la consulta periódica de una respuesta diferida, el reintento de una compactación.
+Desde pi-durable 1.4.0 esa espera se guarda como estado de la tarea, no como un temporizador en RAM:
+sobrevive a un reinicio, y la tarea continúa cuando el reloj del Harness llega a esa hora.
+
+Y hay un límite a los reintentos por caída: una tarea cortada por un fallo **5 veces seguidas**
+(`settings.restartLimit`) sin guardar un estado nuevo termina en lugar de repetirse para siempre.
+Una herramienta termina con un resultado de error (`restart_limit`), una compactación falla y una
+ejecución termina sin respuesta (`runFailure` con razón `restart_limit`): el usuario recibe un fallo
+en vez de una conversación ocupada indefinidamente.
+
 **No se conserva mágicamente la pila de JavaScript.** Se conserva información suficiente para
 volver a ejecutar la fase correcta. Un checkpoint de tarea y un checkpoint del WAL son conceptos
 diferentes: uno guarda progreso del trabajo; el otro incorpora páginas a la base principal.
@@ -286,16 +299,24 @@ peticiones pendientes; no dependen únicamente de una cola en RAM.
 ### Qué ocurre con el texto a medio generar
 
 El progreso del modelo y de las herramientas se confirma por lotes, con intervalos de 100 ms por
-defecto configurables. Lo que aún no se ha confirmado puede perderse; ese intervalo no debe
-interpretarse como una garantía de tiempo real independiente de la latencia del almacenamiento.
+defecto configurables. Desde pi-durable 1.5.0 esos commits son **diferidos**: la memoria y las vistas
+los adoptan al instante, pero se guardan junto con el siguiente commit que lee ese documento (el
+final de la respuesta, una herramienta que termina) o, como muy tarde, tras
+`settings.progress.persistWithinMs` (1 s por defecto). Una caída puede perder hasta un segundo
+aproximado de texto ya mostrado. Por eso pikit construye la vista previa de la respuesta
+(`agent.partial`) observando el documento en memoria (`observeDoc`), no los commits guardados, que
+llegarían con un segundo de retraso.
 
 Guardar texto parcial **no significa continuar la conexión al modelo desde el siguiente token**.
-Una solicitud interrumpida puede necesitar repetirse y generar otro texto o costes adicionales.
-Se recupera el trabajo desde sus checkpoints, no necesariamente el mismo intento de red.
+Desde 1.5.0, una solicitud al modelo en curso cuando el proceso murió **no se reenvía** al reabrir:
+cuenta como un intento fallido de la política de reintentos, espera su backoff y, sin reintentos
+restantes, la ejecución termina sin respuesta (`runFailure` con razón `interrupted`). Se recupera el
+trabajo desde sus checkpoints, no el mismo intento de red.
 
 ### La interfaz es una vista, no el motor del agente
 
-`viewState()` y `watch()` permiten leer un snapshot y recibir cambios confirmados. Una interfaz
+`watchDoc()` y `Conversation.watch()` permiten leer un snapshot y recibir cambios (incluidos los
+diferidos, en cuanto la memoria los adopta). Una interfaz
 puede reconectar sin haber presenciado cada evento del proceso anterior.
 
 El watcher no es un archivo de auditoría infinito: si un consumidor se queda muy atrás, puede
@@ -432,6 +453,17 @@ y mecanismos de concurrencia de la plataforma, no la suposición de que «un act
 Si un objeto es desalojado, desaparecen sus variables y promesas. Al siguiente evento se crea una
 instancia que puede abrir el mismo SQLite. Hace falta que el código reconstruya su trabajo:
 pi-durable aporta los checkpoints; pikit aporta los wakeups y la llamada para continuar.
+
+Una tarea que duerme (un backoff) no retiene el objeto: pi-durable (`Harness.wake()` y
+`HarnessOptions.onWake`, 1.4.0) no arma ningún temporizador para ella, y pikit pide una alarma a la
+hora en que vence. El objeto puede desalojarse mientras tanto; la alarma lo despierta y la tarea
+continúa.
+
+### Una migración sin vuelta atrás
+
+pi-durable 1.4.0 migra el SQLite al esquema de la versión 2 **automáticamente** al abrirlo (reconstruye
+la tabla de tareas). Una base migrada no se puede abrir con 1.3.0 ni anteriores: un despliegue no puede
+volver atrás por debajo de esa versión con los mismos datos.
 
 Cloudflare ofrece además recuperación a puntos de los últimos 30 días para SQLite. Se llama
 *point-in-time recovery* (PITR), o recuperación a un punto en el tiempo. Un *bookmark* identifica una
@@ -596,7 +628,8 @@ Operación        copias de seguridad + monitorización + pruebas de recuperaci�
 | Una herramienta queda a medias | Replay seguro, idempotencia o resultado `interrupted`; no certeza automática sobre el efecto |
 | Hay un escritor zombi | Se necesita coordinación de propiedad y fencing de plataforma |
 | Se pierde un evento de respuesta | El feed persistente y el cursor permiten volver a encontrarla |
-| No llegan más mensajes | Hace falta una alarma o mecanismo externo que despierte el trabajo pendiente |
+| No llegan más mensajes | Hace falta una alarma o mecanismo externo que despierte el trabajo pendiente (en un objeto, la hora de `Harness.wake()`) |
+| El proceso cae una y otra vez en la misma fase | El límite de reinicios (5 por defecto) termina la tarea con un fallo visible |
 | Un bug borra datos | Replicarlo replica también el error; hacen falta backups o historial recuperable |
 | El proveedor externo rechaza permanentemente un envío | Los reintentos no lo arreglan; hay que registrar y comunicar el fallo |
 
@@ -631,8 +664,8 @@ espacio; recuperar puede repetir solicitudes externas, añadir latencia y genera
 
 ## Fuentes y siguientes lecturas
 
-- [pi-durable 1.2.0: README](https://github.com/earendil-works/pi/blob/v1.2.0/packages/durable/README.md)
-  y [especificación](https://github.com/earendil-works/pi/blob/v1.2.0/packages/durable/docs/spec.md):
+- [pi-durable 1.5.0: README](https://github.com/earendil-works/pi/blob/v1.5.0/packages/durable/README.md)
+  y [especificación](https://github.com/earendil-works/pi/blob/v1.5.0/packages/durable/docs/spec.md):
   commits, tareas, replay, vistas y límites del almacenamiento.
 - [Pi coding-agent: SessionManager](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/src/core/session-manager.ts):
   persistencia del historial JSONL, distinta del protocolo de tareas de pi-durable.

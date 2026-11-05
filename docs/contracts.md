@@ -741,19 +741,54 @@ admin-api), or a channel's user for their own conversation (channel-web, by its 
 that shows it to someone who is not an operator projects what that person may see (channel-web's
 live view: the answer's text and the tools' names, nothing else). `conversations(page)`,
 `conversation(id)`, `transcript(id, page)` (newest
-first), `watch(id)` (an async iterable: a `snapshot`, then changes; a consumer that falls behind gets a
-new snapshot), `usage(id)`. It runs in the App that runs the runtime: on Cloudflare it sees only that
-object's conversations. Pages are `Page<T>` (`{ items, next? }`) asked for with a `PageRequest`
+first), `watch(id)`, `usage(id)`. It runs in the App that runs the runtime: on Cloudflare it sees only that
+object's conversations.
+
+`watch(id)` is the conversation live, as state: an async iterable of `ObservedEvent`s, until `ctx` is
+cancelled or the runtime closes (`break` releases it; an unknown id rejects; it throws when the
+runtime fails under it).
+
+| Event | What |
+|---|---|
+| `live` | `ops` over the last `ObservedLive`; the first event is one, `[["r", value]]`, the whole of it |
+| `entries` | the entries the transcript gained, oldest first, before the `live` change that ends the answer they hold |
+| `usage` | what the conversation cost changed: read `usage(id)` again |
+| `transcript` | the transcript changed beyond the `entries` events (some went past unsent, a compaction): read it again |
+
+`ObservedLive` is what a live view shows: `busy`; `requests`, the request ids of the run's inputs
+(absent while idle; empty for a run no request started, and once a run has answered and only finishes
+its own work); `partial`, the answer being written; `tools`,
+the current round's calls (`callId`, `name`, `status` `pending`, `running` or `done`, `output` as far as
+the runtime keeps it); `failure`, why the newest run ended without an answer (`reason`, `detail`),
+until a run starts again. The ops are [json-ops.ts](../packages/contracts/src/json-ops.ts)'s, the subset
+of Chord's delta ops a JSON value needs: `["r", value]` (the whole value, the only op on the root),
+`["s", path, value]` (a member set), `["d", path]` (an object's member removed), `["a", path, text]`
+(text appended), `["t", path, count]` (a string's first characters dropped: a bounded output),
+`["p", path, start, deleteCount, items]` (an array spliced), a path being the keys and indexes from the
+root; a streamed answer costs its new text. Changes are folded, never lost (SPEC K3): a consumer that
+falls behind gets the newest state, as ops or a new `["r", value]`, and a `transcript` event when
+entries went past without their own. A view applies the ops in order to the first value with
+`applyOps(value, ops)` and never counts events; `diffOps(before, after)` makes the ops that turn one
+value into the other, for a provider whose runtime does not give them. Both are pure: `applyOps`
+never mutates its input and copies only the containers on a changed path (the rest keeps its identity,
+for a view that compares by it), and throws on an op whose path leads nowhere.
+
+Pages are `Page<T>` (`{ items, next? }`) asked for with a `PageRequest`
 (`{ limit?, cursor? }`), both in [page.ts](../packages/contracts/src/page.ts): a view of now, not a
 feed (`outbound.queue`'s `pending` pages the same way). Provider: runtime-pi (`createObserver` in the
 adapter). Suite:
-`createAgentObserveConformance` (in the adapter's tests and workerd).
+`createAgentObserveConformance` (in the adapter's tests and workerd): it reads a watch as a view
+does, folding every `live` op, and needs a `streaming` agent in its fixture (one whose answers take a
+second or more to write) to see a partial grow.
 
-`TranscriptEntry.messages` and live event payloads are Pi's runtime JSON, not an engine-independent
-wire format. Consumers intentionally understand it; import isolation alone does not absorb a Pi
-schema change. The workerd admin-api integration folds real Pi SSE through the dashboard reducer,
-checks partial text, and compares the announced entries with the persisted transcript. It covers
-that producer/consumer boundary, not every event variant or browser rendering.
+`TranscriptEntry.messages` and `ObservedLive.partial` are Pi's runtime JSON (pi-ai's `Message` and
+`AssistantMessage`), not an engine-independent wire format; the rest of `ObservedLive` is the
+contract's own shape, which runtime-pi reads from pi-durable's state (Pi 1.5.0 removed the event
+stream, `watchEvents`, that the live part forwarded before). Consumers intentionally understand
+it; import isolation alone does not absorb a Pi schema change. The workerd admin-api integration
+folds real Pi output, as admin-api streams it, through the dashboard's consumer, checks partial
+text, and compares the announced entries with the persisted transcript. It covers that
+producer/consumer boundary, not every shape or browser rendering.
 
 ---
 

@@ -24,10 +24,14 @@
  *    pi-durable runs the hook again when the task recovers before its intent was committed: the same
  *    claimant gets the same approval, so it is safe. Without one, the call is blocked and the model is
  *    told to ask with exactly these arguments. A store that fails blocks (a hook that throws blocks).
- * 4. **`afterTool`** settles it: `executed`, or `failed` with the error's first line.
+ * 4. **`afterTool`** settles it: `executed`, or `failed` with the error's first line. pi-durable also
+ *    runs it on the error results it writes itself, told apart by their diagnostic code: a call that
+ *    certainly did not run (`blocked` by a later hook, `invalid_arguments` after a hook's rewrite,
+ *    `tool_unavailable`, `abandoned`) is settled `failed` with that code; one that may have partly run
+ *    (`interrupted`, `aborted`, `restart_limit`) leaves its approval `claimed`, as nobody knows.
  *
- * Name it last among extensions whose hooks block or rewrite calls: a later hook that blocks or
- * rewrites a call this one claimed leaves the approval claimed and unexecuted.
+ * Name it last among extensions whose hooks block or rewrite calls: a later hook that rewrites a call
+ * this one claimed runs a call other than the one approved.
  *
  * Targets: `server` and `durable` (as approvals-sql); it imports nothing platform-specific.
  */
@@ -161,7 +165,8 @@ export function createApprovals(config: ApprovalsConfig, store: () => ApprovalSt
         },
         afterTool: async (call, result, api, context) => {
           if (!gated.has(call.name)) return undefined;
-          await store().settle(claimant(api), result.isError === true ? { kind: "failed", detail: firstLine(result) } : { kind: "executed" }, within(context));
+          const outcome = settlement(result);
+          if (outcome !== undefined) await store().settle(claimant(api), outcome, within(context));
           return undefined;
         },
       }),
@@ -169,9 +174,25 @@ export function createApprovals(config: ApprovalsConfig, store: () => ApprovalSt
   });
 }
 
+/** The codes of the error results pi-durable writes for a call that certainly did not run. */
+const NOT_RUN = new Set(["tool_unavailable", "invalid_arguments", "blocked", "abandoned"]);
+/** Those of a call that may have partly run: its outcome is unknown. */
+const MAY_HAVE_RUN = new Set(["interrupted", "aborted", "restart_limit"]);
+
+/** What became of a claimed call, by its result; `undefined`: unknown, the approval stays claimed. */
+export function settlement(result: ToolExecutionResult): { kind: "executed" | "failed"; detail?: string } | undefined {
+  const written = result.diagnostics?.find((each) => each.code !== undefined && (NOT_RUN.has(each.code) || MAY_HAVE_RUN.has(each.code)));
+  if (written?.code !== undefined) return NOT_RUN.has(written.code) ? { kind: "failed", detail: `not run (${written.code}): ${firstLineOf(written.message)}` } : undefined;
+  return result.isError === true ? { kind: "failed", detail: firstLine(result) } : { kind: "executed" };
+}
+
+const firstLineOf = (text: string): string => text.split("\n")[0]?.slice(0, 500) ?? "";
+
+/** An error result's first line: its text, or its first error diagnostic's (a thrown error's). */
 const firstLine = (result: ToolExecutionResult): string => {
   const text = result.output?.find((part) => part.type === "text");
-  return (text?.type === "text" ? text.text : "").split("\n")[0]?.slice(0, 500) ?? "";
+  const said = text?.type === "text" && text.text.trim() !== "" ? text.text : (result.diagnostics?.find((each) => each.severity === "error")?.message ?? "");
+  return firstLineOf(said);
 };
 
 export default defineComponent({

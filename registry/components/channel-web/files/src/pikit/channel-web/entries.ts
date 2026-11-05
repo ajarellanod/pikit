@@ -8,8 +8,8 @@
  * - **A run's message** (`runEntryId`): `<the run's request id>#<hash of the message>`. The run's request
  *   id is the one that started it (`AgentResult.requestId`, the first of its inputs live). The hash is of
  *   what makes the message itself (its role, its time, its tool call's id, its blocks' text and ids, by
- *   sorted keys), never of a representation: the live view hashes the message `message_end` announced,
- *   the store the same message in `AgentResult.messages` when the run settles, and both get one id. A
+ *   sorted keys), never of a representation: the live view hashes the message an entry of the watch
+ *   holds, the store the same message in `AgentResult.messages` when the run settles, and both get one id. A
  *   view merging the transcript with the entries it heard live by id never shows one twice.
  * - **What a run wrote that users may see** (`runMessages`): every message but the runtime's user and
  *   system messages (the user's message as the agent read it, an operator's follow-up, a system prompt).
@@ -73,5 +73,3 @@ export function userEntryOf(chatId: string, row: UserRow): ChatTranscriptEntry {
   return { id: row.id, kind: "message", messages: [{ role: "user", content, timestamp: row.at }], ...(row.state !== undefined && { state: row.state }) };
 }
 
-/** An entry in a live event's form (pi-durable's `{ id, kind, model }`, as `message_end` carries it). */
-export const liveEntryOf = (entry: ChatTranscriptEntry): { id: string; kind: string; model: unknown[] } => ({ id: entry.id, kind: entry.kind, model: entry.messages });

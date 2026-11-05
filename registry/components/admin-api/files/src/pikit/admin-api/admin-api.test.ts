@@ -7,7 +7,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { ADMIN_CLIENT_HEADER, type AgentCommand, type CompletionRequest, type ConversationDescriber, type ConversationRef, describeStage, type DeliveryReceipt, type OutboundQueue, type PendingPiece, type SqlDatabase } from "@pikit/contracts";
+import { ADMIN_CLIENT_HEADER, type AgentCommand, type CompletionRequest, type ConversationDescriber, type ConversationRef, describeStage, type DeliveryReceipt, type ObservedEvent, type OutboundQueue, type PendingPiece, type SqlDatabase } from "@pikit/contracts";
 import { createAgentCommandConformance } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import Type from "typebox";
@@ -260,7 +260,7 @@ test("GET one conversation and its transcript; an unknown one is 404", async () 
   }
 });
 
-test("GET …/events: a snapshot, then each change, as server-sent events; the client leaving releases the watch", async () => {
+test("GET …/events: the live state whole, then its changes, entries and hints, as server-sent events; the client leaving releases the watch", async () => {
   const s = await started();
   s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
   const client = new AbortController();
@@ -270,10 +270,19 @@ test("GET …/events: a snapshot, then each change, as server-sent events; the c
   expect(response.headers.get("content-type")).toContain("text/event-stream");
 
   const stream = sse(response);
-  expect(await stream.take(1)).toEqual([{ type: "snapshot", conversationId: "c1" }]);
-  s.runtime.push({ type: "message_update", text: "hel" });
-  s.runtime.push({ type: "agent_end" });
-  expect(await stream.take(2)).toEqual([{ type: "message_update", text: "hel" }, { type: "agent_end" }]);
+  expect(await stream.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
+  const entry = { id: "e1", kind: "message", messages: [{ role: "assistant", content: [{ type: "text", text: "hello" }] }] };
+  const events: ObservedEvent[] = [
+    { type: "live", ops: [["s", ["busy"], true], ["s", ["partial"], { role: "assistant", content: [{ type: "text", text: "hel" }] }]] },
+    { type: "live", ops: [["a", ["partial", "content", 0, "text"], "lo"]] },
+    { type: "entries", entries: [entry] },
+    { type: "live", ops: [["s", ["busy"], false], ["d", ["partial"]]] },
+    { type: "usage" },
+    { type: "transcript" },
+  ];
+  for (const event of events) s.runtime.push(event);
+  // Verbatim: the ops as the runtime made them, every one.
+  expect(await stream.take(events.length)).toEqual(events);
 
   client.abort();
   await stream.reader.cancel();

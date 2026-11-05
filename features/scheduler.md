@@ -50,15 +50,20 @@ any `scheduler` provider; the tool is a risk class of its own (the model creates
 
 ## Pi first
 One Pi process cannot wake itself when it is not running, and Pi has no clock-driven triggers.
-Pi's durable runtime has `sleep(until)` inside a task (`pi-durable` 1.3.0, which the kit runs on,
-[pi-durable migration](completed/pi-durable-migration.md); on a host that is evicted the sleep needs a wake-up,
-`docs/upstream/pi-durable-next-wake.md`), which covers "remind me in two hours" inside one conversation: pikit
-must not build that. A schedule that starts runs across conversations is the host's.
+Pi's durable runtime has durable sleeps inside a task (`pi-durable` 1.5.0, which the kit runs on,
+[pi-durable migration](completed/pi-durable-migration.md)): since 1.4.0 a task ends its phase asleep
+(`runtime.sleepUntil(until, checkpoint, context)`), holds no invocation meanwhile and resumes at its
+checkpoint after a restart, and the Harness tells its host when it next needs a process
+(`Harness.wake()`, `HarnessOptions.onWake`), so an evicted host can arm its own wake-up, a Durable
+Object's alarm (what `docs/upstream/pi-durable-next-wake.md` proposed). That covers "remind me in two
+hours" inside one conversation: pikit must not build that. A schedule that starts runs across
+conversations is the host's.
 
 tool-schedule's `at` overlaps with that sleep: it was built because a reminder that is a new message,
 answered when it comes, keeps no run open meanwhile and is listed and cancelled like a routine.
 Decided (2026-10-21): `at` stays. A sleep is inside a task, so its run stays open and the agent can
-neither list nor cancel it, and on an evicted host it wakes only with pi-durable's next-wake proposal.
+neither list nor cancel it, and on an evicted host it wakes only with pi-durable's next-wake proposal
+(in pi-durable since 1.4.0, `onWake`; the other reasons stand).
 
 ## On `durable` (built, 2026-10-21; the owner's decisions)
 - **A job lives with the actor that scheduled it.** An agent's reminder is its conversation's object's

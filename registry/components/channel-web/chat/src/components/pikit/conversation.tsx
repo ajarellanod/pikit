@@ -2,14 +2,14 @@
  * One conversation, live, whatever serves it (features/completed/chat-parity.md): its transcript, the answer
  * being written, the thinking and the tools running, the messages sent and not shown yet, a composer
  * floating over the thread, and the Context panel. The data is the app's: a `ConversationSource` reads
- * the transcript (entries newest first, paged), follows the live events (a `snapshot` first) and sends
+ * the transcript (entries newest first, paged), follows the live state (sent whole first) and sends
  * or stops; the dashboard's reads the admin API, channel-web's chat its own. Everything here takes its
  * data by props and never fetches by itself, so both show a conversation alike.
  *
- * The thread is the transcript plus the live state (`lib/transcript.ts`): what the live stream
- * announces (a message written, an entry appended) shows before the transcript is read again, and an
- * answer that ended between two snapshots stays as last seen until the transcript has it; nothing is
- * swapped when an answer ends. A message sent shows at once, where it goes (marked while it waits for
+ * The thread is the transcript plus the live state (`lib/transcript.ts`): the entries the live stream
+ * announces show before the transcript is read again, and they come before the answer they hold stops
+ * being written, so nothing is swapped when an answer ends. Why the last run ended without an answer
+ * (the model failed, it was stopped) shows at the thread's end until a run starts. A message sent shows at once, where it goes (marked while it waits for
  * the run going), until the transcript has it (`SentMessages`, kept by the app above its pages, so New
  * chat's first message shows in the conversation it opens).
  *
@@ -31,7 +31,7 @@ import { ErrorNote } from "@/components/pikit/error-note";
 import { type Message, Reply, ToolDetailsContext, turnsOf, UserBubble, type UserMessage, userText } from "@/components/pikit/message";
 import { useActive } from "@/lib/activity";
 import { imagesOf, sourcesOf } from "@/lib/sources";
-import { INITIAL, type LiveEvent, type LiveState, reduce, type TranscriptEntry, type TranscriptPage } from "@/lib/transcript";
+import { failureText, INITIAL, type LiveEvent, type LiveState, reduce, type TranscriptEntry, type TranscriptPage } from "@/lib/transcript";
 
 export type { LiveEvent, LiveState, TranscriptEntry, TranscriptPage };
 
@@ -41,7 +41,7 @@ export interface ConversationSource {
   readonly id: string;
   /** A page of its transcript: the latest without `cursor`, older ones with the `next` of the one before. */
   transcript(page: { limit: number; cursor?: string }): Promise<TranscriptPage>;
-  /** Follows its live events, a `snapshot` first, until `signal` aborts or the stream ends (resolves) or fails (throws). */
+  /** Follows its live events, its live state whole first, until `signal` aborts or the stream ends (resolves) or fails (throws). */
   follow(onEvent: (event: LiveEvent) => void, signal: AbortSignal): Promise<void>;
   /** Sends a message: `queued` when it waits for the run going, `duplicate` when it was already there. */
   send(message: ComposerMessage): Promise<{ admission: string }>;
@@ -350,12 +350,7 @@ export function ConversationView({ source, sent, composer = {}, closed, context 
     return () => clearTimeout(timer);
   }, [live.changes, live.busy]);
 
-  const read = mergedEntries(transcript.entries, live.entries).flatMap((entry) => entry.messages as Message[]);
-  // An answer that ended between two snapshots (a reconnect) stays as it was last seen until the transcript has it.
-  const ended = live.ended.filter(
-    (each) => each.timestamp !== live.partial?.timestamp && !read.some((message) => message.role === "assistant" && message.timestamp === each.timestamp),
-  );
-  const messages = ended.length === 0 ? read : [...read, ...ended];
+  const messages = mergedEntries(transcript.entries, live.entries).flatMap((entry) => entry.messages as Message[]);
   const turns = turnsOf(messages, live);
 
   // The messages sent from here the conversation does not show yet.
@@ -402,12 +397,13 @@ export function ConversationView({ source, sent, composer = {}, closed, context 
     return () => clearTimeout(timer);
   }, [note]);
 
-  // The run goes, said once at the thread's end until it ends, so an answer between two snapshots (a
-  // reconnect) never looks finished before it is. A message sent from here starts one at once: from the
-  // send, through its arrival in the transcript, to the run seen going, it never blinks off.
+  // The run goes, said once at the thread's end until it ends. A message sent from here starts one at
+  // once: from the send, through its arrival in the transcript, to the run seen going, it never blinks
+  // off; a run that ended without an answer since ends the wait.
   const last = turns.at(-1);
   const sentAt = sent.lastSentAt(id);
-  const answering = last?.kind === "user" && sentAt !== undefined && Date.now() - sentAt < ANSWER_EXPECTED_MS;
+  const failed = !live.busy && live.failure !== undefined;
+  const answering = !failed && last?.kind === "user" && sentAt !== undefined && Date.now() - sentAt < ANSWER_EXPECTED_MS;
   const waiting = live.busy || sentShown.some((each) => !each.queued) || answering;
   // Once the reply ends on its thinking and calls, that group's header says the run goes, until text
   // follows it (between two steps too, while nothing streams): no second line, and no blinking from one
@@ -415,6 +411,9 @@ export function ConversationView({ source, sent, composer = {}, closed, context 
   const lastSegment = last?.kind === "reply" ? last.segments.at(-1) : undefined;
   const stepsGoing = waiting && (lastSegment?.kind === "thinking" || lastSegment?.kind === "tools");
   const activity = stepsGoing ? undefined : live.partial?.content.at(-1)?.type === "text" ? "Writing" : "Thinking";
+  // Why the last run gave no answer, unless the thread's end says it already (its error, its stop).
+  const saidAlready = (lastSegment?.kind === "aborted" && live.failure?.reason === "aborted") || (lastSegment?.kind === "error" && lastSegment.text === live.failure?.detail);
+  const failure = failed && !waiting && !saidAlready ? live.failure : undefined;
   // One count per answer: from the message it answers, not from each of its steps.
   const since = sentShown.at(-1)?.at ?? (answering ? sentAt : [...messages].reverse().find((message) => message.role === "user" && message.timestamp !== undefined)?.timestamp);
 
@@ -512,6 +511,11 @@ export function ConversationView({ source, sent, composer = {}, closed, context 
               {each.queued && <span className="px-1 chat-text-11.5 text-ink-3">Queued: it runs once the run going ends</span>}
             </div>
           ))}
+          {failure !== undefined && (
+            <div className="mx-auto w-full max-w-[720px]">
+              <ErrorNote error={{ message: failureText(failure) }} title="The run ended without an answer" />
+            </div>
+          )}
           {/* one line at the end, whatever comes before it: it stays put, and never mounts again as the thread grows */}
           {waiting && activity !== undefined && (
             <div key="activity" className="mx-auto -mt-4 flex min-h-6 w-full max-w-[720px] items-center" style={{ animation: "fade-in 150ms ease-out both" }}>

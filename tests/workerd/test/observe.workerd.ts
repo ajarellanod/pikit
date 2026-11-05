@@ -5,10 +5,10 @@
  */
 
 import { defineComponent } from "@pikit/core";
-import type { SecretStore } from "@pikit/contracts";
+import { defineAgent, type SecretStore } from "@pikit/contracts";
 import { createAdminAuthConformance, createAgentObserveConformance } from "@pikit/contracts/testing";
 import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
-import { testComponents } from "@pikit/pi-adapter/testing/neutral";
+import { scriptedProvider, testComponents } from "@pikit/pi-adapter/testing/neutral";
 import { afterEach, it } from "vitest";
 import adminAuthToken from "../../../registry/components/admin-auth-token/files/src/pikit/admin-auth-token/index.ts";
 import { createRuntimePi } from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
@@ -17,9 +17,19 @@ import { inObject, objectHost, resetObjects } from "./host.ts";
 
 afterEach(() => resetObjects());
 
+/** The suite's streaming agent: `faux-stream/scripted`, its answers written at 8 tokens (32 characters) a second. */
+const streaming = defineComponent({
+  name: "streaming-fixture",
+  setup(pikit) {
+    const provider = scriptedProvider({ id: "faux-stream", tokensPerSecond: 8 });
+    pikit.provideKeyed("model.provider", provider.id, provider);
+    pikit.provideKeyed("agent.definition", "streaming", defineAgent({ name: "streaming", model: "faux-stream/scripted" }));
+  },
+});
+
 for (const c of createAgentObserveConformance(() => {
   const { agents, provider } = testComponents();
-  return { components: [...withWorkersHost(objectHost(), [storageDo]), agents, provider, createRuntimePi()], agent: "scripted" };
+  return { components: [...withWorkersHost(objectHost(), [storageDo]), agents, provider, streaming, createRuntimePi()], agent: "scripted", streaming: "streaming" };
 })) {
   it(`runtime-pi on storage-do ${c.group}: ${c.name}`, () => inObject(c));
 }

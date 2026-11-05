@@ -15,7 +15,7 @@ import type { Context as ChordContext } from "@earendil-works/chord";
 import { defineTool } from "@earendil-works/pi-durable";
 import { type AppContext, type AppEvents, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import type { AgentDefinition, ConversationRef, SqlDatabase } from "@pikit/contracts";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openSqliteDatabase, type SqliteDatabase } from "./testing/sqlite.ts";

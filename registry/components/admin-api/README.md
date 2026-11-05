@@ -40,7 +40,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | `POST /admin/api/conversations` | `{ agent, text, attachments?, webSearch?, requestId? }`: a conversation of the dashboard's own → `201 { conversationId, key, requestId, admission }` |
 | `GET /admin/api/conversations/:id` | one conversation |
 | `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first, a page at a time |
-| `GET /admin/api/conversations/:id/events` | its live events as server-sent events: a `snapshot`, then each change |
+| `GET /admin/api/conversations/:id/events` | its live state as server-sent events: whole first, then its changes, and the entries the transcript gains |
 | `POST /admin/api/conversations/:id/messages` | `{ text, attachments?, webSearch?, requestId? }`: the operator's follow-up → `202 { requestId, admission }` |
 | `POST /admin/api/conversations/:id/abort` | stops its run → `200` |
 | `POST /admin/api/conversations/:id/reset` | points its key to a new, empty conversation; the old one is kept → `200 { key, previousConversationId, conversationId }` |
@@ -69,9 +69,14 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 - `webSearch: true` asks the agent, in the message's first line, to search the web for it with the
   `websearch` tool (`WEB_SEARCH_TOOL`; tool-websearch-brave provides it): only of an agent defined
   with that tool, another is `400 invalid_request`.
-- Live events: one JSON object per `data:` line, each with its `type`, in the runtime's own words. A
-  client that falls behind gets a new `snapshot`: rebuild the view from it. A comment line every
-  `heartbeatMs` keeps an idle stream open. A browser's `EventSource` cannot send a header: read the
+- Live events (`ApiEvent`, `agent.observe`'s `watch` as it is): one JSON object per `data:` line,
+  each with its `type`, as state. The first, `live` with `[["r", value]]`, is what the conversation
+  shows now (`ApiLive`: whether a run goes and whose requests it answers, the answer being written in
+  pi-ai's JSON, the tool round, why the last run ended without an answer); each next `live` is the
+  JSON ops that change it (a streamed answer costs its new text), applied in order. `entries` are the
+  entries the transcript gains, oldest first, sent before the change that ends the answer they hold;
+  `usage` and `transcript` say to read those again. A client that falls behind gets the newest state,
+  never a count of events to keep. A comment line every `heartbeatMs` keeps an idle stream open. A browser's `EventSource` cannot send a header: read the
   stream with `fetch`, and connect again when it ends.
 
 ```sh

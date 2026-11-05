@@ -58,9 +58,10 @@ user the sender of the run's first message. The component's
 5. **Resumed runs keep their trace.** The trace id is SHA-256 of the conversation id and the first
    request id, cut to 16 bytes; the run span's id the same way, cut to 8; a tool call's span id from its
    call id. The instance that resumes a run (after a restart, after an eviction) continues the same
-   trace, under the same run span, and a nested call finds its parent's span. What pi-durable 1.3.0's
-   `HookApi` gives: `taskId`, `conversationId`, `models`, document reads and the asking task's `memo`
-   (first write wins, committed with the task, gone once the task's outcome is decided). A tool call's
+   trace, under the same run span, and a nested call finds its parent's span. What pi-durable's
+   `HookApi` gives (1.5.0): `taskId`, `conversationId`, `models`, document reads, the conversation's raw
+   history (`entry()`, `entries()`, since 1.5.0) and the asking task's `memo` (first write wins,
+   committed with the task, gone once the task's outcome is decided). A tool call's
    start goes in its tool task's memo in `beforeTool` (one durable write per call), and `afterTool`, in
    whichever instance runs it, reads it back; a model request's start stays in memory (an evicted
    request is sent again, as a new span). The run span's start is when the ending instance first saw the
@@ -92,8 +93,17 @@ user the sender of the run's first message. The component's
 
 ## Pi first
 pi-durable has hooks on model requests and tool calls and a durable memo per task, which is all this
-needs; it has no tracer of its own. Pi's coding agent's OpenTelemetry support is the SDK's, which a
-Worker does not want (decision 1).
+needs. Pi's coding agent's OpenTelemetry support is the SDK's, which a Worker does not want
+(decision 1).
+
+Pi 1.4.0 added telemetry of its own (the kit ran 1.3.0 when this was built), which the component does
+not use:
+`HarnessOptions.telemetry`, a host's adapter for pi-durable's content-free `DURABLE_TELEMETRY_SCHEMA`
+(submission admission spans, task phase spans, entry and submission events, a `pi.durable.report`
+event per report; optional carriers stored on submissions and tasks, so a queued input or a reopened
+task keeps its trace; optional metrics), with generation and compaction passing their phase's span to
+pi-ai, whose `AI_TELEMETRY_SCHEMA` traces `pi.ai.request` and `pi.ai.poll` (usage, duration, cost).
+Chord's `Context` carries the parent span (`telemetry`), and so does pikit's (SPEC K5), a no-op so far.
 
 ## Guarantees and tests
 - A run is one batch: its spans share one trace and hang under the run's span; Basic auth from
@@ -117,5 +127,9 @@ Worker does not want (decision 1).
 - **A run's true start after a resume**: a memo of the generation task holds a request's start, not
   the run's; a run-level durable record would need a write per run.
 - **Metrics** (`/metrics`, OTLP metrics) and logs over OTLP are other components.
+- **Pi's telemetry** (above): an OTLP adapter for `HarnessOptions.telemetry` would get pi-durable's
+  and pi-ai's spans, content-free and carried across restarts by Pi, instead of hooks and memos; the
+  GenAI attributes, the Langfuse session and user, and `captureContent` are this component's, not in
+  Pi's schemas. Not weighed yet.
 - **Delegated runs**: a child conversation's run is a trace of its own (its own first request); linking
   it to the parent's tool span (a span link from `delegate`) is open.

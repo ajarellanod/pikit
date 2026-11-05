@@ -1,6 +1,6 @@
 /**
- * Facts about @earendil-works/pi-durable 1.2.0 that the durable runtime (`runtime.ts`) relies on,
- * asserted on pi-durable directly (a `MemoryStorage`, pi-ai 1.2's faux provider), so a Pi bump that
+ * Facts about @earendil-works/pi-durable 1.5.0 that the durable runtime (`runtime.ts`) relies on,
+ * asserted on pi-durable directly (a `MemoryStorage`, pi-ai's faux provider), so a Pi bump that
  * changes one fails here before it breaks the runtime. Each names what depends on it.
  */
 
@@ -26,7 +26,7 @@ import {
   type SubmissionRecord,
   ToolTask,
 } from "@earendil-works/pi-durable";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openSqliteDatabase } from "./testing/sqlite.ts";
@@ -57,6 +57,7 @@ async function open(
     now?: () => number;
     retry?: object;
     followUpMode?: "all" | "one-at-a-time";
+    afterFailedRun?: "keep" | "continue";
     model?: { provider: string; modelId: string };
     storage?: MemoryStorage;
   } = {},
@@ -73,12 +74,17 @@ async function open(
       models,
       registry: options.registry ?? createRegistry(),
       ...(options.now !== undefined && { now: options.now }),
-      // The runtime's queue modes (runtime.ts): follow-ups, all at once.
-      settings: { followUpMode: options.followUpMode ?? "all", steeringMode: "all", ...(options.retry !== undefined && { retry: options.retry }) },
+      // The runtime's queue modes and failed-run policy (runtime.ts): follow-ups, all at once, after a failure too.
+      settings: {
+        followUpMode: options.followUpMode ?? "all",
+        steeringMode: "all",
+        afterFailedRun: options.afterFailedRun ?? "continue",
+        ...(options.retry !== undefined && { retry: options.retry }),
+      },
     },
     ctx,
   );
-  harness.subscribeCommits((publication) => void changes.push([...publication.changes]));
+  harness.observeCommits({ advance: (publication) => void changes.push([...publication.changes]), end: () => {} });
   const conversation = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: options.model ?? MODEL } }, ctx);
   const submissions = (filter: (record: SubmissionRecord) => boolean = () => true) =>
     changes.flat().flatMap((change) => (change.type === "submission" && filter(change.value) ? [change.value] : []));
@@ -97,7 +103,7 @@ class FlakyStorage extends MemoryStorage {
   }
 }
 
-describe("pi-durable facts (1.2.0)", () => {
+describe("pi-durable facts (1.5.0)", () => {
   test("a storage error closes the Harness: close listeners run, the call rejects, later calls reject with SessionFailed, closed settles failed (runtime.ts's dropFailed)", async () => {
     const storage = new FlakyStorage();
     const { harness, conversation } = await open([fauxAssistantMessage("one")], { storage });
@@ -110,7 +116,7 @@ describe("pi-durable facts (1.2.0)", () => {
     expect(closing).toBe(1);
     await expect(conversation.submit({ type: "input", content: "one", requestId: "r1" }, ctx)).rejects.toBeInstanceOf(SessionFailed);
     const end = await harness.closed;
-    expect(end.reason === "failed" && end.error instanceof Error && end.error.message).toBe("the storage is unreachable");
+    expect(end.kind === "failed" && end.error instanceof Error && end.error.message).toBe("the storage is unreachable");
   });
 
   test("a known requestId returns its submission and commits nothing; another type under it throws (duplicate admission)", async () => {
@@ -165,7 +171,7 @@ describe("pi-durable facts (1.2.0)", () => {
     // The commit that placed them started the run with both (pi.live.run.inputs, read by `observe`)...
     const placing = changes.find((commit) => commit.some((change) => change.type === "submission" && change.value.id === second.id && change.value.status === "placed"));
     const run = placing?.find((change) => change.type === "document" && change.record.kind === "pi.live");
-    expect((run?.type === "document" ? (run.value as { run?: { inputs: number[] } }).run?.inputs : undefined)).toEqual([second.id, third.id]);
+    expect(run?.type === "document" && run.kind === "change" ? (run.value as { run?: { inputs: number[] } }).run?.inputs : undefined).toEqual([second.id, third.id]);
     // ...and the commit that ended it settled both (`runsOf`).
     const ending = changes.find((commit) => commit.some((change) => change.type === "submission" && change.value.id === second.id && change.value.status === "done"));
     expect(ending?.flatMap((change) => (change.type === "submission" && change.value.status === "done" ? [change.value.id] : []))).toEqual([second.id, third.id]);
@@ -213,13 +219,13 @@ describe("pi-durable facts (1.2.0)", () => {
     expect(settled.map((record) => record.status)).toEqual(["done", "done", "done"]);
     const runs = changes
       .flat()
-      .flatMap((change) => (change.type === "document" && change.record.kind === "pi.live" ? [(change.value as { run?: { inputs: number[] } } | null)?.run?.inputs] : []))
+      .flatMap((change) => (change.type === "document" && change.kind === "change" && change.record.kind === "pi.live" ? [(change.value as { run?: { inputs: number[] } }).run?.inputs] : []))
       .filter((inputs, index, all) => JSON.stringify(inputs) !== JSON.stringify(all[index - 1]));
     expect(runs).toEqual([[first.id], [second.id], [third.id], undefined]);
     await harness.close(ctx);
   });
 
-  test("a run that fails leaves the follow-ups in the inbox; a queued write (empty `edits`) places the oldest and starts its run, a display-only one does not (reconcileInbox)", async () => {
+  test("afterFailedRun continue: the commit that ends a run the model failed starts the next with the follow-ups queued behind it; pi.live keeps the failure, not a run (runtime.ts)", async () => {
     let fail!: () => void;
     const failing = new Promise<void>((resolve) => (fail = resolve));
     let reached!: () => void;
@@ -229,30 +235,26 @@ describe("pi-durable facts (1.2.0)", () => {
       await failing;
       return fauxAssistantMessage("", { stopReason: "error", errorMessage: "scripted failure" });
     };
-    const { harness, conversation } = await open([broken, fauxAssistantMessage("two")]);
+    const { harness, conversation, changes } = await open([broken, fauxAssistantMessage("two")]);
     const first = await conversation.submit({ type: "input", content: "one", requestId: "r1" }, ctx);
     await reachedP;
     const second = await conversation.submit({ type: "input", content: "two", requestId: "r2" }, ctx);
     fail();
 
     expect(await first.wait(ctx)).toMatchObject({ status: "unanswered", reason: "model_error", detail: "scripted failure" });
-    await harness.waitForIdle(ctx);
-    expect((await second.status(ctx)).status).toBe("queued");
-    expect((await harness.snapshot(LiveDoc, conversation.id, ctx))?.run).toBeUndefined();
-
-    // Only `kind` and `data`: appended at once, done, without a boundary; the input stays queued.
-    const shown = await conversation.submit({ type: "write", entry: { kind: "pikit.note" } }, ctx);
-    expect((await shown.wait(ctx)).status).toBe("done");
-    await harness.waitForIdle(ctx);
-    expect((await second.status(ctx)).status).toBe("queued");
-
-    await conversation.submit({ type: "write", entry: { kind: "pikit.inbox-kick", edits: [] } }, ctx);
-
     expect((await second.wait(ctx)).status).toBe("done");
-    // The write is an entry without model messages: the model never sees it.
-    const kick = (await conversation.entries({}, 100, undefined, ctx)).items.find((entry) => entry.kind === "pikit.inbox-kick");
-    expect(kick?.model).toBeUndefined();
+    // One commit: the failed run's input settled, the queued one placed (`observe` announces its run).
+    const ending = changes.find((commit) => commit.some((change) => change.type === "submission" && change.value.id === first.id && change.value.status === "unanswered"));
+    expect(ending?.some((change) => change.type === "submission" && change.value.id === second.id && change.value.status === "placed")).toBe(true);
     await harness.close(ctx);
+
+    // Kept (pi-durable's default), the follow-up waits; idle is `run === undefined`, whatever else pi.live holds.
+    const kept = await open([fauxAssistantMessage("", { stopReason: "error", errorMessage: "scripted failure" })], { afterFailedRun: "keep" });
+    const failed = await (await kept.conversation.submit({ type: "input", content: "one", requestId: "r1" }, ctx)).wait(ctx);
+    expect(failed.status).toBe("unanswered");
+    const live = await kept.harness.snapshot(LiveDoc, kept.conversation.id, ctx);
+    expect([live?.run, live?.runFailure?.reason]).toEqual([undefined, "model_error"]);
+    await kept.harness.close(ctx);
   });
 
   test("abort withdraws queued inputs unanswered (aborted, never placed) and ends the run's input aborted (placed)", async () => {
@@ -357,7 +359,7 @@ describe("pi-durable facts (1.2.0)", () => {
   });
 
   test("a beforeTool block never runs the tool: the model gets an error result with the reason; a section renders from a committed document (agent.extension)", async () => {
-    const Doc = defineDoc<{ text: string }>({ kind: "pikit.fact-note", version: 1, scope: "conversation", history: "latest", fork: "current", initial: () => ({ text: "" }) });
+    const Doc = defineDoc<{ text: string }>({ kind: "pikit.fact-note", version: 1, scope: "conversation", history: "latest", fork: "current", checkpointWhen: () => false, initial: () => ({ text: "" }) });
     let ran = false;
     const registry = createRegistry();
     registry.install(
@@ -414,7 +416,7 @@ describe("pi-durable facts (1.2.0)", () => {
     // Placed in the commit that adds it to the run's inputs: `observe` sees it led by the first input.
     const placing = changes.find((commit) => commit.some((change) => change.type === "submission" && change.value.id === steer.id && change.value.status === "placed"));
     const run = placing?.find((change) => change.type === "document" && change.record.kind === "pi.live");
-    expect(run?.type === "document" ? (run.value as { run?: { inputs: number[] } }).run?.inputs : undefined).toEqual([first.id, steer.id]);
+    expect(run?.type === "document" && run.kind === "change" ? (run.value as { run?: { inputs: number[] } }).run?.inputs : undefined).toEqual([first.id, steer.id]);
 
     const third = await conversation.submit({ type: "input", content: "three", requestId: "r3" }, ctx);
     await gate.reached;
@@ -447,7 +449,7 @@ describe("pi-durable facts (1.2.0)", () => {
   });
 
   test("a conversation document survives a new Harness over the storage, and a new conversation starts from its initial value (agent.state)", async () => {
-    const Doc = defineDoc<{ phase?: string }>({ kind: "pikit.fact", version: 1, scope: "conversation", history: "latest", fork: "current", initial: () => ({}) });
+    const Doc = defineDoc<{ phase?: string }>({ kind: "pikit.fact", version: 1, scope: "conversation", history: "latest", fork: "current", checkpointWhen: () => false, initial: () => ({}) });
     const file = databaseFile();
     try {
       const reopen = async () => {
@@ -470,24 +472,51 @@ describe("pi-durable facts (1.2.0)", () => {
     }
   });
 
-  test("a model retry waits in-process: its generation's checkpoint is phase retry with `until`, on the Harness clock (whenIdle, wakeups)", async () => {
-    let clock = 1_000_000;
+  test("a model retry sleeps: inspect reports its generation sleeping until the backoff's end, on the Harness clock (whenIdle, wakeups)", async () => {
+    const clock = 1_000_000;
     const { harness, conversation } = await open(
       [fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded" }), fauxAssistantMessage("answered")],
       { now: () => clock, retry: { baseDelayMs: 5_000 } },
     );
     await conversation.submit({ type: "input", content: "hello" }, ctx);
-    let checkpoint: { phase?: string; until?: number } | undefined;
-    for (let i = 0; i < 200 && checkpoint?.phase !== "retry"; i++) {
+    let state: { kind: string; until?: number } | undefined;
+    for (let i = 0; i < 200 && state?.kind !== "sleeping"; i++) {
       await Bun.sleep(2);
-      const task = (await harness.inspect(ctx)).tasks.find((t) => t.record.kind === "pi.generation");
-      checkpoint = (task?.record.state as { checkpoint?: typeof checkpoint } | undefined)?.checkpoint;
+      state = (await harness.inspect(ctx)).tasks.find((t) => t.record.kind === "pi.generation")?.state;
     }
 
-    expect(checkpoint).toMatchObject({ phase: "retry", until: 1_005_000 });
+    expect(state).toEqual({ kind: "sleeping", until: 1_005_000 });
+    expect(harness.wake()).toEqual({ active: false, at: 1_005_000 });
     expect((await harness.snapshot(LiveDoc, conversation.id, ctx))?.generation?.retry?.at).toBe(1_005_000);
-    // The sleep is a timer in this process: closing abandons it, and the next Harness continues from the checkpoint
-    // (recovery.test.ts).
+    // The sleep is in the storage: the next Harness continues it (recovery.test.ts, wakeups.test.ts).
+    await harness.close(ctx);
+  });
+
+  test("a partial answer reaches a pi.live observer before it is stored: observeCommits gets it with the answer (agent.partial)", async () => {
+    const faux = fauxProvider({ tokensPerSecond: 200, tokenSize: { min: 1, max: 1 } });
+    const answer = Array.from({ length: 30 }, (_, index) => `word${index}`).join(" ");
+    faux.setResponses([fauxAssistantMessage(answer)]);
+    const models = createModels();
+    models.setProvider(faux.provider);
+    const harness = await Harness.open(new MemoryStorage(), { models, registry: createRegistry(), settings: { progress: { partialIntervalMs: 10, persistWithinMs: 60_000 } } }, ctx);
+    const conversation = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: MODEL } }, ctx);
+    const observed: string[] = [];
+    const stored: string[] = [];
+    const textOf = (value: unknown) => ((value as { generation?: { message?: { content?: { text?: string }[] } } }).generation?.message?.content ?? []).map((part) => part.text ?? "").join("");
+    const observation = await harness.observeDoc(LiveDoc, conversation.id, { advance: (call) => void (call.kind === "value" && observed.push(textOf(call.value))), end: () => {} }, ctx);
+    harness.observeCommits({
+      advance: (publication) => {
+        for (const change of publication.changes) if (change.type === "document" && change.kind === "change" && change.record.kind === "pi.live") stored.push(textOf(change.value));
+      },
+      end: () => {},
+    });
+
+    await (await conversation.submit({ type: "input", content: "write" }, ctx)).wait(ctx);
+
+    const partial = (texts: string[]) => texts.filter((text) => text !== "" && text !== answer).length;
+    expect(partial(observed)).toBeGreaterThan(2);
+    expect(partial(stored)).toBeLessThanOrEqual(1);
+    observation?.detach();
     await harness.close(ctx);
   });
 

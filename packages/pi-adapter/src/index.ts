@@ -2,7 +2,7 @@
 // Its pikit-facing surface follows the core's stability rule; its Pi-facing internals do not. Neutral:
 // it runs on a server (storage-sqlite) and in a Cloudflare Durable Object (storage-do) alike.
 
-export { createDurableRuntime, INBOX_KICK, PARTIAL_EVERY_MS } from "./runtime.ts";
+export { createDurableRuntime, PARTIAL_EVERY_MS } from "./runtime.ts";
 export { PARTS_DETAIL, withParts } from "./parts.ts";
 export type { DurableRuntime, DurableRuntimeOptions } from "./runtime.ts";
 export type { ConversationDelegations } from "./delegation.ts";
@@ -17,7 +17,7 @@ export type { ModelsOptions } from "./models.ts";
 export { createObserver, OBSERVE_MAX_PAGE, OBSERVE_PAGE } from "./observe.ts";
 export type { ObservedRuntime } from "./observe.ts";
 export { driveSlice, nextWakeAt, nextWakeAtOf } from "./wakeups.ts";
-export type { DriveSliceOptions, LiveTaskRecord, SliceResult, WakeOptions } from "./wakeups.ts";
+export type { DriveSliceOptions, SliceResult, WakeOptions } from "./wakeups.ts";
 export { harnessEnv } from "./execution.ts";
 export type { HarnessEnvSources } from "./execution.ts";
 export { loginInteraction } from "./credentials.ts";

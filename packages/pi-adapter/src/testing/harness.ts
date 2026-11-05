@@ -21,7 +21,7 @@ import {
 import type { SqlDatabase } from "@pikit/contracts";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { openDurableStorage } from "../sql.ts";
 
 // Re-exported so a lane (workerd) runs pi-durable's suite without importing Pi itself.

@@ -107,7 +107,7 @@ it, among the tool's config.
 Beautiful UI's harness has a **Tasks** panel (`TaskRows`: a row per task, its status, steps and
 output) beside the chat. The dashboard dropped it while a run's tool calls are its only work (they
 are the chat's chips); it is the place for durable tasks and subagents: a conversation's task graph
-(pi-durable's `taskGraph()`), read through an admin route, each child conversation a row that opens it.
+(pi-durable's `Harness.watchTaskGraph()`, since 1.5.0; `taskGraph()` is gone), read through an admin route, each child conversation a row that opens it.
 A `delegate` call already puts its child's conversation id in its details (`api.details`), as
 pi-durable's example does for a UI to attach to it.
 

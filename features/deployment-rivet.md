@@ -83,9 +83,8 @@ Changes to existing components:
   path a server uses: no Pi change expected, if `c.db` passes pi-durable's storage conformance.
 - One conversation per storage (its root), as on Cloudflare: pi-durable's global scheduler is no
   limit ([scheduling scope](../docs/upstream/pi-durable-scheduling-scope.md)).
-- `contextRetentionMs` / `documentRetentionMs` are set to 0 only on Workers (`WORKERS_SETTINGS`,
-  `runtime.ts`). In Bun the timers are unreferenced; check that a kept context neither blocks Rivet's
-  sleep nor leaks across sleeps.
+- pi-durable's idle-context and document timers: since 1.4.0 Workers decline them and Bun's are
+  unreferenced; check that a kept context neither blocks Rivet's sleep nor leaks across sleeps.
 - pi-ai refreshes OAuth tokens in Bun: only the owner actor is pikit's.
 
 ## Limits to check against pikit

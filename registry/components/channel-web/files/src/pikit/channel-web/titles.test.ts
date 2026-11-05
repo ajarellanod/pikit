@@ -95,7 +95,7 @@ test("TITLES: the first message names it, given to /name while it is dispatched;
 
   const client = new AbortController();
   const events = sse(await c.served.fetch(`${API}/conversations/${started.id}/events`, as({ signal: client.signal })));
-  expect(await events.take(1)).toMatchObject([{ type: "snapshot" }]);
+  expect(await events.take(1)).toMatchObject([{ type: "live" }]);
   await send(c, started.id, "and Porto?", "web:m2");
   await c.runtime.start(started.key, ["web:m2"]);
   await c.runtime.end(started.key, ["web:m2"], { text: "Sure." });
@@ -106,12 +106,12 @@ test("TITLES: the first message names it, given to /name while it is dispatched;
   release();
   await eventually(async () => ((await titleOf(c, started.id)) === "Lisbon trip" ? true : undefined), "the model's title");
   expect(await listed(c)).toEqual(["Lisbon trip"]);
-  // The page hears it as a change (and reads the conversation and the list again): a change with no
-  // entry, the run's stored messages' first, then the title's.
-  const changes: { type: string; entry?: unknown }[] = [];
+  // The page hears it as a change (and reads the conversation and the list again): a `transcript`
+  // hint, the run's stored messages' first, then the title's.
+  const changes: { type: string }[] = [];
   while (changes.length < 2) {
-    const [event] = (await events.take(1)) as { type: string; entry?: unknown }[];
-    if (event?.type === "entry_appended" && event.entry === undefined) changes.push(event);
+    const [event] = (await events.take(1)) as { type: string }[];
+    if (event?.type === "transcript") changes.push(event);
   }
   client.abort();
   await events.reader.cancel();

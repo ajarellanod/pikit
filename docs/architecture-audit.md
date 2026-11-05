@@ -105,8 +105,8 @@ The boundary holds: only the adapter imports Pi. The pi-durable files the adapte
 
 | pikit workaround | Pi gap | Action now |
 |---|---|---|
-| `wakeups.ts` `checkpointedDue`, and `runtime.ts` `timed()` (duplicated, low) | next due time (proposal 1) | Comment on **#10325** (open, reopened and assigned by a maintainer) endorsing its `inspect()`-sleeping shape. Do not push `nextDueAt()`. Unify the two readers now. |
-| `reconcileInbox` kick after a failed run | proposal 2 | Keep. |
+| `wakeups.ts` `checkpointedDue`, and `runtime.ts` `timed()` (duplicated, low) | next due time (proposal 1) | **Done** with Pi 1.5.0: pi-durable 1.4.0 sleeps durably (`sleeping` in `inspect()`, `onWake`); both readers are gone. |
+| `reconcileInbox` kick after a failed run | proposal 2 | **Done** with Pi 1.5.0: `afterFailedRun: "continue"` (pi-durable 1.4.0) replaced it. |
 | `RESUME_AT_ONCE` (a bound that does not hold: 8 of 8 runs resume before `recover`) | `maxConcurrentRuns` (proposal 5) | Remove the claim from `resume.ts:9,24` and README:88. Keep `recover`'s abandonment for removed agents and missing conversations. |
 | `abandon` repeats `abortSubmission` with its own reason (`runtime.ts:715-728`) | `abortSubmission(id, {reason, detail})` | Add a low-priority docs/upstream entry. Keep the single-commit implementation, which `recovery.test.ts:497` already covers. |
 | `pikit.admissions` timestamps | no time on a submission | Add a low-priority docs/upstream entry. |

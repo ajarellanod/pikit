@@ -1,7 +1,7 @@
 # When pikit moves to Chord
 
-**Decision: not now.** Last validated 2026-10-20, against Pi 1.3.0 (`@earendil-works/chord` 1.3.0):
-G1 and G2 only. All gates last ran 2026-10-13 against 1.2.0, with the spike on branch
+**Decision: not now.** Last validated 2026-11-05, against Pi 1.5.0 (`@earendil-works/chord` 1.5.0,
+and 1.4.0, which pikit skipped): G1, G2 and G6. All gates last ran 2026-10-13 against 1.2.0, with the spike on branch
 `spike/chord-core` (commit `2036e40`). Next validation: the next Pi pin bump
 ([upstream/README.md](upstream/README.md), "At each Pi pin bump", step 4).
 
@@ -10,8 +10,9 @@ Chord (`defineFacet`, `host.serve`, contracts, registries, resources), or a kern
 This page says what must be true first, how to check each condition, and what every check found.
 
 Not in question, allowed today: Chord **through the adapter**. pi-durable's `Context` (bridged by
-`toChord`), `replicatedState` and pi-durable's watches for the dashboard's live state, and keeping
-pikit's `Context` in Chord's shape (SPEC K5).
+`toChord`), pi-durable's watches for the dashboard's live state (Chord's `WatchHandle` since 1.5.0,
+whose ops `agent.observe` passes on; pi-durable no longer uses `replicatedState`), and keeping
+pikit's `Context` in Chord's shape (SPEC K5: `telemetry` since 1.5.0).
 
 ## When to validate
 
@@ -28,15 +29,15 @@ Move only when **every** gate passes. Each has a check anyone can run, and its r
 The commands assume the Pi checkout next to this one (`../pi`, AGENTS.md) and `<v>` the Pi version
 being checked (`git -C ../pi fetch --tags` first).
 
-| Gate | Passes when | 1.2.0 | 1.3.0 |
-|---|---|---|---|
-| G1 Stable API | Chord says which entry points follow semver, the kernel's among them, and no minor broke them | fail | fail |
-| G2 One Chord | a context of another Chord keeps its cancellation, or the kit enforces one Chord | fail | fail |
-| G3 Kernel guarantees | core's own suite passes over Chord without rebuilding core | fail (44/49) | not re-run |
-| G4 Green everywhere | the repository and the workerd lane pass over Chord | fail (10 failures) | not re-run |
-| G5 SPEC decision | SPEC lets the kernel import Pi | not taken | not re-run |
-| G6 A reason | a feature needs what only Chord gives | none | not re-run |
-| G7 Worth it | the kernel loses most of its own code | 9 % | not re-run |
+| Gate | Passes when | 1.2.0 | 1.3.0 | 1.4.0 | 1.5.0 |
+|---|---|---|---|---|---|
+| G1 Stable API | Chord says which entry points follow semver, the kernel's among them, and no minor broke them | fail | fail | fail | fail |
+| G2 One Chord | a context of another Chord keeps its cancellation, or the kit enforces one Chord | fail | fail | fail | fail |
+| G3 Kernel guarantees | core's own suite passes over Chord without rebuilding core | fail (44/49) | not re-run | not re-run | not re-run |
+| G4 Green everywhere | the repository and the workerd lane pass over Chord | fail (10 failures) | not re-run | not re-run | not re-run |
+| G5 SPEC decision | SPEC lets the kernel import Pi | not taken | not re-run | not re-run | not re-run |
+| G6 A reason | a feature needs what only Chord gives | none | not re-run | not re-run | none |
+| G7 Worth it | the kernel loses most of its own code | 9 % | not re-run | not re-run | not re-run |
 
 ### G1. Stable API
 
@@ -62,6 +63,21 @@ identity" and "stable readables"). 1.3.0, a minor, lists 17 breaking changes (`H
 typed principals with `createHost({ self })` required, async `ctx.get` and `host.get`, state typed
 `T`, link `PROTOCOL_VERSION` 4).
 
+*1.4.0: fail.* No stability statement (the same matches as 1.3.0). Its one breaking change is in
+`./context`, the kernel's own entry point: a custom `Context` must provide `telemetry` (a
+`TelemetrySpan`, `NOOP_TELEMETRY_CONTEXT` when disabled), and `withTelemetry()` takes spans, not
+adapters. pikit's `Context` grew `telemetry` to keep Chord's shape (SPEC K5).
+
+*1.5.0: fail.* No stability statement in the README or `docs/spec.md` (the same matches); the
+changelog calls the new export `./next` (Chord v2: contracts, hosts, documents, the store, plugins,
+HTTP and workers in `src/next-node`, not exported yet) experimental, and says nothing of the root's
+or `./context`'s stability. 1.5.0, a minor, lists 7 breaking changes: schemas are JSON Schema checked
+by `@earendil-works/pi-schema` (TypeBox gone, `format` no longer checked, other `invalid` messages),
+`traceIn(options, fn, context)` takes the context last, watch listeners take a tagged `WatchCall`
+(`{ kind: "value", value, ops, retired }` or `{ kind: "failed", error }`), a retirement is a flag
+(`Watch.retire` removed), `WatchEnd` is tagged by `kind` (`cancelled` is `aborted`), and
+`SqliteExecutor.runCounted` is required.
+
 ### G2. One Chord
 
 *Why:* Chord keeps the abort signal under a private key of its own module. A context made by another
@@ -86,6 +102,14 @@ context of the same shape keeps its cancellation when derived" must pass.
 
 *1.3.0: fail.* Line 24 still returns `this.value(ABORT_SIGNAL_CONTEXT_KEY)`. 1.3.0 rejects a foreign
 ctx on a remote call (`invalid/foreign_ctx`, #10959), which is not reading its signal.
+
+*1.4.0: fail, and wider.* Line 31 still returns `this.value(ABORT_SIGNAL_CONTEXT_KEY)`, and the new
+`get telemetry()` beside it reads a private key the same way (`TELEMETRY_CONTEXT_KEY`, else the
+no-op span): a foreign context derived by Chord loses its telemetry parent as well as its signal.
+
+*1.5.0: fail.* Unchanged since 1.4.0 (the only change to `src/context/index.ts` is `traceIn`'s
+argument order). `toChord` in the adapter still re-attaches the signal, not the telemetry parent
+(pikit's is a no-op).
 
 ### G3. Kernel guarantees without rebuilding them
 
@@ -146,6 +170,11 @@ adapter is allowed today); concurrent start (`lifecycle.ts` can do it).
 
 *1.2.0: none.*
 
+*1.5.0: none.* The check finds no note that needs objects across processes, hot reload or
+replicated state; the live state the dashboard needs is `agent.observe`'s, through the adapter.
+Chord v2's plugins (hot reload per plugin), HTTP layer and workers are experimental, and only
+`./next` is exported.
+
 ### G7. Worth it
 
 *Passes when* the kernel loses most of its own code, measured over the spike without tests:
@@ -187,3 +216,4 @@ before running. A new Chord API may let the spike drop glue: try it, it is what 
 | 2026-10 | 1.1.0 | not now | Nothing changed but the version. Portability no longer an objection (Bun and bare workerd). |
 | 2026-10-13 | 1.2.0 | not now | Runtime rewritten (typed host runtime). `esbuild` gone, only `typebox` 1.3.27 (the kernel's). Spike: Bun and workerd work; G1, G2, G3, G4, G5, G6 fail; G7 9 %. Found the silent two-Chords hang (G2) and the keyed-providers gap (G3.5). |
 | 2026-10-20 | 1.3.0 | not now | G1 and G2 only, both fail: 17 breaking changes in a minor (typed principals, async `get`, protocol 4), no stability statement; `abortSignal` unchanged. Spike not re-run. |
+| 2026-11-05 | 1.4.0, 1.5.0 | not now | G1, G2 and G6, checked for both (pikit went from 1.3.0 to 1.5.0). G1 fails: no stability statement; 1.4.0 broke `./context` (`telemetry` required, which pikit's `Context` now carries), 1.5.0 lists 7 breaking changes (pi-schema instead of TypeBox, `traceIn`'s argument order, tagged watch calls and ends). G2 fails and widened: `telemetry` is read by a private key too. G6: none. Dependencies: `typebox` gone, `@earendil-works/pi-schema` and `pi-telemetry`, `esbuild` and `ws` optional peers (only Chord v2's plugins and HTTP import them). Spike not re-run. |

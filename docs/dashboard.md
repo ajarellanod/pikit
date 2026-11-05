@@ -58,7 +58,7 @@ Every `/admin/api/*` route asks `admin.auth` first and answers `401` without an 
 | `POST /admin/api/conversations` | a new conversation of the dashboard's own (`dashboard:<uuid>`) with its first message |
 | `GET /admin/api/conversations/:id` | one conversation |
 | `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first |
-| `GET /admin/api/conversations/:id/events` | live events as server-sent events: a `snapshot`, then changes |
+| `GET /admin/api/conversations/:id/events` | the conversation live, as server-sent events: `agent.observe`'s `watch` (its state whole, then the ops that change it; the entries it gains) |
 | `POST /admin/api/conversations/:id/messages` | the operator's follow-up |
 | `POST /admin/api/conversations/:id/abort` | `agent.runtime.abort` |
 | `POST /admin/api/conversations/:id/reset` | `conversations.registry.reset` |
@@ -83,7 +83,7 @@ agent reads a first line saying the message is the operator's.
 ### Server and Cloudflare
 
 - **Server.** One App; the default export is the whole API over the App's contracts
-  (`createLocalBackend`). Live events come from `agent.observe.watch`.
+  (`createLocalBackend`). The live part is `agent.observe.watch`.
 - **Cloudflare.** Two halves (`"apps": { "worker": "worker" }`). The Worker's half
   (`admin-api-worker`, `worker.ts`) serves the routes over `remote.ts`: every read and action is an
   `actor.mailbox.call` to the conversation's object (`admin-api.list`, `admin-api.conversation`,
@@ -175,8 +175,8 @@ The shared pieces (`bui`, `message`, `error-note`, `image-viewer`, `markdown`, `
 other than the dashboard (channel-web's chat page) carries them without the admin client. A
 conversation's view (`ConversationView`, features/completed/chat-parity.md) reads through a
 `ConversationSource` each app implements (the dashboard's: `views/conversations/source.ts`, over
-`/admin/api/conversations/:id/...`): its transcript's entries, its live events (`lib/transcript.ts`
-folds them), a message and a stop; the app fills its slots (the header's actions, the side panel, its
+`/admin/api/conversations/:id/...`): its transcript's entries, its live state (`lib/transcript.ts`
+applies its ops with `lib/json-ops.ts`, a verbatim copy of the contracts' `applyOps`), a message and a stop; the app fills its slots (the header's actions, the side panel, its
 notes, what replaces the composer). `scripts/ui-shared.test.ts` fails when one of them
 reaches `@/lib/api`, `@/lib/admin-api`, `@/lib/chats`, `@/lib/settings`, `@/lib/views`,
 `@/lib/router`, `@/lib/shell` or any other file that is not shared. `ErrorNote` takes any

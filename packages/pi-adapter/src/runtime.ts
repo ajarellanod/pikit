@@ -38,9 +38,14 @@
  *   by the delegation that creates it (`delegation.ts`), and given with every ref the runtime builds
  *   from that record (`asRecorded`): a ref given to `dispatch` never sets one.
  * - **The answer as it is written** (`agent.partial`): pi-durable commits the response being generated to
- *   the conversation's `pi.live` (`generation.message`, itself throttled by `progress.partialIntervalMs`);
- *   the runtime re-emits its text from those commits, at most once per `partialEveryMs`, while the run
- *   goes, and never once the commit that ends it was seen.
+ *   the conversation's `pi.live` (`generation.message`, itself throttled by `progress.partialIntervalMs`),
+ *   deferred: memory adopts each at once, storage gets them later (`progress.persistWithinMs`), so the
+ *   stored commits would show a preview a second late. While a run goes, the runtime observes the
+ *   conversation's `pi.live` as memory adopts it (`observeDoc`) and re-emits its text, at most once per
+ *   `partialEveryMs`, and never once the commit that ends the run was seen.
+ * - **Queued messages after a failed run**: pi-durable places them in the commit that ends a run failed
+ *   by the model (`afterFailedRun: "continue"`, the runtime's): the next run starts with them. A run
+ *   that faulted (a bug) or was orphaned (its task's code is gone) keeps them until the next message.
  *
  * Steps that touch one conversation (admissions, aborts, recoveries, settlements) run in that
  * conversation's line, one at a time, so a duplicate check and the submit after it never interleave,
@@ -59,6 +64,8 @@ import {
   InboxDoc,
   type InputSubmissionDraft,
   LiveDoc,
+  type LiveState,
+  type Report,
   ROOT_CONVERSATION_ID,
   type Storage,
   type SubmissionRecord,
@@ -101,17 +108,6 @@ import { RecentMap } from "./recent.ts";
 import { openDurableStorage } from "./sql.ts";
 import { ABANDONED, AdmissionsDoc, announced, durableId, INPUT_KIND, runKey, runsOf, senderOfEntry, storedRunsOf } from "./submissions.ts";
 
-/**
- * Settings pi-durable gets on Cloudflare Workers, under the host's. pi-durable keeps an idle
- * conversation's context for `contextRetentionMs`, and an unobserved document for `documentRetentionMs`
- * (ten minutes each), behind timers it unreferences, and keeps none where timers cannot be unreferenced.
- * workerd with `nodejs_compat` returns Node timers whose `unref` does nothing, so a timer would keep a
- * Durable Object alive (and `evictDurableObject` waits for it): there both are dropped right after use
- * (docs/upstream, proposal 18).
- */
-const WORKERS_SETTINGS: Partial<HarnessSettings> =
-  typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers" ? { contextRetentionMs: 0, documentRetentionMs: 0 } : {};
-
 export interface DurableRuntimeOptions {
   /**
    * The app's `storage.sqlite` (storage-sqlite, storage-do; portable `storage.sql` alone is not enough). pi-durable's storage is opened over it
@@ -150,12 +146,14 @@ export interface DurableRuntimeOptions {
    */
   conversations?: "ownerless" | "root";
   /**
-   * pi-durable's run policy (stream, retry, compaction, tool execution). The queue modes are the
-   * runtime's (queued follow-ups are taken all at once by the next run, steers all at once by the run
-   * in progress). Extensions are not a host default: each conversation selects exactly its agent's
-   * (`AgentDefinition.extensions`, through `extension`), so a default selection would never apply.
+   * pi-durable's run policy (stream, retry, compaction, tool execution, restart limit). The queue modes
+   * are the runtime's (queued follow-ups are taken all at once by the next run, steers all at once by
+   * the run in progress), and so is what a failed run does with them (`afterFailedRun: "continue"`:
+   * `agent.runtime` answers a message queued behind a failure). Extensions are not a host default: each
+   * conversation selects exactly its agent's (`AgentDefinition.extensions`, through `extension`), so a
+   * default selection would never apply.
    */
-  settings?: Omit<HarnessSettings, "extensions" | "steeringMode" | "followUpMode">;
+  settings?: Omit<HarnessSettings, "extensions" | "steeringMode" | "followUpMode" | "afterFailedRun">;
   /**
    * Builds a conversation's execution environment for its tools (pi-durable's `HarnessOptions.env`).
    * Default: `harnessEnv` over `workspace` and `execution` below.
@@ -179,13 +177,14 @@ export interface DurableRuntimeOptions {
    */
   refsKept?: number;
   /**
-   * For a host that keeps running only while an event is in progress (a Durable Object): called by
-   * `whenIdle` when nothing is driven but live work waits for a time (a model retry's backoff, a
-   * deferred response's poll, a compaction's retry). Those waits are in-process sleeps that die with the
-   * host, so the host asks to be woken when the earliest is due (computed from `inspection`, see
-   * `wakeups.ts`); a reopened Harness continues them. A rejection is logged.
+   * For a host that wakes the process itself (a Durable Object's alarm, pikit's `wakeups`): called by
+   * `whenIdle` when nothing is driven but a task sleeps until `at` (a model retry's backoff, a deferred
+   * response's poll, a compaction's retry), so the host asks to be woken then; its next `whenIdle`
+   * resumes what is due. With it, pi-durable keeps no timer for sleeping tasks (`HarnessOptions.onWake`),
+   * which would keep the host alive: with nothing running, a Durable Object can be evicted with the
+   * Harness open, and the sleep stays in its storage. A rejection is logged.
    */
-  onIdleWithPendingWork?(inspection: HarnessInspection, ctx: AppContext): Promise<void>;
+  onIdleUntil?(at: number, ctx: AppContext): Promise<void>;
   /**
    * Called once a storage error closed the open Harness (pi-durable never uses a failed one again) and
    * it has closed. The runtime opens another at the next call; nothing it left pending (a run, queued
@@ -207,14 +206,6 @@ export interface DurableRuntime extends AgentRuntime {
    * `ConversationRef.conversationId` of every message to it.
    */
   createConversation(ctx: AppContext): Promise<string>;
-  /**
-   * Close the Harness but keep the runtime: the next call opens it again (and resumes what it finds).
-   * For a host that is evicted between events (a Durable Object): an idle Harness whose remaining
-   * work only waits for a time keeps an in-process timer, which keeps the object alive; closed, the
-   * object can go, and the wake-up the host scheduled (`onIdleWithPendingWork`) reopens it. Waits for
-   * the steps and announcements under way first. Call it inside an event of the host.
-   */
-  suspend(ctx: AppContext): Promise<void>;
   /**
    * Bring back a conversation with requests pending (`submissions.pending`), as a host does at start:
    * it is reconfigured, its work resumed, and what pi-durable settled without the run being logged is
@@ -252,8 +243,8 @@ export interface DurableRuntime extends AgentRuntime {
    */
   readonly delegations: ConversationDelegations;
   /**
-   * Resolves `true` once nothing is driven: no task running, no step or announcement under way (work
-   * that only waits for a time does not count; `onIdleWithPendingWork` is told about it). A Harness a
+   * Resolves `true` once nothing is driven: no task running or due, no step or announcement under way (a
+   * task sleeping until a time does not count; `onIdleUntil` is told about it). A Harness a
    * storage error closed drives nothing either (`onFailure` is told about it). `false` as soon as `ctx`
    * is cancelled or the runtime closed.
    */
@@ -281,9 +272,6 @@ class Unopenable extends Error {
 /** `pi.live`, whose `run` says a conversation is busy. */
 const LIVE = "pi.live";
 
-/** The kind of the write that starts a run for inputs a failed run left queued (README.md, "Gaps"). */
-export const INBOX_KICK = "pikit.inbox-kick";
-
 /** How often `agent.partial` is emitted at most, per conversation, by default: a preview's pace, not a stream's. */
 export const PARTIAL_EVERY_MS = 1_000;
 
@@ -294,7 +282,7 @@ export const PARTIAL_EVERY_MS = 1_000;
 const REFS_KEPT = 1_000;
 
 /** What the runtime reads of a `pi.live` commit: the run and the response being written. */
-type LiveValue = { run?: { inputs?: number[] }; generation?: { message?: { content?: readonly { type: string; text?: unknown }[] } } };
+type LiveValue = Readonly<Pick<LiveState, "run" | "generation">>;
 
 const DAY = 24 * 60 * 60 * 1_000;
 /** The answers log is pruned when the Harness opens, and at most this often after, when a run is logged. */
@@ -328,11 +316,14 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   let opening: Promise<Harness> | undefined;
   /** The storage under the open Harness (read directly: scans and entry commit sequences). */
   let storage: Storage | undefined;
-  /** A `suspend` closing the Harness, or a failed one closing: the next open waits for it (one Harness per storage). */
-  let suspending: Promise<void> | undefined;
-  /** The Harness `opening` gives, from when it opened until `suspend`, `close` or a failure drops it. */
+  /** A Harness a storage error failed, closing: the next open waits for it (one Harness per storage). */
+  let failing: Promise<void> | undefined;
+  /** The Harness `opening` gives, from when it opened until `close` or a failure drops it. */
   let current: Harness | undefined;
+  /** Detaches the open Harness's commit observer. */
   let unsubscribe: (() => void) | undefined;
+  /** Per conversation with a run going, its `pi.live` observer (`agent.partial`), attached or attaching. */
+  const previews = new Map<ConversationId, { detach(): void }>();
 
   /** Every promise in flight (steps, settlements, announcements): what `whenIdle` and `close` wait for. */
   const inflight = new Set<Promise<unknown>>();
@@ -362,7 +353,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
    * recorded), so a dropped entry is read back the same (`refOf`).
    */
   const refs = new RecentMap<ConversationId, ConversationRef>(options.refsKept ?? REFS_KEPT);
-  /** Resolved at each commit. */
+  /** Resolved at each commit, and at each change of `Harness.wake()` when the host wakes the process (`onIdleUntil`). */
   let commitWaiters: (() => void)[] = [];
   let resolveClosed!: () => void;
   const closedSignal = new Promise<void>((resolve) => (resolveClosed = resolve));
@@ -438,7 +429,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   const harnessOf = (ctx: AppContext): Promise<Harness> => {
     if (closed) return Promise.reject(new Error("agent.runtime is closed"));
     if (opening !== undefined) return opening;
-    const attempt: Promise<Harness> = (suspending ?? Promise.resolve())
+    const attempt: Promise<Harness> = (failing ?? Promise.resolve())
       .then(() => openHarness(ctx))
       .catch((error: unknown) => {
         // A Harness that failed while opening was dropped already, and another may be opening.
@@ -475,10 +466,14 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         // other inputs: live and answered runs are still grouped exactly (by the settling commit, by
         // the answer), but a failed run that took a steer, found after a crash, is grouped by placing
         // commit and its steer announced apart (submissions.ts says how steers will be grouped).
-        settings: { ...WORKERS_SETTINGS, ...options.settings, steeringMode: "all", followUpMode: "all" },
+        // A run the model failed hands what is queued behind it to the next run, in the commit that ends it.
+        settings: { ...options.settings, steeringMode: "all", followUpMode: "all", afterFailedRun: "continue" },
         ...(env !== undefined && { env }),
         now,
-        onReport: (error) => logger.warn("pi-durable reported a failure", { error: error instanceof Error ? error.message : String(error) }),
+        // The host's wakeup resumes sleeping tasks (`whenIdle`), not a timer that keeps it alive; a change
+        // may end a `whenIdle` wait that no commit ends (open's recovery pass).
+        ...(options.onIdleUntil !== undefined && { onWake: () => wakeWaiters() }),
+        onReport: (report) => reported(report),
       },
       // Tasks run in the Harness's context: the app's values, never a caller's cancellation.
       toChord(runContext(events)),
@@ -489,7 +484,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     }
     storage = store;
     current = harness;
-    const unsubscribeCommits = harness.subscribeCommits((publication) => observe(publication.changes));
+    const observation = harness.observeCommits({ advance: (publication) => observe(harness, publication.changes), end: () => {} });
+    const unsubscribeCommits = () => observation.detach();
     unsubscribe = unsubscribeCommits;
     harness.subscribeClose(() => dropFailed(harness));
     try {
@@ -510,7 +506,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
   /**
    * A storage error closes pi-durable's Harness for good: every later call rejects with `SessionFailed`.
-   * When the open Harness begins closing and neither `suspend` nor `close` closes it, drop it at once:
+   * When the open Harness begins closing and `close` does not close it, drop it at once:
    * the next call opens another over the storage, which finds what the failure left as after a crash
    * (commits are atomic). That open waits until the failed one has closed (one Harness per storage).
    */
@@ -518,22 +514,15 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     if (closed || current !== harness) return;
     current = undefined;
     opening = undefined;
-    unsubscribe?.();
-    unsubscribe = undefined;
     storage = undefined;
-    busy.clear();
-    queued.clear();
-    requestOf.clear();
-    partials.clear();
+    forget();
     // `whenIdle` waiting for a commit: none comes from a failed Harness.
-    const waiters = commitWaiters;
-    commitWaiters = [];
-    for (const wake of waiters) wake();
-    const before = suspending;
+    wakeWaiters();
+    const before = failing;
     const done: Promise<void> = Promise.all([before, harness.closed]).then(
       ([, end]) => {
-        if (suspending === done) suspending = undefined;
-        if (end.reason !== "failed" || closed) return;
+        if (failing === done) failing = undefined;
+        if (end.kind !== "failed" || closed) return;
         logger.error("pi-durable's Harness failed on a storage error; the next call opens it again", {
           error: end.error instanceof Error ? end.error.message : String(end.error),
         });
@@ -543,10 +532,10 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           .catch(logFailure("onFailure failed"));
       },
       () => {
-        if (suspending === done) suspending = undefined;
+        if (failing === done) failing = undefined;
       },
     );
-    suspending = done;
+    failing = done;
   };
 
   /** What opening does once the Harness is open: see `openHarness`. */
@@ -554,14 +543,12 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     const inspection = await harness.inspect(toChord(ctx));
     const live = new Set<ConversationId>([...inspection.tasks.map((task) => task.record.conversationId)]);
     const resumed: SubmissionRecord[] = [];
-    const waiting = new Set<ConversationId>();
     for (const submission of inspection.submissions) {
       live.add(submission.conversationId);
       if (submission.type !== "input" || submission.requestId === undefined) continue;
       requestOf.set(submission.id, submission.requestId);
       if (submission.status === "queued") {
         queued.add(submission.id);
-        waiting.add(submission.conversationId);
       } else if (submission.status === "placed") {
         busy.add(submission.conversationId);
         resumed.push(submission);
@@ -586,14 +573,12 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       if ((leadOf.get(submission.id) ?? submission.id) !== submission.id) continue;
       const requestId = submission.requestId;
       const key = keyOf(submission.conversationId, requestId);
-      // Announced by this runtime before a `suspend`: not announced again.
+      // Announced by this runtime before its Harness failed and was opened again: not announced again.
       if (runs.has(key)) continue;
       runs.set(key, { ctx: events, announced: emit(events, "agent.started", { conversation: ref, requestId, resumed: true }) });
     }
+    for (const id of busy) preview(harness, id);
     harness.resume();
-    for (const id of waiting) {
-      if (!busy.has(id)) void inLine(id, () => reconcileInbox(harness, id)).catch(logFailure("starting a run for queued messages failed"));
-    }
     // A run may have ended with its log never written (a crash between the two): logged and announced now.
     const admissions = await harness.snapshot(AdmissionsDoc, toChord(ctx));
     for (const key of Object.keys(admissions?.conversations ?? {})) {
@@ -604,19 +589,22 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
   /**
    * Every commit: inputs queued, placed (a queued one's run starts: `agent.started`), settled (logged
-   * and announced in their conversation's line); conversations' runs starting and ending. Must not call
-   * the Harness.
+   * and announced in their conversation's line); conversations' runs starting and ending, and their
+   * previews with them (`preview`). Only records: what calls the Harness runs later.
    */
-  const observe = (changes: readonly CommitChange[]) => {
-    /** This commit's `pi.live` documents: the answers being written. */
-    const lives: [ConversationId, LiveValue | null][] = [];
+  const observe = (harness: Harness, changes: readonly CommitChange[]) => {
     // The runs that start in this commit, first: a run's inputs are placed in the commit that starts it.
     for (const change of changes) {
       if (change.type !== "document" || change.record.kind !== LIVE || change.conversationId === undefined) continue;
-      const value = change.value as LiveValue | null;
-      lives.push([change.conversationId, value]);
-      if (value?.run !== undefined) busy.add(change.conversationId);
-      else busy.delete(change.conversationId);
+      const id = change.conversationId;
+      const value = change.kind === "change" ? (change.value as LiveValue) : undefined;
+      if (value?.run !== undefined) {
+        busy.add(id);
+        preview(harness, id);
+      } else {
+        busy.delete(id);
+        unpreview(id);
+      }
       const inputs = value?.run?.inputs ?? [];
       for (const input of inputs) if (!leadOf.has(input)) leadOf.set(input, inputs[0] as number);
     }
@@ -643,38 +631,91 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     for (const [id, records] of settled) {
       void inLine(id, async () => settle(await harnessOf(events), id, runsOf(records), [])).catch(logFailure("a run ended but it could not be logged"));
     }
-    for (const [id, value] of lives) partial(id, value);
-    const waiters = commitWaiters;
-    commitWaiters = [];
-    for (const wake of waiters) wake();
+    wakeWaiters();
   };
 
   /**
-   * `agent.partial` from a commit of the conversation's `pi.live`: the text of the response being
-   * written, when it changed and `partialEveryMs` passed since the run's last one. A commit with no run
-   * ends the run's: an emit still on its way is dropped, so none follows the run's end (whose
-   * announcement comes after this commit). Never awaited by the run; a listener's failure is logged.
+   * Observe the conversation's `pi.live` while its run goes, for `agent.partial`: as memory adopts each
+   * commit, deferred ones included, which the stored commits show only later. Attached after the call
+   * that saw the run start (an observer only records), from the value it finds.
    */
-  const partial = (id: ConversationId, value: LiveValue | null): void => {
+  const preview = (harness: Harness, id: ConversationId): void => {
+    if (previews.has(id)) return;
+    let cancelled = false;
+    let attached: { detach(): void } | undefined;
+    const entry = {
+      detach() {
+        cancelled = true;
+        attached?.detach();
+      },
+    };
+    previews.set(id, entry);
+    const observer = {
+      advance: (call: { kind: string; value?: LiveValue }) => {
+        // An observer must not throw (pi-durable would detach it and report it).
+        try {
+          if (!cancelled && call.kind === "value") partial(id, call.value);
+        } catch (error) {
+          logFailure("agent.partial could not be emitted")(error);
+        }
+      },
+      end: () => {
+        if (previews.get(id) === entry) previews.delete(id);
+      },
+    };
+    void track(
+      Promise.resolve()
+        .then(() => harness.observeDoc(LiveDoc, id, observer, toChord(events)))
+        .then(
+          (observation) => {
+            attached = observation;
+            if (cancelled) observation?.detach();
+            else if (observation !== undefined) partial(id, observation.value);
+          },
+          (error: unknown) => {
+            if (previews.get(id) === entry) previews.delete(id);
+            throw error;
+          },
+        ),
+    ).catch(logFailure("agent.partial: a run's answer could not be observed"));
+  };
+
+  const unpreview = (id: ConversationId): void => {
+    const entry = previews.get(id);
+    previews.delete(id);
+    entry?.detach();
+  };
+
+  /**
+   * `agent.partial` from the conversation's `pi.live` as memory adopts it: the text of the response being
+   * written, when `partialEveryMs` passed since the run's last one and it changed. A value with no run
+   * ends the run's: an emit still on its way is dropped, so none follows the run's end (whose
+   * announcement comes after its commit). Only records (an observer's call): the emit runs later, never
+   * awaited by the run; a listener's failure is logged.
+   */
+  const partial = (id: ConversationId, value: LiveValue | undefined): void => {
     const lead = value?.run?.inputs?.[0];
     const requestId = lead === undefined ? undefined : requestOf.get(lead);
     if (requestId === undefined) {
       partials.delete(id);
       return;
     }
-    const content = value?.generation?.message?.content ?? [];
-    const text = content.flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : [])).join("");
     const last = partials.get(id);
     const at = now();
-    if (text === "" || (last?.requestId === requestId && (last.text === text || at - last.at < partialEveryMs))) return;
+    if (last?.requestId === requestId && at - last.at < partialEveryMs) return;
+    const content = value?.generation?.message?.content ?? [];
+    const text = content.flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : [])).join("");
+    if (text === "" || (last?.requestId === requestId && last.text === text)) return;
     partials.set(id, { requestId, at, text });
     const ctx = runs.get(keyOf(id, requestId))?.ctx ?? events;
     void track(
-      refOf(id).then(async (ref) => {
-        // The run ended meanwhile: too late for a preview.
-        if (ref === undefined || partials.get(id)?.requestId !== requestId) return;
-        await emit(ctx, "agent.partial", { conversation: ref, requestId, text });
-      }),
+      Promise.resolve()
+        .then(() => refOf(id))
+        .then(async (ref) => {
+          // The run ended meanwhile: too late for a preview.
+          if (ref === undefined || partials.get(id)?.requestId !== requestId) return;
+          await emit(ctx, "agent.partial", { conversation: ref, requestId, text });
+        }),
     ).catch(logFailure("agent.partial could not be emitted"));
   };
 
@@ -722,7 +763,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
    * 2. they are appended to the answers log, idempotently by run key, in one transaction;
    * 3. their requests (and `gone`, requests pi-durable never held) leave `AdmissionsDoc`, in one commit;
    * 4. each is announced, once the announcements of its admission are out (not inputs an abort withdrew
-   *    while queued), and a run that ended unanswered gets what it left queued started.
+   *    while queued).
    * A crash between 2 and 3 appends the same keys again: nothing changes.
    */
   const settle = async (harness: Harness, id: ConversationId, groups: readonly SettledInput[][], gone: readonly string[]): Promise<void> => {
@@ -759,7 +800,6 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         for (const record of group) leadOf.delete(record.id);
         if (announced(group)) countAnnouncing(id, announce(results[index] as AgentResult, announcements[0]?.ctx ?? events, announcements));
       }
-      if (pending.some((group) => group[0]?.status === "unanswered" && group[0].entry !== undefined)) await reconcileInbox(harness, id);
     } finally {
       for (const record of groups.flat()) {
         const waiters = handled.get(record.id);
@@ -799,21 +839,45 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     else await emit(ctx, "agent.settled", { ...result, kind: result.kind });
   };
 
+  /** Drops what the runtime knows of the open Harness's runs, and stops observing it. */
+  const forget = (): void => {
+    unsubscribe?.();
+    unsubscribe = undefined;
+    for (const id of [...previews.keys()]) unpreview(id);
+    busy.clear();
+    queued.clear();
+    requestOf.clear();
+    partials.clear();
+  };
+
+  const wakeWaiters = (): void => {
+    const waiters = commitWaiters;
+    commitWaiters = [];
+    for (const wake of waiters) wake();
+  };
+
   /**
-   * pi-durable leaves the inputs queued behind a run that ended unanswered in the inbox, until the next
-   * input or queued write places them (pi-facts.test.ts). With no run going and inputs queued, a write
-   * submission (an entry of kind `pikit.inbox-kick`, never seen by the model) runs the boundary that
-   * places the oldest one and starts its run. Its empty `edits` make it a queued write: one of only
-   * `kind` and `data` is display-only, appended at once without a boundary, and places nothing.
-   * In the conversation's line.
+   * pi-durable's reports: failures that fail no call. A storage failure is logged as the Harness closes
+   * (`dropFailed`). Work lost to a bug (a task that faulted, a state that cannot migrate, code that
+   * threw) is an error; the rest (crashes that ended a run, which its failure announces; a task's own
+   * report; a task left on its old code) a warning.
    */
-  const reconcileInbox = async (harness: Harness, id: ConversationId): Promise<void> => {
-    if (closed) return;
-    const ctx = toChord(events);
-    const [live, inbox] = await Promise.all([harness.snapshot(LiveDoc, id, ctx), harness.snapshot(InboxDoc, id, ctx)]);
-    if (live?.run !== undefined || !(inbox?.items ?? []).some((item) => item.mode !== "write")) return;
-    const conversation = await harness.conversation(id, ctx);
-    await conversation?.submit({ type: "write", entry: { kind: INBOX_KICK, edits: [] } }, ctx);
+  const reported = (report: Report): void => {
+    if (report.kind === "storage_failed") return;
+    const task = "task" in report ? report.task : undefined;
+    const fields = {
+      kind: report.kind,
+      error: report.error instanceof Error ? report.error.message : String(report.error),
+      ...(task !== undefined && { task: task.kind, taskId: task.id, conversation: task.conversationId }),
+      ...("conversationId" in report && report.conversationId !== undefined && { conversation: report.conversationId }),
+      ...("extension" in report && report.extension !== undefined && { extension: report.extension }),
+      ...("reason" in report && { reason: report.reason }),
+      ...("restarts" in report && { restarts: report.restarts }),
+      ...("callback" in report && { callback: report.callback }),
+    };
+    const warning = report.kind === "task_interrupted" || report.kind === "task_error" || report.kind === "task_outdated";
+    if (warning) logger.warn(`pi-durable reported ${report.kind}`, fields);
+    else logger.error(`pi-durable reported ${report.kind}`, fields);
   };
 
   /** The conversation's `ConversationRef`, from memory or its `pikit.conversation` document. */
@@ -1067,12 +1131,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           if (existing !== undefined) {
             // A redelivery. Settled: its run (and every run of the conversation) may never have been
             // logged (a crash); still live: make sure something drives it.
-            if (isSettledInput(existing)) {
-              await reconcile(harness, id);
-            } else {
-              harness.resume();
-              await reconcileInbox(harness, id);
-            }
+            if (isSettledInput(existing)) await reconcile(harness, id);
+            else harness.resume();
             return { kind: "duplicate", requestId } as const;
           }
           runs.set(key, { ctx: runContext(ctx), announced: admissionAnnounced });
@@ -1163,7 +1223,6 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         await conversationOf(harness, conversation, ctx);
         await reconfigure(harness, id, ctx, options.agent(conversation.agent) === undefined ? undefined : conversation);
         harness.resume();
-        await reconcileInbox(harness, id);
       });
     },
 
@@ -1177,7 +1236,6 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           await conversationOf(harness, conversation, ctx);
           await reconfigure(harness, id, ctx, conversation);
           harness.resume();
-          await reconcileInbox(harness, id);
           await reconcile(harness, id);
           const pending: Promise<void>[] = [];
           for (const requestId of requestIds) {
@@ -1217,17 +1275,17 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         const harness = await opening.catch(() => undefined);
         if (harness === undefined) return !closed;
         const committed = new Promise<void>((resolve) => commitWaiters.push(resolve));
+        // With `onIdleUntil`, no timer wakes the sleeping tasks that are due: this call, from the host's wakeup, does.
+        if (options.onIdleUntil !== undefined && current === harness) harness.resume();
         const inspection = await harness.inspect(toChord(ctx)).catch(() => undefined);
         if (inspection === undefined) {
-          // Dropped meanwhile (a storage error, a suspend): look again, at what is open now.
+          // Dropped meanwhile (a storage error): look again, at what is open now.
           if (current !== harness) continue;
           return false;
         }
-        const at = now();
-        if (inflight.size === 0 && !inspection.tasks.some((task) => driven(task, at))) {
-          if (options.onIdleWithPendingWork !== undefined && inspection.tasks.some((task) => timed(task, at))) {
-            await options.onIdleWithPendingWork(inspection, ctx).catch(logFailure("onIdleWithPendingWork failed"));
-          }
+        if (inflight.size === 0 && !inspection.tasks.some(driven)) {
+          const at = sleepsUntil(inspection);
+          if (options.onIdleUntil !== undefined && at !== undefined) await options.onIdleUntil(at, ctx).catch(logFailure("onIdleUntil failed"));
           return !closed;
         }
         await untilAborted(Promise.race([committed, ...inflight]), ctx.abortSignal, closedSignal);
@@ -1242,45 +1300,17 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
     opened,
 
-    async suspend(ctx: AppContext): Promise<void> {
-      if (closed || opening === undefined) return;
-      await untilAborted(Promise.allSettled([...inflight]), ctx.abortSignal, closedSignal);
-      const open = opening;
-      if (closed || open === undefined || inflight.size > 0) return;
-      opening = undefined;
-      const stopping = (async () => {
-        const harness = await open.catch(() => undefined);
-        current = undefined;
-        unsubscribe?.();
-        unsubscribe = undefined;
-        storage = undefined;
-        // Runs waiting for a time stay pending in the storage; the next open continues them.
-        if (harness !== undefined) await harness.close(toChord(ctx));
-        busy.clear();
-        queued.clear();
-        requestOf.clear();
-        partials.clear();
-      })();
-      const done: Promise<void> = stopping
-        .catch(() => {})
-        .then(() => {
-          if (suspending === done) suspending = undefined;
-        });
-      suspending = done;
-      await stopping;
-    },
-
     async close(ctx: AppContext): Promise<void> {
       if (closed) return;
       closed = true;
       resolveClosed();
       for (const waiters of handled.values()) for (const wake of waiters) wake();
       handled.clear();
-      await suspending;
+      await failing;
       const open = opening;
       if (open !== undefined) {
         const harness = await open.catch(() => undefined);
-        unsubscribe?.();
+        forget();
         // Runs in progress stop here and stay pending in the storage, for the next worker.
         if (harness !== undefined) await untilAborted(harness.close(toChord(ctx)), ctx.abortSignal);
       }
@@ -1292,26 +1322,19 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   return runtime;
 }
 
-type Checkpoint = { phase?: string; until?: number; pollAt?: number } | undefined;
-
-/**
- * Live work that waits for a time, in-process: a model retry's backoff, a deferred poll, a compaction's retry.
- * Reads pi-durable's private checkpoints, as wakeups.ts's `checkpointedDue` does; goes when
- * earendil-works/pi#10325 ships (docs/upstream/README.md, proposal 1).
- */
-function timed(task: TaskInspection, at: number): boolean {
-  const checkpoint = (task.record.state as { checkpoint?: Checkpoint }).checkpoint;
-  if (task.record.kind === "pi.generation") {
-    if (checkpoint?.phase === "retry") return (checkpoint.until ?? 0) > at;
-    if (checkpoint?.phase === "poll") return (checkpoint.pollAt ?? 0) > at;
-  }
-  if (task.record.kind === "pi.compaction" && checkpoint?.phase === "retry") return (checkpoint.until ?? 0) > at;
-  return false;
+/** Live work this process drives now: a task running or about to (a sleeping one past its time included). */
+function driven(task: TaskInspection): boolean {
+  return task.state.kind === "running" || task.state.kind === "pending";
 }
 
-/** Live work this process drives now: a task running or about to, unless it only sleeps (`timed`). */
-function driven(task: TaskInspection, at: number): boolean {
-  return (task.state.kind === "running" || task.state.kind === "ready") && !timed(task, at);
+/**
+ * When the earliest sleeping task is due (a model retry's backoff, a deferred response's poll, a
+ * compaction's retry: pi-durable's sleeps, which survive a restart), or `undefined` when none sleeps.
+ */
+function sleepsUntil(inspection: HarnessInspection): number | undefined {
+  let at: number | undefined;
+  for (const { state } of inspection.tasks) if (state.kind === "sleeping" && (at === undefined || state.until < at)) at = state.until;
+  return at;
 }
 
 /** Resolves when `work` settles, `signal` aborts, or `stop` resolves, whichever comes first. */

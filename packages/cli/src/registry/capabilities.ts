@@ -106,7 +106,7 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/contracts",
     stability: "experimental",
     // Provided by the runtime (runtime-pi reads it from pi-durable), so never offered.
-    summary: "What the runtime holds, read-only, for a reader its consumer authorized for that conversation (an operator; a channel's user for their own): its conversations (agent, busy, cost), a transcript, a live event stream, usage.",
+    summary: "What the runtime holds, read-only, for a reader its consumer authorized for that conversation (an operator; a channel's user for their own): its conversations (agent, busy, cost), a transcript, one conversation live as state (sent whole, then as the JSON ops that change it, folded for a reader that falls behind), usage.",
   },
   "agent.directory": {
     mode: "single",

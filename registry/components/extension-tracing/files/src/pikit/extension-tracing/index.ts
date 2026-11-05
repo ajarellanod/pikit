@@ -6,8 +6,10 @@
  * - **Spans** (OpenTelemetry's GenAI conventions): `invoke_agent <agent>` for the run, from
  *   `agent.started` to `agent.settled` / `agent.failed`; `chat <model>` for each model request
  *   attempt (`beforeRequest` to `afterResponse`); `execute_tool <name>` for each tool call
- *   (`beforeTool` to `afterTool`; a call that never ran, blocked by a hook, refused or interrupted, is
- *   an error span ended at its round's `afterTools`). Model requests and the run's tool calls are
+ *   (`beforeTool` to `afterTool`; pi-durable runs `afterTool` on the error results it writes too, a
+ *   call blocked by a hook, refused or interrupted, whose span's `error.type` is that result's code;
+ *   one whose `afterTool` never comes is a `not_run` error span ended at its round's `afterTools`).
+ *   Model requests and the run's tool calls are
  *   children of the run's span, a nested call of the call that made it. The session is the
  *   conversation key, the user the sender of the run's first message.
  * - **One component, both halves.** The hooks see a run's work, the App's events its start and end:
@@ -53,6 +55,18 @@ import {
 
 /** The name agents give it and its key under `agent.extension`. */
 export const TRACING = "tracing";
+
+/**
+ * The diagnostic codes of the error results pi-durable writes itself, without running the tool (or
+ * after cutting it off), which `afterTool` sees too.
+ */
+export const HARNESS_RESULTS = new Set(["tool_unavailable", "invalid_arguments", "blocked", "interrupted", "restart_limit", "aborted", "abandoned"]);
+
+/** A tool span's `error.type`: pi-durable's code for a result it wrote, `tool_error` for the tool's own error, none for a success. */
+export function errorTypeOf(result: { isError?: boolean; diagnostics?: readonly { code?: string }[] }): string | undefined {
+  const written = result.diagnostics?.find((each) => each.code !== undefined && HARNESS_RESULTS.has(each.code))?.code;
+  return written ?? (result.isError === true ? "tool_error" : undefined);
+}
 
 /** Finished spans that make a batch be sent before its run ends. */
 export const FLUSH_AT = 200;
@@ -426,8 +440,8 @@ export function createExtensionTracing(options: TracingOptions = {}) {
                   ...(capture && { arguments: content(call.arguments) }),
                 };
               }
-              const failed = result.isError === true;
-              push(toolSpan(run, call.id, tool, end, { "error.type": failed ? "tool_error" : undefined, "gen_ai.tool.call.result": capture ? content(resultText(result.output)) : undefined }, failed ? "tool_error" : undefined));
+              const errorType = errorTypeOf(result);
+              push(toolSpan(run, call.id, tool, end, { "error.type": errorType, "gen_ai.tool.call.result": capture ? content(resultText(result.output)) : undefined }, errorType));
             }),
           }),
         ],

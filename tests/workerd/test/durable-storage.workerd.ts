@@ -101,7 +101,7 @@ describe("a Harness over storage-do's storage.sql", () => {
     const run = await inApp(stub, interruptGeneration);
     await evictDurableObject(stub);
     const pending = await inApp(stub, pendingWork);
-    expect(pending.tasks.map((t) => [t.kind, t.status, t.inspection])).toEqual([["pi.generation", "pending", "ready"]]);
+    expect(pending.tasks.map((t) => [t.kind, t.status, t.inspection])).toEqual([["pi.generation", "pending", "pending"]]);
     expect(pending.submissions).toEqual(["placed"]);
     await inApp(stub, (db) => resumeInterrupted(db, run));
   });
