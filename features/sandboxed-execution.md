@@ -17,9 +17,13 @@ replaces (C7). It passes `createDurableExecutionConformance` with a real shell a
 change on the host, the next command sees (Gondolin's mount caches are synced first). Its README has
 the decisions and limits.
 `execution-remote` and `execution-serve` built (`registry/components/`): a real shell
-for a server or a Durable Object, in a sandbox of a host; their protocol is execution-remote's own
-(`protocol.ts`, copied in both). The sandboxes themselves are a `workspace` provider's on the host
-(execution-gondolin's micro-VMs). `execution-docker` and hosted sandboxes: not built.
+for a server or a Durable Object, in a sandbox of a host, each agent routed to a host of its own
+([several sandbox hosts](agent-sandboxes.md#several-sandbox-hosts-built-2026-11-05)); their protocol
+is execution-remote's own (`protocol.ts`, copied in both). The sandboxes themselves are a `workspace`
+provider's on the host (execution-gondolin's micro-VMs, an image per machine:
+[images per machine](agent-sandboxes.md#images-per-machine-built-2026-11-05)), saved to a bucket when
+idle with `snapshots` ([workspace snapshots](workspace-snapshots.md)). `execution-docker` and other
+hosted sandboxes (Modal, Daytona, E2B): not built.
 `execution-cloudflare-sandbox` built (2026-11-05, `registry/components/`): a sandbox host on Cloudflare
 Containers, a Worker of its own speaking the same protocol, a container per sandbox id and agent with
 an image per agent, its workspace saved to `storage.blob` when idle (the shared snapshot format) and
@@ -32,8 +36,9 @@ secret reaches a VM (`noEnv`, a profile with `secrets` refused), and boat cannot
 `allowedHosts` is refused. Tested over a fake boat API (pi-durable's suite with a real shell); its
 live test waits for a key.
 
-**Needed by:** self-improvement requires `execution-cloudflare-sandbox` (SPEC §6): that one is
-required work, specified there, not here. On the server, SPEC §6's rule that the workspace's network
+**Needed by:** nothing required. SPEC §6 names `execution-cloudflare-sandbox` as the Cloudflare
+Sandbox, a sandbox host reached through `execution-remote` (built, above); self-improvement's
+workspace on Cloudflare stays `execution-do`. On the server, SPEC §6's rule that the workspace's network
 is closed except for the hosts it needs is met by `execution-gondolin` (decided below).
 
 ## What it gives
@@ -53,7 +58,11 @@ remote host, with their own user, filesystem and network.
     `workspace` provider of sandboxes) speaking its protocol over HTTP: a sandbox per Durable Object
     and agent, or per chat key and agent on a server, each request naming its agent
     (`Pikit-Agent`) so the host's profiles apply; a command started, then read from a cursor, never one long
-    request (alarm slices, evictions, subrequest limits). Credentials stay on the host (C7).
+    request (alarm slices, evictions, subrequest limits). Credentials stay on the host (C7). Several
+    hosts (`hosts`, `defaultHost`), each agent routed to its own (`agents`), each with its own token.
+  - `execution-cloudflare-sandbox` (durable on Cloudflare, built): a sandbox host, not an `execution`
+    provider: a Worker of its own speaking execution-serve's protocol, one host of execution-remote's
+    `hosts`; a container per sandbox id and agent, an image and instance per agent, no secrets.
   - `execution-boat` (server, built): a boat.dev VM per chat and agent, behind `execution-serve`
     (a gateway host execution-remote names per agent); sizes and a saved-snapshot template per
     agent's profile; idle VMs stopped (disk kept, billing stopped), deleted after `retentionDays`,
@@ -71,6 +80,10 @@ example for one terminal (`docs/containerization.md`, `examples/extensions/sandb
 only where each agent's commands run across a service.
 
 ## Open questions
+- ~~Several sandbox hosts, an agent on each.~~ Built: execution-remote's `hosts`
+  ([several sandbox hosts](agent-sandboxes.md#several-sandbox-hosts-built-2026-11-05)), with an image
+  per machine ([images per machine](agent-sandboxes.md#images-per-machine-built-2026-11-05)) and idle
+  workspaces in a bucket ([workspace snapshots](workspace-snapshots.md)), so a host is disposable.
 - ~~Does self-improvement on the server need `execution-docker`, or is a local checkout with a closed
   network achievable otherwise?~~ Decided: neither. `execution-gondolin`'s VM, its network closed,
   clones and pushes through the proposals repository's `serve`, answered in the host at a host name

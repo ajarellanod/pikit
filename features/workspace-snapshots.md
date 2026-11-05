@@ -43,7 +43,8 @@ workspaces go to a bucket after ten minutes idle and come back on first use, so 
   the agent (the hex SHA-256 of `"<chat key>\n<agent>"`), so any host finds a workspace's snapshot
   with nothing but the `ConversationRef` it resolves, and the manifest is the ref.
 - **Config** (workspace-local, execution-gondolin):
-  `snapshots: { idleMinutes: 10, maxBytes?, namespace? }`, with a `storage.blob` required at start.
+  `snapshots: { idleMinutes: 10, maxBytes?, maxUnpackedBytes: 4 GiB, maxEntries: 1,000,000, namespace? }`,
+  with a `storage.blob` required at start.
 
 ### The shared format (every backend, exactly)
 In `storage.blob` namespace `workspace-snapshots`, keys under `<sha256 hex of "<chat key>\n<agent>">/`:
@@ -89,6 +90,11 @@ every minute, each workspace unused for idleMinutes and not busy:
   no directory made.
 - **No entry leaves the directory**: `..`, absolute paths, NUL, entries under a link, links leading
   out, hard links and devices refuse the whole archive; links are made last, files exclusively.
+- **A restore is bounded**: past `maxUnpackedBytes` (the tar after gunzip, headers included, counted
+  before it is written) or `maxEntries`, the whole restore is refused and what it wrote removed, so a
+  gzip bomb or a huge archive never fills the host's disk; a checkpoint keeps to the same limits (a
+  workspace past them stays on its host), so a host never saves what it would refuse to restore.
+  execution-cloudflare-sandbox's `maxUnpackedBytes` counts the same bytes.
 - **Streaming end to end**: tar and gzip over `node:zlib` into a file, `putStream` from it (S3
   multipart, one part in memory), `getStream` through gunzip into the files.
 - **System tar reads ours, and ours restores system tar's** (`tar -czf`, bsdtar's pax records).

@@ -6,7 +6,10 @@ analyst has Python and Google's APIs, and no other agent has either, not even th
 **Specified:** yes (2026-10-20), this note is the frozen interface the implementation follows.
 **Built** (2026-10-20): `execution-gondolin` (`agents`), `execution-remote` and `execution-serve`
 (`Pikit-Agent`), `workspace-local` (one leading `_`); checked with real micro-VMs
-(`execution-remote/gondolin.test.ts`) and in workerd.
+(`execution-remote/gondolin.test.ts`) and in workerd. **Built** (2026-11-05): several sandbox hosts,
+an agent routed to each ([below](#several-sandbox-hosts-built-2026-11-05)), an image and a root disk
+per machine ([below](#images-per-machine-built-2026-11-05)), and idle workspaces saved to a bucket
+([workspace snapshots](workspace-snapshots.md)).
 
 **Needed by:** nothing required. Builds on [sandboxed execution](sandboxed-execution.md)
 (`execution-gondolin`, `execution-remote`, `execution-serve`) and runs on every target they run on,
@@ -69,7 +72,8 @@ now tells the host which agent each request is for. The secrets' values stay in 
    no compatibility).
 5. **An agent misspelled in `agents` gets the base**: no secret, no network. Fails closed. A server
    App that has `agent.definition`s warns at start for a profile no agent defines; a sandbox host
-   knows no agents and cannot.
+   knows no agents and cannot. execution-remote warns the same way for a key of its own `agents` (the
+   agent meant goes to the default host).
 
 ## The interfaces (frozen)
 
@@ -221,8 +225,10 @@ and execution-serve's own.
   (the steward's changes are approved by a person); it is not a wall against that code.
 - An agent with a profile can do whatever its token allows: give it a fine-grained token, the fewest
   repositories and permissions.
-- The sandbox host's disk holds every workspace, unreplicated
-  ([workspace snapshots](workspace-snapshots.md) is not built).
+- The sandbox host's disk holds every workspace in use, unreplicated. Without `snapshots` it holds
+  them all; with it (execution-gondolin, workspace-local; execution-cloudflare-sandbox and
+  execution-boat save theirs too) a workspace idle ten minutes goes to a bucket and comes back on its
+  next use ([workspace snapshots](workspace-snapshots.md)).
 - **Workspaces are ephemeral** ([spaces](spaces.md)): what must last is saved on purpose
   (`tool-space-files`, memory). With `retentionDays: N` (execution-gondolin, workspace-local,
   execution-do; absent, the default, keeps everything), a chat's workspace not used for N days (a
@@ -248,8 +254,8 @@ and execution-serve's own.
 
 ## Several sandbox hosts (built 2026-11-05)
 Agents run on machines fitted to them: a host `general` (a small machine: trader, notm, developer), a
-host `render` (a bigger one with KVM for the designer, a Chromium and ffmpeg image), later a host
-`cloud` (a Cloudflare Sandbox Worker, a gateway to boat.dev VMs). Every one speaks execution-serve's
+host `render` (a bigger one with KVM for the designer, a Chromium and ffmpeg image), a host `cloud`
+(execution-cloudflare-sandbox's Worker, or execution-boat's gateway to boat.dev VMs, both built). Every one speaks execution-serve's
 protocol, unchanged, so each is one more entry of execution-remote's `hosts`:
 
 ```ts
@@ -279,7 +285,9 @@ protocol, unchanged, so each is one more entry of execution-remote's `hosts`:
   start (one error naming it) on: a host `agents` or `defaultHost` names and `hosts` has not; several
   hosts without `defaultHost`; a key of `agents` outside the agent grammar, of `hosts` outside
   kebab-case; a host's secret unset or short; two hosts with the same token (one secret name, or two
-  of one value: a host could otherwise act on another).
+  of one value: a host could otherwise act on another); two hosts at one `url` (one execution-serve
+  takes one token, so one of them would be refused on every request). A key of `agents` no
+  `agent.definition` has is warned of at start (a misspelled agent would work on the default host).
 - **Health:** execution-remote reports none, for one host or several; one host down fails only its
   agents' operations (`unknown`, no answer), the others keep working.
 - **Cloud hosts never receive secrets** (owner's decision "a"): a `cloud` host's execution-serve runs
@@ -292,7 +300,9 @@ protocol, unchanged, so each is one more entry of execution-remote's `hosts`:
   agents of one Durable Object on two real hosts, two processes and tokens, found again by a reset).
 
 ## Open questions
-- Several sandbox hosts: built, above ("Several sandbox hosts").
+- ~~Several sandbox hosts.~~ Built: [Several sandbox hosts](#several-sandbox-hosts-built-2026-11-05),
+  with [images per machine](#images-per-machine-built-2026-11-05) and
+  [workspace snapshots](workspace-snapshots.md).
 - A health check per sandbox host (a dashboard row per host), when one is needed.
 - Editing profiles from the dashboard.
 - Files shared between agents (a read-only reference mount).
