@@ -180,14 +180,14 @@ function header(name: string, type: string, size: number, linkname = "", mode = 
   return block;
 }
 type Entry = { name: string; type?: string; body?: string; link?: string };
-function tarOf(entries: Entry[], end = true): Uint8Array {
+function tarOf(entries: Entry[], end = true): Uint8Array<ArrayBuffer> {
   const parts: Uint8Array[] = [];
   for (const entry of entries) {
     const body = new TextEncoder().encode(entry.body ?? "");
     parts.push(header(entry.name, entry.type ?? "0", body.byteLength, entry.link ?? ""), body, new Uint8Array((512 - (body.byteLength % 512)) % 512));
   }
   if (end) parts.push(new Uint8Array(1024));
-  return Bun.gzipSync(Buffer.concat(parts));
+  return new Uint8Array(Bun.gzipSync(new Uint8Array(Buffer.concat(parts))));
 }
 async function* once(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
   yield bytes;
@@ -224,7 +224,7 @@ test("an archive with an entry that could leave the directory is refused whole, 
   const raw = Bun.gunzipSync(broken);
   raw[0] = 0x79;
   await expect(extractSnapshotArchive(once(Bun.gzipSync(raw)), root)).rejects.toThrow("checksum");
-  const cut = Bun.gzipSync(Bun.gunzipSync(tarOf([{ name: "y", body: "y".repeat(2000) }], false)).subarray(0, 1024));
+  const cut = Bun.gzipSync(Bun.gunzipSync(tarOf([{ name: "y", body: "y".repeat(2000) }], false)).slice(0, 1024));
   await expect(extractSnapshotArchive(once(cut), temporary())).rejects.toThrow("middle of an entry");
 });
 
@@ -292,7 +292,7 @@ test("a checkpoint that stops at any step leaves the directory and the snapshot 
   const saved = await checkpointSnapshot(store, target(dir), { tmp, now: 700 });
   const { deleteSupersededSnapshots } = await import("./workspace-snapshot.ts");
   await deleteSupersededSnapshots(store, ID, saved?.manifest.object as string);
-  expect(await archives()).toEqual([saved?.manifest.object]);
+  expect(await archives()).toEqual([saved?.manifest.object as string]);
   const restored = join(root, "restored");
   await restoreSnapshot(store, target(restored), { tmp, base: root });
   const kept = { ...changed };
@@ -345,7 +345,7 @@ test("a restore that fails at any step, or finds an archive that is not its mani
   const original = await store.getStream(manifest.object);
   const bytes = new Uint8Array(await new Response(original?.body).arrayBuffer());
   const corrupt = new Uint8Array(bytes);
-  corrupt[corrupt.length - 9] ^= 0xff;
+  corrupt[corrupt.length - 9] = (corrupt[corrupt.length - 9] as number) ^ 0xff;
   await store.put(manifest.object, corrupt);
   await expect(restore(store)).rejects.toThrow();
   nothing();

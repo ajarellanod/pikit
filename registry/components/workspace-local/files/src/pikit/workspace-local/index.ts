@@ -28,6 +28,12 @@
  * worked in them for that many days, never while a call runs in one (`retention.ts`); an agent's or a
  * channel's directory never. Without it (the default), nothing is ever deleted.
  *
+ * With `snapshots` (and a `storage.blob`), a chat's directory of an agent unused for `idleMinutes`
+ * (10) is saved to the bucket in the shared snapshot format (`@pikit/contracts/snapshots`) and
+ * deleted here; the next `resolve` of that chat and agent restores it before the tool runs. Never
+ * while a call of an environment given for it runs. Then `retentionDays` deletes the bucket's
+ * snapshots of workspaces unused that long, not the local directories (released anyway).
+ *
  * ORDER, NOT ISOLATION. The directory is where an agent's tools start, not a wall. Paths are not
  * confined, and `bash` runs as `execution` runs it (with `execution-local`, as the server's OS user):
  * it can `cd ..`, read another agent's files and this app's `.pikit/credentials.json`. Isolation needs
@@ -38,11 +44,13 @@
 
 import { defineComponent } from "@pikit/core";
 import { createHash } from "node:crypto";
-import { type ConversationRef, originOf } from "@pikit/contracts";
+import { join } from "node:path";
+import { type ConversationRef, originOf, SNAPSHOT_NAMESPACE } from "@pikit/contracts";
+import { openSnapshotStore, snapshotIdOf, WorkspaceSnapshots } from "@pikit/contracts/snapshots";
 import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { atCwd } from "@pikit/pi-adapter/execution";
 import Type from "typebox";
-import { Retention } from "./retention.ts";
+import { DAY, Retention } from "./retention.ts";
 
 const Config = Type.Object({
   /** Where the agents' directories go: relative to `execution`'s working directory, or absolute. Created at start. */
@@ -58,7 +66,28 @@ const Config = Type.Object({
    * channel's directory. Absent (the default): kept forever.
    */
   retentionDays: Type.Optional(Type.Integer({ minimum: 1 })),
+  /**
+   * Saves a chat's directory of an agent to `storage.blob` once unused for `idleMinutes`, deletes it
+   * here, and restores it at its next use (`per: "chat"` only). With `retentionDays`, the bucket's
+   * snapshots unused that long are deleted instead of the local directories.
+   */
+  snapshots: Type.Optional(
+    Type.Object(
+      {
+        /** Minutes a workspace is unused (no command, no file read or written) before it goes to the bucket. */
+        idleMinutes: Type.Number({ exclusiveMinimum: 0, default: 10 }),
+        /** The largest archive (gzip'd) a workspace may have: a larger one stays here, a warning logged. */
+        maxBytes: Type.Optional(Type.Integer({ minimum: 1 })),
+        /** The `storage.blob` namespace: the shared format's; another only to keep two fleets apart in one bucket. */
+        namespace: Type.String({ default: SNAPSHOT_NAMESPACE, pattern: "^[a-z0-9_.-]{1,100}$" }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
 });
+
+/** Under `root`: the snapshots' own files (archives on their way, restores, the index). Never an agent's name. */
+export const SNAPSHOTS_DIR = ".workspace-local-snapshots";
 
 /**
  * An agent name that is safe as one directory name. `defineAgent` already requires kebab-case, but a
@@ -95,9 +124,16 @@ export default defineComponent({
   config: Config,
   setup(pikit, config) {
     const execution = pikit.use("execution");
+    const blob = pikit.useOptional("storage.blob");
     const root = config.root.replace(/\/+$/, "");
+    if (config.snapshots !== undefined && config.per !== "chat") {
+      throw new Error(`workspace-local: snapshots save a chat's directories (per: "chat"); per: "${config.per}" directories are shared, never released`);
+    }
+    /** With `snapshots`, from start: and the agents' directories on this host. */
+    let snapshots: { keeper: WorkspaceSnapshots; root: string } | undefined;
+    // With snapshots, retention is the bucket's (`retentionMs`): the local directories are released anyway.
     const retention =
-      config.retentionDays === undefined
+      config.retentionDays === undefined || config.snapshots !== undefined
         ? undefined
         : new Retention({
             env: () => execution.get(),
@@ -134,15 +170,20 @@ export default defineComponent({
         }
         // Noted before anything awaits; waits for a retirement of the chat in progress, which leaves no directory.
         const using = chatDir === undefined ? undefined : retention?.use(chatDir);
+        // The same for a snapshot: a release in progress, then a restore of one not on disk, before anything works in it.
+        const hostDir = chatDir === undefined || snapshots === undefined ? undefined : join(snapshots.root, agent, CHATS_DIR, chatDir);
+        const restoring = hostDir === undefined ? undefined : snapshots?.keeper.use({ id: snapshotIdOf(originOf(conversation).key, agent), agent, dir: hostDir });
         const env = execution.get();
         const ctx = toChord(context);
         const cwd = directory === undefined ? `${root}/${agent}` : `${root}/${agent}/${directory}`;
         await using;
+        await restoring;
         // Every call: a directory removed meanwhile is made again, and one made already costs nothing.
         const made = await env.createDir(cwd, { recursive: true }, ctx);
         if (!made.ok) throw made.error;
         const view = await atCwd(env, cwd, ctx);
-        return { env: chatDir === undefined || retention === undefined ? view : retention.track(chatDir, view) };
+        const tracked = chatDir === undefined || retention === undefined ? view : retention.track(chatDir, view);
+        return { env: hostDir === undefined || snapshots === undefined ? tracked : snapshots.keeper.track(hostDir, tracked) };
       },
     };
     pikit.provide("workspace", provider);
@@ -152,11 +193,36 @@ export default defineComponent({
         // Fail at start: tools with nowhere to work are a broken deployment.
         const made = await execution.get().createDir(root, { recursive: true }, toChord(ctx));
         if (!made.ok) throw made.error;
+        if (config.snapshots !== undefined) {
+          const env = execution.get();
+          const storage = blob.get();
+          if (storage === undefined) throw new Error("workspace-local: snapshots need a storage.blob provider (storage-blob-s3, storage-blob-fs)");
+          // Saved and restored on this host's disk: the archive streams from and into the directories themselves.
+          if (env.id !== "node:local") throw new Error(`workspace-local: snapshots need execution's directories on this host (execution-local), not ${env.id}`);
+          const canonical = await env.canonicalPath(root, toChord(ctx));
+          if (!canonical.ok) throw canonical.error;
+          const options = config.snapshots;
+          const keeper = new WorkspaceSnapshots({
+            name: "workspace-local",
+            store: () => openSnapshotStore(storage, options.namespace),
+            base: canonical.value,
+            state: join(canonical.value, SNAPSHOTS_DIR),
+            idleMs: options.idleMinutes * 60_000,
+            ...(options.maxBytes !== undefined && { maxBytes: options.maxBytes }),
+            ...(config.retentionDays !== undefined && { retentionMs: config.retentionDays * DAY }),
+            clock: pikit.clock,
+            log: ctx.logger,
+          });
+          await keeper.start();
+          snapshots = { keeper, root: canonical.value };
+        }
         // In the background: a first sweep may have much to delete.
         retention?.start();
       },
       async stop() {
         await retention?.stop();
+        await snapshots?.keeper.stop();
+        snapshots = undefined;
       },
     };
   },

@@ -21,7 +21,7 @@
  * Neutral: Web Crypto only, so a Worker computes the same keys.
  */
 
-import type { BlobStore } from "./blob.ts";
+import type { BlobStorage, BlobStore } from "./blob.ts";
 
 /** The `storage.blob` namespace every backend keeps snapshots in. */
 export const SNAPSHOT_NAMESPACE = "workspace-snapshots";
@@ -31,6 +31,15 @@ export const SNAPSHOT_MANIFEST = "manifest.json";
 export const SNAPSHOT_VERSION = 1;
 /** The archive's content type. */
 export const SNAPSHOT_CONTENT_TYPE = "application/gzip";
+
+/**
+ * The namespace snapshots are kept in: `workspace-snapshots`, the format's, shared by every backend
+ * (the exception to "a component opens the namespace named after it": a snapshot one backend saved
+ * is restored by another). `namespace` only to keep two fleets apart in one bucket.
+ */
+export function openSnapshotStore(storage: BlobStorage, namespace: string = SNAPSHOT_NAMESPACE): BlobStore {
+  return storage.namespace(namespace);
+}
 
 /** A workspace's manifest: the snapshot to restore. */
 export interface SnapshotManifest {

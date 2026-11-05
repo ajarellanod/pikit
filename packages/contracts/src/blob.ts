@@ -4,7 +4,8 @@
  * snapshot. Bytes in, the same bytes out.
  *
  * - **A namespace per component.** A component opens the namespace named after it
- *   (`namespace("tool-space-files")`), as it prefixes its SQL tables with its name. Two namespaces
+ *   (`namespace("tool-space-files")`), as it prefixes its SQL tables with its name; a format several
+ *   components share names its own (`workspace-snapshots`, workspace-snapshot.ts). Two namespaces
  *   never see each other's keys; a provider keeps them apart however it stores them (a directory, a
  *   key prefix in a bucket). A namespace's name is 1 to 100 characters of `a-z 0-9 - _ .`, not `.`
  *   or `..` (a component's name is one): one directory or one segment of a key wherever it is kept,

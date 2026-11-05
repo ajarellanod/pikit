@@ -15,7 +15,9 @@
     ]
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "storage.blob"
+    ]
   },
   "provides": [
     "workspace"

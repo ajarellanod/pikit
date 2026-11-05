@@ -56,6 +56,7 @@ import {
 export {
   deleteSnapshotsBefore,
   deleteSupersededSnapshots,
+  openSnapshotStore,
   parseSnapshotArchiveKey,
   parseSnapshotManifest,
   SNAPSHOT_CONTENT_TYPE,
