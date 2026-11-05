@@ -201,7 +201,8 @@ test("several hosts: the App does not start on a host agents or defaultHost name
   expect(await refused({ hosts: two, defaultHost: "general", agents: { designer: "gpu" } })).toContain(`agents.designer names the host "gpu", which hosts has not (general, render)`);
   expect(await refused({ hosts: two, defaultHost: "cloud" })).toContain(`defaultHost "cloud" is not a host of hosts`);
   expect(await refused({ hosts: two })).toContain("hosts has 2 hosts (general, render): name the default one (defaultHost)");
-  expect(await refused({ hosts: {} })).toContain("invalid config");
+  expect(await refused({ hosts: {} })).toContain("hosts is empty");
+  expect(await refused({})).toContain("invalid config");
   expect(await refused({ hosts: two, defaultHost: "general", agents: { Designer: "render" } })).toContain("/execution-remote/agents/Designer");
   expect(await refused({ hosts: two, defaultHost: "general", agents: { [`a${"b".repeat(MAX_AGENT_LENGTH)}`]: "render" } })).toContain("invalid config");
   expect(await refused({ hosts: { ...two, Render: { url } }, defaultHost: "general" })).toContain("/execution-remote/hosts/Render");

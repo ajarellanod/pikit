@@ -79,8 +79,8 @@ const Host = Type.Object(
 
 const Config = Type.Object(
   {
+    // At least one (checked at start: a record with `minProperties` cannot be described).
     hosts: Type.Record(Type.String(), Host, {
-      minProperties: 1,
       propertyNames: HOST_NAME,
       description: "The sandbox hosts, by name: each runs execution-serve, with its own token.",
     }),
@@ -114,7 +114,8 @@ function routing(config: Pick<RemoteConfig, "hosts" | "defaultHost" | "agents">)
   const problems: string[] = [];
   const has = (name: string) => Object.hasOwn(config.hosts, name);
   const defaultHost = config.defaultHost ?? (names.length === 1 ? names[0] : undefined);
-  if (defaultHost === undefined) problems.push(`hosts has ${names.length} hosts (${names.join(", ")}): name the default one (defaultHost)`);
+  if (names.length === 0) problems.push("hosts is empty: name at least one sandbox host");
+  else if (defaultHost === undefined) problems.push(`hosts has ${names.length} hosts (${names.join(", ")}): name the default one (defaultHost)`);
   else if (!has(defaultHost)) problems.push(`defaultHost ${JSON.stringify(defaultHost)} is not a host of hosts (${names.join(", ")})`);
   for (const [agent, host] of Object.entries(config.agents)) {
     if (!has(host)) problems.push(`agents.${agent} names the host ${JSON.stringify(host)}, which hosts has not (${names.join(", ")})`);

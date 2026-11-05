@@ -33,6 +33,14 @@ line names its area.
 
 ### Components
 
+- execution-remote reaches several sandbox hosts, an agent routed to its own
+  ([features/agent-sandboxes.md](features/agent-sandboxes.md), "Several sandbox hosts"): config is
+  `hosts: { <name>: { url, tokenSecret? } }`, `defaultHost` (required with several) and
+  `agents: { <agent>: <host> }`, replacing `endpoint` and `tokenSecret` (no compatibility: move them
+  into `hosts`). A conversation's sandbox is on its agent's host (a delegated child on its own agent's),
+  `execution`'s own and any unnamed agent's on the default host; sandbox ids are unchanged. Each
+  host's token is its own secret and goes only to that host; an unknown host, several hosts without a
+  default, a bad name, an unset secret or two hosts with one token stop the App at start.
 - extension-tracing ([features/tracing.md](features/tracing.md)), new on both targets: agents
   naming `tracing` export their run, model-request and tool-call spans to Langfuse or an OTLP/HTTP
   JSON collector. Credentials come from named secrets; content is off by default, redacted and capped
