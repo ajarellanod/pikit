@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { BlobStorage } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createBlobConformance } from "@pikit/contracts/testing";
+import { BLOB_CONFORMANCE_STREAM_BYTES, createBlobConformance } from "@pikit/contracts/testing";
 import storageBlobFs, { fileNames, HEADER_BYTES } from "./index.ts";
 
 const directories: string[] = [];
@@ -27,7 +27,7 @@ function temporaryRoot(): { parent: string; root: string } {
 
 const configFor = (root: string) => ({ "storage-blob-fs": { root } });
 
-for (const c of createBlobConformance(() => ({ components: [storageBlobFs], config: configFor(temporaryRoot().root) }))) {
+for (const c of createBlobConformance(() => ({ components: [storageBlobFs], config: { "storage-blob-fs": { root: temporaryRoot().root, maxStreamBytes: BLOB_CONFORMANCE_STREAM_BYTES } } }))) {
   test(`storage-blob-fs ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
 
@@ -160,4 +160,35 @@ test("a root it cannot create fails the start, naming it", async () => {
 
 test("maxBytes below the contract's 25 MiB is refused by the config", async () => {
   await expect((async () => defineApp({ components: [storageBlobFs], config: { "storage-blob-fs": { maxBytes: 1024 } }, logger: silentLogger }).create())()).rejects.toThrow("maxBytes");
+});
+
+test("a stream is written to a temporary file as it comes: one that fails leaves none, and the key as it was", async () => {
+  const { root } = temporaryRoot();
+  const { storage, stop } = await started(root);
+  const store = storage.namespace("ns");
+  await store.put("k", new Uint8Array([1]));
+  let seen: string[] = [];
+  const failing = (async function* () {
+    yield new Uint8Array(1024).fill(7);
+    // The first chunk is on disk, in a temporary file beside the key's, before the body ends.
+    seen = tree(join(root, "ns"));
+    throw new Error("cut");
+  })();
+  await expect(store.putStream("k", failing)).rejects.toThrow("cut");
+  expect(seen.filter((name) => name.startsWith("#"))).toHaveLength(1);
+  expect(tree(join(root, "ns"))).toEqual(["k"]);
+  expect((await store.get("k"))?.bytes).toEqual(new Uint8Array([1]));
+  // A value replaced while a stream reads it is read whole: the stream holds the old file.
+  await store.put("r", new Uint8Array(3 * 1024 * 1024).fill(1));
+  const reading = await store.getStream("r");
+  await store.put("r", new Uint8Array(10).fill(2));
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of reading?.body ?? []) chunks.push(chunk);
+  expect(chunks.reduce((n, c) => n + c.byteLength, 0)).toBe(3 * 1024 * 1024);
+  expect(chunks.every((chunk) => chunk.every((byte) => byte === 1))).toBe(true);
+  await stop();
+});
+
+test("maxStreamBytes smaller than maxBytes is refused when the app is defined", async () => {
+  await expect((async () => defineApp({ components: [storageBlobFs], config: { "storage-blob-fs": { root: temporaryRoot().root, maxStreamBytes: 26 * 1024 * 1024, maxBytes: 30 * 1024 * 1024 } }, logger: silentLogger }).create())()).rejects.toThrow("maxStreamBytes");
 });

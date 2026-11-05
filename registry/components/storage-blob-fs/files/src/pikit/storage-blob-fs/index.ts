@@ -21,24 +21,34 @@
  *   path is checked to be inside its namespace's directory before it is used. Symbolic links are never
  *   followed when listing. A key, a value or a content type the contract refuses is refused before
  *   any file is touched.
- * - Values are read and written whole, in memory (`maxBytes`, 25 MiB by default).
+ * - `put` and `get` hold a value whole, in memory (`maxBytes`, 25 MiB by default). `putStream`
+ *   writes the chunks to the temporary file as they come (hashed with `node:crypto`), then syncs and
+ *   renames it as `put` does: a body that fails, is larger than `maxStreamBytes` (1 TiB by default)
+ *   or has another SHA-256 removes the temporary file and leaves the key as it was. `getStream` reads
+ *   the file it opened, a piece at a time: a value replaced meanwhile is still read whole (the open
+ *   file is the old one).
  *
  * Target: `server` (it uses a file system).
  */
 
-import { mkdir, open, readdir, readFile, rename, rmdir, stat, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { type FileHandle, mkdir, open, readdir, rename, rmdir, stat, unlink } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { defineComponent } from "@pikit/core";
 import {
   BLOB_MIN_MAX_BYTES,
   type BlobEntry,
+  type BlobHash,
   type BlobStorage,
   type BlobStore,
+  BlobTooLargeError,
   blobKeyProblem,
   blobListLimit,
+  blobStreamChunks,
   checkBlobKey,
   checkBlobNamespace,
   checkBlobPut,
+  checkBlobPutStream,
 } from "@pikit/contracts";
 import Type from "typebox";
 
@@ -47,7 +57,34 @@ const Config = Type.Object({
   root: Type.String({ minLength: 1, default: ".pikit/blobs" }),
   /** The largest value it keeps, in bytes: at least 25 MiB. Values are held whole in memory. */
   maxBytes: Type.Integer({ minimum: BLOB_MIN_MAX_BYTES, default: BLOB_MIN_MAX_BYTES }),
+  /** The largest value `putStream` writes, in bytes: at least `maxBytes`. Streams are never held whole. */
+  maxStreamBytes: Type.Integer({ minimum: BLOB_MIN_MAX_BYTES, default: 2 ** 40 }),
 });
+
+/** How much of a file `getStream` reads at a time. */
+const READ_CHUNK = 1024 * 1024;
+
+/** `node:crypto`'s SHA-256, for `blobStreamChunks`: far faster than the plain one. */
+const nodeHash = (): BlobHash => {
+  const hash = createHash("sha256");
+  return { update: (bytes) => void hash.update(bytes), digest: () => hash.digest("hex") };
+};
+
+/** The header of a value: the content type's length, then its characters. */
+function header(contentType: string | undefined): Uint8Array {
+  const bytes = new Uint8Array(HEADER_BYTES);
+  if (contentType !== undefined) {
+    bytes[0] = contentType.length;
+    bytes.set(new TextEncoder().encode(contentType), 1);
+  }
+  return bytes;
+}
+
+/** The content type in a value's header, read from its first `HEADER_BYTES`. */
+function headerType(bytes: Uint8Array): string | undefined {
+  const length = bytes[0] as number;
+  return length > 0 ? String.fromCharCode(...bytes.subarray(1, 1 + length)) : undefined;
+}
 
 /** The bytes before a value: the content type's length, then its characters (at most 255). */
 export const HEADER_BYTES = 256;
@@ -103,6 +140,7 @@ export default defineComponent({
   name: "storage-blob-fs",
   config: Config,
   setup(pikit, config) {
+    if (config.maxStreamBytes < config.maxBytes) throw new Error(`storage-blob-fs: maxStreamBytes (${config.maxStreamBytes}) is smaller than maxBytes (${config.maxBytes})`);
     /** The root's absolute path, from start to stop. */
     let root: string | undefined;
     /**
@@ -135,61 +173,132 @@ export default defineComponent({
       return file;
     };
 
+    /**
+     * Writes a value with `write` to a temporary file (`#<uuid>`) beside the key's, syncs it and
+     * renames it over the key's file: a reader opens the old file or the new one. When `write` fails
+     * the temporary file is removed and the key is as it was.
+     */
+    const replace = async (name: string, key: string, write: (handle: FileHandle) => Promise<unknown>): Promise<void> => {
+      const file = fileOf(directoryOf(name), key);
+      const directory = dirname(file);
+      for (let attempt = 1; ; attempt++) {
+        const temporary = join(directory, `${TEMPORARY}${crypto.randomUUID()}`);
+        let opened = false;
+        try {
+          // Once the temporary file is there, no delete empties (and removes) its directory.
+          const handle = await exclusive(async () => {
+            await mkdir(directory, { recursive: true, mode: 0o700 });
+            return await open(temporary, "wx", 0o600);
+          });
+          opened = true;
+          try {
+            await write(handle);
+            await handle.sync();
+          } finally {
+            await handle.close();
+          }
+          await rename(temporary, file);
+          return;
+        } catch (error) {
+          await unlink(temporary).catch(() => {});
+          // Another process's delete removed the directory it emptied between mkdir and open
+          // (ENOENT; EINVAL on macOS): make it again. Never once writing started (a stream is read once).
+          if (opened || (!missing(error) && codeOf(error) !== "EINVAL") || attempt === 5) throw error;
+        }
+      }
+    };
+
+    /** The file of a value, open, with its size and content type; `undefined` when it is missing. */
+    const openValue = async (file: string): Promise<{ handle: FileHandle; size: number; contentType: string | undefined } | undefined> => {
+      let handle: FileHandle;
+      try {
+        handle = await open(file, "r");
+      } catch (error) {
+        if (missing(error) || codeOf(error) === "EISDIR") return undefined;
+        throw error;
+      }
+      try {
+        const { size } = await handle.stat();
+        if (size < HEADER_BYTES) throw new Error(`storage-blob-fs: ${file} is not a value it wrote (shorter than its header)`);
+        const head = new Uint8Array(HEADER_BYTES);
+        await handle.read(head, 0, HEADER_BYTES, 0);
+        return { handle, size: size - HEADER_BYTES, contentType: headerType(head) };
+      } catch (error) {
+        await handle.close();
+        throw error;
+      }
+    };
+
     const store = (name: string): BlobStore => ({
       async put(key, bytes, options) {
         const contentType = options?.contentType;
         checkBlobPut(key, bytes, contentType, config.maxBytes);
         // The header and a copy of the bytes, before anything is awaited: the caller may change its array.
         const content = new Uint8Array(HEADER_BYTES + bytes.byteLength);
-        if (contentType !== undefined) {
-          content[0] = contentType.length;
-          content.set(new TextEncoder().encode(contentType), 1);
-        }
+        content.set(header(contentType));
         content.set(bytes, HEADER_BYTES);
-        const file = fileOf(directoryOf(name), key);
-        const directory = dirname(file);
-        for (let attempt = 1; ; attempt++) {
-          const temporary = join(directory, `${TEMPORARY}${crypto.randomUUID()}`);
-          try {
-            // Once the temporary file is there, no delete empties (and removes) its directory.
-            const handle = await exclusive(async () => {
-              await mkdir(directory, { recursive: true, mode: 0o700 });
-              return await open(temporary, "wx", 0o600);
-            });
+        await replace(name, key, (handle) => handle.writeFile(content));
+      },
+
+      async putStream(key, body, options) {
+        checkBlobPutStream(key, body, options);
+        const read = blobStreamChunks(body, { maxStreamBytes: config.maxStreamBytes, hash: nodeHash, ...(options?.sha256 !== undefined && { sha256: options.sha256 }) });
+        // Written to the temporary file as they come; renamed over the key's only once the body ended, checked.
+        await replace(name, key, async (handle) => {
+          await handle.write(header(options?.contentType));
+          for await (const chunk of read.chunks) await handle.write(chunk);
+        });
+        return read.stored();
+      },
+
+      async getStream(key) {
+        checkBlobKey(key);
+        const opened = await openValue(fileOf(directoryOf(name), key));
+        if (opened === undefined) return undefined;
+        const { handle, size, contentType } = opened;
+        let at = HEADER_BYTES;
+        const end = HEADER_BYTES + size;
+        const body = new ReadableStream<Uint8Array>({
+          async pull(controller) {
             try {
-              await handle.writeFile(content);
-              await handle.sync();
-            } finally {
-              await handle.close();
+              if (at >= end) {
+                await handle.close();
+                return controller.close();
+              }
+              const chunk = new Uint8Array(Math.min(READ_CHUNK, end - at));
+              const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, at);
+              if (bytesRead === 0) throw new Error(`storage-blob-fs: ${key} ended before its ${size} bytes`);
+              at += bytesRead;
+              controller.enqueue(chunk.subarray(0, bytesRead));
+            } catch (error) {
+              await handle.close().catch(() => {});
+              controller.error(error);
             }
-            await rename(temporary, file);
-            return;
-          } catch (error) {
-            await unlink(temporary).catch(() => {});
-            // Another process's delete removed the directory it emptied between mkdir and open
-            // (ENOENT; EINVAL on macOS): make it again.
-            if ((!missing(error) && codeOf(error) !== "EINVAL") || attempt === 5) throw error;
-          }
-        }
+          },
+          async cancel() {
+            await handle.close().catch(() => {});
+          },
+        });
+        return { body, size, ...(contentType !== undefined && { contentType }) };
       },
 
       async get(key) {
         checkBlobKey(key);
-        const file = fileOf(directoryOf(name), key);
-        let content: Uint8Array;
+        const opened = await openValue(fileOf(directoryOf(name), key));
+        if (opened === undefined) return undefined;
+        const { handle, size, contentType } = opened;
         try {
-          content = await readFile(file);
-        } catch (error) {
-          if (missing(error)) return undefined;
-          throw error;
+          if (size > config.maxBytes) throw new BlobTooLargeError(size, config.maxBytes);
+          const bytes = new Uint8Array(size);
+          for (let at = 0; at < size; ) {
+            const { bytesRead } = await handle.read(bytes, at, size - at, HEADER_BYTES + at);
+            if (bytesRead === 0) throw new Error(`storage-blob-fs: ${key} ended before its ${size} bytes`);
+            at += bytesRead;
+          }
+          return { bytes, ...(contentType !== undefined && { contentType }) };
+        } finally {
+          await handle.close();
         }
-        if (content.byteLength < HEADER_BYTES) throw new Error(`storage-blob-fs: ${file} is not a value it wrote (shorter than its header)`);
-        const typeLength = content[0] as number;
-        return {
-          // A copy, as a plain Uint8Array: the caller owns it.
-          bytes: new Uint8Array(content.subarray(HEADER_BYTES)),
-          ...(typeLength > 0 && { contentType: String.fromCharCode(...content.subarray(1, 1 + typeLength)) }),
-        };
       },
 
       async delete(key) {
@@ -237,6 +346,7 @@ export default defineComponent({
 
     const storage: BlobStorage = {
       maxBytes: config.maxBytes,
+      maxStreamBytes: config.maxStreamBytes,
       namespace(name) {
         checkBlobNamespace(name);
         return store(name);

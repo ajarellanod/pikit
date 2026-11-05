@@ -1,6 +1,7 @@
 /**
- * A fake S3 for storage-blob-s3's tests: one bucket in memory, `PUT`, `GET`, `DELETE` of objects and
- * `ListObjectsV2`, path-style (`/<bucket>/<key>`) or virtual-hosted (`<bucket>.<host>/<key>`). It
+ * A fake S3 for storage-blob-s3's tests: one bucket in memory, `PUT`, `GET`, `DELETE` of objects,
+ * `ListObjectsV2`, and multipart uploads (create, upload a part, complete, abort; a part but the last
+ * under 5 MiB refused as S3 refuses it, the parts' ETags checked at completion), path-style (`/<bucket>/<key>`) or virtual-hosted (`<bucket>.<host>/<key>`). It
  * checks every request's Signature Version 4 as S3 does, with its own canonical request (the path
  * decoded and encoded again, the query sorted, the signed headers as received), the payload's hash
  * against the body, the clock within 15 minutes, and the session token when it has one: a request it
@@ -35,14 +36,29 @@ export interface FakeS3 {
   readonly requests: { method: string; path: string; status: number }[];
   /** Answers the next `count` requests with `status` and S3's error `code`, before checking anything. */
   failNext(count: number, status: number, code: string): void;
+  /** The multipart uploads begun and neither completed nor aborted, by upload id. */
+  readonly uploads: Map<string, FakeUpload>;
+  /** Answers the next completion of an upload with 200 and an error in its body, as S3 may. */
+  failCompletion(code: string): void;
 }
+
+export interface FakeUpload {
+  key: string;
+  headers: Record<string, string>;
+  parts: Map<number, { bytes: Uint8Array; etag: string }>;
+}
+
+/** S3's smallest part, but the last. */
+const MIN_PART = 5 * 1024 * 1024;
 
 const encoder = new TextEncoder();
 
 export function createFakeS3(options: FakeS3Options): FakeS3 {
   const objects = new Map<string, FakeObject>();
   const requests: FakeS3["requests"] = [];
+  const uploads = new Map<string, FakeUpload>();
   let failures: { count: number; status: number; code: string } | undefined;
+  let completionFailure: string | undefined;
 
   const answer = async (request: Request): Promise<Response> => {
     if (failures !== undefined && failures.count > 0) {
@@ -72,11 +88,57 @@ export function createFakeS3(options: FakeS3Options): FakeS3 {
       if (request.method === "GET" && url.searchParams.get("list-type") === "2") return list(url.searchParams);
       return error(405, "MethodNotAllowed");
     }
+    const uploadId = url.searchParams.get("uploadId");
+    if (request.method === "POST" && url.searchParams.has("uploads")) {
+      const id = crypto.randomUUID();
+      uploads.set(id, { key, headers: keptHeaders(request), parts: new Map() });
+      return xmlAnswer(`<InitiateMultipartUploadResult><Bucket>${escapeXml(options.bucket)}</Bucket><Key>${escapeXml(key)}</Key><UploadId>${id}</UploadId></InitiateMultipartUploadResult>`);
+    }
+    if (uploadId !== null) {
+      const upload = uploads.get(uploadId);
+      if (upload === undefined || upload.key !== key) return error(404, "NoSuchUpload");
+      if (request.method === "PUT") {
+        const number = Number(url.searchParams.get("partNumber"));
+        if (!Number.isInteger(number) || number < 1 || number > 10_000) return error(400, "InvalidArgument");
+        const etag = `"${hex(await crypto.subtle.digest("SHA-256", body)).slice(0, 32)}"`;
+        upload.parts.set(number, { bytes: body, etag });
+        return new Response(null, { status: 200, headers: { etag } });
+      }
+      if (request.method === "DELETE") {
+        uploads.delete(uploadId);
+        return new Response(null, { status: 204 });
+      }
+      if (request.method === "POST") {
+        if (completionFailure !== undefined) {
+          const code = completionFailure;
+          completionFailure = undefined;
+          return new Response(`<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>${code}</Message></Error>`, { status: 200 });
+        }
+        const listed = [...new TextDecoder().decode(body).matchAll(/<Part><PartNumber>(\d+)<\/PartNumber><ETag>([^<]*)<\/ETag><\/Part>/g)].map(([, n, etag]) => ({ number: Number(n), etag: unescapeXml(etag as string) }));
+        if (listed.length === 0) return error(400, "MalformedXML");
+        const chunks: Uint8Array[] = [];
+        for (const [i, { number, etag }] of listed.entries()) {
+          const part = upload.parts.get(number);
+          if (i > 0 && number <= (listed[i - 1] as { number: number }).number) return error(400, "InvalidPartOrder");
+          if (part === undefined || part.etag !== etag) return error(400, "InvalidPart");
+          if (i < listed.length - 1 && part.bytes.byteLength < MIN_PART) return error(400, "EntityTooSmall");
+          chunks.push(part.bytes);
+        }
+        const whole = new Uint8Array(chunks.reduce((n, chunk) => n + chunk.byteLength, 0));
+        let at = 0;
+        for (const chunk of chunks) {
+          whole.set(chunk, at);
+          at += chunk.byteLength;
+        }
+        objects.set(key, { bytes: whole, headers: upload.headers });
+        uploads.delete(uploadId);
+        return xmlAnswer(`<CompleteMultipartUploadResult><Bucket>${escapeXml(options.bucket)}</Bucket><Key>${escapeXml(key)}</Key><ETag>"${listed.length}"</ETag></CompleteMultipartUploadResult>`);
+      }
+      return error(405, "MethodNotAllowed");
+    }
     switch (request.method) {
       case "PUT": {
-        const headers: Record<string, string> = {};
-        for (const [name, value] of request.headers) if (name === "content-type" || name.startsWith("x-amz-meta-")) headers[name] = value;
-        objects.set(key, { bytes: body, headers });
+        objects.set(key, { bytes: body, headers: keptHeaders(request) });
         return new Response(null, { status: 200, headers: { etag: `"${body.byteLength}"` } });
       }
       case "GET": {
@@ -116,6 +178,10 @@ export function createFakeS3(options: FakeS3Options): FakeS3 {
   return {
     objects,
     requests,
+    uploads,
+    failCompletion(code) {
+      completionFailure = code;
+    },
     failNext(count, status, code) {
       failures = { count, status, code };
     },
@@ -130,6 +196,21 @@ export function createFakeS3(options: FakeS3Options): FakeS3 {
 
 /** S3's order: the keys' UTF-8 bytes; code-unit order for the ASCII keys it is given. */
 const byUtf8 = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** The headers S3 keeps with an object: `content-type` and every `x-amz-meta-*`. */
+function keptHeaders(request: Request): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [name, value] of request.headers) if (name === "content-type" || name.startsWith("x-amz-meta-")) headers[name] = value;
+  return headers;
+}
+
+function xmlAnswer(xml: string): Response {
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?>${xml}`, { status: 200, headers: { "content-type": "application/xml" } });
+}
+
+function unescapeXml(text: string): string {
+  return text.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
 
 function error(status: number, code: string): Response {
   return new Response(`<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>${code}</Message></Error>`, { status, headers: { "content-type": "application/xml" } });
