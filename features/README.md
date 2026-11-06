@@ -77,6 +77,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [slash-commands](slash-commands.md) | | Commands typed in a chat: built for the registry's (`agent.command`) in Google Chat, Telegram and the web chat (`admitInbound`'s `commands`); Pi extensions' own not | No |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations, in the channel's key (no contract field); replies in their thread | No |
+| [parallel-workspace-merges](parallel-workspace-merges.md) | | Parallel tasks of one agent in one chat, each in a fork of the workspace, merged back by the infrastructure (the model never runs a VCS); the engine to evaluate: git, Jujutsu or LayerFS; idea, not urgent | No |
 | [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation; `storage.blob` built (storage-blob-fs, storage-blob-s3); snapshots in a bucket built (workspace-local, execution-gondolin: idle 10 minutes, restored on use, a restore bounded; execution-cloudflare-sandbox and execution-boat in the same format) | Open: SPEC §6's git workspace |
 
 Other channels (Signal, iMessage, Matrix, Home Assistant…) get a file when someone needs one.
