@@ -132,6 +132,13 @@ export interface ChatCommand {
   argumentHint?: string;
   /** Who it is for (`AgentCommand.audience`): `user`, or `operator` when the operator allowed one by name or `all`. */
   audience: "operator" | "user";
+  /**
+   * The assistants it is for (`AgentCommand.agents`: a prompt template's), among `ChatConfig.agents`
+   * only (empty: none of those; an agent users may not pick is never named): the page's "/" menu lists
+   * it only in their conversations. Typed in another agent's, it is refused, saying so. Absent: every
+   * agent's.
+   */
+  agents?: string[];
 }
 
 /** What the page needs before anyone signed in. */

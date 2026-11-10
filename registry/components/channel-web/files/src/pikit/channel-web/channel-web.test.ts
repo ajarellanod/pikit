@@ -1382,6 +1382,33 @@ test("COMMANDS: a first message that is a command makes the chat (empty, New con
   expect(await later.json()).toMatchObject({ admission: "command", command: { outcome: "ran", text: "kept: later" } });
 });
 
+test("COMMANDS: a command for some agents is listed with those users may pick only (never another's name), runs in their chats, and is refused in another agent's, saying so", async () => {
+  let runs = 0;
+  const agents = defineComponent({
+    name: "agents-test",
+    setup(pikit) {
+      for (const name of ["helper", "secret"]) pikit.provideKeyed("agent.definition", name, { name, model: "test/model" });
+      const run = async () => ({ text: `ran ${++runs}` });
+      pikit.provideKeyed("agent.command", "audit", { description: "Audit", audience: "user", agents: ["helper", "secret"], run });
+      pikit.provideKeyed("agent.command", "hidden", { description: "Hidden", audience: "user", agents: ["secret"], run });
+    },
+  });
+  const c = await chat({ config: { agents: ["helper"] }, components: [agents] });
+  const config = (await (await c.served.fetch(`${API}/config`)).json()) as ChatConfig;
+  expect(config.commands).toEqual([
+    { name: "audit", description: "Audit", audience: "user", agents: ["helper"] },
+    { name: "hidden", description: "Hidden", audience: "user", agents: [] },
+  ]);
+  expect(JSON.stringify(config.commands)).not.toContain("secret");
+
+  const { id } = await start(c, "ana", "hello", { agent: "helper" });
+  const ran = await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "/audit" }));
+  expect(((await ran.json()) as { command: unknown }).command).toEqual({ name: "audit", outcome: "ran", text: "ran 1" });
+  const refused = await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "/hidden" }));
+  expect(((await refused.json()) as { command: unknown }).command).toEqual({ name: "hidden", outcome: "failed", text: '/hidden is not a command of the agent "helper"' });
+  expect(runs).toBe(1);
+});
+
 test("COMMANDS: the config says which (\"all\": every command of the App, the operator's /name too; [] none)", async () => {
   const all = commandsOf();
   const c = await chat({ components: [all.component], config: { commands: "all" } });

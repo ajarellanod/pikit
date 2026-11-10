@@ -12,7 +12,11 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
  * the send button stops it. Enter sends (or runs "/name
  * args" when it names a command), Shift+Enter breaks a line;
  * in a menu, arrows move, Enter picks (a command whose whole
- * name is typed runs), Tab completes, Escape closes. A message
+ * name is typed runs), Tab completes, Escape closes. With an
+ * `agent`, the menu lists only the commands for it (a command
+ * naming other `agents` still runs when typed: its runner
+ * refuses it, saying why). The menu fits the room above the
+ * composer and scrolls, its note kept at its foot. A message
  * sent leaves the composer at once (it comes back if sending
  * fails). `compact`: a line to write in, for a thread's foot.
  * --------------------------------------------------------- */
@@ -78,7 +82,24 @@ export type Command = {
   description: string;
   /** what it takes after its name: "<title>"; absent, it runs as soon as it is picked */
   argumentHint?: string;
+  /** the agents it is for (a prompt template's); absent, every agent's */
+  agents?: readonly string[];
 };
+
+/** Whether the menu lists `command` for `agent`: it names no agents, or that one; every command with no agent. */
+const listedFor = (command: Command, agent: string | undefined): boolean => agent === undefined || command.agents === undefined || command.agents.includes(agent);
+
+/** The tallest the menu grows, and the least it keeps when the room above is short, in pixels. */
+const MENU_MAX = 384;
+const MENU_MIN = 160;
+
+/** Where the nearest ancestor that clips `element` begins (a scrolling page), else the viewport's top. */
+function clipTopOf(element: HTMLElement): number {
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    if (getComputedStyle(parent).overflowY !== "visible") return Math.max(0, parent.getBoundingClientRect().top);
+  }
+  return 0;
+}
 
 /**
  * A pill beside the picker, as web search's: what the message goes with (the chat's project). `onRemove`
@@ -123,6 +144,7 @@ export default function PromptBar({
   files,
   webSearch,
   commands = [],
+  agent,
   onCommand,
   commandsNote = "Type to search commands",
   commandsMenu = true,
@@ -147,6 +169,8 @@ export default function PromptBar({
   webSearch?: { available: boolean; unavailable?: string };
   /** the "/" menu: the App's commands, by name */
   commands?: Command[];
+  /** the agent the commands run for (the chosen assistant, the conversation's): the menu lists only its commands */
+  agent?: string;
   /** runs "/name args"; the draft is cleared once it resolves, kept when it throws */
   onCommand?: (name: string, args: string) => Promise<void> | void;
   /** the line under the commands */
@@ -166,6 +190,7 @@ export default function PromptBar({
   const [active, setActive] = useState(0);
   const [engaged, setEngaged] = useState(false);
   const [rowBox, setRowBox] = useState<{ top: number; height: number } | null>(null);
+  const [menuMax, setMenuMax] = useState(MENU_MAX);
   const [modelOpen, setModelOpen] = useState(false);
   const [modelBox, setModelBox] = useState<{ top: number; height: number } | null>(null);
   const [modelHovered, setModelHovered] = useState<number | null>(null);
@@ -176,6 +201,9 @@ export default function PromptBar({
   const fileRef = useRef<HTMLInputElement>(null);
   const modelRef = useRef<HTMLButtonElement>(null);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const listRef = useRef<HTMLDivElement>(null);
+  /* the active row was moved with the keys: the list scrolls to keep it in view */
+  const keyed = useRef(false);
   const modelRowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const attachedRef = useRef(attached);
   attachedRef.current = attached;
@@ -233,6 +261,9 @@ export default function PromptBar({
     } else void runCommand(command.name, "");
   };
 
+  /* the commands the menu offers: the agent's (every one is still run when typed) */
+  const listed = commands.filter((command) => listedFor(command, agent));
+
   const rows: MenuRow[] =
     menu === "plus"
       ? [
@@ -271,7 +302,7 @@ export default function PromptBar({
               ]),
         ]
       : menu === "slash"
-        ? commands
+        ? listed
             .filter((command) => command.name.startsWith(query))
             .map((command) => ({ key: command.name, name: `/${command.name}`, ...(command.argumentHint !== undefined && { hint: command.argumentHint }), desc: command.description, pick: () => pick(command) }))
         : [];
@@ -284,8 +315,25 @@ export default function PromptBar({
   /* a single highlight glides to the active row instead of each row toggling its own background */
   useLayoutEffect(() => {
     const target = rowRefs.current[active];
-    if (target) setRowBox({ top: target.offsetTop, height: target.offsetHeight });
+    if (!target) return;
+    setRowBox({ top: target.offsetTop, height: target.offsetHeight });
+    const list = listRef.current;
+    if (!keyed.current || !list) return;
+    keyed.current = false;
+    /* reached with the keys beyond what shows: scroll it in, with the list's padding */
+    if (target.offsetTop < list.scrollTop + 4) list.scrollTop = target.offsetTop - 4;
+    else if (target.offsetTop + target.offsetHeight > list.scrollTop + list.clientHeight - 4) list.scrollTop = target.offsetTop + target.offsetHeight - list.clientHeight + 4;
   }, [menu, query, active, rows.length]);
+
+  /* the menu fits the room above the composer, inside whatever clips it (the page scrolling), up to MENU_MAX */
+  useLayoutEffect(() => {
+    const anchor = composerAnchorRef.current;
+    if (menu === null || !anchor) return;
+    const fit = () => setMenuMax(Math.min(MENU_MAX, Math.max(MENU_MIN, Math.floor(anchor.getBoundingClientRect().top - clipTopOf(anchor) - 16))));
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [menu]);
 
   /* the same in the picker's menu: the hovered row, else the chosen one */
   const modelIndex = options.findIndex((option) => option.key === picker?.value);
@@ -438,49 +486,62 @@ export default function PromptBar({
             role="listbox"
             aria-label={menu === "plus" ? "Add to the message" : "Commands"}
             onMouseLeave={() => setEngaged(false)}
-            className="absolute inset-x-0 bottom-full z-10 mb-2 rounded-[10px] bg-surface p-1 shadow-raised"
-            style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}
+            className="absolute inset-x-0 bottom-full z-10 mb-2 flex flex-col overflow-hidden rounded-[10px] bg-surface shadow-raised"
+            style={{ maxHeight: menuMax, animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom center" }}
           >
-            {/* single gliding highlight: appears once a row is hovered or reached with the keys */}
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-x-1 rounded-[6px] bg-hover"
-              style={{
-                top: rowBox?.top ?? 0,
-                height: rowBox?.height ?? 0,
-                opacity: rowBox && engaged && rows.length > 0 ? 1 : 0,
-                transition: "top 220ms cubic-bezier(0.23,1,0.32,1), height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease",
-              }}
-            />
-            {rows.map((row, i) => (
-              <button
-                key={row.key}
-                type="button"
-                role="option"
-                aria-selected={engaged && i === active}
-                disabled={row.disabled}
-                ref={(el) => {
-                  rowRefs.current[i] = el;
+            <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-1">
+              {/* single gliding highlight: appears once a row is hovered or reached with the keys; it scrolls with the rows */}
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-1 rounded-[6px] bg-hover"
+                style={{
+                  top: rowBox?.top ?? 0,
+                  height: rowBox?.height ?? 0,
+                  opacity: rowBox && engaged && rows.length > 0 ? 1 : 0,
+                  transition: "top 220ms cubic-bezier(0.23,1,0.32,1), height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease",
                 }}
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => {
-                  setActive(i);
-                  setEngaged(true);
-                }}
-                onClick={() => row.pick()}
-                className="relative z-10 flex h-9 w-full items-center gap-2.5 rounded-[6px] px-2 text-left disabled:cursor-default"
-              >
-                {row.icon !== undefined && <span className={`flex size-5.5 shrink-0 items-center justify-center ${row.disabled ? "text-ink-3" : "text-ink-2"}`}>{row.icon}</span>}
-                <span className={`shrink-0 chat-text-12.5 font-medium ${row.disabled ? "text-ink-3" : "text-ink"}`}>{row.name}</span>
-                {row.hint !== undefined && <span className="shrink-0 font-mono chat-text-11.5 text-ink-3">{row.hint}</span>}
-                <span className="min-w-0 flex-1 truncate chat-text-12 text-ink-3">{row.desc}</span>
-                {row.trailing}
-              </button>
-            ))}
-            {rows.length === 0 && (
-              <div className="flex h-9 items-center px-2 chat-text-12 text-ink-3">{menu === "slash" && commands.length === 0 ? "No commands" : `No command “/${query}”`}</div>
-            )}
-            {menu === "slash" && rows.length > 0 && <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 chat-text-11 text-ink-3">{commandsNote}</div>}
+              />
+              {rows.map((row, i) => (
+                <button
+                  key={row.key}
+                  type="button"
+                  role="option"
+                  aria-selected={engaged && i === active}
+                  disabled={row.disabled}
+                  ref={(el) => {
+                    rowRefs.current[i] = el;
+                  }}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => {
+                    setActive(i);
+                    setEngaged(true);
+                  }}
+                  onClick={() => row.pick()}
+                  className={`relative z-10 flex w-full items-center gap-2.5 rounded-[6px] px-2 text-left disabled:cursor-default ${row.hint === undefined ? "h-9" : "py-1.5"}`}
+                >
+                  {row.icon !== undefined && <span className={`flex size-5.5 shrink-0 items-center justify-center ${row.disabled ? "text-ink-3" : "text-ink-2"}`}>{row.icon}</span>}
+                  {/* the name and what it does read first; what it takes, below, never squeezes them */}
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="flex min-w-0 items-baseline gap-2.5">
+                      <span className={`shrink-0 chat-text-12.5 font-medium ${row.disabled ? "text-ink-3" : "text-ink"}`}>{row.name}</span>
+                      <span className="min-w-0 flex-1 truncate chat-text-12 text-ink-3" title={row.desc}>
+                        {row.desc}
+                      </span>
+                    </span>
+                    {row.hint !== undefined && (
+                      <span className="truncate font-mono chat-text-11 leading-4 text-ink-3" title={`${row.name} ${row.hint}`}>
+                        {row.hint}
+                      </span>
+                    )}
+                  </span>
+                  {row.trailing}
+                </button>
+              ))}
+              {rows.length === 0 && (
+                <div className="flex h-9 items-center px-2 chat-text-12 text-ink-3">{menu === "slash" && listed.length === 0 ? "No commands" : `No command “/${query}”`}</div>
+              )}
+            </div>
+            {menu === "slash" && rows.length > 0 && <div className="mx-1 shrink-0 border-t border-line px-2 pt-1.5 pb-2 chat-text-11 text-ink-3">{commandsNote}</div>}
           </div>
         )}
 
@@ -586,6 +647,7 @@ export default function PromptBar({
                   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                     event.preventDefault();
                     setEngaged(true);
+                    keyed.current = true;
                     setActive((current) => (current + (event.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length);
                     return;
                   }

@@ -380,6 +380,14 @@ export interface ApiCommand {
   description: string;
   /** What its arguments are: `<title>`. Absent: it takes none. */
   argumentHint?: string;
+  /** Who it is for (`AgentCommand.audience`): `operator` (when it says none), or `user`, which channels offer their users too. */
+  audience: "operator" | "user";
+  /**
+   * The agents it is for (`AgentCommand.agents`: a prompt template's, the agents that have it): a menu
+   * lists it only in their conversations, and run in another agent's it fails (`422 command_failed`).
+   * Absent: every agent's.
+   */
+  agents?: string[];
 }
 
 export interface ApiCommands {

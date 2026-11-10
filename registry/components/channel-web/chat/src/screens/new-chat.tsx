@@ -14,7 +14,7 @@
  * go on with are the project's.
  *
  * The commands the operator lets users type (`ChatConfig.commands`: `/rules`…) have the composer's "/"
- * menu; one typed makes the chat (empty) and runs there, and the conversation opens with what it
+ * menu (those for the assistant picked, `ChatCommand.agents`); one typed makes the chat (empty) and runs there, and the conversation opens with what it
  * answered as a quiet note, never in its transcript.
  */
 
@@ -134,6 +134,7 @@ export function NewChatScreen({ agent: asked, project }: { agent?: string | unde
                   ]
             }
             commands={config.commands}
+            {...(agent !== undefined && { agent })}
             commandsMenu={config.commands.length > 0}
             commandsNote="Runs here, never sent to the assistant"
             onCommand={(name, args) => begin(args === "" ? `/${name}` : `/${name} ${args}`, [])}

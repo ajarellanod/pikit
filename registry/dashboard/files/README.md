@@ -26,8 +26,11 @@ kept in this browser.
   tool); and the send button, which stops the run going when there is nothing to send.
 - **The "/" menu**: `/` at the start of the composer opens the App's slash commands, and only them:
   what its components registered (`agent.command`, read once from `GET /admin/api/commands`; the
-  kit's are `/new`, `/name <title>` and `/compact`), filtered as you type (arrows, Enter or Tab,
-  Escape). Picking one that takes arguments writes `/name ` for you to go on (Tab completes a name;
+  kit's are `/new`, `/name <title>` and `/compact`), the ones for the chosen assistant only (New chat's
+  picker, or the conversation's: a project's prompt template is its agents', `agents`), filtered as
+  you type (arrows, Enter or Tab, Escape). Each row shows the name and its description; the arguments
+  it takes are below them, in small mono (cut short when long, whole in its tooltip). A long list
+  scrolls inside the menu, which fits the room above the composer, its note line kept at its foot. Picking one that takes arguments writes `/name ` for you to go on (Tab completes a name;
   Enter on a whole name runs it, its arguments being optional then); Enter on `/name args` runs it in
   the conversation, and what it answers is a quiet note in the thread, for you only (no
   channel gets it). `/new` takes you to the key's new conversation. With no command registered the

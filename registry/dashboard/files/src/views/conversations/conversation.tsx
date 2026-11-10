@@ -5,7 +5,8 @@
  * the channel, the name, the ids, a link to where the channel shows them), the Context panel's button, when there is any (the images
  * sent in it, what its web searches and fetches found), and its menu (Rename, Archive or Restore,
  * Delete: the sidebar row's). Its composer shows its assistant: a conversation never changes agent, so
- * picking another starts a new chat with it. Its "/" runs the App's commands here (`POST
+ * picking another starts a new chat with it. Its "/" lists the App's commands for its agent (`agents`)
+ * and runs them here (`POST
  * …/commands/:name`): what one answers is a quiet note in the thread, for the operator only (no channel
  * gets it); one that left the conversation behind (`/new`) is followed to its key's new conversation,
  * the note with it.
@@ -187,6 +188,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
         images: imageLimits(app),
         webSearch: webSearchOf(described, conversation?.agent),
         commands: commands ?? [],
+        ...(conversation?.agent !== undefined && { agent: conversation.agent }),
         onCommand: runCommand,
       }}
     />

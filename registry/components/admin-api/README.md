@@ -45,7 +45,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | `POST /admin/api/conversations/:id/abort` | stops its run → `200` |
 | `POST /admin/api/conversations/:id/reset` | points its key to a new, empty conversation; the old one is kept → `200 { key, previousConversationId, conversationId }` |
 | `POST /admin/api/conversations/:id/rename` | `{ title }`: the operator's title, cleaned (`cleanTitle`), as `/name` sets it, on any conversation (current or not) → `200`, the conversation titled; nothing left once cleaned `400` |
-| `GET /admin/api/commands` | `{ items: [{ name, description, argumentHint? }] }`: the App's slash commands (`agent.command`), by name |
+| `GET /admin/api/commands` | `{ items: [{ name, description, argumentHint?, audience, agents? }] }`: the App's slash commands (`agent.command`), by name |
 | `POST /admin/api/conversations/:id/commands/:name` | `{ args? }`: the command run in the conversation → `200 { text? }`, a note for the operator |
 | `GET /admin/api/delivery/pending?limit&cursor` | what is not delivered yet (with an `outbound.queue`, on a server), each piece with the conversation it answers (`conversationId`, from its answer key) |
 | `GET /admin/api/delivery/receipts?after&limit` | what settled (with an `outbound.queue`, on a server), each with its `conversationId` likewise |
@@ -107,7 +107,7 @@ curl -N -H "Authorization: Bearer $PIKIT_ADMIN_TOKEN" http://localhost:3000/admi
 The dashboard's "/" lists the App's slash commands and runs them in a conversation. They are a
 registry, as Pi's are (`registerCommand`): the keyed capability `agent.command` of `@pikit/contracts`
 (`command.ts`), one command per name (Pi's rule: lowercase letters, digits, `-` and `:`), each a
-`{ description, argumentHint?, run(conversation, args, ctx) }`. Nothing about them is the dashboard's:
+`{ description, argumentHint?, audience?, agents?, run(conversation, args, ctx) }`. Nothing about them is the dashboard's:
 it shows what `GET /admin/api/commands` lists, and nothing else.
 
 - **Who registers them.** admin-api registers two of Pi's built-ins that pikit does for real: `/new`
@@ -121,7 +121,9 @@ it shows what `GET /admin/api/commands` lists, and nothing else.
   trimmed (`runAgentCommand`). It acts only through contracts.
 - **As an action**: only an operator, only a key's current conversation (`409 not_current`, `409
   no_agent`), whether or not a run is going. An unknown name is `404 unknown_command` (before the
-  conversation is looked at); a command that throws is `422 command_failed`, its message the reason.
+  conversation is looked at); a command that throws is `422 command_failed`, its message the reason,
+  and so is one for other agents than the conversation's (`agents`: `/audit is not a command of the
+  agent "assistant"`), which runs nothing. The dashboard's menu lists a command only for its agents.
   It is logged with the operator, the key and the command's name, never its arguments.
 - **What comes back**: `{ text? }`, which the dashboard shows in the conversation as a quiet note for
   the operator: no channel gets it, and the transcript has only what the command did there.

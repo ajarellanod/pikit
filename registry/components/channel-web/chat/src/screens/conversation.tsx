@@ -13,7 +13,8 @@
  *
  * Its project, when it was made in one, is a badge in the composer (as web search's in the dashboard: a
  * link to the project's page); another assistant picked starts the new chat in the same project. The commands the operator lets
- * users type (`ChatConfig.commands`) have the composer's "/" menu: one runs in this conversation and
+ * users type (`ChatConfig.commands`) have the composer's "/" menu (those for its assistant, when it is
+ * one users may pick; else every one): one runs in this conversation and
  * what it answered shows as a quiet note (`CommandNoteRow`), never in the transcript.
  *
  * An archived conversation is still talked to: a message lists it again (the server's rule), and the
@@ -121,6 +122,7 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
             ? []
             : [{ key: "project", label: projectName, title: `Project: ${projectName}`, href: `#${projectPath(project)}`, icon: <Folder width={12} height={12} strokeWidth={2} aria-hidden /> }],
         commands: config.commands,
+        ...(agent !== undefined && { agent }),
         commandsMenu: config.commands.length > 0,
         commandsNote: "Runs here, never sent to the assistant",
         onCommand: runCommand,

@@ -382,7 +382,8 @@ export type LiveSettings = { signUp: SignUpSettings; visibility: VisibilitySetti
 /**
  * The page's config, made where the accounts are: their sign-in methods (`config` is that App's), who
  * may sign up now, what users see and the agents they may pick (`settings`, the live settings, the
- * agents among them that are agents now: `agents`), and whether that App sends email (`email.send` there).
+ * agents among them that are agents now: `agents`), the commands users may type (each one's `agents` cut
+ * to those they may pick), and whether that App sends email (`email.send` there).
  */
 export async function chatConfigOf(
   options: {
@@ -401,6 +402,9 @@ export async function chatConfigOf(
   const { config, target, email } = options;
   const live = await options.settings(ctx);
   const { thinking, tools, context } = live.visibility;
+  const agents = await options.agents(live.agents, ctx);
+  // A command's agents as users may see them: only the ones they may pick (as `shownConversation`).
+  const offered = new Set(agents.map((each) => each.name));
   return {
     name: config.name,
     target,
@@ -409,8 +413,8 @@ export async function chatConfigOf(
     email,
     files: options.files,
     visibility: { thinking, tools, context },
-    agents: await options.agents(live.agents, ctx),
-    commands: options.commands(),
+    agents,
+    commands: options.commands().map((command) => (command.agents === undefined ? command : { ...command, agents: command.agents.filter((agent) => offered.has(agent)) })),
   };
 }
 

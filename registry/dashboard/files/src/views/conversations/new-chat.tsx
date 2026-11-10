@@ -4,7 +4,8 @@
  * composer does when another is picked there) and writes the first message, with images and a web
  * search when wanted: `POST /admin/api/conversations` makes `dashboard:<uuid>`, whose answers appear
  * only here, and no other channel can continue it. Below, the last conversations, to continue. The
- * "/" menu lists the App's commands, which run in a conversation: here, they say so.
+ * "/" menu lists the App's commands for the agent picked (`agents`), which run in a conversation:
+ * here, they say so.
  */
 
 import { ChatBubble } from "iconoir-react";
@@ -93,6 +94,7 @@ export function NewChatPage() {
             images={imageLimits(app)}
             webSearch={webSearch}
             commands={commands ?? []}
+            {...(chosen !== undefined && { agent: chosen })}
             commandsNote="Commands run in a conversation: start one, then run them there"
             onCommand={(name) => {
               setError(new Error(`/${name} runs in a conversation: start one with a first message, then run it there.`));
