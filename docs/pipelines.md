@@ -63,7 +63,7 @@ Stages in the registry, in the order they run:
 | Stage id | Priority | Component | What it does |
 |---|---|---|---|
 | (a project's) | 10 and up, by convention | the project | routes some messages, or denies them (router-basic's README shows one at 10) |
-| `router-rules` | 1 | [router-rules](../registry/components/router-rules/files/src/pikit/router-rules/index.ts) | the first rule matching `channel` (an instance like `telegram:ops`, or a kind like `telegram`), `conversation`, `actor` decides an agent or a deny; no match leaves it undecided |
+| `router-rules` | 1 | [router-rules](../registry/components/router-rules/files/src/pikit/router-rules/index.ts) | the first rule matching `channel` (an instance like `telegram:ops`, or a kind like `telegram`), `conversations`, `actors` (lists: any one of their ids) decides an agent or a deny; no match leaves it undecided |
 | `router-basic` | 0 | [router-basic](../registry/components/router-basic/files/src/pikit/router-basic/index.ts) | `defaultAgent` for everything still undecided |
 
 Both routers refuse to start when they name an agent that is not an `agent.definition`. `pikit doctor`

@@ -27,8 +27,8 @@ const ops = defineAgent({ name: "ops", model: "faux/scripted", systemPrompt: "Yo
 const support = defineAgent({ name: "support", model: "faux/scripted", systemPrompt: "You help customers.", tools: ["bash"] });
 
 const RULES = [
-  { conversation: "ops-room", agent: "ops" },
-  { conversation: "support-room", agent: "support" },
+  { conversations: ["ops-room"], agent: "ops" },
+  { conversations: ["support-room"], agent: "support" },
 ];
 
 test("each conversation reaches its agent, with that agent's tools and directory", async () => {

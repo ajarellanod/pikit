@@ -33,6 +33,11 @@ line names its area.
 
 ### Components
 
+- router-rules: a rule matches lists, `conversations` and `actors` (a message matches when its chat
+  is one of them, its sender one of them), instead of one `conversation` and one `actor`: one rule
+  sends many chats to one agent. A list is never empty and names each id once (at most 1,000). The
+  singular fields are gone and refused: rewrite `{ conversation: "42" }` as `{ conversations: ["42"] }`,
+  and the rules an operator saved in the dashboard the same way.
 - A snapshot's restore is bounded: workspace-local's and execution-gondolin's `snapshots` take
   `maxUnpackedBytes` (4 GiB: the tar after gunzip, headers included) and `maxEntries` (1,000,000),
   past which the whole restore is refused and nothing is left half-extracted (a gzip bomb never fills

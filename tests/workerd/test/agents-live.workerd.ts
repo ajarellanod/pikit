@@ -149,7 +149,11 @@ it("an operator's live agent and rule, set through the Worker, route a sender's 
     expect(told.at(-1)).toContain("The code's.");
 
     expect((await worker.put("agents-live", { support: { model: "faux/scripted", systemPrompt: "Help customers." } })).status).toBe(200);
-    expect((await worker.put("router-rules", { rules: [{ actor: "ana", agent: "support" }, { actor: "bob", agent: "nobody" }] })).status).toBe(200);
+    expect((await worker.put("router-rules", { rules: [{ actors: ["ana"], agent: "support" }, { actors: ["bob"], agent: "nobody" }] })).status).toBe(200);
+    // A list, never empty, each id once: a single id, an empty or a repeated list is refused.
+    expect((await worker.put("router-rules", { rules: [{ actor: "ana", agent: "support" }] })).status).toBe(400);
+    expect((await worker.put("router-rules", { rules: [{ actors: [], agent: "support" }] })).status).toBe(400);
+    expect((await worker.put("router-rules", { rules: [{ actors: ["ana", "ana"], agent: "support" }] })).status).toBe(400);
     // Refused by the settings object: a code agent's name, a model no provider has.
     expect((await worker.put("agents-live", { scripted: { model: "faux/scripted" } })).status).toBe(400);
     expect((await worker.put("agents-live", { other: { model: "gone/model" } })).status).toBe(400);

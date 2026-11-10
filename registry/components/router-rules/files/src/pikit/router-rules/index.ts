@@ -9,9 +9,11 @@
  *
  * Rules are values, not strategies (MANIFESTO, principle 8): choosing the agent from the chat itself is another
  * component. A rule matches on `channel` (an instance, `telegram:support`, or a kind, `telegram`,
- * which matches every account of it), `conversation` and `actor`; a rule with none of them matches
- * everything. There is no `thread`: a channel keeps `conversationId` the chat or space and puts the
- * thread in its key (features/threads.md), so a rule naming it is invalid config, as any unknown field.
+ * which matches every account of it), `conversations` (the chat is one of them) and `actors` (the
+ * sender is one of them); a rule with none of them matches everything. A list is never empty (it would
+ * match nothing, or read as a catch-all) and names each id once: both are invalid config. There is no
+ * `thread`: a channel keeps `conversationId` the chat or space and puts the thread in its key
+ * (features/threads.md), so a rule naming it is invalid config, as any unknown field.
  *
  * A `deny` rule decides `{ agent: "", access: "deny" }`: `RouteDecision.agent` is required, and a
  * denied message has no agent. `admitInbound` never reads it for a deny; the channel refuses the
@@ -40,15 +42,21 @@ import Type, { type Static, type TSchema } from "typebox";
 const AGENT_NAME = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
 /** The most rules an operator may set. */
 export const MAX_RULES = 500;
+/** The most ids one rule's `conversations` or `actors` lists. */
+export const MAX_IDS = 1000;
+
+/** A list of ids a rule matches one of: at least one, each once. */
+const ids = (title: string, description: string) =>
+  Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: MAX_IDS, uniqueItems: true, title, description }));
 
 /** What a rule matches on. Each field it gives must match; none given matches every message. */
 const match = {
   /** A channel instance (`telegram:support`), or a kind (`telegram`) for all of its accounts. */
   channel: Type.Optional(Type.String({ minLength: 1, title: "Channel", description: "A channel (telegram), or one account of it (telegram:support)." })),
-  /** `InboundMessage.conversationId`: a chat, an HTTP client's conversation. */
-  conversation: Type.Optional(Type.String({ minLength: 1, title: "Chat", description: "The platform's conversation: a chat's id." })),
-  /** `InboundMessage.actor.id`: who sent it. */
-  actor: Type.Optional(Type.String({ minLength: 1, title: "Sender", description: "Who sent it: the platform's id of a person." })),
+  /** `InboundMessage.conversationId` is one of them: chats, an HTTP client's conversations. */
+  conversations: ids("Chats", "The platform's conversations: chats' ids. A message from any of them matches."),
+  /** `InboundMessage.actor.id` is one of them: who sent it. */
+  actors: ids("Senders", "Who sent it: the platform's ids of people. A message from any of them matches."),
 };
 
 /**
@@ -93,8 +101,8 @@ export function rulesSchema(agents: readonly string[], live: boolean): TSchema {
 
 function matches(rule: Rule, message: InboundMessage): boolean {
   if (rule.channel !== undefined && !matchesChannel(rule.channel, message.channel)) return false;
-  if (rule.conversation !== undefined && rule.conversation !== message.conversationId) return false;
-  if (rule.actor !== undefined && rule.actor !== message.actor.id) return false;
+  if (rule.conversations !== undefined && !rule.conversations.includes(message.conversationId)) return false;
+  if (rule.actors !== undefined && !rule.actors.includes(message.actor.id)) return false;
   return true;
 }
 

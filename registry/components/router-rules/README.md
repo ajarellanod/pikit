@@ -21,10 +21,15 @@ any of these fields, and every field it gives must match:
 | Field | Matches | Example |
 |---|---|---|
 | `channel` | the channel instance, or a kind for every account of it | `"telegram:support"`, `"telegram"` |
-| `conversation` | `InboundMessage.conversationId`: a chat, an HTTP client's conversation | `"12345"` |
-| `actor` | `InboundMessage.actor.id`: who sent it | `"987654"` |
+| `conversations` | `InboundMessage.conversationId` is one of them: chats, a Google Chat space, an HTTP client's conversation | `["12345", "67890"]`, `["spaces/AAQA6yBxAgA"]` |
+| `actors` | `InboundMessage.actor.id` is one of them: who sent it | `["987654"]` |
 
-A rule with none of them matches every message. Each rule gives exactly one of `agent: "<name>"`
+A rule with none of them matches every message. A list holds at least one id and each id once (at
+most 1,000): an empty list (which would match nothing, or read as a catch-all) or a repeated id is
+invalid config, as a single id written as a string. One rule sends many chats to one agent: 63
+Google Chat spaces answered by `trader` are `{ channel: "googlechat", conversations: [ ...63 ids ],
+agent: "trader" }`. A chat listed in two rules goes to the first; the later one never matches it
+(the dashboard warns). Each rule gives exactly one of `agent: "<name>"`
 (that agent answers) or `deny: true` with an optional `reason` (nobody answers; the channel refuses
 the message: `403 denied` over HTTP, "Sorry, I can't answer that here." on Telegram). A rule with
 both, neither, or a field it does not know is invalid config, so a typo is never a catch-all.
@@ -69,21 +74,21 @@ and to an existing one after a reset (`/new`).
 Rules are values. Choosing the agent another way (from the chat itself, by content) is a different
 router component, not a config key here.
 
-**No `thread` field.** A channel with threads keeps `conversation` the chat or space and puts the
-thread in the conversation's key ([features/threads.md](https://github.com/ajarellanod/pikit/blob/main/features/threads.md)): an agent per space is one rule, whatever the
-thread. A rule with `thread` is invalid config, as any field it does not know.
+**No `thread` field.** A channel with threads keeps `conversationId` the chat or space and puts the
+thread in the conversation's key ([features/threads.md](https://github.com/ajarellanod/pikit/blob/main/features/threads.md)): an agent per space is one id in a rule's
+`conversations`, whatever the thread. A rule with `thread` is invalid config, as any field it does not know.
 
 ## Config
 
-Three agents: the support bot's account goes to `support`, one sales chat to `sales`, a blocked
+Three agents: the support bot's account goes to `support`, two sales chats to `sales`, a blocked
 user is denied, and everything else falls through to `router-basic`:
 
 ```ts
 "router-rules": {
   rules: [ // empty by default: until you write rules, router-basic answers everything
-    { actor: "666", deny: true, reason: "blocked" },
+    { actors: ["666"], deny: true, reason: "blocked" },
     { channel: "telegram:support", agent: "support" },
-    { channel: "telegram", conversation: "12345", agent: "sales" },
+    { channel: "telegram", conversations: ["12345", "67890"], agent: "sales" },
     { channel: "http", agent: "assistant" },
   ],
 },
@@ -103,10 +108,11 @@ changed. Existing conversations keep the agent they were created with.
 ## Tests
 
 `router-rules.test.ts` is copied with the component and runs in your project. It covers the
-lifecycle conformance suite, first match, channel kinds and instances, conversation and actor,
-the catch-all, deny, falling through to `router-basic`, an earlier decision left alone, the start
-failure, and invalid rules; with a `settings` double, an operator's rules replacing the config's (and
-refused ones), settings that cannot be read; with a directory double, a rule naming a live agent and
+lifecycle conformance suite, first match, channel kinds and instances, conversations and actors
+(any id of a list, only those; a chat in two rules goes to the first), the catch-all, deny, falling through to `router-basic`, an earlier decision left alone, the start
+failure, and invalid rules (empty lists, repeated or empty ids, too many, a single id or the
+singular `conversation`/`actor`); with a `settings` double, an operator's rules replacing the
+config's (and refused ones: empty or repeated lists too), settings that cannot be read; with a directory double, a rule naming a live agent and
 one naming no agent.
 
 `component.json` is generated from `setup` by the CLI and is not written by hand. The test "what

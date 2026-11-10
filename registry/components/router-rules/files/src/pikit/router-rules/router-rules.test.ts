@@ -11,7 +11,7 @@ import { defineApp, defineComponent, Halt, silentLogger } from "@pikit/core";
 import { defineAgent, type DirectoryAgent, type InboundMessage, type Settings, SettingsError, type SettingsValue } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import Value from "typebox/value";
-import routerRules from "./index.ts";
+import routerRules, { MAX_IDS } from "./index.ts";
 
 const agents = defineComponent({
   name: "agents-test",
@@ -95,17 +95,45 @@ test("a kind matches every account of it; an instance matches only itself", asyn
   await app.stop();
 });
 
-test("conversation and actor match, and every field a rule gives must match", async () => {
+test("conversations and actors match, and every field a rule gives must match", async () => {
   const app = await started([
-    { channel: "telegram", conversation: "42", actor: "ana", agent: "sales" },
-    { conversation: "42", agent: "support" },
-    { actor: "ana", agent: "assistant" },
+    { channel: "telegram", conversations: ["42"], actors: ["ana"], agent: "sales" },
+    { conversations: ["42"], agent: "support" },
+    { actors: ["ana"], agent: "assistant" },
   ]);
 
   expect(await agentFor(app, { channel: "telegram", conversationId: "42", actor: { id: "ana" } })).toMatchObject({ agent: "sales" });
   expect(await agentFor(app, { channel: "http", conversationId: "42", actor: { id: "ana" } })).toMatchObject({ agent: "support" });
   expect(await agentFor(app, { conversationId: "7", actor: { id: "ana" } })).toMatchObject({ agent: "assistant" });
   expect(await agentFor(app, { conversationId: "7", actor: { id: "bob" } })).toBeUndefined();
+  await app.stop();
+});
+
+test("a list matches any one of its ids, and only those: a chat or a sender listed nowhere falls through", async () => {
+  const app = await started([
+    { channel: "googlechat", conversations: ["spaces/A", "spaces/B", "spaces/C"], agent: "sales" },
+    { actors: ["ana", "bob"], deny: true, reason: "blocked" },
+    { channel: "googlechat", conversations: ["spaces/D"], agent: "support" },
+  ]);
+
+  for (const space of ["spaces/A", "spaces/B", "spaces/C"]) expect(await agentFor(app, { channel: "googlechat", conversationId: space })).toMatchObject({ agent: "sales" });
+  expect(await agentFor(app, { channel: "googlechat", conversationId: "spaces/D" })).toMatchObject({ agent: "support" });
+  expect(await agentFor(app, { channel: "googlechat", conversationId: "spaces/E" })).toBeUndefined();
+  // An id is a whole id: not a prefix, not a part.
+  expect(await agentFor(app, { channel: "googlechat", conversationId: "spaces/" })).toBeUndefined();
+  expect(await agentFor(app, { actor: { id: "bob" } })).toEqual({ agent: "", access: "deny", reason: "blocked" });
+  expect(await agentFor(app, { actor: { id: "carla" } })).toBeUndefined();
+  await app.stop();
+});
+
+test("a chat listed in two rules goes to the first: the later one never matches it", async () => {
+  const app = await started([
+    { conversations: ["42"], agent: "support" },
+    { conversations: ["42", "43"], agent: "sales" },
+  ]);
+
+  expect(await agentFor(app, { conversationId: "42" })).toMatchObject({ agent: "support" });
+  expect(await agentFor(app, { conversationId: "43" })).toMatchObject({ agent: "sales" });
   await app.stop();
 });
 
@@ -117,7 +145,7 @@ test("a rule with no match fields matches every message", async () => {
 });
 
 test("a deny rule denies, with its reason", async () => {
-  const app = await started([{ actor: "spammer", deny: true, reason: "blocked" }, { channel: "telegram", deny: true }, { agent: "assistant" }]);
+  const app = await started([{ actors: ["spammer"], deny: true, reason: "blocked" }, { channel: "telegram", deny: true }, { agent: "assistant" }]);
 
   expect(await agentFor(app, { actor: { id: "spammer" } })).toEqual({ agent: "", access: "deny", reason: "blocked" });
   expect(await agentFor(app, { channel: "telegram" })).toEqual({ agent: "", access: "deny" });
@@ -181,6 +209,18 @@ test("an invalid rule is rejected by config validation; no rules at all is valid
   expect(invalid([{ chanel: "telegram", agent: "support" }])).toThrow("invalid config");
   expect(invalid([{ thread: "t1", agent: "support" }])).toThrow("invalid config");
   expect(invalid([{ channel: "", agent: "support" }])).toThrow("invalid config");
+  // Lists: never empty (it would match nothing, or read as a catch-all), each id once and not empty.
+  expect(invalid([{ conversations: ["42"], actors: ["ana"], agent: "support" }])).not.toThrow();
+  expect(invalid([{ conversations: [], agent: "support" }])).toThrow("invalid config");
+  expect(invalid([{ actors: [], deny: true }])).toThrow("invalid config");
+  expect(invalid([{ conversations: ["42", "42"], agent: "support" }])).toThrow("invalid config");
+  expect(invalid([{ actors: ["ana", ""], agent: "support" }])).toThrow("invalid config");
+  expect(invalid([{ conversations: Array.from({ length: MAX_IDS + 1 }, (_, n) => `c${n}`), agent: "support" }])).toThrow("invalid config");
+  expect(invalid([{ conversations: Array.from({ length: MAX_IDS }, (_, n) => `c${n}`), agent: "support" }])).not.toThrow();
+  // A list, not one id: a single string, and the singular names, are refused, not read.
+  expect(invalid([{ conversations: "42", agent: "support" }])).toThrow("invalid config");
+  expect(invalid([{ conversation: "42", agent: "support" }])).toThrow("invalid config");
+  expect(invalid([{ actor: "ana", deny: true }])).toThrow("invalid config");
 });
 
 /** `settings` in memory, and `set`, an operator's change, validated against what was declared as settings-store's routes validate it. */
@@ -223,12 +263,16 @@ test("with settings, the rules an operator sets replace the config's, from the n
   const ctx = app.context();
 
   expect(await settings.provider.get("router-rules", ctx)).toEqual({ rules: [{ channel: "telegram", agent: "support" }] });
-  await settings.set("router-rules", { rules: [{ channel: "telegram", agent: "sales" }, { actor: "spammer", deny: true, reason: "blocked" }] });
+  await settings.set("router-rules", { rules: [{ channel: "telegram", agent: "sales" }, { actors: ["spammer"], deny: true, reason: "blocked" }] });
   expect(await agentFor(app, { channel: "telegram" })).toEqual({ agent: "sales", access: "allow" });
   expect(await agentFor(app, { channel: "http", actor: { id: "spammer" } })).toEqual({ agent: "", access: "deny", reason: "blocked" });
   // Validated as the config's: without a directory, only the code's agents; never a typo.
   await expect(settings.set("router-rules", { rules: [{ agent: "billing" }] })).rejects.toThrow("the schema refuses");
   await expect(settings.set("router-rules", { rules: [{ chanel: "telegram", agent: "sales" }] })).rejects.toThrow("the schema refuses");
+  // Lists as the config's: not empty, each id once, no singular field.
+  await expect(settings.set("router-rules", { rules: [{ conversations: [], agent: "sales" }] })).rejects.toThrow("the schema refuses");
+  await expect(settings.set("router-rules", { rules: [{ conversations: ["42", "42"], agent: "sales" }] })).rejects.toThrow("the schema refuses");
+  await expect(settings.set("router-rules", { rules: [{ conversation: "42", agent: "sales" }] })).rejects.toThrow("the schema refuses");
   await app.stop();
 });
 
