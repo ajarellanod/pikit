@@ -82,7 +82,7 @@ export function SettingsNav<T extends SettingsEntry>({ choice, onChoose, classNa
   const { shown, current } = choice;
   const groups = [...new Set(shown.map((section) => section.group))];
   return (
-    <nav aria-label="Settings sections" className={`flex shrink-0 flex-col gap-1 overflow-y-auto border-b border-line bg-canvas p-3 sm:max-h-none sm:w-64 sm:border-r sm:border-b-0 ${className}`}>
+    <nav aria-label="Settings sections" className={`flex shrink-0 flex-col gap-1 overflow-y-auto border-b border-line bg-canvas p-3 sm:max-h-none sm:w-52 sm:border-r sm:border-b-0 ${className}`}>
       <div className="control flex shrink-0 items-center gap-2 pl-2.5">
         <Search width={15} height={15} strokeWidth={2} className="shrink-0 text-ink-3" />
         <input
