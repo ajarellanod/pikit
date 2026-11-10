@@ -19,7 +19,7 @@ kept in this browser.
 - **The composer**: the assistant where the harness picks its model, always a dropdown, even with
   one (in a new chat it chooses the agent; in a conversation it shows its agent, and picking another
   starts a new chat with it, since a conversation never changes agent). An agent is shown by its
-  words, the first capitalized (`support-bot` is "Support bot", `assistantName`); its name stays as
+  words, each capitalized (`support-bot` is "Support Bot", `assistantName`); its name stays as
   it is; **+** with exactly two things: **Add image** (PNG, JPEG, WebP or
   GIF, at most 4 of 5 MB each, 1 MB in all on Cloudflare; checked here and by the API; pasting one
   works too) and **Web search** for the next message (only for an assistant with the `websearch`
