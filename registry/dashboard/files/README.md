@@ -64,10 +64,12 @@ switches and selects save at once; a text or a prompt with its own Save.
 - **General** (Dashboard) is the dashboard's own: the theme and the interaction sounds, kept in this
   browser. Nothing of the service changes.
 - **App** (Dashboard), the dashboard's own too, read only: what the App is made of. Where it runs and
-  talks, in one line; its agents (the steward marked), each with its model and tools; its components
+  talks, in one line; its agents (the steward marked), each a card of one size: its model, two lines
+  of its tools (then `+n`, the rest in its tooltip) and how many it has; its components
   by what they are for, each opening under its row with what it provides and to whom, what it needs
   and from whom, and its config (redacted); and, folded, the wiring (choices of providers, what
-  nothing provides, the pipelines' stages, every route and command with its provider).
+  nothing provides, the pipelines' stages, every route and command with its provider). Its tags are
+  identifiers, shown as written (`publish_file`, `agent.directory`).
 - **One section per installed component that brings one** (`src/settings/<component>/`, installed
   with it by `pikit add`), shown when the App provides what it requires. Sections of one `entry` are
   one entry, each component's part shown one after another: **Agents** (runtime-pi's code agents, each
