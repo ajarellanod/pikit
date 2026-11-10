@@ -65,8 +65,9 @@ Adding an agent is adding a folder and running `pikit agents`; adding a skill is
   spaces). Each name is one `agent.command` (`audience: "user"`) in the generated file, whose `run`
   answers the conversation's agent's template, expanded, as `{ prompt }`: the runner dispatches it as
   the typed message (`admitInbound`: its id is the request id, so a redelivery is a duplicate; the
-  dashboard: an operator's message). A conversation whose agent has none of that name is told `this
-  agent has no template "<name>"`. The same name in two agents is one command, the first agent's
+  dashboard: an operator's message). The command is for the agents that have the template
+  (`agents`): menus list it only in their conversations, and in another agent's `runAgentCommand`
+  refuses it (`/<name> is not a command of the agent "<agent>"`). The same name in two agents is one command, the first agent's
   description the menu's. `pikit agents` and `pikit doctor` refuse a name that is no `COMMAND_NAME`, an
   empty template, a description of more than one line or 200 characters; a name another component's
   command has is refused where the App is composed (`pikit doctor`, the start: one key, two

@@ -71,8 +71,9 @@ that conversation.
   frontmatter `description` and `argument-hint`, placeholders `$1`, `$@`, `$ARGUMENTS`,
   `${1:-default}`, `${@:N}`, `${@:N:L}`, arguments split as a shell does). `pikit agents` makes each
   name one `agent.command` (`audience: "user"`) in the generated file, whose `run` answers the
-  conversation's agent's template, expanded, as the prompt; a conversation whose agent has no template
-  of that name is told `this agent has no template "<name>"`. The same name in two agents is one
+  conversation's agent's template, expanded, as the prompt; it is for the agents that have the template
+  (`agents`): menus list it only in their conversations, and in another agent's it is refused
+  (`/<name> is not a command of the agent "<agent>"`). The same name in two agents is one
   command (the first agent's description is the menu's). A name that is no `COMMAND_NAME` (or an
   empty template, a description of more than one line) is refused by `pikit agents` and `pikit
   doctor`; one named as another component's command, where the App is composed (`pikit doctor`, the

@@ -62,9 +62,10 @@ src/skills/
   sends the agent the text with its placeholders filled: `$1`, `$2`…, `$@` or `$ARGUMENTS` (all),
   `${1:-default}`, `${@:-default}`, `${@:N}` and `${@:N:L}` (from the Nth, L of them); arguments split
   at spaces, quotes keeping one whole. The description is the frontmatter's, else the first line (60
-  characters). Each name is one command: in a conversation whose agent has no template of that name
-  it answers `this agent has no template "<name>"`; the same name in two agents is one command, each
-  conversation getting its own agent's text (the first agent's description is the menu's). The
+  characters). Each name is one command, for the agents that have it (`agents`): a menu (the
+  dashboard's, the chat's) lists it only in their conversations, and typed in another agent's it is
+  refused (`/<name> is not a command of the agent "<agent>"`); the same name in two agents is one
+  command, each conversation getting its own agent's text (the first agent's description is the menu's). The
   expanded text is the message: it goes through `admitInbound` as the typed message (its id, so a
   redelivery runs once), and waits for a run going as any message; from the dashboard's "/" it is an
   operator's message. Only the folder's own `.md` files are templates.
@@ -123,7 +124,8 @@ small project next to it and runs the command there:
 - `doctor` passing when the file is current and failing, naming the command, once a folder changed;
 - the command writing only when the text changes, and taking no arguments; stable output;
 - prompt templates: each name one command for users, the conversation's agent's template with Pi's
-  placeholders filled (quoted arguments, defaults, slices), another agent told it has none; a bad
+  placeholders filled (quoted arguments, defaults, slices), listed for the agents that have it and
+  refused in another agent's conversation; a bad
   name, an empty template, a long description refused; a name another command has stopping the App.
 
 `app.test.ts`, a repository test (not copied: it imports agents-live and runtime-pi), runs the

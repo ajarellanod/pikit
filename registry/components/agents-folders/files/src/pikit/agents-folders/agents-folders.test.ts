@@ -9,7 +9,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineApp, defineComponent, type ComponentDefinition, silentLogger } from "@pikit/core";
-import { type AgentDefinition, type AgentSkill, type CommandLookup, type ConversationRef, runAgentCommand } from "@pikit/contracts";
+import { type AgentDefinition, type AgentSkill, type CommandLookup, type ConversationRef, listAgentCommands, runAgentCommand } from "@pikit/contracts";
 import { doctor } from "./doctor.ts";
 import { command, generated, stale } from "./generate.ts";
 import { channelOfFile, GENERATED, literal, render } from "./index.ts";
@@ -228,7 +228,7 @@ async function commandsOf(dir: string, others: ComponentDefinition[] = []): Prom
 
 const REVIEW = "---\ndescription: Review a part of the code\nargument-hint: \"<part> [focus]\"\n---\nReview $1, focusing on ${2:-correctness}. All: $@. Rest: ${@:2}. One: ${@:2:1}. Again: $ARGUMENTS\n";
 
-test("a prompt template is a slash command for the chat's users: the conversation's agent's template, Pi's placeholders filled, as the prompt to dispatch", async () => {
+test("a prompt template is a slash command for the chat's users, of the agents that have it: the conversation's agent's template, Pi's placeholders filled, as the prompt to dispatch", async () => {
   const dir = project({
     "src/agents/support/agent.ts": agentText("support"),
     "src/agents/support/prompts/review.md": REVIEW,
@@ -247,6 +247,11 @@ test("a prompt template is a slash command for the chat's users: the conversatio
   // One command per name: the first agent's (ops) description, its first line when it has no frontmatter.
   expect(commands.get("review")).toMatchObject({ description: "Look at `$@` closely.", audience: "user" });
   expect(commands.get("deploy")?.argumentHint).toBeUndefined();
+  // Each command is for the agents whose folders have it: a menu lists it only in their conversations.
+  expect(listAgentCommands(commands).map(({ name, agents }) => ({ name, agents }))).toEqual([
+    { name: "deploy", agents: ["ops"] },
+    { name: "review", agents: ["ops", "support"] },
+  ]);
 
   expect(await runAgentCommand(commands, "review", support, 'api "error handling" now', ctx)).toEqual({
     kind: "ran",
@@ -255,7 +260,7 @@ test("a prompt template is a slash command for the chat's users: the conversatio
   expect(await runAgentCommand(commands, "review", support, "api", ctx)).toEqual({ kind: "ran", prompt: "Review api, focusing on correctness. All: api. Rest: . One: . Again: api" });
   // The same name, the conversation's agent's own template, its text as written.
   expect(await runAgentCommand(commands, "review", ops, "the diff", ctx)).toEqual({ kind: "ran", prompt: "Look at `the diff` closely.\nThen say what breaks." });
-  expect(await runAgentCommand(commands, "deploy", support, "", ctx)).toEqual({ kind: "failed", message: 'this agent has no template "deploy"' });
+  expect(await runAgentCommand(commands, "deploy", support, "", ctx)).toEqual({ kind: "failed", message: '/deploy is not a command of the agent "support"' });
   expect(await runAgentCommand(commands, "deploy", ops, "", ctx)).toEqual({ kind: "ran", prompt: "Deploy staging." });
 });
 

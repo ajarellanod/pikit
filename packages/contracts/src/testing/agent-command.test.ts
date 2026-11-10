@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { ConversationRef } from "../agent.ts";
-import { type AgentCommand, allowedCommands, commandOf, listAgentCommands, runAgentCommand } from "../command.ts";
+import { type AgentCommand, allowedCommands, commandIsFor, commandOf, commandProblem, listAgentCommands, runAgentCommand } from "../command.ts";
 import { createAgentCommandConformance } from "./agent-command.ts";
 
 const CONVERSATION: ConversationRef = { key: "test:1", agent: "assistant", conversationId: "c1" };
@@ -151,4 +151,59 @@ test("audience: listed with every command, operator when none; any other value i
     { name: "rules", description: "Rules", audience: "user" },
   ]);
   expect(allowedCommands(lookup, "user").keys()).toEqual(["rules"]);
+});
+
+test("agents: listed with the command; runs only in their conversations, refused elsewhere without running; malformed agents leave it out", async () => {
+  let runs = 0;
+  const run = async () => {
+    runs++;
+    return { text: "ran" };
+  };
+  const all = new Map<string, AgentCommand>([
+    ["audit", { description: "Audit", agents: ["notm-bot", "trader"], run }],
+    ["everyone", { description: "Every agent's", run }],
+    ["empty", { description: "No agents", agents: [], run }],
+    ["bad-name", { description: "Bad agent name", agents: ["Notm Bot"], run }],
+    ["twice", { description: "An agent twice", agents: ["trader", "trader"], run }],
+    ["not-array", { description: "Not a list", agents: "trader" as never, run }],
+  ]);
+  const lookup = { keys: () => [...all.keys()], get: (name: string) => all.get(name) };
+  const context = (await defineApp({ components: [], logger: silentLogger }).create()).context();
+
+  expect(listAgentCommands(lookup)).toEqual([
+    { name: "audit", description: "Audit", audience: "operator", agents: ["notm-bot", "trader"] },
+    { name: "everyone", description: "Every agent's", audience: "operator" },
+  ]);
+  expect(commandProblem("empty", all.get("empty"))).toContain("at least one");
+  expect(commandProblem("bad-name", all.get("bad-name"))).toContain("kebab-case");
+  expect(commandProblem("twice", all.get("twice"))).toContain("each once");
+  expect(commandProblem("not-array", all.get("not-array"))).toContain("agents");
+
+  expect(await runAgentCommand(lookup, "audit", { ...CONVERSATION, agent: "trader" }, "", context)).toEqual({ kind: "ran", text: "ran" });
+  expect(runs).toBe(1);
+  expect(await runAgentCommand(lookup, "audit", { ...CONVERSATION, agent: "admin" }, "", context)).toEqual({ kind: "failed", message: '/audit is not a command of the agent "admin"' });
+  expect(await runAgentCommand(lookup, "everyone", { ...CONVERSATION, agent: "admin" }, "", context)).toEqual({ kind: "ran", text: "ran" });
+  expect(await runAgentCommand(lookup, "empty", CONVERSATION, "", context)).toEqual({ kind: "unknown" });
+  expect(runs).toBe(2);
+
+  expect(commandIsFor({ agents: ["trader"] }, "trader")).toBe(true);
+  expect(commandIsFor({ agents: ["trader"] }, "admin")).toBe(false);
+  expect(commandIsFor({}, "admin")).toBe(true);
+  // Typed, it is still a command (not a message for the agent): runAgentCommand says whose it is.
+  expect(commandOf("/audit", lookup)).toEqual({ name: "audit", args: "" });
+});
+
+test("a command for the conversation's own agent passes the suite, and runs there", async () => {
+  const titles = new Map<string, string>();
+  const forMe = defineComponent({
+    name: "commands-for-me",
+    setup(pikit) {
+      pikit.provideKeyed("agent.command", "mine", { description: "Mine", agents: [CONVERSATION.agent], run: async () => ({ text: "mine" }) });
+    },
+  });
+  const failed: string[] = [];
+  for (const c of createAgentCommandConformance(() => ({ components: [commands(titles), forMe], conversation: async () => CONVERSATION, runs: [{ name: "mine" }] }))) {
+    await c.run().catch(() => failed.push(c.name));
+  }
+  expect(failed).toEqual([]);
 });

@@ -41,6 +41,11 @@ const check = checker(GROUP);
 const ECHO = "conformance-echo";
 const FAILS = "conformance:fails";
 const PROMPT = "conformance-prompt";
+/** A command for an agent no fixture has: refused in the fixture's conversation. */
+const ELSEWHERE = "conformance-elsewhere";
+const OTHER_AGENT = "conformance-other-agent";
+/** How many times the probe for another agent ran: never, in any case. */
+let elsewhereRuns = 0;
 const probes = defineComponent({
   name: "agent-command-conformance-probes",
   setup(pikit) {
@@ -62,6 +67,14 @@ const probes = defineComponent({
     pikit.provideKeyed("agent.command", ECHO, echo);
     pikit.provideKeyed("agent.command", FAILS, fails);
     pikit.provideKeyed("agent.command", PROMPT, prompt);
+    pikit.provideKeyed("agent.command", ELSEWHERE, {
+      description: "A command of another agent only",
+      agents: [OTHER_AGENT],
+      run: async () => {
+        elsewhereRuns++;
+        return { text: "ran elsewhere" };
+      },
+    });
   },
 });
 
@@ -125,6 +138,15 @@ export function createAgentCommandConformance(factory: () => AgentCommandFixture
         const outcome = await runAgentCommand(commands, each.name, conversation, each.args, ctx);
         check(outcome.kind === "failed" && outcome.message.trim() !== "", `/${each.name} ${each.args} to fail with a message (got ${JSON.stringify(outcome)})`);
       }
+    }),
+
+    commandCase("a command for other agents is listed with them, and refused in this conversation, saying so, without running", async (commands, conversation, _fixture, _app, ctx) => {
+      check(conversation.agent !== OTHER_AGENT, `the fixture's conversation to be of an agent other than "${OTHER_AGENT}"`);
+      expect(listAgentCommands(commands).find((each) => each.name === ELSEWHERE)?.agents, [OTHER_AGENT], `the agents "${ELSEWHERE}" is listed with`);
+      const before = elsewhereRuns;
+      const outcome = await runAgentCommand(commands, ELSEWHERE, conversation, "", ctx);
+      check(outcome.kind === "failed" && outcome.message.includes(conversation.agent), `/${ELSEWHERE} to fail, naming the agent "${conversation.agent}" (got ${JSON.stringify(outcome)})`);
+      expect(elsewhereRuns, before, `the runs of /${ELSEWHERE}`);
     }),
 
     commandCase("an unknown or malformed name is refused, and runs nothing", async (commands, conversation, _fixture, _app, ctx) => {

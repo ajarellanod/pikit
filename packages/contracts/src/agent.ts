@@ -225,6 +225,8 @@ export interface AgentDefinition<S extends object = object> {
 }
 
 const AGENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+/** Whether `name` is an agent's name (kebab-case, as `defineAgent` requires): what names an agent elsewhere (`AgentCommand.agents`). */
+export const isAgentName = (name: unknown): name is string => typeof name === "string" && AGENT_NAME.test(name);
 /** The name a model calls a tool by: letters, digits, `_` and `-`. */
 const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
 /** `provider/modelId`; the model id may contain slashes of its own (`openrouter/anthropic/x`). */
@@ -234,7 +236,7 @@ const EXTENSION_NAME = /^\S+$/;
 
 /** Check an agent definition's shape and return it unchanged. */
 export function defineAgent<S extends object = object>(definition: AgentDefinition<S>): AgentDefinition<S> {
-  if (!AGENT_NAME.test(definition.name)) {
+  if (!isAgentName(definition.name)) {
     throw new Error(`agent name "${definition.name}" must be kebab-case (e.g. "support")`);
   }
   if (!MODEL.test(definition.model)) {

@@ -282,7 +282,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "keyed",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "One slash command per name (Pi's rule: /new, /name), run in a conversation by whoever runs commands (the dashboard; channel-web gives /name its titles), answering a note.",
+    summary: "One slash command per name (Pi's rule: /new, /name), run in a conversation by whoever runs commands (the dashboard; channel-web gives /name its titles), answering a note; for every agent or the agents it names.",
   },
   "http.route": {
     mode: "keyed",

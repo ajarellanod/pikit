@@ -32,10 +32,14 @@
  *   the conversation as the message that typed the command: a channel's `admitInbound`, with that
  *   message's id as the request id (a platform's redelivery is a duplicate: one run) and its sender;
  *   the dashboard (admin-api), as an operator's message. Such a command has no note.
+ * - **Whose it is:** every agent's, or only the agents it names (`agents`: a project's prompt templates,
+ *   agents-folders, are the agents' whose folders have them). A menu lists a command only in a
+ *   conversation of an agent it is for (`commandIsFor`); typed in another, `runAgentCommand` refuses it
+ *   (`failed`, saying so) and runs nothing.
  */
 
 import type { AppContext } from "@pikit/core";
-import type { ConversationRef, Sender } from "./agent.ts";
+import { type ConversationRef, isAgentName, type Sender } from "./agent.ts";
 
 /** A command's name (its `agent.command` key, without the slash): Pi's rule for slash commands. */
 export const COMMAND_NAME = /^[a-z0-9][a-z0-9:-]*$/;
@@ -58,6 +62,11 @@ export interface AgentCommand {
    */
   audience?: CommandAudience;
   /**
+   * The agents it is for, by name (`agent.definition` keys; at least one, each once): it runs only in
+   * their conversations, and a menu lists it only there (`commandIsFor`). Absent: every agent's.
+   */
+  agents?: readonly string[];
+  /**
    * Runs it in `conversation` (the key's current one) with `args`, the text after the name, trimmed
    * (`""` when none). Resolves with a note for whoever ran it, or nothing; rejects, with a message for
    * the operator, when it cannot. `sender` is who typed it in a channel (`{ channel, id }`, as a
@@ -79,7 +88,12 @@ export interface CommandInfo {
   description: string;
   argumentHint?: string;
   audience: CommandAudience;
+  /** The agents it is for (`AgentCommand.agents`); absent: every agent's. */
+  agents?: string[];
 }
+
+/** Whether `command` is for `agent`: it names no agents, or names that one (`AgentCommand.agents`). */
+export const commandIsFor = (command: { agents?: readonly string[] }, agent: string): boolean => command.agents === undefined || command.agents.includes(agent);
 
 /** Whether `name` is a command's name (`COMMAND_NAME`). */
 export const isCommandName = (name: string): boolean => name.length <= MAX_NAME && COMMAND_NAME.test(name);
@@ -93,6 +107,12 @@ export function commandProblem(name: string, command: AgentCommand | undefined):
   }
   if (command.argumentHint !== undefined && (typeof command.argumentHint !== "string" || /[\r\n]/.test(command.argumentHint))) return `"${name}": its argumentHint is one line`;
   if (command.audience !== undefined && command.audience !== "operator" && command.audience !== "user") return `"${name}": its audience is "operator" or "user"`;
+  if (command.agents !== undefined) {
+    const agents: unknown = command.agents;
+    if (!Array.isArray(agents) || agents.length === 0 || !agents.every(isAgentName) || new Set(agents).size !== agents.length) {
+      return `"${name}": its agents are agents' names (kebab-case), at least one, each once`;
+    }
+  }
   return undefined;
 }
 
@@ -110,7 +130,15 @@ export function listAgentCommands(commands: CommandLookup): CommandInfo[] {
     .flatMap((name) => {
       const command = commands.get(name);
       if (command === undefined || commandProblem(name, command) !== undefined) return [];
-      return [{ name, description: command.description, ...(command.argumentHint !== undefined && { argumentHint: command.argumentHint }), audience: audienceOf(command) }];
+      return [
+        {
+          name,
+          description: command.description,
+          ...(command.argumentHint !== undefined && { argumentHint: command.argumentHint }),
+          audience: audienceOf(command),
+          ...(command.agents !== undefined && { agents: [...command.agents] }),
+        },
+      ];
     });
 }
 
@@ -122,7 +150,8 @@ export type CommandOutcome = { kind: "ran"; text?: string; prompt?: string } | {
 
 /**
  * Runs the command `name` of `commands` in `conversation` with `args` (trimmed). An unknown or
- * malformed name is `unknown`, and runs nothing; a command that rejects is `failed`, with its message
+ * malformed name is `unknown`, and runs nothing; a command not for the conversation's agent
+ * (`commandIsFor`) is `failed`, saying so, and runs nothing; a command that rejects is `failed`, with its message
  * (never thrown); what it answers other than `{ text: string }`, `{ prompt: string }` (not blank: then
  * without its text) or nothing is taken as nothing.
  */
@@ -136,6 +165,7 @@ export async function runAgentCommand(
 ): Promise<CommandOutcome> {
   const command = isCommandName(name) ? commands.get(name) : undefined;
   if (command === undefined || commandProblem(name, command) !== undefined) return { kind: "unknown" };
+  if (!commandIsFor(command, conversation.agent)) return { kind: "failed", message: `/${name} is not a command of the agent "${conversation.agent}"` };
   try {
     const answer = sender === undefined ? await command.run(conversation, args.trim(), ctx) : await command.run(conversation, args.trim(), ctx, { channel: sender.channel, id: sender.id });
     const field = (name: "text" | "prompt") => {
@@ -155,8 +185,9 @@ export async function runAgentCommand(
 /**
  * The command a channel's message names, or `undefined`: its text is `/name` or `/name args` (leading
  * spaces aside; the name ends at the first space or line break, `args` is the rest, trimmed) and `name`
- * is a command of `commands` that `runAgentCommand` would run. Anything else, an unknown `/word`
- * included, is a message for the agent. A channel that runs commands (typed in its chat) asks this
+ * is a command of `commands` that `runAgentCommand` would run (whatever agents it is for: in a
+ * conversation of another, it refuses it, saying so). Anything else, an unknown `/word` included, is a
+ * message for the agent. A channel that runs commands (typed in its chat) asks this
  * before `admitInbound`, then runs the command with `runAgentCommand` in the App that holds the
  * conversation, with the message's sender, and tells the sender the outcome; the command's message is
  * never dispatched to the agent (the prompt a command answers is, in its place: `AgentCommand`).

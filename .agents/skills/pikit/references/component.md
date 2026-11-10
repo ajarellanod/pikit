@@ -129,7 +129,9 @@ pikit.provideKeyed("agent.command", "deploy", {
 });
 ```
 
-`audience: "user"` offers it to anyone a channel admits in a chat (absent: the operator's only).
+`audience: "user"` offers it to anyone a channel admits in a chat (absent: the operator's only);
+`agents: ["support"]` makes it those agents' only (menus list it in their conversations, it is refused
+in another's; absent: every agent's).
 Returning `{ prompt }` instead of `{ text }` makes the runner dispatch that text to the agent in place
 of the typed message (a prompt template; no `agent.runtime` needed). The kit's own: `/new` and `/name`
 (admin-api), `/compact` (runtime-pi), for the chat's users `/stop`, `/status`, `/tasks`, `/cancel <id>`

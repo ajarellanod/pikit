@@ -342,6 +342,19 @@ test("admitInbound with commands: a registered /name runs in its conversation wi
   expect(e.dispatched.map((each) => each.prompt)).toEqual(["/unknown x"]);
 });
 
+test("admitInbound with commands: a command for other agents is refused in this agent's conversation, saying so, and neither runs nor is dispatched", async () => {
+  let ran = 0;
+  const command = { description: "Audit", agents: ["trader"], run: async () => ({ prompt: `Audit ${++ran}` }) };
+  const commands = { keys: () => ["audit"], get: (name: string) => (name === "audit" ? command : undefined) };
+
+  const e = ends();
+  const ctx = await appWith(() => {});
+  const outcome = await admitInbound(ctx, { ...message, text: "/audit" }, { ...e, key: "test:c1", commands });
+  expect(outcome).toMatchObject({ kind: "command", name: "audit", outcome: { kind: "failed", message: '/audit is not a command of the agent "support"' }, conversation: { agent: "support" } });
+  expect(ran).toBe(0);
+  expect(e.dispatched).toEqual([]);
+});
+
 test("admitInbound with commands: a command's prompt is dispatched as the typed message (its id, its sender); a redelivery is a duplicate", async () => {
   const command = { description: "Review", run: async (_conversation: ConversationRef, args: string) => ({ prompt: `Review ${args}`, text: "never shown" }) };
   const commands = { keys: () => ["review"], get: (name: string) => (name === "review" ? command : undefined) };

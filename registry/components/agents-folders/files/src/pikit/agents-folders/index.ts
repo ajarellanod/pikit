@@ -162,9 +162,10 @@ function expand(text: string, args: string[]): string {
 }
 
 /**
- * The slash command of a template's name, for anyone in a chat: the template of the conversation's
- * agent, its arguments expanded, as the prompt whoever ran it dispatches in place of the typed message.
- * One name in several agents is one command; the first agent's description is the menu's.
+ * The slash command of a template's name, for anyone in a chat, in the conversations of the agents
+ * that have it (agents: a menu lists it only there, and it is refused elsewhere): the template of the
+ * conversation's agent, its arguments expanded, as the prompt whoever ran it dispatches in place of the
+ * typed message. One name in several agents is one command; the first agent's description is the menu's.
  */
 function templateCommand(name: string, byAgent: Record<string, Template>): AgentCommand {
   const first = Object.values(byAgent)[0] as Template;
@@ -172,6 +173,7 @@ function templateCommand(name: string, byAgent: Record<string, Template>): Agent
     description: first.description,
     ...(first.argumentHint !== undefined && { argumentHint: first.argumentHint }),
     audience: "user",
+    agents: Object.keys(byAgent),
     async run(conversation, args) {
       const template = Object.hasOwn(byAgent, conversation.agent) ? byAgent[conversation.agent] : undefined;
       if (template === undefined) throw new Error("this agent has no template \"" + name + "\"");

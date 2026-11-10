@@ -293,11 +293,15 @@ User: tool-mcp, for a server with `auth: "oauth"`.
 ### `agent.command` (keyed, [command.ts](../packages/contracts/src/command.ts))
 
 One slash command per name (`COMMAND_NAME`: lowercase letters, digits, `-`, `:`):
-`{ description, argumentHint?, audience?, run(conversation, args, ctx, sender?) }`. It runs in the App that holds the
+`{ description, argumentHint?, audience?, agents?, run(conversation, args, ctx, sender?) }`. It runs in the App that holds the
 conversation and acts only through contracts. `audience` says who it is for: `"user"`, anyone a
 channel admits may type it (it acts only on their space's or their own things: memory-recall's
 `/rules`, `/prefs`); `"operator"` (also when absent), the dashboard's, offered in a chat only when the
-channel's config names it or allows `"all"`. `listAgentCommands` gives each command's audience. `sender` is who typed it in a channel (absent for the
+channel's config names it or allows `"all"`. `agents` names the agents it is for (agents' names,
+at least one, each once; absent: every agent's): a menu lists it only in their conversations
+(`commandIsFor`), and `runAgentCommand` refuses it in another agent's (`failed`, `/name is not a
+command of the agent "<agent>"`), so the dashboard and every channel (through `admitInbound`) refuse it
+in one place. `listAgentCommands` gives each command's audience and agents. `sender` is who typed it in a channel (absent for the
 operator's dashboard): a command acting for a person (their preferences) refuses without one. `run` resolves with `{ text? }`, a note for whoever ran
 it, or `{ prompt }`, a message for the agent its runner dispatches in place of the typed one (a prompt
 template's expansion: `admitInbound` with the typed message's id and sender, admin-api as an
@@ -306,7 +310,7 @@ helpers a runner uses (`runAgentCommand` never throws); `commandOf(text, command
 `/name args` in a chat's message and `allowedCommands(commands, "user" | "all" | names)` cuts them to a
 channel's config. Providers: admin-api (`new`, `name`: operator),
 runtime-pi (`compact`: operator; `stop`, `status`, `tasks`, `cancel`: user), memory-recall (`rules`, `prefs`: user),
-and a project's generated `src/extensions/agents.ts` (agents-folders: one per prompt template's name, user, answering `{ prompt }`). Runners: admin-api (the dashboard's "/"), channel-web (`/name` with each
+and a project's generated `src/extensions/agents.ts` (agents-folders: one per prompt template's name, user, for the agents that have it, answering `{ prompt }`). Runners: admin-api (the dashboard's "/"), channel-web (`/name` with each
 title it sets, so the dashboard lists a web conversation by the chat's title and asks no model of its
 own), and the channels that run commands typed in their chats through `admitInbound` (below).
 
