@@ -75,7 +75,9 @@ switches and selects save at once; a text or a prompt with its own Save.
   (router-rules' rules; router-basic's default agent, the last card). Their values are the
   components' settings, kept by `settings-store` (`/admin/api/settings`, installed with the
   dashboard): a change applies to the next run, with no deploy and no restart. Each part edits only
-  its own component's settings.
+  its own component's settings. A part may open a page in place of its entry (`useSettingsPage`,
+  `lib/settings.ts`): an agent's, from the Agents list, with its tabs (`components/pikit/agent-editor.tsx`);
+  its back button or Escape (outside a text field) returns to the list, never closing the dialog.
 
 ## A channel of its own
 
@@ -158,6 +160,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/settings/<component>/index.tsx` | a component's section of the Settings dialog (below) |
 | `src/lib/settings.ts` | how sections are found and when they show (`defineSettings`), a component's settings (`useSettings`) |
 | `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General, and `SchemaSettings`; `settings.tsx` re-exports the rows and controls |
+| `src/components/pikit/agent-editor.tsx` | the Agents entry's look, shared by runtime-pi's and agents-live's parts, each with its own data: an agent's row (`AgentRow`), its page (`AgentPage`: a way back, its header and actions, tabs with icons and counts) and searchable switches grouped by family (`ToggleList`) |
 | `src/components/pikit/app-settings.tsx`, `src/lib/composition.ts` | Settings' App section: where the App runs and talks, its agents, its components by what they are for, each one's details under its row, and the wiring, folded; worked out in `composition.ts` |
 | `src/components/pikit/settings-shell.tsx`, `settings-rows.tsx` | a settings dialog's frame and navigation (`SettingsPanels`, `useSettingsChoice`), its rows and controls (`SettingsHeading`, `SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`): by props only, shared with channel-web's chat page |
 | `src/lib/router.tsx` | the pages under `/admin` |

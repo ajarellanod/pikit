@@ -17,7 +17,11 @@ and no restart.
 A live agent is a name (kebab-case), a description, a system prompt, a model (one an installed
 provider has), and tools, extensions and skills by name (installed ones; skills are the project's,
 `agent.skill`). It is made in the dashboard's Settings, **Agents**, in agents-live's part ("Made
-here", order 1): "New agent", then Edit or remove each. The project's own agents (`src/agents/`) are
+here", order 1): a row per agent (its description, model, how many tools and skills), Remove (asking
+again), and "New agent" or Edit opening the agent's page in place of the list (the dashboard's
+`agent-editor`, shared with runtime-pi's part): tabs General (name, description, model, system prompt),
+Tools, Skills and Extensions (searchable switches grouped by family), saved together with Save (Create)
+or dropped with Cancel, "← Agents" or Escape. The project's own agents (`src/agents/`) are
 runtime-pi's part of the same entry, above it ("In the project's code"): their prompt, model, tools and
 skills are changed there, as overrides of their definition.
 

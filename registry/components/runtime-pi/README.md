@@ -291,8 +291,11 @@ deploy and no restart ([features/settings.md](https://github.com/ajarellanod/pik
 overrides are data over it (`overrides.ts`).
 
 Its section (`settings/`) is Agents' first part (order 0, "In the project's code"; agents-live's live
-agents follow it in the same entry): the code's agents, each with Edit opening its system prompt,
-model, tools and skills, and "Use default" to drop an override. It edits runtime-pi's settings only.
+agents follow it in the same entry): the code's agents, each with its model, how many tools and skills it
+has and "changed here" when overridden; Edit opens the agent's page in place of the list (the dashboard's
+`agent-editor`: "← Agents" or Escape goes back), with tabs: General (model, system prompt), Tools and
+Skills (searchable switches grouped by family, `delegate_*`, each with its one line, "All on" / "All off"
+per family). Each change saves at once; "Use default" drops the override. It edits runtime-pi's settings only.
 
 - **Declared at start** as runtime-pi's settings: one optional object per agent, its schema built from
   the App (the models of the providers with credentials, the tools and skills the definition names), its
