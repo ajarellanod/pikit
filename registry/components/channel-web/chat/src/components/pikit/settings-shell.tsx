@@ -128,7 +128,8 @@ export function SettingsNav<T extends SettingsEntry>({ choice, onChoose, classNa
  * The navigation, and the chosen section on the right under its title (`children`, rendered by the
  * caller for `choice.current`), with a close button (`onClose`). `navClassName`: the navigation's height
  * on a narrow screen, where it sits on top. `fullScreenOnMobile` (with `settingsFrameClass(true)`): below
- * `sm` a bar heads the screen, its `title` and the close button.
+ * `sm` a bar heads the screen, its `title` and the close button. `titled` false: no section title (a
+ * page of the section heads the panel with its own, and its way back).
  */
 export function SettingsPanels<T extends SettingsEntry>({
   choice,
@@ -138,6 +139,7 @@ export function SettingsPanels<T extends SettingsEntry>({
   navClassName = "max-h-56",
   fullScreenOnMobile = false,
   title = "Settings",
+  titled = true,
   children,
 }: {
   choice: SettingsChoice<T>;
@@ -147,6 +149,7 @@ export function SettingsPanels<T extends SettingsEntry>({
   navClassName?: string;
   fullScreenOnMobile?: boolean;
   title?: string;
+  titled?: boolean;
   children: ReactNode;
 }) {
   const { current } = choice;
@@ -175,7 +178,7 @@ export function SettingsPanels<T extends SettingsEntry>({
         <div className={`min-h-0 flex-1 overflow-y-auto px-6 pb-16 sm:px-10 sm:pt-12 ${fullScreenOnMobile ? "pt-6" : "pt-12"}`}>
           {current !== undefined && (
             <>
-              <h2 className="mb-6 text-[19px] font-semibold text-ink">{current.title}</h2>
+              {titled && <h2 className="mb-6 text-[19px] font-semibold text-ink">{current.title}</h2>}
               {children}
             </>
           )}
