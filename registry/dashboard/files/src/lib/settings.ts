@@ -65,6 +65,28 @@ export function useOpenSettingsSection(): (id: string) => void {
   return useContext(SettingsNavigation);
 }
 
+/**
+ * A part's page: one thing of it (an agent) opened in place of the whole entry, its parts' list hidden
+ * until it closes (its back button, or Escape outside a text field: never the dialog). The page is the
+ * part's own string (an agent's name); the dialog keeps it while the entry stays chosen, so nothing of
+ * it goes in the URL.
+ */
+export interface SettingsPage {
+  /** The page this part shows; `undefined` while the entry shows its parts. */
+  page: string | undefined;
+  /** The page this part showed last, right after it closed (until another opens): its row takes the focus back. */
+  closed: string | undefined;
+  open(page: string): void;
+  close(): void;
+}
+
+export const SettingsPageContext = createContext<SettingsPage>({ page: undefined, closed: undefined, open: () => {}, close: () => {} });
+
+/** This part's page (the dialog provides it to each part). */
+export function useSettingsPage(): SettingsPage {
+  return useContext(SettingsPageContext);
+}
+
 const found = import.meta.glob<{ default: SettingsSectionDefinition }>("../settings/*/index.tsx", { eager: true });
 
 /** Every section of `src/settings/`, by group, then order, then title. */

@@ -4,6 +4,10 @@
  * changed here (an operator's override over the agent's definition, applied from its next run).
  * agents-live's part, the agents made here, follows it. It reads and writes only runtime-pi's settings.
  *
+ * The list shows each agent (its model, its tools and skills, "changed here" when overridden); Edit opens
+ * the agent's page in place of the list (`useSettingsPage`, the shared `agent-editor`): General (model,
+ * system prompt), Tools and Skills (searchable switches, by family). Each change saves at once.
+ *
  * What runtime-pi's schema says is all it reads: the agents (its properties; with an `agent.directory`
  * installed it accepts other names too, a live agent's, which are agents-live's to show), each one's
  * definition (the `default`s), the models of the providers with credentials (as runtime-pi found them
@@ -13,15 +17,17 @@
  * `tools` and `skills` (a tool's `summary`, written where its component provides it; a skill's description).
  */
 
-import { Community, EditPencil } from "iconoir-react";
-import { Fragment, useState } from "react";
+import { Community, EditPencil, GraduationCap, Settings, Tools } from "iconoir-react";
+import { useState } from "react";
+import { Badge } from "@/components/bui/Badge";
 import { Button } from "@/components/bui/Button";
-import { Switch } from "@/components/bui/Switch";
+import { AgentPage, AgentRow, countOf, ToggleList, toggleables } from "@/components/pikit/agent-editor";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { type ApiAgents, type ApiSummary, useApi } from "@/lib/api";
-import { PromptEditor, SelectControl, SettingsHeading, SettingsRow } from "@/components/pikit/settings";
+import { type ApiAgents, useApi } from "@/lib/api";
 import { assistantName } from "@/lib/names";
-import { choicesOf, defineSettings, type JsonSchema, type SettingsValue, useSettings } from "@/lib/settings";
+import { PromptEditor, SelectControl, SettingsHeading, SettingsRow } from "@/components/pikit/settings";
+import { choicesOf, defineSettings, type JsonSchema, type SettingsValue, useSettings, useSettingsPage } from "@/lib/settings";
+import { useShell } from "@/lib/shell";
 
 /** One agent's override (runtime-pi's settings): absent, the definition's. */
 type Override = { systemPrompt?: string; model?: string; tools?: string[]; skills?: string[] };
@@ -29,15 +35,7 @@ type Override = { systemPrompt?: string; model?: string; tools?: string[]; skill
 /** What an agent's definition says, as the schema's `default`s carry it. */
 type Definition = { systemPrompt: string; model: string; tools: string[]; skills: string[] };
 
-/** What `name` does, in one line (`ApiAgents.tools` or `skills`); `undefined` until read, or when it says nothing. */
-const summaryIn = (list: readonly ApiSummary[] | undefined, name: string) => {
-  const summary = list?.find((each) => each.name === name)?.summary;
-  return summary === undefined || summary === "" ? undefined : summary;
-};
-
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((each) => b.includes(each));
-
-const count = (n: number, one: string) => `${n === 0 ? "no" : n} ${one}${n === 1 ? "" : "s"}`;
 
 /** An agent's definition, from its fields' `default`s. */
 function definitionOf(fields: Record<string, JsonSchema>): Definition {
@@ -49,21 +47,36 @@ function definitionOf(fields: Record<string, JsonSchema>): Definition {
   };
 }
 
-/** One agent's prompt, model, tools and skills; every change saved at once, through `save`. */
-function AgentEditor({
+const STEWARD = (
+  <span title="The project's steward: it knows what the project is made of, and operators ask it to change it">
+    <Badge tone="accent">steward</Badge>
+  </span>
+);
+const CHANGED = (
+  <span title="Changed from the dashboard: an override over its definition">
+    <Badge>changed here</Badge>
+  </span>
+);
+
+/** One agent's page: its model and prompt, its tools and skills; every change saved at once, through `save`. */
+function CodeAgentPage({
   name,
   fields,
   override,
+  steward,
   saving,
+  failed,
   save,
-  onDone,
+  onBack,
 }: {
   name: string;
   fields: Record<string, JsonSchema>;
   override: Override;
+  steward: boolean;
   saving: boolean;
+  failed: Error | undefined;
   save: (next: Override) => void;
-  onDone: () => void;
+  onBack: () => void;
 }) {
   const catalog = useApi<ApiAgents>("/agents").data;
   const definition = definitionOf(fields);
@@ -72,68 +85,104 @@ function AgentEditor({
   const tools = override.tools ?? definition.tools;
   const skillOptions = choicesOf(fields.skills?.items) ?? definition.skills;
   const skills = override.skills ?? definition.skills;
+  const changed = Object.keys(override).length > 0;
 
   return (
-    <section aria-label={`${assistantName(name)}'s settings`} className="rise-in mt-1 mb-3 rounded-card border border-line p-4 sm:p-5">
-      <SettingsRow label="System prompt" description="What the agent is told before every conversation. Applies from its next run." stacked htmlFor="settings-system-prompt">
-        <PromptEditor
-          id="settings-system-prompt"
-          label="System prompt"
-          placeholder="You are a helpful assistant: answer briefly, ask when unsure."
-          value={override.systemPrompt}
-          fallback={definition.systemPrompt}
-          saving={saving}
-          onSave={(text) => save({ ...override, systemPrompt: text })}
-          onReset={() => save({ ...override, systemPrompt: undefined })}
-        />
-      </SettingsRow>
-      <SettingsRow label="Model" description="The model that answers, among those of the providers with credentials." htmlFor="settings-model">
-        <SelectControl
-          id="settings-model"
-          label="Model"
-          value={override.model ?? definition.model}
-          disabled={saving}
-          options={models.map((model) => ({ value: model, label: model === definition.model ? `${model} (default)` : model }))}
-          onChange={(model) => save({ ...override, model })}
-        />
-      </SettingsRow>
-      {toolOptions.length > 0 && (
+    <AgentPage
+      name={name}
+      onBack={onBack}
+      line={<span className="font-mono text-[12px]">{override.model ?? definition.model}</span>}
+      badges={
         <>
-          <SettingsHeading>Tools</SettingsHeading>
-          {toolOptions.map((tool) => (
-            <SettingsRow key={tool} label={tool} description={summaryIn(catalog?.tools, tool) ?? (tools.includes(tool) ? "The agent may call it." : "Off: the agent does not have it.")}>
-              <Switch checked={tools.includes(tool)} label={tool} onChange={(on) => save({ ...override, tools: toolOptions.filter((each) => (each === tool ? on : tools.includes(each))) })} />
-            </SettingsRow>
-          ))}
+          {steward && STEWARD}
+          {changed && CHANGED}
         </>
-      )}
-      {skillOptions.length > 0 && (
-        <>
-          <SettingsHeading>Skills</SettingsHeading>
-          {skillOptions.map((skill) => (
-            <SettingsRow key={skill} label={skill} description={summaryIn(catalog?.skills, skill) ?? (skills.includes(skill) ? "The agent knows it, and loads it when a task needs it." : "Off: the agent does not know it.")}>
-              <Switch checked={skills.includes(skill)} label={skill} onChange={(on) => save({ ...override, skills: skillOptions.filter((each) => (each === skill ? on : skills.includes(each))) })} />
-            </SettingsRow>
-          ))}
-        </>
-      )}
-      <div className="flex justify-end gap-2 pt-3">
-        {Object.keys(override).length > 0 && (
-          <Button size="sm" variant="quiet" disabled={saving} onClick={() => save({})}>
+      }
+      actions={
+        changed ? (
+          <Button size="sm" variant="secondary" disabled={saving} onClick={() => save({})} title="Drop every change made here: the definition's prompt, model, tools and skills">
             Use default
           </Button>
-        )}
-        <Button size="sm" variant="secondary" onClick={onDone}>
-          Done
-        </Button>
-      </div>
-    </section>
+        ) : undefined
+      }
+      notice={failed === undefined ? undefined : <ErrorNote error={failed} title="Not saved" />}
+      tabs={[
+        {
+          id: "general",
+          label: "General",
+          icon: Settings,
+          content: (
+            <>
+              <SettingsRow label="Model" description="The model that answers, among those of the providers with credentials." htmlFor="settings-model">
+                <SelectControl
+                  id="settings-model"
+                  label="Model"
+                  value={override.model ?? definition.model}
+                  disabled={saving}
+                  options={models.map((model) => ({ value: model, label: model === definition.model ? `${model} (default)` : model }))}
+                  onChange={(model) => save({ ...override, model })}
+                />
+              </SettingsRow>
+              <SettingsRow label="System prompt" description="What the agent is told before every conversation. Applies from its next run." stacked htmlFor="settings-system-prompt">
+                <PromptEditor
+                  id="settings-system-prompt"
+                  label="System prompt"
+                  placeholder="You are a helpful assistant: answer briefly, ask when unsure."
+                  value={override.systemPrompt}
+                  fallback={definition.systemPrompt}
+                  saving={saving}
+                  onSave={(text) => save({ ...override, systemPrompt: text })}
+                  onReset={() => save({ ...override, systemPrompt: undefined })}
+                />
+              </SettingsRow>
+            </>
+          ),
+        },
+        {
+          id: "tools",
+          label: "Tools",
+          icon: Tools,
+          count: `${tools.length}/${toolOptions.length}`,
+          content: (
+            <ToggleList
+              noun="tool"
+              items={toggleables(toolOptions, catalog?.tools)}
+              on={tools}
+              disabled={saving}
+              onChange={(next) => save({ ...override, tools: next })}
+              onLine="The agent may call it."
+              offLine="Off: the agent does not have it."
+              empty="Its definition names no tool."
+            />
+          ),
+        },
+        {
+          id: "skills",
+          label: "Skills",
+          icon: GraduationCap,
+          count: `${skills.length}/${skillOptions.length}`,
+          content: (
+            <ToggleList
+              noun="skill"
+              items={toggleables(skillOptions, catalog?.skills)}
+              on={skills}
+              disabled={saving}
+              onChange={(next) => save({ ...override, skills: next })}
+              onLine="The agent knows it, and loads it when a task needs it."
+              offLine="Off: the agent does not know it."
+              empty="Its definition names no skill."
+            />
+          ),
+        },
+      ]}
+    />
   );
 }
 
 function CodeAgentsSettings() {
   const runtime = useSettings("runtime-pi");
-  const [editing, setEditing] = useState<string>();
+  const { agents: shown } = useShell();
+  const page = useSettingsPage();
   const [failed, setFailed] = useState<Error>();
 
   if (runtime.error !== undefined && runtime.section === undefined) return <ErrorNote error={runtime.error} title="The agents' settings cannot be read" />;
@@ -143,6 +192,7 @@ function CodeAgentsSettings() {
   const agents = Object.entries(section.schema.properties ?? {})
     .filter(([, schema]) => schema.properties?.systemPrompt !== undefined)
     .map(([name, schema]) => ({ name, fields: schema.properties ?? {} }));
+  const isSteward = (name: string) => shown?.some((agent) => agent.name === name && agent.steward) === true;
 
   /** Saves `next` as `name`'s override, without what is the definition's; no key at all when nothing is left. */
   const saveOverride = (name: string, definition: Definition, next: Override) => {
@@ -159,6 +209,24 @@ function CodeAgentsSettings() {
     runtime.save(all).catch((thrown: unknown) => setFailed(thrown instanceof Error ? thrown : new Error(String(thrown))));
   };
 
+  const opened = agents.find((agent) => agent.name === page.page);
+  if (opened !== undefined) {
+    const definition = definitionOf(opened.fields);
+    return (
+      <CodeAgentPage
+        key={opened.name}
+        name={opened.name}
+        fields={opened.fields}
+        override={(section.value[opened.name] ?? {}) as Override}
+        steward={isSteward(opened.name)}
+        saving={runtime.saving}
+        failed={failed}
+        save={(next) => saveOverride(opened.name, definition, next)}
+        onBack={page.close}
+      />
+    );
+  }
+
   return (
     <div>
       {failed !== undefined && (
@@ -172,29 +240,38 @@ function CodeAgentsSettings() {
         const definition = definitionOf(fields);
         const override = (section.value[name] ?? {}) as Override;
         const changed = Object.keys(override).length > 0;
-        const open = editing === name;
-        const description = [override.model ?? definition.model, count((override.tools ?? definition.tools).length, "tool"), changed && "changed here"].filter(Boolean).join(" · ");
         return (
-          // a fragment, not a wrapper: the rows stay siblings, so only the last one drops its border
-          <Fragment key={name}>
-            <SettingsRow label={assistantName(name)} description={description}>
-              <Button size="sm" variant="quiet" aria-label={`${open ? "Close" : "Edit"} ${assistantName(name)}`} aria-expanded={open} onClick={() => setEditing(open ? undefined : name)}>
-                {!open && <EditPencil width={14} height={14} strokeWidth={1.8} />}
-                {open ? "Close" : "Edit"}
+          <AgentRow
+            key={name}
+            name={name}
+            focus={page.closed === name}
+            badges={
+              <>
+                {isSteward(name) && STEWARD}
+                {changed && CHANGED}
+              </>
+            }
+            line={
+              <>
+                <span className="font-mono text-[12px]">{override.model ?? definition.model}</span>
+                {` · ${countOf((override.tools ?? definition.tools).length, "tool")} · ${countOf((override.skills ?? definition.skills).length, "skill")}`}
+              </>
+            }
+            actions={
+              <Button
+                size="sm"
+                variant="quiet"
+                aria-label={`Edit ${assistantName(name)}`}
+                onClick={() => {
+                  setFailed(undefined);
+                  page.open(name);
+                }}
+              >
+                <EditPencil width={14} height={14} strokeWidth={1.8} />
+                Edit
               </Button>
-            </SettingsRow>
-            {open && (
-              <AgentEditor
-                key={name}
-                name={name}
-                fields={fields}
-                override={override}
-                saving={runtime.saving}
-                save={(next) => saveOverride(name, definition, next)}
-                onDone={() => setEditing(undefined)}
-              />
-            )}
-          </Fragment>
+            }
+          />
         );
       })}
     </div>
