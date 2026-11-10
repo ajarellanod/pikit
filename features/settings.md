@@ -197,8 +197,9 @@ A feature component (`agents-live`, with `router-rules`), offered by `pikit new`
   them whole, validated as the config's: without a directory only the code's agents). With a
   directory, the config's rules may name a live agent (not checked at start), and a rule's agent is
   checked when a message matches it: no agent halts the message, logged. Its section, **Routing**'s
-  first part: the ordered rules (channel, chat, sender; an agent or deny with a reason), "Add rule" in
-  the heading, a save bar while there are changes, "Use the config's rules"; the last card, where
+  first part: the rules (channel, chats, senders; an agent or deny with a reason) by agent (a card
+  per agent, its chats as chips, added several at once, moved to another agent) or in order (each
+  rule a card, dragged), Save and Revert while there are changes, "Use default"; the last card, where
   everything else goes, is router-basic's part.
 - **admin-api**: `GET /admin/api/agents` lists the live agents after the code's (`live: true`,
   `description`, `steward: false`); a dashboard conversation may start with one, and the new-conversation

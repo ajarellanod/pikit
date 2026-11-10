@@ -48,13 +48,26 @@ It refuses to start when a rule names an agent that is not an `agent.definition`
 
 With `settings` installed (settings-store, which comes with the dashboard), the rules are also a
 setting: an operator edits them in Settings, Routing, and they apply from the next message, with no
-deploy. Each rule is a card that reads down ("When channel is [web], and chat is [...], and sender is
-[...], then answered by [Researcher]", or "Nobody: refused", with a reason for the log): the channel one of the App's (its
-`channel-*` components and their named instances: Telegram's `accounts`, `telegram:support`; Google
-Chat's `instances`, `googlechat:ops`, read as "Google Chat: ops") or typed, the chat and the sender added only when wanted;
-rules are dragged by their number or moved from their menu; "Add rule" is in the heading, and a save
-bar stays fixed at the bottom while there are changes. In a rule's card, what is wrong with it: no
-agent chosen, a rule an earlier one always takes first. The locked last card, where everything else
+deploy. Two views of the same rules, Save and Revert in the heading while there are changes:
+
+- **By agent** (the first): one card per agent, "Trader answers in → Google Chat · 63 chats", its
+  chats and senders as chips (a chat's name when the dashboard has seen it, from its conversations'
+  parties, `GET /admin/api/conversations`; else its id), and a "Refused" card for the refusals. Chats
+  are added several at once (pasted, one per line or separated by spaces or commas), taken away, or
+  moved to another agent from a chip's menu. Each change edits the rules and keeps the order's meaning:
+  a chat is one agent's (it leaves the other agents' lists of that channel; a rule left with none goes,
+  never left matching everything), it joins the agent's list, and a new agent's rule goes right before
+  the first rule that would take its chats first (a refusal of every other chat), saying so. Each
+  rule's number shows on its line; a chat an earlier rule takes first is orange.
+- **In order**: the rules as they are read, each a card that reads down ("When channel is [web], and
+  chat in [chips], and sender in [chips], then answered by [Researcher]", or "Nobody: refused", with a
+  reason for the log), dragged by their number or moved from their menu; "Add rule" in the heading.
+
+The channel is one of the App's (its `channel-*` components and their named instances: Telegram's
+`accounts`, `telegram:support`; Google Chat's `instances`, `googlechat:ops`, read as "Google Chat:
+ops") or typed. With many chats, a search narrows both views. Where it is: what is wrong (no agent
+chosen, a list with no id, a rule an earlier one always takes first, a chat an earlier rule takes
+first, an agent that is none now). The locked last card, where everything else
 goes ("ELSE", the default agent, chosen there), is router-basic's part of the same Routing entry, and
 its setting. "Use default" goes back to the config's rules. The section's logic is `settings/rules.ts`,
 tested by the repository's `scripts/routing-settings.test.ts`. The config's `rules` are

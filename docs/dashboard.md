@@ -213,7 +213,7 @@ at it (repo-github-app's setup comes back to `/admin/?settings=repo-github-app`)
 |---|---|---|---|
 | Agents (part 1) | runtime-pi | `settings` | the code's agents ("In the project's code"), each with Edit: its prompt, model, tools and skills overrides, "Use default" |
 | Agents (part 2) | agents-live | `settings`, `agent.directory` | "Made here": create, edit, remove live agents |
-| Routing (part 1) | router-rules | `settings` | the ordered rules: channel, chat, sender; an agent (the code's or a live one) or deny with a reason; "Add rule", a save bar while there are changes |
+| Routing (part 1) | router-rules | `settings` | the rules (channel, chats, senders; an agent, the code's or a live one, or deny with a reason) in two views: "By agent" (a card per agent, its chats as chips with their names, added several at once, moved to another agent; the refusals) and "In order" (each rule a card, dragged; "Add rule"); a search with many chats; Save and Revert while there are changes |
 | Routing (part 2) | router-basic | `settings` | the locked last card: "ELSE · Everything else goes to [agent]" (alone: "ALWAYS · Every message goes to [agent]"), saved at once |
 | GitHub | repo-github-token | `settings`, `repo.github` | the repository (the token is the `GITHUB_TOKEN` secret, never here) |
 | GitHub | repo-github-app | `repo.github` | Connect GitHub (a GitHub App created from a manifest and installed on the repository), the App, its installation and repository, the last token minted, Disconnect; its own routes (`/admin/api/repo-github-app/*`), not settings |

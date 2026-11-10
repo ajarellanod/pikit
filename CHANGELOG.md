@@ -37,7 +37,11 @@ line names its area.
   is one of them, its sender one of them), instead of one `conversation` and one `actor`: one rule
   sends many chats to one agent. A list is never empty and names each id once (at most 1,000). The
   singular fields are gone and refused: rewrite `{ conversation: "42" }` as `{ conversations: ["42"] }`,
-  and the rules an operator saved in the dashboard the same way.
+  and the rules an operator saved in the dashboard the same way. Its Routing section opens **By
+  agent**: a card per agent ("Trader answers in → Google Chat · 63 chats"), its chats as chips with
+  their names when the dashboard has seen them, added several at once, removed, moved to another
+  agent, and the refusals' card; **In order** is the ordered cards, adapted to lists. A chat an
+  earlier rule takes first is marked, and a search narrows both views.
 - A snapshot's restore is bounded: workspace-local's and execution-gondolin's `snapshots` take
   `maxUnpackedBytes` (4 GiB: the tar after gunzip, headers included) and `maxEntries` (1,000,000),
   past which the whole restore is refused and nothing is left half-extracted (a gzip bomb never fills
