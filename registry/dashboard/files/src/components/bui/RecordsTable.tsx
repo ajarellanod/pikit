@@ -85,8 +85,8 @@ export function RecordTag({ children, base, title, mono = false }: { children: R
   );
 }
 
-/** As many tags as fit the cell, then `+n`: the rest are in its tooltip. */
-export function TagList({ tags, render, empty = "—" }: { tags: string[]; render: (tag: string) => ReactNode; empty?: ReactNode }) {
+/** As many tags as fit `rows` lines of the cell (one by default), then `+n`: the rest are in its tooltip. */
+export function TagList({ tags, render, empty = "—", rows = 1 }: { tags: string[]; render: (tag: string) => ReactNode; empty?: ReactNode; rows?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const [visibleCount, setVisibleCount] = useState(tags.length);
@@ -98,14 +98,21 @@ export function TagList({ tags, render, empty = "—" }: { tags: string[]; rende
 
     const update = () => {
       const available = container.clientWidth;
-      const widths = Array.from(measure.querySelectorAll<HTMLElement>("[data-tag-measure]"), (tag) => tag.offsetWidth);
-      const moreWidth = measure.querySelector<HTMLElement>("[data-more-measure]")?.offsetWidth ?? 0;
+      const widths = Array.from(measure.querySelectorAll<HTMLElement>("[data-tag-measure]"), (tag) => tag.getBoundingClientRect().width);
+      const moreWidth = measure.querySelector<HTMLElement>("[data-more-measure]")?.getBoundingClientRect().width ?? 0;
+      // lay the tags out as the wrapping row does: a line full, the next one; the last line keeps room for `+n`
+      let line = 1;
       let used = 0;
       let count = 0;
       for (let index = 0; index < widths.length; index += 1) {
-        const nextUsed = used + (count > 0 ? 4 : 0) + (widths[index] ?? 0);
+        const width = widths[index] ?? 0;
+        let nextUsed = used + (used > 0 ? 4 : 0) + width;
+        if (nextUsed > available && used > 0 && line < rows) {
+          line += 1;
+          nextUsed = width;
+        }
         const hiddenAfter = tags.length - (index + 1);
-        if (nextUsed + (hiddenAfter > 0 ? 4 + moreWidth : 0) > available) break;
+        if (nextUsed + (line === rows && hiddenAfter > 0 ? 4 + moreWidth : 0) > available) break;
         used = nextUsed;
         count += 1;
       }
@@ -116,13 +123,13 @@ export function TagList({ tags, render, empty = "—" }: { tags: string[]; rende
     const observer = new ResizeObserver(update);
     observer.observe(container);
     return () => observer.disconnect();
-  }, [tags]);
+  }, [tags, rows]);
 
   if (tags.length === 0) return <span className="records-muted">{empty}</span>;
   const hiddenCount = tags.length - visibleCount;
 
   return (
-    <div ref={containerRef} className="records-tags" title={tags.join(", ")}>
+    <div ref={containerRef} className={`records-tags ${rows > 1 ? "is-wrapped" : ""}`} title={tags.join(", ")}>
       <div ref={measureRef} className="records-tags-measure" aria-hidden>
         {tags.map((tag) => (
           <span key={tag} data-tag-measure>
@@ -138,7 +145,11 @@ export function TagList({ tags, render, empty = "—" }: { tags: string[]; rende
           {render(tag)}
         </span>
       ))}
-      {hiddenCount > 0 && <span className="records-more-tag">+{hiddenCount}</span>}
+      {hiddenCount > 0 && (
+        <span className="records-more-tag" title={tags.slice(visibleCount).join(", ")}>
+          +{hiddenCount}
+        </span>
+      )}
     </div>
   );
 }

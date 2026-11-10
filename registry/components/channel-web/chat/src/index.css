@@ -1243,6 +1243,12 @@ button.records-header-button:hover {
   overflow: hidden;
 }
 
+/* `rows` lines: they wrap, one line under the other */
+.records-tags.is-wrapped {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
 .records-tags-measure {
   position: absolute;
   top: 0;

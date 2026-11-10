@@ -19,7 +19,7 @@ kept in this browser.
 - **The composer**: the assistant where the harness picks its model, always a dropdown, even with
   one (in a new chat it chooses the agent; in a conversation it shows its agent, and picking another
   starts a new chat with it, since a conversation never changes agent). An agent is shown by its
-  words, the first capitalized (`support-bot` is "Support bot", `assistantName`); its name stays as
+  words, each capitalized (`support-bot` is "Support Bot", `assistantName`); its name stays as
   it is; **+** with exactly two things: **Add image** (PNG, JPEG, WebP or
   GIF, at most 4 of 5 MB each, 1 MB in all on Cloudflare; checked here and by the API; pasting one
   works too) and **Web search** for the next message (only for an assistant with the `websearch`
@@ -64,10 +64,12 @@ switches and selects save at once; a text or a prompt with its own Save.
 - **General** (Dashboard) is the dashboard's own: the theme and the interaction sounds, kept in this
   browser. Nothing of the service changes.
 - **App** (Dashboard), the dashboard's own too, read only: what the App is made of. Where it runs and
-  talks, in one line; its agents (the steward marked), each with its model and tools; its components
+  talks, in one line; its agents (the steward marked), each a card of one size: its model, two lines
+  of its tools (then `+n`, the rest in its tooltip) and how many it has; its components
   by what they are for, each opening under its row with what it provides and to whom, what it needs
   and from whom, and its config (redacted); and, folded, the wiring (choices of providers, what
-  nothing provides, the pipelines' stages, every route and command with its provider).
+  nothing provides, the pipelines' stages, every route and command with its provider). Its tags are
+  identifiers, shown as written (`publish_file`, `agent.directory`).
 - **One section per installed component that brings one** (`src/settings/<component>/`, installed
   with it by `pikit add`), shown when the App provides what it requires. Sections of one `entry` are
   one entry, each component's part shown one after another: **Agents** (runtime-pi's code agents, each
@@ -75,7 +77,9 @@ switches and selects save at once; a text or a prompt with its own Save.
   (router-rules' rules; router-basic's default agent, the last card). Their values are the
   components' settings, kept by `settings-store` (`/admin/api/settings`, installed with the
   dashboard): a change applies to the next run, with no deploy and no restart. Each part edits only
-  its own component's settings.
+  its own component's settings. A part may open a page in place of its entry (`useSettingsPage`,
+  `lib/settings.ts`): an agent's, from the Agents list, with its tabs (`components/pikit/agent-editor.tsx`);
+  its back button or Escape (outside a text field) returns to the list, never closing the dialog.
 
 ## A channel of its own
 
@@ -158,6 +162,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/settings/<component>/index.tsx` | a component's section of the Settings dialog (below) |
 | `src/lib/settings.ts` | how sections are found and when they show (`defineSettings`), a component's settings (`useSettings`) |
 | `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General, and `SchemaSettings`; `settings.tsx` re-exports the rows and controls |
+| `src/components/pikit/agent-editor.tsx` | the Agents entry's look, shared by runtime-pi's and agents-live's parts, each with its own data: an agent's row (`AgentRow`), its page (`AgentPage`: a way back, its header and actions, tabs with icons and counts) and searchable switches grouped by family (`ToggleList`) |
 | `src/components/pikit/app-settings.tsx`, `src/lib/composition.ts` | Settings' App section: where the App runs and talks, its agents, its components by what they are for, each one's details under its row, and the wiring, folded; worked out in `composition.ts` |
 | `src/components/pikit/settings-shell.tsx`, `settings-rows.tsx` | a settings dialog's frame and navigation (`SettingsPanels`, `useSettingsChoice`), its rows and controls (`SettingsHeading`, `SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`): by props only, shared with channel-web's chat page |
 | `src/lib/router.tsx` | the pages under `/admin` |

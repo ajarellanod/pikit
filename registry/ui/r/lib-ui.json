@@ -36,7 +36,7 @@
       "path": "registry/dashboard/files/src/lib/names.ts",
       "type": "registry:file",
       "target": "~/src/lib/names.ts",
-      "content": "/** How the dashboard shows names: no imports, so the kit's tests read it as it is. */\n\n/**\n * An agent's name as the dashboard shows it (the stored name stays as it is): its words, split at\n * `-` and `_`, the first one capitalized. `assistant` is \"Assistant\", `support-bot` \"Support bot\".\n */\nexport function assistantName(name: string): string {\n  const words = name.split(/[-_]+/).filter((word) => word !== \"\").join(\" \");\n  return words === \"\" ? name : words.charAt(0).toLocaleUpperCase() + words.slice(1);\n}\n"
+      "content": "/** How the dashboard shows names: no imports, so the kit's tests read it as it is. */\n\n/**\n * An agent's name as the dashboard shows it (the stored name stays as it is): its words, split at\n * `-` and `_`, each one capitalized. `assistant` is \"Assistant\", `support-bot` \"Support Bot\".\n */\nexport function assistantName(name: string): string {\n  const words = name.split(/[-_]+/).filter((word) => word !== \"\");\n  return words.length === 0 ? name : words.map((word) => word.charAt(0).toLocaleUpperCase() + word.slice(1)).join(\" \");\n}\n"
     },
     {
       "path": "registry/dashboard/files/src/lib/sounds.ts",

@@ -199,8 +199,8 @@ test("the Context panel reads a transcript's sources as the websearch and fetch 
   ]);
 });
 
-test("an assistant is shown by its words, the first capitalized; its stored name stays as it is", () => {
-  expect(["assistant", "support-bot", "sales_helper-v2", "Ops", "a--b", "-"].map(assistantName)).toEqual(["Assistant", "Support bot", "Sales helper v2", "Ops", "A b", "-"]);
+test("an assistant is shown by its words, each capitalized; its stored name stays as it is", () => {
+  expect(["assistant", "support-bot", "sales_helper-v2", "Ops", "a--b", "-", "notm-bot", "trader-plus", "designer_minion"].map(assistantName)).toEqual(["Assistant", "Support Bot", "Sales Helper V2", "Ops", "A B", "-", "Notm Bot", "Trader Plus", "Designer Minion"]);
 });
 
 test('the "/" menu lists only the commands the App registered; titles are the API\'s, never kept or looked for in the browser', () => {

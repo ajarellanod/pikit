@@ -36,19 +36,28 @@ const GROUP_ICONS: Record<string, ReactNode> = {
 const CARD = "overflow-hidden rounded-card bg-surface shadow-card";
 
 const quiet = (text: string) => <p className="text-[12.5px] text-ink-3">{text}</p>;
-const name = (text: string) => <RecordTag title={text}>{text}</RecordTag>;
+/* The tags of this page are identifiers (components, capabilities, tools): `mono`, as written. */
+const name = (text: string) => (
+  <RecordTag mono title={text}>
+    {text}
+  </RecordTag>
+);
 
 /** A capability's tag, coloured by its family (`agent.`, `storage.`, …): the same everywhere. */
 const capabilityTag = (capability: string) => (
-  <RecordTag base={tagHue(capability.split(".")[0] ?? capability)} title={capability}>
+  <RecordTag mono base={tagHue(capability.split(".")[0] ?? capability)} title={capability}>
     {capability}
   </RecordTag>
 );
 
-/** An agent: its name (the steward marked, a live one said so), what it is for, its model and its tools. */
+/**
+ * An agent: its name (the steward marked, a live one said so), what it is for (two lines at most),
+ * its model and its tools (two lines of them, then `+n`), and how many tools it has: every card the
+ * same size, however many tools.
+ */
 function AgentCard({ agent }: { agent: ApiAgent }) {
   return (
-    <article className={`${CARD} flex flex-col gap-3 p-4`}>
+    <article className={`${CARD} flex h-full min-w-0 flex-col gap-3 p-4`}>
       <div className="flex min-w-0 items-center gap-2">
         <RecordMark name={agent.name} />
         <span className="min-w-0 truncate text-[14px] font-medium text-ink" title={agent.name}>
@@ -65,21 +74,18 @@ function AgentCard({ agent }: { agent: ApiAgent }) {
           </span>
         )}
       </div>
-      {agent.description !== undefined && <p className="text-[12.5px] leading-relaxed text-ink-2">{agent.description}</p>}
+      {agent.description !== undefined && (
+        <p className="line-clamp-2 text-[12.5px] leading-relaxed text-ink-2" title={agent.description}>
+          {agent.description}
+        </p>
+      )}
       <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-2" title={agent.model}>
         <Cpu width={14} height={14} className="shrink-0 text-ink-3" aria-hidden />
         <span className="min-w-0 truncate font-mono text-[12px]">{agent.model}</span>
       </div>
-      <div className="flex flex-wrap gap-1">
-        {agent.tools.length === 0 ? (
-          <span className="text-[12.5px] text-ink-3">No tools</span>
-        ) : (
-          agent.tools.map((tool) => (
-            <RecordTag key={tool} title={tool}>
-              {tool}
-            </RecordTag>
-          ))
-        )}
+      <div className="mt-auto flex flex-col gap-2">
+        {agent.tools.length > 0 && <TagList tags={agent.tools} render={name} rows={2} />}
+        <p className="text-[12px] text-ink-3 tabular-nums">{agent.tools.length === 0 ? "No tools" : agent.tools.length === 1 ? "1 tool" : `${agent.tools.length} tools`}</p>
       </div>
     </article>
   );
@@ -310,7 +316,7 @@ export function AppSettings() {
           <EmptyState icon={<Sparks />} title="No agent" hint="The App has no agent to talk to." />
         </div>
       ) : (
-        <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+        <div className="mt-2 grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
           {agents.map((agent) => (
             <AgentCard key={agent.name} agent={agent} />
           ))}

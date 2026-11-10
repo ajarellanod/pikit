@@ -95,7 +95,7 @@ export default defineView({
   operator's page is `Page` / `Section` (`bui/Page`, the page `fill: true`): the view's name over what
   it says now, then sections with `FilterChips` (a dot and a count each), a `RecordsTable` (columns
   with a glyph, sorting, a numbered gutter; its count is the section's figure or its chips'; with `paging` the server's pages, a footer "Showing 1-20 of 57" and `Pagination`; `RecordMark`,
-  `RecordTag`, `TagList` in its cells), `StatusDot` for a state (a dot and the label in ink, never a filled pill), `EmptyState` when nothing shows, `SearchField`, `Field` for a form's field (its label, a red asterisk when required, "(optional)" when not, a hint, an error; every field has a placeholder),
+  `RecordTag` (`mono` for an identifier, as written), `TagList` (one line of tags then `+n`; `rows` for more) in its cells), `StatusDot` for a state (a dot and the label in ink, never a filled pill), `EmptyState` when nothing shows, `SearchField`, `Field` for a form's field (its label, a red asterisk when required, "(optional)" when not, a hint, an error; every field has a placeholder),
   `CodeBlock` for JSON; health-registry's and the base `delivery` view are
   examples. Also `Badge` (a small quiet tag, or tinted), `Chip`, `Button`, `Switch`, `ContextCards` (a card per
   source: title, figure, text, a chip that opens it), `ToolChips`, `LoadingState`. shadcn's in `src/components/ui/` (in the same
