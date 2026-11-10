@@ -200,7 +200,8 @@ missing or unusable required one fails the start, naming it.
   `/name`, runtime-pi's `/compact`, another component's) that the `commands` config allows is routed
   like any message (a sender the router denies runs nothing), then runs in its conversation with its
   sender (`{ channel, id: "users/<id>" }`), and never reaches the agent. Its note is said in the
-  message's thread (`/name: done.` when it has none; `/name failed: <why>` when it fails). It runs
+  message's thread (`/name: done.` when it has none; `/name failed: <why>` when it fails, as for a
+  command of other agents than the conversation's: `agents`, a prompt template's). It runs
   once per message: what it said is kept under `command:<message name>`, and Google delivering the
   message again is told the same, under the same ids. `/new` and `/reset` stay the channel's (they
   win over an App command of that name). An unknown `/word`, or a command `commands` does not allow,
