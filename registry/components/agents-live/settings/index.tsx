@@ -132,10 +132,10 @@ function LiveAgentPage({
                   aria-label="System prompt"
                   value={fields.systemPrompt ?? ""}
                   onChange={(event) => set({ systemPrompt: event.target.value })}
-                  rows={8}
+                  rows={16}
                   spellCheck
                   placeholder="You answer billing questions for Acme's customers, briefly and kindly."
-                  className="control min-h-40 w-full resize-y font-mono text-[12.5px] leading-relaxed"
+                  className="control min-h-80 w-full resize-y font-mono text-[12.5px] leading-relaxed"
                 />
               </SettingsRow>
             </>

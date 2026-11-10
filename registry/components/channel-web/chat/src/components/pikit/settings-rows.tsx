@@ -174,10 +174,10 @@ export function PromptEditor({
         aria-label={label}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
-        rows={8}
+        rows={16}
         placeholder={placeholder}
         spellCheck
-        className="control min-h-40 w-full resize-y font-mono text-[12.5px] leading-relaxed"
+        className="control min-h-80 w-full resize-y font-mono text-[12.5px] leading-relaxed"
       />
       <div className="flex min-h-(--control-h) items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">{value === undefined ? "Default" : "Changed from the dashboard"}</span>
