@@ -112,7 +112,11 @@ for end users, who may sign themselves up, and an operator's command (admin-api'
 deploy; any that says no audience) acts on the conversation or the App with no check of who typed it.
 Name one only if it is safe for anyone who can sign up; `"all"` only when every user is trusted. A name the App has no command of is left out (`ChatConfig.commands` lists those
 there are); a command not allowed goes to the agent as text. Read where the conversations are (on
-Cloudflare the objects' App, the default one).
+Cloudflare the objects' App, the default one). A command for some agents only (`agents`: a project's
+prompt template is for the agents that have it) is listed with those of them users may pick
+(`ChatCommand.agents`; an agent they may not pick is never named): the page's "/" lists it only in
+their chats (in a chat whose assistant is not one they may pick, every command), and typed in another
+agent's chat it is refused (`failed`, `/name is not a command of the agent "<agent>"`).
 
 ## What the operator does
 
@@ -408,7 +412,8 @@ under an https `PIKIT_PUBLIC_URL`).
   user's, none without a project; an agent picked too). Commands: listed in the config (the default,
   `"all"`, `[]`), run in the conversation with the user as sender, never dispatched nor in the
   transcript, once by request id, a failure's message, a routing denial running nothing and keeping no
-  claim, a first message that is a command making the chat in its project's space.
+  claim, a first message that is a command making the chat in its project's space, a command for some
+  agents listed with the offered ones only and refused in another agent's chat.
 - `visibility.test.ts`: each policy value on messages, entries and the live value (a hidden block
   left out of the partial, a change only to what is hidden sending nothing), and what never shows under the defaults.
 - Security cases: a spoofed `Host` gets no link nor email and `400` (accounts, the operator's routes),

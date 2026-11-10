@@ -392,6 +392,21 @@ describe("the composer", () => {
     expect(render({ images, files: fileLimits("server") })).toContain('aria-label="Add files"');
   });
 
+  test.skipIf(!installed)('its "/" menu lists the commands for the agent: those naming no agents, or that one; with no agent, every one', async () => {
+    const { commandsFor } = await import(join(CHAT, "src/components/bui/PromptBar.tsx"));
+    const commands = [
+      { name: "new", description: "New" },
+      { name: "audit", description: "Audit", agents: ["notm-bot"] },
+      { name: "report", description: "Report", agents: ["trader", "notm-bot"] },
+      { name: "nobody", description: "None offered", agents: [] },
+    ];
+    const names = (agent: string | undefined) => (commandsFor(commands, agent) as { name: string }[]).map((each) => each.name);
+    expect(names("admin")).toEqual(["new"]);
+    expect(names("notm-bot")).toEqual(["new", "audit", "report"]);
+    expect(names("trader")).toEqual(["new", "report"]);
+    expect(names(undefined)).toEqual(["new", "audit", "report", "nobody"]);
+  });
+
   // With the default policy (tools: "names") a call's result is withheld: it opened to "(no output)".
   test.skipIf(!installed)("a tool call opens to its result only where results are shown: the chat with tools withheld shows the name alone", async () => {
     const { default: ToolChips } = await import(join(CHAT, "src/components/bui/ToolChips.tsx"));

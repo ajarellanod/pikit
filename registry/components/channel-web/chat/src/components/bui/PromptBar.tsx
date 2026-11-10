@@ -86,8 +86,9 @@ export type Command = {
   agents?: readonly string[];
 };
 
-/** Whether the menu lists `command` for `agent`: it names no agents, or that one; every command with no agent. */
-const listedFor = (command: Command, agent: string | undefined): boolean => agent === undefined || command.agents === undefined || command.agents.includes(agent);
+/** The commands the menu lists for `agent`: those that name no agents, or that one; with no agent, every one. */
+export const commandsFor = (commands: readonly Command[], agent: string | undefined): Command[] =>
+  commands.filter((command) => agent === undefined || command.agents === undefined || command.agents.includes(agent));
 
 /** The tallest the menu grows, and the least it keeps when the room above is short, in pixels. */
 const MENU_MAX = 384;
@@ -262,7 +263,7 @@ export default function PromptBar({
   };
 
   /* the commands the menu offers: the agent's (every one is still run when typed) */
-  const listed = commands.filter((command) => listedFor(command, agent));
+  const listed = commandsFor(commands, agent);
 
   const rows: MenuRow[] =
     menu === "plus"
