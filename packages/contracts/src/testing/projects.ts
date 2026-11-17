@@ -190,6 +190,20 @@ export function createProjectsConformance(fixture: ProjectsFixture): readonly Co
       expect(await projects.removeMember(space, ANA, people(ANA), ctx), true, "who is no longer owner leaves");
       expect((await outcome(() => projects.transferOwnership(space, STRANGER, people(LUIS), ctx))).code !== "resolved", true, "a transfer to a non-member refused");
     }),
+    one("an operator does the owner's acts on any project: lists it, hands it over, removes the old owner, archives it; each logged as theirs", async (subject) => {
+      const { projects, ctx } = subject;
+      const space = await shared(subject);
+      check((await projects.list({ limit: 100 }, OPERATOR, ctx)).items.some((project) => project.space === space), "an operator lists every project");
+      expect((await projects.members(space, { limit: 10 }, OPERATOR, ctx)).items.map((member) => member.principal.id), ["u-ana", "u-luis"], "and reads its members");
+      expect((await projects.transferOwnership(space, LUIS, OPERATOR, ctx)).owner.id, "u-luis", "an operator hands it to a member");
+      expect(await projects.removeMember(space, ANA, OPERATOR, ctx), true, "an operator removes the former owner");
+      expect(await projects.roleOf(space, [ANA], ctx), undefined, "who was removed has no role");
+      check((await projects.update(space, { archived: true }, OPERATOR, ctx)).archivedAt !== undefined, "an operator archives it");
+      const owners = (await projects.members(space, { limit: 10 }, OPERATOR, ctx)).items.filter((member) => member.role === "owner");
+      expect(owners.map((member) => member.principal.id), ["u-luis"], "still exactly one owner");
+      const latest = (await allChanges(projects, space, OPERATOR, ctx)).slice(-3);
+      expect(latest.map((change) => change.by), [{ kind: "operator", id: "admin" }, { kind: "operator", id: "admin" }, { kind: "operator", id: "admin" }], "the operator's acts are logged as theirs");
+    }),
     one("a removed member's reads and writes stop at their next call", async (subject) => {
       const { projects, ctx } = subject;
       const space = await shared(subject);

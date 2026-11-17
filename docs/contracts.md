@@ -1155,7 +1155,8 @@ Provider: [projects-sql](../registry/components/projects-sql/README.md) (a direc
 actor per project, over `storage.sql`; a Worker half and the admin routes `/admin/api/projects*`).
 Users: channel-web, projects-context, memory-recall, tool-space-files. Suite: `createProjectsConformance`
 (`@pikit/contracts/testing`), with the note's negative cases (a non-member writes nothing, a removed
-member's writes stop, sourced members expire, an agent stays in its space, the owner's acts, restore
+member's writes stop, sourced members expire, an agent stays in its space, the owner's acts (and an
+operator's on any project: hand-over, removal, archive, as channel-web does for a removed user), restore
 exact, the log not rewritable by members, conflicts, the core budget, search in its project,
 credentials, malformed callers, context `unchanged`, removal and recovery, restart) and
 `changeLogCases` over documents (with a repeat, retention, a redaction and a write failing before its
