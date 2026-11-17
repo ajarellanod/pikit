@@ -30,7 +30,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-notify, tool-read, tool-schedule, tool-websearch-brave, tool-websearch-gemini, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
-| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, extension-tracing, memory-recall, tool-space-files | agents-live?, runtime-pi? | none |
+| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, extension-tracing, memory-recall, projects-context, tool-space-files | agents-live?, runtime-pi? | none |
 | `mcp.auth` | keyed | tool-mcp-oauth | tool-mcp? | none (tool-mcp-oauth's own tests; one provider) |
 | `agent.command` | keyed | admin-api, memory-recall, runtime-pi | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, scheduler-admit | `createConversationRegistryConformance` |
@@ -58,11 +58,11 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `approvals` | single | approvals-sql | admin-approvals, extension-approvals | `createApprovalsConformance` (approvals-sql's `conformance.ts`) |
 | `workspace` | single | execution-boat, execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
-| `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
-| `projects` | single | none | none | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
-| `space.files` | single | none | none | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
+| `memory` | single | memory-sql | memory-recall, memory-summaries, projects-context? | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
+| `projects` | single | none | projects-context | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
+| `space.files` | single | none | projects-context? | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
 | `principals` | single | none | none | none (no kit provider: neural-agents' people directory) |
-| `document.convert` | single | none | none | none yet (planned provider: convert-workers-ai) |
+| `document.convert` | single | convert-workers-ai | none | none (one provider: convert-workers-ai's tests against a fake binding) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web),
@@ -1072,8 +1072,8 @@ Crypto, `AWS_SES_*`). Consumer: channel-web's accounts (being built). Suite:
 The contracts of [projects](../features/projects.md): a project is the record of one space, shared by
 its members and agents, with no approvals and every change logged. They are in `@pikit/contracts`
 (not a registry's own) because several kit components use each of them (channel-web, projects-context,
-memory-recall, tool-space-files, projects-sql). None has a provider yet: projects-sql,
-tool-space-files' `space.files`, convert-workers-ai are being built; `principals` has none in the kit.
+memory-recall, tool-space-files, projects-sql). projects-sql and tool-space-files' `space.files`
+are being built; `document.convert` has convert-workers-ai; `principals` has none in the kit.
 
 ### `Author` and `Change` ([change.ts](../packages/contracts/src/change.ts))
 
@@ -1183,8 +1183,8 @@ people directory provides it. Users: channel-web, memory-recall, projects-sql's 
 document's text as Markdown (PDF, Office, OpenDocument, HTML, XML, CSV), at most `CONVERT_TEXT_MAX`,
 never empty; `ConvertError` codes `invalid`, `too_large`, `empty`, `failed`, `unavailable`, never
 quoting the document; nothing kept. Helpers for its users: `isTextType`, `mediaTypeOf`, `textOf`,
-`cutText`. Absent, only text types are read. Planned provider: convert-workers-ai (Workers AI's
-`toMarkdown`). Users: projects-sql's and channel-web's document routes, tool-space-files.
+`cutText`. Absent, only text types are read. Provider: convert-workers-ai (Workers AI's
+`toMarkdown`, `durable`; tested against a fake of the binding). Users: projects-sql's and channel-web's document routes, tool-space-files.
 
 ## A registry's own contracts
 

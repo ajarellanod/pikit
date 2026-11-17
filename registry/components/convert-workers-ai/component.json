@@ -1,0 +1,33 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "convert-workers-ai",
+  "version": "0.0.1",
+  "description": "A document's text as Markdown through Workers AI's toMarkdown (the Worker's AI binding): PDF, Office, OpenDocument, HTML, XML, CSV; never images. Provides document.convert on Cloudflare.",
+  "targets": [
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "document.convert"
+  ],
+  "apps": {
+    "worker": "default"
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

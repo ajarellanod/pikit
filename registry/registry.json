@@ -132,6 +132,14 @@
       ],
       "path": "components/conversations-kv"
     },
+    "convert-workers-ai": {
+      "version": "0.0.1",
+      "description": "A document's text as Markdown through Workers AI's toMarkdown (the Worker's AI binding): PDF, Office, OpenDocument, HTML, XML, CSV; never images. Provides document.convert on Cloudflare.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/convert-workers-ai"
+    },
     "credentials-do": {
       "version": "0.0.1",
       "description": "The model providers' credentials on Cloudflare, API keys and subscription logins (OAuth) alike, kept by one Durable Object that every conversation asks; an expiring token is refreshed once, under that object's lock. `pikit configure --login` uploads a login made on your machine.",
@@ -360,6 +368,15 @@
         "durable"
       ],
       "path": "components/outbound-durable"
+    },
+    "projects-context": {
+      "version": "0.0.1",
+      "description": "The agents' one view of a project, for the agents that name the extension project: a stable section with the project's members, instructions, rules with their source, core documents, notes, files and links; the tools project_search (one search over the project, its memory and its files), project_read and project_link, over projects, memory and space.files.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/projects-context"
     },
     "proposals-github": {
       "version": "0.0.1",
