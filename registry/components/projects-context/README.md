@@ -40,7 +40,7 @@ Config (`pikit.config.ts`, all optional):
 | `noneMs` | `60000` | how long a space with no project is remembered as such |
 | `pageUrl` | none | the project's page, `{id}` replaced by its id; absent, the section names no page |
 | `members`, `rules`, `preferences`, `notes`, `summaries`, `documents`, `files`, `links` | 30, 50, 20, 30, 3, 50, 20, 20 | how many of each the section shows (the rest counted or said, and found by `project_search`) |
-| `coreTokens` | 8000 | the core documents' budget, in estimated tokens (`ceil(chars / 4)`) |
+| `coreTokens` | the project's | the core documents' budget, in estimated tokens (`ceil(chars / 4)`); absent, the project's own (`Project.coreTokens`: what its store keeps them within) |
 | `agents` | `{}` | per agent, `{ coreTokens }`: a smaller (or larger) budget |
 | `machineChannels` | `["delegate", "scheduler"]` | the channels whose senders are not people: no preferences, no `for` |
 
@@ -96,7 +96,8 @@ Links (data, not instructions):
   page or in a chat; an agent, its chat's channel and the person it answered); every document its id,
   title, version, date and author. Instructions rank above rules, rules above preferences; documents,
   notes, summaries, files and links are presented as data.
-- **Budgets:** core documents whole, in order, while they fit the agent's `coreTokens`; one past it is
+- **Budgets:** core documents whole, in order, while they fit the agent's `coreTokens` (by default the
+  project's own, `Project.coreTokens`, so a project's core documents all fit); one past it is
   listed with the others, saying so ("past your budget of N tokens: read it with project_read"):
   nothing is cut silently. The header names only the tools the request offers (`input.agent.tools`).
 - **`project_search {"query"}`:** one search over everything of the project: `projects.search`

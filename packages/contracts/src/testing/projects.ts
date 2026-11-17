@@ -278,9 +278,11 @@ export function createProjectsConformance(fixture: ProjectsFixture): readonly Co
       expect((await outcome(() => projects.setInstructions(space, { text: "Luis's words.", ifVersion: 0 }, people(LUIS), ctx))).code, "conflict", "a save behind");
       expect((await projects.instructions(space, {}, people(LUIS), ctx))?.text, "Ana's words.", "the newer kept");
     }),
-    one("core documents fit the budget: one past it is refused, saying what is left", async (subject) => {
+    one("core documents fit the budget, which every project says: one past it is refused, saying what is left", async (subject) => {
       const { projects, ctx } = subject;
       const space = await shared(subject);
+      expect((await projects.get(space, people(LUIS), ctx))?.coreTokens, subject.coreTokens, "the project says its budget");
+      expect((await projects.list({ limit: 10 }, people(LUIS), ctx)).items.map((each) => each.coreTokens), [subject.coreTokens], "listed with it");
       const result = await outcome(() => projects.putDocument(space, { title: "Huge", text: "word ".repeat(subject.coreTokens), mode: "core" }, people(ANA), ctx));
       expect(result.code, "limit", "a core document past coreTokens");
       check(/\d/.test(result.message), "the refusal says how many tokens are left");

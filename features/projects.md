@@ -257,7 +257,7 @@ The log's guarantees, for each store that keeps one:
 
 The record of one space: `Project` (`id`, 32 hex; `space`, fixed; `name`; `description`; `agents`;
 `owner`; the caller's `role`; `members`; `archivedAt`; `removedAt` for operators; `version`, bumped by
-every change an agent's context shows), `Member` (`principal`, `role`, `source`: `manual` or a source's
+every change an agent's context shows; `coreTokens`, the store's budget of core documents), `Member` (`principal`, `role`, `source`: `manual` or a source's
 name, `checkedAt`, `by`, `at`), `Instructions`, `ProjectDocument` (`core` or `reference`, `chars`,
 `tokens`, `version`, `source` when pinned from a saved file), `Link`, `ItemVersion`, `ProjectContext`.
 Every method but `locate` and `roleOf` takes a `Caller`:

@@ -34,9 +34,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AppEvents, BACKGROUND_CONTEXT, defineApp, defineComponent, type HttpRoute, silentLogger } from "@pikit/core";
+import { type AppEvents, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { createManualClock } from "@pikit/core/testing";
-import { compareHttpRoutes, defineAgent, matchesHttpRoute, parseHttpRouteKey } from "@pikit/contracts";
+import { compareHttpRoutes, defineAgent, type HttpRoute, matchesHttpRoute, parseHttpRouteKey } from "@pikit/contracts";
 import { createMemoryWakeups } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import type {
@@ -143,6 +143,7 @@ async function world() {
     "memory-recall": { freshMs: 0, noProjectMs: 0 },
     "tool-space-files": { freshMs: 0 },
     "projects-context": { freshMs: 0, noneMs: 0, pageUrl: PAGE },
+    "projects-sql": { coreTokens: 4_000 },
   };
   const app = await defineApp({ components, config, clock, logger: silentLogger }).create();
   await app.start();
@@ -226,6 +227,9 @@ test("a project end to end: made on the page, its chat's agent sees it and adds 
   await w.ok("ana", "PUT", `${P}/instructions`, { text: "Answer the client formally.", ifVersion: 0 });
   const brief = await w.ok<ChatDocument>("ana", "POST", `${P}/documents`, { title: "Brief 2027", mode: "core", text: "The brief: a launch in Valencia, for 300 guests." }, 201);
   expect(brief).toMatchObject({ mode: "core", version: 1 });
+  // The budget is the store's (projects-sql's coreTokens), as the page shows it and refuses past it.
+  expect((await w.ok<{ coreBudget: number }>("ana", "GET", `${P}/documents`)).coreBudget).toBe(4_000);
+  expect((await w.call<{ error: string; message: string }>("ana", "POST", `${P}/documents`, { title: "Big", mode: "core", text: "x".repeat(16_000) })).body).toMatchObject({ error: "limit", message: expect.stringContaining("of the 4000 tokens") });
 
   // Ben starts a chat in it: the project's tools only, and its one section.
   const { chat, answer: tools } = await w.start("ben", "echo-tools", project.id);
@@ -292,7 +296,7 @@ test("a project end to end: made on the page, its chat's agent sees it and adds 
     ["project", "project", "added"],
   ]);
   const overview = await w.ok<ChatProjectOverview>("ben", "GET", P);
-  expect(overview).toMatchObject({ documents: 1, links: 1, files: { names: 1 }, memory: { rules: 1, notes: 1, summaries: 0 } });
+  expect(overview).toMatchObject({ coreBudget: 4_000, documents: 1, links: 1, files: { names: 1 }, memory: { rules: 1, notes: 1, summaries: 0 } });
 
   // Ben (a member) removes the note, then brings it back from History: the same id, words and author.
   const memory = await w.ok<ChatMemory>("ben", "GET", `${P}/memory`);

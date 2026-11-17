@@ -162,7 +162,7 @@ export class MemoryProjects implements ProjectStore {
     const at = this.now();
     const by = authorOf(caller);
     const record: ProjectRecord = {
-      project: { id, space, name: input.name, description: input.description ?? "", agents: [...(input.agents ?? [])], owner, createdAt: at, updatedAt: at, version: 1 },
+      project: { id, space, name: input.name, description: input.description ?? "", agents: [...(input.agents ?? [])], owner, createdAt: at, updatedAt: at, version: 1, coreTokens: this.coreTokens },
       members: [{ principal: owner, role: "owner", source: "manual", checkedAt: at, by, at }],
       instructions: [],
       documents: new Map(),

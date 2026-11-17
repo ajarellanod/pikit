@@ -32,7 +32,6 @@ import {
   type Caller,
   CONTEXT_MEMBERS,
   CONVERSATION,
-  CORE_TOKENS_DEFAULT,
   type ConversationRef,
   changeTitle,
   formatItemRef,
@@ -83,8 +82,8 @@ const Config = Type.Object({
   documents: budget(200, 50, "Reference documents the section lists; the rest counted."),
   files: budget(1000, 20, "Files the section lists, the newest."),
   links: budget(200, 20, "Links the section lists; the rest counted."),
-  /** The core documents' budget in estimated tokens: documents past it are listed as reference, and the section says so. */
-  coreTokens: Type.Integer({ minimum: 0, maximum: 1_000_000, default: CORE_TOKENS_DEFAULT }),
+  /** The core documents' budget in estimated tokens: documents past it are listed as reference, and the section says so. Absent: the project's own (`Project.coreTokens`, what its store keeps them within). */
+  coreTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
   /** Per agent, a smaller (or larger) core budget than `coreTokens`. */
   agents: Type.Record(Type.String({ minLength: 1 }), Type.Object({ coreTokens: Type.Integer({ minimum: 0, maximum: 1_000_000 }) }), { default: {} }),
   /** The channels whose senders are not people: their runs have no preferences, and no `for`. */
@@ -573,7 +572,7 @@ export function createProjectsContext(config: ProjectsContextConfig, deps: Proje
           {
             tools: input.agent.tools.map((tool) => tool.name),
             ...(config.pageUrl !== undefined && { pageUrl: config.pageUrl }),
-            coreTokens: config.agents[conversation.agent]?.coreTokens ?? config.coreTokens,
+            coreTokens: config.agents[conversation.agent]?.coreTokens ?? config.coreTokens ?? view.context.project.coreTokens,
             limits: config,
           },
         );

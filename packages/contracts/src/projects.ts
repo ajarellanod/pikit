@@ -39,8 +39,8 @@
  * - **Bounds**: a name of one line, 1 to `PROJECT_NAME_MAX` characters; a description up to
  *   `PROJECT_DESCRIPTION_MAX`; instructions up to `INSTRUCTIONS_MAX`; a document up to `DOCUMENT_MAX`, at
  *   most `PROJECT_DOCUMENTS_MAX` a project and `PROJECT_TEXT_MAX` characters of current text; the core
- *   documents' tokens (`estimateTokens`) within the provider's `coreTokens`, `putDocument` refusing a core
- *   document past it (`limit`, saying how many are left); at most `PROJECT_LINKS_MAX` links and
+ *   documents' tokens (`estimateTokens`) within the provider's `coreTokens` (every `Project` says it:
+ *   `Project.coreTokens`), `putDocument` refusing a core document past it (`limit`, saying how many are left); at most `PROJECT_LINKS_MAX` links and
  *   `PROJECTS_OWNED_MAX` projects owned by one principal. Past any: `limit`.
  * - **No credentials**: a name, description, instructions, a document's title or text, a link's URL,
  *   title or note with a known credential's shape (`credentialSettingProblem`) is `refused`, never echoed.
@@ -114,6 +114,8 @@ export type Project = {
   updatedAt: number;
   /** Bumped by every change an agent's context shows (record, members, instructions, documents, links). */
   version: number;
+  /** The core documents' budget, in estimated tokens (`estimateTokens`): the provider's, what `putDocument` keeps them within. */
+  coreTokens: number;
 };
 
 /** A member. `source` is `manual` (added by someone; never stale) or the name of the source a component keeps in step (`googlechat:spaces/AAA`). */

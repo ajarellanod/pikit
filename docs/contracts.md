@@ -1141,8 +1141,9 @@ interface ProjectStore {
   always. Agents read, search and add links. `redact` is operators', `syncMembers` components'.
 - Membership: `manual` members never expire; a sourced member counts while `checkedAt` is within
   `staleAfterMs` (`memberIsCurrent`, `roleOfMembers`: `roleOf`'s one rule, owner wins).
-- Versions and `ifVersion` (`conflict`), bounds (`limit`: the core documents within `coreTokens`, said
-  how many are left), credentials `refused` unechoed, `ProjectError` codes `not_found`, `forbidden`,
+- Versions and `ifVersion` (`conflict`), bounds (`limit`: the core documents within the provider's
+  `coreTokens`, which every `Project` says, `Project.coreTokens`, for a page's meter and an agent's
+  section; the refusal says how many are left), credentials `refused` unechoed, `ProjectError` codes `not_found`, `forbidden`,
   `conflict`, `gone`, `space_taken`, `limit`, `refused`, `invalid`.
 - The agents' one read path spans three stores, so its vocabulary is here: `ProjectSearchHit` (`ref`,
   `kind`: `instructions`, `document`, `link`, `rule`, `note`, `summary`, `file`; title, snippet, author,
@@ -1152,7 +1153,7 @@ interface ProjectStore {
 
 Provider: [projects-sql](../registry/components/projects-sql/README.md) (a directory actor and one
 actor per project, over `storage.sql`; a Worker half and the admin routes `/admin/api/projects*`).
-Users (being built): channel-web, projects-context, memory-recall. Suite: `createProjectsConformance`
+Users: channel-web, projects-context, memory-recall, tool-space-files. Suite: `createProjectsConformance`
 (`@pikit/contracts/testing`), with the note's negative cases (a non-member writes nothing, a removed
 member's writes stop, sourced members expire, an agent stays in its space, the owner's acts, restore
 exact, the log not rewritable by members, conflicts, the core budget, search in its project,

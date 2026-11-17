@@ -43,7 +43,6 @@ import {
   type Change,
   type ChangePage,
   type ChangePageRequest,
-  CORE_TOKENS_DEFAULT,
   DOCUMENT_TITLE_MAX,
   type DocumentConverter,
   isTextType,
@@ -523,7 +522,7 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
       project: chatProjectOf(project, chats[id] ?? 0),
       documents: documents.length,
       coreTokens: documents.filter((each) => each.mode === "core").reduce((sum, each) => sum + each.tokens, 0),
-      coreBudget: CORE_TOKENS_DEFAULT,
+      coreBudget: project.coreTokens,
       links: links.length,
       ...(usage !== undefined && { files: { names: usage.usage.names, bytes: usage.usage.bytes } }),
       ...(counts !== undefined && { memory: { rules: counts[0].length, notes: counts[1].length, summaries: counts[2].length } }),
@@ -663,11 +662,12 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
 
   user(`GET ${API}/projects/:id/documents`, async (request, ctx, me) => {
     const { projects, space, who: asking } = await at(request, me, ctx);
-    const documents = await projects.documents(space, asking.caller, ctx);
+    const [documents, project] = await Promise.all([projects.documents(space, asking.caller, ctx), projects.get(space, asking.caller, ctx)]);
+    if (project === undefined) throw notFound();
     return json<ChatDocuments>(200, {
       items: documents.map(chatDocumentOf),
       coreTokens: documents.filter((each) => each.mode === "core").reduce((sum, each) => sum + each.tokens, 0),
-      coreBudget: CORE_TOKENS_DEFAULT,
+      coreBudget: project.coreTokens,
     });
   });
 

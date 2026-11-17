@@ -333,6 +333,7 @@ class Project_ {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       version: row.version,
+      coreTokens: this.env.options.coreTokens,
     };
   }
 
