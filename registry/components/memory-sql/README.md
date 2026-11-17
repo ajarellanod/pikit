@@ -47,7 +47,8 @@ export const config = {
 type MemoryOwner = { type: "space"; space: string } | { type: "agent"; agent: string } | { type: "person"; channel: string; id: string };
 type MemoryKind = "fact" | "summary" | "rule" | "preference";
 type MemoryStatus = "active" | "pending";
-type Memory = { id: string; kind: MemoryKind; status: MemoryStatus; text: string; createdAt: number };
+type Memory = { id: string; kind: MemoryKind; status: MemoryStatus; text: string; createdAt: number; updatedAt?: number; by?: Author };
+type NewMemory = Omit<Memory, "updatedAt" | "by"> & { by: Author };   // Author: @pikit/contracts' change.ts
 type MemoryMatch = Memory & { snippet: string };
 type MemoryFilter = { kinds: readonly MemoryKind[]; status?: MemoryStatus };
 
@@ -55,10 +56,16 @@ interface MemoryStore {
   ownerOf(conversation): MemoryOwner;                   // its space's, or its agent's own
   list(owner, filter, limit, ctx): Promise<Memory[]>;   // the newest `limit` the filter takes, oldest first
   get(owner, id, ctx): Promise<Memory | undefined>;
-  remember(owner, memory, ctx): Promise<void>;          // idempotent by id: text and status stay
-  approve(owner, id, kind, ctx): Promise<boolean>;      // pending -> active; true when active now
-  forget(owner, id, filter, ctx): Promise<boolean>;     // true when one was removed
-  search(owner, query, limit, ctx): Promise<MemoryMatch[]>; // facts and summaries, full-text, best first
+  remember(owner, memory: NewMemory, ctx): Promise<void>; // idempotent by id: text and status stay
+  approve(owner, id, kind, by, ctx): Promise<boolean>;  // pending -> active; true when active now
+  forget(owner, id, filter, by, ctx): Promise<boolean>; // true when one was removed
+  search(owner, query, limit, ctx, filter?): Promise<MemoryMatch[]>; // default facts and summaries, full-text, best first
+  // Not built yet (features/projects.md): they refuse, and `by` is not kept.
+  replace(owner, id, memory: NewMemory, ctx): Promise<Memory | undefined>; // new words as one change
+  changes(owner, page, ctx): Promise<ChangePage>;       // the owner's change log
+  restore(owner, n, by, ctx): Promise<Change>;
+  redact(owner, n, by, ctx): Promise<void>;             // operators only
+  purge(owner, ctx): Promise<void>;                     // a removed project's space
 }
 ```
 
