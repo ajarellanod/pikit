@@ -87,7 +87,9 @@ What to take, and the pitfalls each one shows:
    operator, a component) may make a project for a space that already exists, keeping its string: a
    Google Chat space's key (`googlechat:spaces/AAA`), so its threads and the project's web chats share
    memory and files with no copy; or channel-web's former project space (`web:<user>:project:<id>`),
-   so a project made before this design keeps its memory. People can never name a space.
+   so a project made before this design keeps its memory. People can never name a space. Operators
+   adopt one with projects-sql's `POST /admin/api/projects` (the dashboard's New project); a space
+   taken answers `space_taken` with its project's id, so an adopting script can run again.
 3. **An owner and members, no editors** (operator's decision). A member is a principal (`{ channel,
    id }`, a `Sender`'s shape: a web user, a Google Chat user, or any identity a channel authenticates)
    with a role: `member` (chat; read everything; add, change and remove the name, description,

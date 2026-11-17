@@ -74,6 +74,12 @@ The admin routes ask `admin.auth` first and answer `401` before reading anything
 the operator (`{ kind: "operator", id }`), and the project's actor decides as for anyone:
 
 - `GET /admin/api/projects?archived=&cursor=&limit=`: every project, removed ones too (`removedAt`).
+- `POST /admin/api/projects` `{ space?, name, description?, owner: { channel, id }, agents? }`: a new
+  project made by the operator, `201` with it. `space` adopts an existing space, keeping its string (a
+  Google Chat space's key, `googlechat:spaces/AAA`); without it the project gets a new one. A space
+  that has a project already (removed ones too) is `409` `{ error: "space_taken", id }`, naming that
+  project, so a script adopting spaces can run twice; a body of another shape is `400`
+  `invalid_request`, and the store's `invalid`, `limit` and `refused` are `400` too.
 - `GET /admin/api/projects/:id`: `{ project, members, instructions?, documents, links }`.
 - `GET /admin/api/projects/:id/history?before=&limit=`; `GET .../documents/:doc?part=&version=`.
 - `POST .../history/:n/restore`, `.../history/:n/redact`, `.../archive` `{ archived }`, `.../remove`,
@@ -88,18 +94,23 @@ logged with the operator and the project's id, never a name or a text.
 `view/` (the dashboard's Projects): every project, active, archived or removed, with its owner, members,
 space and last change; a project's page with its members (add one, make one the owner, remove a manual
 one), instructions, documents (read one, part by part), links and History (Restore, Redact, each
-behind a confirmation), and Archive, Remove (asks first) and Recover. It uses only the base
+behind a confirmation), and Archive, Remove (asks first) and Recover. "New project" makes one as the
+operator: a space to adopt (or none: a new one), the owner's channel and id, the agents; a space taken
+links to its project. It uses only the base
 dashboard's primitives.
 
 ## Tests
 
-- `projects-sql.test.ts` (37 tests): `createProjectsConformance` (18 cases, and the change log's 10 over
+- `projects-sql.test.ts` (39 tests): `createProjectsConformance` (18 cases, and the change log's 10 over
   documents written by three members, with a repeat, retention, a redaction and a write failing
   before its commit: the fixture's storage fails the next log entry's write) over `sqliteStorage()`,
   an in-memory mailbox and wakeups, and a manual clock; what setup declares (both halves); an actor
   answering only for its space and checking what it is sent; the purge after the tombstone (over a
   restart, `memory.purge` called, the space free again); archived projects; a document's hit naming
-  its read part; the admin routes (`401` first, every act; and with no `admin.auth`).
+  its read part; the admin routes (`401` first, every act; and with no `admin.auth`); `POST /admin/api/projects` (`401`
+  before the body is read, an adopted space made with the operator as its log's author, `409`
+  `space_taken` with the project's id again and once removed, a new space without one, `400` for each
+  bad body and the store's refusals).
 - The workerd lane (`tests/workerd/test/projects.workerd.ts`, 29 tests): the same suite with the
   directory and each project in its own Durable Object, and from the Worker's App the routes, the
   rows in each object, and the purge at the project object's alarm.

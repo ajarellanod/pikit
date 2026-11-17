@@ -128,6 +128,15 @@ it("from the Worker: 401 first; a project in its own object, the directory's apa
       ["added", "project"],
     ]);
 
+    // An operator adopts an existing space from the Worker: in that space's object; again, the space's project named.
+    const space = `googlechat:spaces/${crypto.randomUUID()}`;
+    const adopt = { method: "POST", body: JSON.stringify({ space, name: "Client", owner: ana.principals[0], agents: ["trader"] }) };
+    expect(await worker.fetch("/admin/api/projects", { ...adopt, operator: false })).toEqual({ status: 401, body: { error: "unauthorized" } });
+    const adopted = await worker.fetch("/admin/api/projects", adopt);
+    expect(adopted).toMatchObject({ status: 201, body: { space, name: "Client", agents: ["trader"] } });
+    expect(await rows(projectKey(space), "SELECT id FROM projects_sql_projects")).toEqual([{ id: adopted.body.id }]);
+    expect(await worker.fetch("/admin/api/projects", adopt)).toMatchObject({ status: 409, body: { error: "space_taken", id: adopted.body.id } });
+
     expect((await worker.fetch(`/admin/api/projects/${project.id}/remove`, { method: "POST" })).status).toBe(200);
     expect(await worker.projects.get(project.space, ana, worker.app.context())).toBeUndefined();
 

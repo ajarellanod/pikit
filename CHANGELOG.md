@@ -33,6 +33,10 @@ line names its area.
 
 ### Components
 
+- projects-sql: `POST /admin/api/projects` (`{ space?, name, description?, owner, agents? }`, behind
+  `admin.auth`): an operator makes a project, adopting an existing space (a Google Chat space's key) or
+  a new one; a space that has one is `409` `space_taken` with that project's `id`. The dashboard's
+  Projects view has New project.
 - projects-context (new): the agents' one view of a project (features/projects.md), the extension
   `project`: a stable `<project>` section (members, instructions, rules with their source, the run's
   people's preferences, core documents within the agent's budget, the rest listed, notes, summaries,

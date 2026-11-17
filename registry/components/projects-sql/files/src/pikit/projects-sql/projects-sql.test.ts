@@ -306,6 +306,70 @@ test("the admin routes: 401 before anything is read, then every project and an o
   }
 });
 
+test("POST /admin/api/projects: 401 before anything, an adopted space made by the operator, 409 space_taken with its project's id, 400 for a bad body", async () => {
+  let routes: Map<string, HttpRoute> | undefined;
+  const reader = defineComponent({
+    name: "routes-reader",
+    setup(pikit) {
+      const handle = pikit.useKeyed("http.route");
+      return { start: () => void (routes = new Map(handle.keys().map((key) => [key, handle.get(key) as HttpRoute]))) };
+    },
+  });
+  const { app, projects } = await boot([sqliteStorage(), createMemoryMailbox(), createMemoryWakeups(), auth], createManualClock(), [reader]);
+  const ctx = app.context();
+  const operator: Caller = { kind: "operator", id: "ops" };
+  const create = async (body: unknown, token = OPERATOR_TOKEN) => {
+    const response = await (routes as Map<string, HttpRoute>).get("POST /admin/api/projects")?.(
+      new Request("http://pikit.test/admin/api/projects", { method: "POST", headers: { authorization: token, "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) }),
+      ctx,
+    );
+    return { status: response?.status, body: (await response?.json()) as Record<string, unknown> };
+  };
+  const adopt = { space: "googlechat:spaces/AAA", name: "AECC", description: "The client's space.", owner: ANA, agents: ["trader"] };
+  try {
+    expect(await create(adopt, "Bearer wrong")).toEqual({ status: 401, body: { error: "unauthorized" } });
+    expect(await create("{", "Bearer wrong")).toEqual({ status: 401, body: { error: "unauthorized" } });
+    expect((await projects.list({}, operator, ctx)).items).toEqual([]);
+
+    const made = await create(adopt);
+    expect(made).toMatchObject({ status: 201, body: { space: "googlechat:spaces/AAA", name: "AECC", description: "The client's space.", agents: ["trader"], owner: ANA, members: 1 } });
+    const id = made.body.id as string;
+    expect(await projects.get("googlechat:spaces/AAA", ana, ctx)).toMatchObject({ id, role: "owner" });
+    expect((await projects.changes("googlechat:spaces/AAA", { limit: 10 }, operator, ctx)).items).toMatchObject([{ n: 1, action: "added", by: { kind: "operator", id: "ops" } }]);
+
+    // Twice is once: the space's project, named; nothing more made. Removed, it is still the space's.
+    expect(await create({ ...adopt, name: "Another" })).toMatchObject({ status: 409, body: { error: "space_taken", id } });
+    await projects.remove("googlechat:spaces/AAA", operator, ctx);
+    expect(await create(adopt)).toMatchObject({ status: 409, body: { error: "space_taken", id } });
+    expect((await projects.list({}, operator, ctx)).items.map((each) => each.id)).toEqual([id]);
+
+    // No space: a new one, `project:<id>`.
+    const fresh = await create({ name: "Fresh", owner: ANA });
+    expect(fresh.status).toBe(201);
+    expect(fresh.body.space).toBe(`project:${fresh.body.id as string}`);
+
+    for (const bad of [
+      "{",
+      [],
+      { name: "X" },
+      { name: "X", owner: { channel: "web" } },
+      { name: 7, owner: ANA },
+      { name: "X", owner: ANA, space: 1 },
+      { name: "X", owner: ANA, agents: "trader" },
+      { name: "X", owner: ANA, id: "0123456789abcdef0123456789abcdef" },
+    ]) {
+      expect([JSON.stringify(bad), (await create(bad)).status]).toEqual([JSON.stringify(bad), 400]);
+    }
+    // The store's own refusals: a name past its bounds, an empty space, a credential.
+    expect(await create({ name: "x".repeat(61), owner: ANA, space: "googlechat:spaces/BBB" })).toMatchObject({ status: 400, body: { error: "invalid" } });
+    expect(await create({ name: "B", owner: ANA, space: " " })).toMatchObject({ status: 400, body: { error: "invalid" } });
+    expect(await create({ name: "B", owner: ANA, description: "key: sk-ant-api03-Zq8xVb2nLm4Kp7Rt9Ws1Yd6Fh3Jc5Ge0Ai" })).toMatchObject({ status: 400, body: { error: "refused" } });
+    expect(await projects.get("googlechat:spaces/BBB", operator, ctx)).toBeUndefined();
+  } finally {
+    await app.stop();
+  }
+});
+
 test("the routes without admin.auth: nobody is an operator", async () => {
   let routes: Map<string, HttpRoute> | undefined;
   const reader = defineComponent({
@@ -319,6 +383,11 @@ test("the routes without admin.auth: nobody is an operator", async () => {
   try {
     const response = await routes?.get("GET /admin/api/projects")?.(new Request("http://pikit.test/admin/api/projects", { headers: { authorization: OPERATOR_TOKEN } }), app.context());
     expect(response?.status).toBe(401);
+    const made = await routes?.get("POST /admin/api/projects")?.(
+      new Request("http://pikit.test/admin/api/projects", { method: "POST", headers: { authorization: OPERATOR_TOKEN }, body: JSON.stringify({ name: "X", owner: ANA }) }),
+      app.context(),
+    );
+    expect(made?.status).toBe(401);
   } finally {
     await app.stop();
   }
