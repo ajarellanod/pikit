@@ -2,7 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "memory-sql",
   "version": "0.0.1",
-  "description": "What the agents of each space remember (facts, summaries, rules), and what each person prefers: one actor per owner (a space, an agent kept apart, a person), its storage.sql, full-text search. Declares and provides memory.",
+  "description": "What the agents of each space remember (facts, summaries, rules), and what each person prefers, with who kept each and a change log per owner (restore, redact, purge): one actor per owner (a space, an agent kept apart, a person), its storage.sql, full-text search. Declares and provides memory, in the Worker's App too.",
   "targets": [
     "server",
     "durable"
@@ -32,6 +32,31 @@
         "stability": "experimental",
         "summary": "What the agents of a space remember (facts, summaries, rules) and what each person prefers, per owner, with full-text search."
       }
+    }
+  },
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "memory"
+      ],
+      "requires": [
+        "storage.sql",
+        "actor.mailbox",
+        "actor.inbox"
+      ],
+      "optional": []
+    },
+    "worker": {
+      "provides": [
+        "memory"
+      ],
+      "requires": [
+        "actor.mailbox"
+      ],
+      "optional": []
     }
   },
   "dependencies": {

@@ -4,10 +4,12 @@
  * deployment-cloudflare's `Conversation` class, as `PlatformConversation`, `src/platform.ts`), reached
  * through actors-do's `actor.mailbox` by RPC.
  *
- * - The `memory` suite from an App in an object of its own (storage-do, actors-do, memory-sql, with
- *   `trader` kept apart): every call crosses to the owner's object, which keeps the rows, and the FTS5
- *   index, in its own SQLite; a restart is a second App. A call for another owner reaches that owner's
- *   object and is refused there (`invalid`).
+ * - The `memory` suite (the change log's cases included) from an App in an object of its own
+ *   (storage-do, actors-do, memory-sql, with `trader` kept apart): every call crosses to the owner's
+ *   object, which keeps the rows, the log and the FTS5 index in its own SQLite, on the case's clock; a
+ *   restart is a second App. The same suite from a Worker's App (actors-do and memory-sql's Worker
+ *   half, no `storage.sql`). A call for another owner reaches that owner's object and is refused there
+ *   (`invalid`).
  * - Threads of a space, each a conversation's object (runtime-pi on provider-faux's `faux/scripted`,
  *   conversations-kv recording the space, memory-recall): the model calls `remember`, the fact lands in
  *   the space's object, not the conversation's, and another thread's next request carries it in its
@@ -28,7 +30,7 @@ import actorsDo from "../../../registry/components/actors-do/files/src/pikit/act
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import memoryRecall from "../../../registry/components/memory-recall/files/src/pikit/memory-recall/index.ts";
 import { createMemoryConformance } from "../../../registry/components/memory-sql/files/src/pikit/memory-sql/conformance.ts";
-import memorySql, { actorKey, CALL } from "../../../registry/components/memory-sql/files/src/pikit/memory-sql/index.ts";
+import memorySql, { actorKey, CALL, worker as memorySqlWorker } from "../../../registry/components/memory-sql/files/src/pikit/memory-sql/index.ts";
 import memorySummaries from "../../../registry/components/memory-summaries/files/src/pikit/memory-summaries/index.ts";
 import providerFaux from "../../../registry/components/provider-faux/files/src/pikit/provider-faux/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
@@ -45,11 +47,23 @@ afterEach(async () => {
   await resetObjects();
 });
 
-for (const c of createMemoryConformance(() => {
-  composeObjects([storageDo, actorsDo, memorySql], CONFIG);
+for (const c of createMemoryConformance((clock) => {
+  composeObjects([storageDo, actorsDo, memorySql], CONFIG, { clock });
   return { components: () => withWorkersHost(objectHost(), [storageDo, actorsDo, memorySql]), config: CONFIG, target: "durable", agentScope: ["trader"] };
 })) {
   it(`memory-sql over storage-do and actors-do ${c.group}: ${c.name}`, () => inObject(c));
+}
+
+for (const c of createMemoryConformance((clock) => {
+  composeObjects([storageDo, actorsDo, memorySql], CONFIG, { clock });
+  return {
+    components: () => withWorkersHost({ env: workerEnv }, [actorsDo, memorySqlWorker]),
+    config: { ...ACTORS, "memory-sql-worker": { agentScope: ["trader"] } },
+    target: "durable",
+    agentScope: ["trader"],
+  };
+})) {
+  it(`memory-sql's Worker half, from the Worker's App, ${c.group}: ${c.name}`, () => c.run());
 }
 
 /** The Worker's App: a mailbox to the objects. */
