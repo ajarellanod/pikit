@@ -21,6 +21,7 @@ import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import conversationsKv from "../conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import mailboxLocal from "../mailbox-local/files/src/pikit/mailbox-local/index.ts";
 import memoryRecall from "../memory-recall/files/src/pikit/memory-recall/index.ts";
+import type { MemoryStore } from "../memory-sql/files/src/pikit/memory-sql/contract.ts";
 import memorySql from "../memory-sql/files/src/pikit/memory-sql/index.ts";
 import providerFaux from "../provider-faux/files/src/pikit/provider-faux/index.ts";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
@@ -41,15 +42,16 @@ test("a quiet thread is summarized into its space's memory, its credential redac
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const clock = createManualClock(Date.now());
   const results: (AppEvents["agent.settled"] | AppEvents["agent.failed"])[] = [];
-  let reached: { runtime: AgentRuntime; registry: ConversationRegistry } | undefined;
+  let reached: { runtime: AgentRuntime; registry: ConversationRegistry; memory: MemoryStore } | undefined;
   const observer = defineComponent({
     name: "observer",
     setup(pikit) {
       const runtime = pikit.use("agent.runtime");
       const registry = pikit.use("conversations.registry");
+      const memory = pikit.use("memory");
       pikit.on("agent.settled", (result) => void results.push(result));
       pikit.on("agent.failed", (result) => void results.push(result));
-      return { start: () => void (reached = { runtime: runtime.get(), registry: registry.get() }) };
+      return { start: () => void (reached = { runtime: runtime.get(), registry: registry.get(), memory: memory.get() }) };
     },
   });
   const agent = defineAgent({ name: "assistant", model: "faux/scripted", extensions: ["memory"] });
@@ -92,4 +94,12 @@ test("a quiet thread is summarized into its space's memory, its credential redac
   );
   expect(section).not.toContain("sk-ant-");
   expect(await ask(SPACE_B, "1", "echo-system memory")).toBe("(no section memory)");
+
+  // Kept by memory-summaries as its author, and logged so in the space's change log (memory-sql's).
+  const live = reached as NonNullable<typeof reached>;
+  const owner = { type: "space", space: SPACE_A } as const;
+  const [summary] = await live.memory.list(owner, { kinds: ["summary"] }, 10, app.context());
+  expect(summary?.by).toEqual({ kind: "component", name: "memory-summaries" });
+  const log = await live.memory.changes(owner, { limit: 10 }, app.context());
+  expect(log.items.map((entry) => [entry.action, entry.item.kind, entry.item.id, entry.by])).toEqual([["added", "summary", summary?.id ?? "", { kind: "component", name: "memory-summaries" }]]);
 });

@@ -188,6 +188,9 @@ to the owners' objects (`memoryOver`), for channel-web's project routes and an a
   through the Worker half, from an App whose mailbox reaches the owners' App; what `setup` declares
   (both halves); an owner's actor refusing another owner's call, a kind its owner does not keep and
   malformed ones (`invalid`); how a query becomes FTS5 queries.
+- `contract-copies.test.ts` (in the registry only): every component's `contract.ts` that declares
+  `memory` (memory-recall's, memory-summaries', any new user's) is this one, byte for byte (`tsc`
+  catches copies whose types differ, not whose guarantees do).
 - In the registry, `memory-recall/app.test.ts` runs it in a real App with runtime-pi, and the
   workerd lane (`tests/workerd/test/memory.workerd.ts`) runs the suite (the log's cases included)
   over storage-do and actors-do, each owner in their own Durable Object (FTS5 included) on the case's

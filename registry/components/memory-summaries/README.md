@@ -54,6 +54,9 @@ export const config = {
 - **Only what is new.** It reads the transcript (`agent.observe`, newest first) back to the last entry
   it summarized, at most 200 entries and the newest 24 000 characters of what the people and the
   assistant said (no tool results). Nothing new, nothing kept.
+- **Its author.** Every summary is kept by `{ kind: "component", name: "memory-summaries" }`
+  (memory's `Author`): its memory's `by`, and the author of its `added` entry in the owner's change log
+  (memory-sql's), so a project's History says a summary came from here, not from a person or an agent.
 - **Once.** The summary's id is `summary:<conversationId>:<newest entry id>` and memory's `remember`
   is idempotent by id: a wakeup that runs again, or a crash between keeping it and recording it, keeps
   it once.
@@ -71,7 +74,7 @@ export const config = {
 
 - `memory-summaries.test.ts` (copied into your project), with doubles of the runtime's side, a
   registry of each key's space, an in-memory `wakeups` and the test's clock: a quiet conversation
-  summarized once into its space, though the wakeup runs again and the App restarts; a restart before
+  summarized once into its space, by memory-summaries as its author, though the wakeup runs again and the App restarts; a restart before
   it went quiet; a summary cut mid-call written at the next run; a crash after the summary was kept keeps it once; a settled run and a pending request
   postpone; a run settling while a summary is written is read at once; a later period summarizes only
   what is new; credentials redacted in and out, an answer still holding one not kept; only the
@@ -80,7 +83,7 @@ export const config = {
 - `app.test.ts` (in the registry only): runtime-pi, conversations-kv, memory-sql, memory-recall,
   provider-faux (`faux/echo` writes the summary) in a real App: a quiet thread with a credential is
   summarized, redacted, and shown in another thread of its space's `memory` section; a thread of
-  another space has none.
+  another space has none; the summary's `by` and its change log entry are memory-summaries'.
 - The workerd lane (`tests/workerd/test/memory.workerd.ts`): in a thread's Durable Object, a run
   settles, `Date` is moved past `idleMinutes`, and the object's alarm summarizes the thread into the
   space's object.
