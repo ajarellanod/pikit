@@ -18,9 +18,9 @@
  *   the files, the links), so pi-durable sends it again only when the project changes.
  * - **Tools**, all `replay: "safe"`: `project_search` and `project_read` only read; `project_link` is
  *   idempotent by its URL (`projects.addLink`), and ends its result with `addedToProject`.
- * - **Outside a project** it renders nothing, and its tools refuse with a pointer. `offered` says which
- *   of its tools a conversation should be offered (all in a project's space, none elsewhere): what the
- *   adapter's `offerTools` takes once it lands.
+ * - **Offered only in a project's space** (`offerTools`: the runtime asks at each admission): all its
+ *   tools there, none elsewhere, where it renders nothing either. A tool called by name outside a
+ *   project still refuses with a pointer (the second line: the answer changes from the next admission).
  *
  * Targets: `server` and `durable`: it imports nothing platform-specific.
  */
@@ -51,7 +51,7 @@ import {
   type SpaceFiles,
   spaceOf,
 } from "@pikit/contracts";
-import { defineExtension, defineTool, type Extension, section } from "@pikit/pi-adapter/extensions";
+import { defineExtension, defineTool, type Extension, offerTools, section } from "@pikit/pi-adapter/extensions";
 import Type, { type Static } from "typebox";
 import type { Memory, MemoryKind, MemoryOwner, MemoryStore } from "./contract.ts";
 
@@ -360,7 +360,7 @@ function bounded<T>() {
   };
 }
 
-/** The extension, and `offered`: which of its tools a conversation is offered (for the adapter's `offerTools`). */
+/** The extension (with its `offerTools` choice), and that choice, `offered`: which of its tools a conversation is offered. */
 export function createProjectsContext(config: ProjectsContextConfig, deps: ProjectsContextDeps): { extension: Extension; offered: (conversation: ConversationRef, ctx: AppContext) => Promise<string[]> } {
   const spaces = bounded<SpaceView | undefined>();
   const preferences = bounded<readonly Memory[]>();
@@ -550,6 +550,10 @@ export function createProjectsContext(config: ProjectsContextConfig, deps: Proje
     },
   });
 
+  /** All its tools in a project's space, none elsewhere: the runtime asks at each admission (`offerTools`). */
+  const offered = async (conversation: ConversationRef, ctx: AppContext): Promise<string[]> =>
+    (await viewOf(spaceOf(conversation), callerOf(conversation, undefined), ctx)) === undefined ? [] : [...PROJECT_TOOLS];
+
   const extension = defineExtension({
     name: PROJECT,
     tools: [projectSearch, projectRead, projectLink],
@@ -577,13 +581,7 @@ export function createProjectsContext(config: ProjectsContextConfig, deps: Proje
     ],
   });
 
-  return {
-    extension,
-    /** All its tools in a project's space, none elsewhere: what the adapter's `offerTools` will take. */
-    async offered(conversation, ctx) {
-      return (await viewOf(spaceOf(conversation), callerOf(conversation, undefined), ctx)) === undefined ? [] : [...PROJECT_TOOLS];
-    },
-  };
+  return { extension: offerTools(extension, offered), offered };
 }
 
 export default defineComponent({

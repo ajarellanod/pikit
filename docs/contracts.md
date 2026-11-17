@@ -30,7 +30,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.directory` | single | agents-live | admin-api?, channel-web?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-notify, tool-read, tool-schedule, tool-websearch-brave, tool-websearch-gemini, tool-write | admin-api?, agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | admin-api?, agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
-| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, extension-tracing, memory-recall, tool-space-files | agents-live?, runtime-pi? | none |
+| `agent.extension` | keyed | extension-approvals, extension-house-rules, extension-pikit-self, extension-tracing, memory-recall, projects-context, tool-space-files | agents-live?, runtime-pi? | none |
 | `mcp.auth` | keyed | tool-mcp-oauth | tool-mcp? | none (tool-mcp-oauth's own tests; one provider) |
 | `agent.command` | keyed | admin-api, memory-recall, runtime-pi | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, scheduler-admit | `createConversationRegistryConformance` |
@@ -58,9 +58,9 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `approvals` | single | approvals-sql | admin-approvals, extension-approvals | `createApprovalsConformance` (approvals-sql's `conformance.ts`) |
 | `workspace` | single | execution-boat, execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
-| `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
-| `projects` | single | none | none | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
-| `space.files` | single | none | none | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
+| `memory` | single | memory-sql | memory-recall, memory-summaries, projects-context? | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
+| `projects` | single | none | projects-context | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
+| `space.files` | single | none | projects-context? | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
 | `principals` | single | none | none | none (no kit provider: neural-agents' people directory) |
 | `document.convert` | single | none | none | none yet (planned provider: convert-workers-ai) |
 

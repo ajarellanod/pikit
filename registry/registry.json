@@ -361,6 +361,15 @@
       ],
       "path": "components/outbound-durable"
     },
+    "projects-context": {
+      "version": "0.0.1",
+      "description": "The agents' one view of a project, for the agents that name the extension project: a stable section with the project's members, instructions, rules with their source, core documents, notes, files and links; the tools project_search (one search over the project, its memory and its files), project_read and project_link, over projects, memory and space.files.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/projects-context"
+    },
     "proposals-github": {
       "version": "0.0.1",
       "description": "proposals as GitHub pull requests (Cloudflare): a pikit/self/* branch the steward pushes gets its pull request, which an operator merges or closes from the dashboard; GitHub reached through the github contract (repo-github-app, repo-github-token); and the project's CI workflow. Dormant until GitHub is connected, after deploying.",
