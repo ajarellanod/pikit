@@ -86,8 +86,9 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   keeps the `refsKept` most recently used refs in memory (default 1,000); a dropped one is read back
   from that document, its channel and origin included (`asRecorded`). An id that is not a
   pi-durable one is refused (`conversation_missing`).
-- **Admission.** `dispatch` runs in the conversation's line: a commit looks the request id up
-  (`duplicate` if pi-durable has it) and, in the same commit, applies `prepare` and records the
+- **Admission.** `dispatch` runs in the conversation's line: it first asks the extensions that
+  declare `offerTools` ("Offered tools" below), then a commit looks the request id up
+  (`duplicate` if pi-durable has it) and, in the same commit, applies `prepare` (with those offers) and records the
   admission's time (`pikit.admissions`, below); then
   `submit({ type: "input", requestId })`, its content the prompt, then the request's images (pi-ai's
   `ImageContent`) when it has some. The status the creating commit published (`queued` in the
@@ -142,6 +143,32 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   rebuilds it from `prepare` and writes it when it differs, so a `configure()` made on the
   conversation directly is undone at the next one; a live change goes through `agent.state` or the
   data `prepare` reads.
+- **Offered tools** (`offerTools`, `agent.ts`). An extension may choose, per conversation, which of
+  its tools the agent has: `offerTools(extension, offered)` returns a copy of the extension carrying
+  `offered(conversation, ctx): Promise<string[] | undefined>` (names; `undefined`: all its tools;
+  names that are not its tools are ignored), exported by `./extensions` and the root. `dispatch` asks
+  every extension of the conversation's turn that declares one (the turn `prepare` gives for the
+  stored state; `conversation` as recorded, with its channel and space) **before the admission's
+  commit**, in the conversation's line, so it may call other actors (a Durable Object's commit must
+  not wait on I/O); the answers go in the conversation's `pikit.conversation` document (`offered`,
+  sorted names or `null` for all), written in the admission's commit when they changed. `apply` (every
+  one: the admission's, a state update's, a reopened Harness's) leaves the names an extension did not
+  offer out of `pi.agent`'s enabled `tools`, so: the model is never sent them, a call to one by name
+  settles `tool_unavailable` ("Tool x is not available") without running and the run goes on, and
+  nested calls (`executeTool`) and `tool_search` do not find them either (pi-durable's `modelTools`
+  would have left them callable by other tools, and a `tool_search` load would have undone a
+  `remove`). A name two extensions provide follows the one whose tool wins it (the later). **When it
+  is asked again**: at each admission, and only then (duplicates included, their answer unused); a
+  restart, a reopened Harness and a state update apply the answer kept, so an extension's change of
+  mind (a space adopted as a project) applies from the conversation's next message. **Failures** (a
+  throw, a rejection, an answer that is not a list of names, no answer within `offerTimeoutMs`,
+  default `OFFER_TIMEOUT_MS`, 5 s) are logged and never fail the admission: the conversation keeps
+  that extension's last answer, and with none is offered **none** of its tools (closed: an extension
+  that declares a choice hides a family of tools, and a store it cannot reach must not show them). An
+  extension that prepare selects only after an admission offers none of its tools until the next one.
+  Without an extension declaring one, nothing is asked or written (an agent with no `prepare` and no
+  declaring extension skips even the reads). Tested by `offers.test.ts` and runtime-pi's
+  `offer-tools.test.ts`.
 - **Tools, models and environments.** `tool(name)` returns a pi-durable tool; a tool object in a
   definition must be one too. `models` is pi-ai's `Models`. Each tool call's environment is
   `harnessEnv` over `workspace()` (the call's conversation's) and `execution()`, unless `env` is given.
@@ -268,7 +295,8 @@ host must come back. runtime-pi uses the runtime's `whenIdle` and `onIdleUntil`.
 `recovery` (restarts, `agent.submissions`: a batch whose log a crash never wrote, logged once by a
 redelivery or the next start, retention and `gap`, abandoning; retries), `answers` (the
 log's feed suite, idempotent appends), `prepare` (and
-`agent.state`'s conformance), `usage`, `conformance` (the contracts' `agent.runtime` suite, every
+`agent.state`'s conformance), `offers` (`offerTools`: the record, a timeout, names not the
+extension's, a name two extensions provide), `usage`, `conformance` (the contracts' `agent.runtime` suite, every
 case), `pi-facts` (the pi-durable behaviours relied on: duplicate admission, follow-up batching,
 checkpoint shapes, `afterFailedRun`, sleeping tasks, previews before storage…), `sql`, `wakeups`, `models`, `credentials`, `execution`, `mcp`,
 `tools/*`. `test-support.ts` (not exported) is the scripted runtime worker they share.
