@@ -24,6 +24,7 @@ state across a restart).
 | See or change each model request or answer, each tool call or result, a compaction | an extension's **hook** |
 | Decorate a tool or a section someone else provides | an extension's **wrap** |
 | Tools that belong with that behaviour (`remember` with memory's section) | the extension's **tools** |
+| Offer some of the extension's tools in some conversations only (by space, by a store's answer) | `offerTools(extension, offered)` ("Offer tools per conversation" below): async, asked at each admission |
 
 ## 1. The pieces
 
@@ -105,6 +106,30 @@ defineExtension({
   }
   ```
 
+- **Offer tools per conversation** (`offerTools`, from `@pikit/pi-adapter/extensions`): wrap the
+  extension to choose which of its tools a conversation's agent has, by the conversation (its
+  `space`, `channel`, `key`) and whatever a store says:
+
+  ```ts
+  const memory = offerTools(defineExtension({ name: "memory", tools: [remember, recall, projectNote] }), async (conversation, ctx) => {
+    const space = spaceOf(conversation);
+    return space !== undefined && (await projects.get().get(space, { kind: "component", name: "memory-recall" }, ctx)) !== undefined
+      ? ["project_note"]
+      : ["remember", "recall"];   // undefined: all its tools
+  });
+  ```
+
+  The runtime asks at each admission of a message, before its commit (a mailbox call is fine there;
+  cache what you can, it is on the admission's path, bounded at 5 s), and keeps the answer with the
+  conversation: a restart or a state update offers the same until the next message, so a change
+  (a space adopted as a project) applies from the next message. A tool not offered is never sent to
+  the model, and a call to it by name is refused (`tool_unavailable`) without running. A throw, a
+  wrong answer or a timeout keeps the conversation's last answer, or offers **none** of your tools
+  when it has none: catch and answer yourself when another fallback suits you better. Keep each
+  tool's own refusal where it does not belong as a second line (an answer changes between messages,
+  not mid-run). The section, unlike the tools, is yours to leave out (`render` returns `undefined`);
+  name only the tools offered in it: `input.agent.tools`.
+
 ## 2. Provide it, and name it
 
 ```ts
@@ -179,7 +204,10 @@ sections are its `system` messages' `sections` (a change per message; `null` rem
    is what `echo-system <section>` answers for an agent that names it, and `(no section <section>)` for one
    that does not; a hook blocks or rewrites what it should and nothing else; a tool's effect is seen
    by the next request; what must survive does after `stop()` and a new App over the same file; a
-   stable section is sent once (`scriptedProvider({ onRequest })`).
+   stable section is sent once (`scriptedProvider({ onRequest })`). With `offerTools`: `echo-tools`
+   in a conversation of each kind (refs with a `space`), and `call: <a tool not offered> {}` answering
+   `<tool> failed: ...not available` without running it (runtime-pi's `offer-tools.test.ts` is the
+   model).
 3. **End to end**, optional: `pikit add provider-faux --yes`, an agent on `faux/scripted`, `pikit
    dev`, and `call: <tool> <json>` / `echo-system <section>` through the real channel.
 

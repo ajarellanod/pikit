@@ -281,7 +281,16 @@ suite").
 One pi-durable `Extension` per name (`defineExtension` from `@pikit/pi-adapter/extensions`): system
 prompt sections, hooks on model requests, tool calls and compaction, tool wrappers, durable tasks,
 tools. An agent runs with the ones it names, in order, after its own tools. Names starting with
-`pikit.` are the runtime's. Providers in the registry: extension-house-rules, extension-approvals,
+`pikit.` are the runtime's. `offerTools(extension, offered)` (same subpath) lets one choose, per
+conversation, which of its tools the agent has: `offered(conversation, ctx)` answers names (or
+`undefined` for all), asked by the runtime at each admission before its commit and kept in the
+conversation's `ConversationDoc.offered`. Guarantees: a tool not offered is never sent to the model,
+and a call to it by name settles `tool_unavailable` without running (nor do nested calls find it);
+each conversation has its own answer; a restart, a reopened Harness and a state update keep it until
+the next admission; a failure (throw, wrong answer, `OFFER_TIMEOUT_MS`) keeps the last answer, else
+offers none of that extension's tools, and never fails the admission; with no extension declaring
+one, nothing changes. Tested by the adapter's `offers.test.ts` and runtime-pi's `offer-tools.test.ts`
+(Pi is the runtime's only provider). Providers in the registry: extension-house-rules, extension-approvals,
 extension-tracing (hooks only: OpenTelemetry spans of each run, with the App's run events).
 
 ### `mcp.auth` (keyed, `@pikit/pi-adapter/mcp`, experimental)
