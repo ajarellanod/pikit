@@ -744,9 +744,10 @@ function createInbox(): Inbox {
  * `actor.mailbox` and `actor.inbox` in memory, for tests: every key's actor is this App, as on a
  * server. `send` calls the handler registered for the type with a JSON copy of the message and a
  * context of the handler's own (cancelled when the App stops), and resolves when the handler does.
- * Handlers are dropped when the App stops.
+ * Handlers are dropped when the App stops. `observe` sees each call and stream as it is made (a test
+ * counting what reached an actor); one that throws fails that call with its error, unanswered.
  */
-export function createMemoryMailbox(): ComponentDefinition {
+export function createMemoryMailbox(options: { observe?: (key: string, type: string, message: JsonValue) => void } = {}): ComponentDefinition {
   return defineComponent({
     name: "memory-mailbox",
     setup(pikit) {
@@ -800,6 +801,7 @@ export function createMemoryMailbox(): ComponentDefinition {
           const text = JSON.stringify(message) as string | undefined;
           if (text === undefined) throw new ActorCallError("invalid", "memory-mailbox: a message must be JSON");
           if (ctx.abortSignal?.aborted) throw new ActorCallError("cancelled", "memory-mailbox: the call was cancelled", { cause: ctx.abortSignal.reason });
+          options.observe?.(key, type, JSON.parse(text) as JsonValue);
           const outcome = await bounded(answerCall(handler, key, JSON.parse(text) as JsonValue, running.ctx), ctx.abortSignal).catch((reason: unknown) => {
             throw new ActorCallError("cancelled", "memory-mailbox: the call was cancelled before it was answered", { cause: reason });
           });
@@ -813,6 +815,7 @@ export function createMemoryMailbox(): ComponentDefinition {
           const text = JSON.stringify(message) as string | undefined;
           if (text === undefined) throw new ActorCallError("invalid", "memory-mailbox: a message must be JSON");
           if (ctx.abortSignal?.aborted) throw new ActorCallError("cancelled", "memory-mailbox: the stream was cancelled", { cause: ctx.abortSignal.reason });
+          options.observe?.(key, type, JSON.parse(text) as JsonValue);
           const opening = answerStream(handler, key, JSON.parse(text) as JsonValue, running.ctx);
           const outcome = await bounded(opening, ctx.abortSignal).catch((reason: unknown) => {
             // Opened after its caller left: nobody reads it.

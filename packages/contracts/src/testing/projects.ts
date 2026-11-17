@@ -166,6 +166,7 @@ export function createProjectsConformance(fixture: ProjectsFixture): readonly Co
       await projects.addLink(space, { url: "https://drive.example.com/folder", title: "Folder" }, luis, ctx);
       await projects.addMember(space, EVA, luis, ctx);
       await projects.update(space, { name: "AECC 2027 (Q1)" }, luis, ctx);
+      expect((await projects.members(space, { limit: 10 }, luis, ctx)).items.map((member) => member.principal.id), ["u-ana", "u-luis", "users/31"], "the owner first, then in the order they were added");
       const owners: [string, () => Promise<unknown>][] = [
         ["removeMember of another", () => projects.removeMember(space, EVA, luis, ctx)],
         ["transferOwnership", () => projects.transferOwnership(space, LUIS, luis, ctx)],
@@ -261,6 +262,7 @@ export function createProjectsConformance(fixture: ProjectsFixture): readonly Co
       const same = (document: ProjectDocument | undefined) => [document?.title, document?.mode, document?.source];
       expect([...same(read?.document), read?.text], [...same(v1), "Version one."], "the document as it was (title, mode, source, text)");
       check((read?.document.version ?? 0) > 2, "restored as a new version");
+      expect((await projects.versions(space, { kind: "document", id: v1.id }, people(ANA), ctx)).map((each) => [each.version, each.title]), [[1, "Brief"], [2, "Brief 2"], [3, "Brief"]], "its versions, oldest first");
       const i1 = await projects.setInstructions(space, { text: "First.", ifVersion: 0 }, people(ANA), ctx);
       await projects.setInstructions(space, { text: "Second.", ifVersion: i1.version }, people(LUIS), ctx);
       const second = (await allChanges(projects, space, people(ANA), ctx)).at(-1) as Change;

@@ -483,7 +483,9 @@ export class MemorySpaceFiles implements SpaceFiles {
   async list(space: string, query: { limit: number; trashed?: boolean }) {
     this.calls.push("list");
     const kept = this.space(space);
+    // The newest version of each name, newest first (`SpaceFiles.list`).
     const files: ListedSpaceFile[] = [...kept.names.values()]
+      .reverse()
       .filter((each) => (query.trashed === true) === (each.trashedAt !== undefined))
       .map((each) => ({ ...this.newest(each.versions, each.trashedAt), versions: each.versions.length }));
     const all = [...kept.names.values()].flatMap((each) => each.versions);
@@ -542,6 +544,9 @@ export class MemorySpaceFiles implements SpaceFiles {
     else {
       existing.versions.push({ file, bytes: input.bytes.slice() });
       delete existing.trashedAt;
+      // Listed newest first: the name saved last goes last in the map.
+      kept.names.delete(input.name);
+      kept.names.set(input.name, existing);
     }
     kept.ids.set(file.id, file);
     kept.log.add(at, by, existing === undefined ? "added" : "changed", { kind: "file", id: input.name, title: input.name }, { version: file.version, before });

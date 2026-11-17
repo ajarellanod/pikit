@@ -160,7 +160,7 @@ export type DocumentRead = { document: ProjectDocument; text: string; part: numb
 /** What an agent's section shows of projects-sql's part of the project: whole, or `unchanged` for the version the caller holds. */
 export type ProjectContext = {
   project: Project;
-  /** The first `CONTEXT_MEMBERS` members, the owner first. */
+  /** The first `CONTEXT_MEMBERS` members, in `members`' order (the owner first). */
   members: Member[];
   links: Link[];
   instructions?: Instructions;
@@ -190,6 +190,7 @@ export interface ProjectStore {
   /** The best role any of `principals` holds now (owner wins; a stale sourced member none), or `undefined`. For trusted components. */
   roleOf(space: string, principals: readonly Principal[], ctx: AppContext): Promise<ProjectRole | undefined>;
   update(space: string, change: ProjectUpdate, caller: Caller, ctx: AppContext): Promise<Project>;
+  /** The owner first, then the others in the order they were added. */
   members(space: string, page: PageRequest, caller: Caller, ctx: AppContext): Promise<Page<Member>>;
   /** Any member adds a manual member; idempotent (a member already: as it is). */
   addMember(space: string, principal: Principal, caller: Caller, ctx: AppContext): Promise<Member>;
@@ -207,6 +208,7 @@ export interface ProjectStore {
   putDocument(space: string, input: DocumentInput, caller: Caller, ctx: AppContext): Promise<ProjectDocument>;
   removeDocument(space: string, id: string, caller: Caller, ctx: AppContext): Promise<boolean>;
   read(space: string, id: string, query: { part: number; version?: number }, caller: Caller, ctx: AppContext): Promise<DocumentRead | undefined>;
+  /** Every version, oldest first. */
   versions(space: string, item: { kind: "instructions" } | { kind: "document"; id: string }, caller: Caller, ctx: AppContext): Promise<ItemVersion[]>;
   /** The instructions, documents and links matching `query`, the best `limit` first, typed with their provenance. */
   search(space: string, query: string, limit: number, caller: Caller, ctx: AppContext): Promise<ProjectSearchHit[]>;

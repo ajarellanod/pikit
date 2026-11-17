@@ -304,7 +304,7 @@ class Project_ {
   }
 
   async members(): Promise<MemberRow[]> {
-    const rows = await this.tx.query(`SELECT * FROM ${MEMBERS} WHERE space = ? ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, at, key`, [this.space]);
+    const rows = await this.tx.query(`SELECT * FROM ${MEMBERS} WHERE space = ? ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, at, rowid`, [this.space]);
     return rows.map(memberRowOf);
   }
 
@@ -1037,7 +1037,7 @@ const OPS = {
     if (!isJsonObject(item) || (item.kind !== "instructions" && item.kind !== "document")) throw invalid('item is { kind: "instructions" } or { kind: "document", id }');
     const kind = item.kind as VersionKind;
     const id = kind === "instructions" ? INSTRUCTIONS_ID : text(item.id, "item.id", 64);
-    const rows = await p.tx.query(`SELECT * FROM ${VERSIONS} WHERE space = ? AND kind = ? AND id = ? ORDER BY version DESC`, [p.space, kind, id]);
+    const rows = await p.tx.query(`SELECT * FROM ${VERSIONS} WHERE space = ? AND kind = ? AND id = ? ORDER BY version`, [p.space, kind, id]);
     const versions = rows.map((row): ItemVersion => {
       const version = versionRowOf(row);
       const out: ItemVersion = { version: version.version, by: version.by, at: version.at, chars: version.chars };

@@ -453,8 +453,11 @@ under an https `PIKIT_PUBLIC_URL`).
   transcript, once by request id, a failure's message, a routing denial running nothing and keeping no
   claim, a first message that is a command making the chat in its project's space, a command for some
   agents listed with the offered ones only and refused in another agent's chat.
-- `projects.test.ts`: every project route over doubles of the five capabilities
-  (`projects.test-support.ts`), each first for who may not (`401`, `400` without the header, `404` for a
+- `projects.test.ts` and the repository's `projects-stores.test.ts`: the same cases
+  (`projects.cases.test-support.ts`), over doubles of the stores (`projects.test-support.ts`) and over
+  the real ones (projects-sql, tool-space-files' `space.files` with storage-blob-fs, memory-sql, their
+  actors counted at the mailbox), `principals` and `document.convert` doubles in both: every project
+  route, each first for who may not (`401`, `400` without the header, `404` for a
   non-member with every call of `space.files` and `memory` recorded as none and the logs byte for byte
   unchanged, `403` for a member's owner act), then what it does: projects (made, listed, archived apart,
   the overview's counts and recent changes, removal `409` then `204`), members (by email, a directory's
@@ -536,6 +539,7 @@ under an https `PIKIT_PUBLIC_URL`).
 
 Not covered yet: the page, the view and the Settings section in an automated browser test (the page's
 projects and command notes are checked by its build and `scripts/chat.test.ts`; the project page was
-tried by hand in a browser over the doubles); the project routes against a real project store
-(projects-sql), tool-space-files' `space.files` and memory-sql's new methods, built apart: the doubles
-(`projects.test-support.ts`) keep only the rules the routes rely on.
+tried by hand in a browser over the doubles); the Worker's half over the real stores' Worker halves
+(`remote.test.ts` uses doubles; the repository's workerd e2e, `tests/workerd/test/projects-e2e.workerd.ts`,
+runs the routes in a Worker with the real components). The whole flow with the real components and an
+agent is the repository's `tests/acceptance/projects.test.ts`.

@@ -1140,7 +1140,9 @@ interface ProjectStore {
   `agents`, and restores the record's and members' changes (`OWNER_RESTORES`); exactly one owner,
   always. Agents read, search and add links. `redact` is operators', `syncMembers` components'.
 - Membership: `manual` members never expire; a sourced member counts while `checkedAt` is within
-  `staleAfterMs` (`memberIsCurrent`, `roleOfMembers`: `roleOf`'s one rule, owner wins).
+  `staleAfterMs` (`memberIsCurrent`, `roleOfMembers`: `roleOf`'s one rule, owner wins). `members` lists
+  the owner first, then the others in the order they were added; `versions` oldest first (as
+  `space.files.versions`).
 - Versions and `ifVersion` (`conflict`), bounds (`limit`: the core documents within the provider's
   `coreTokens`, which every `Project` says, `Project.coreTokens`, for a page's meter and an agent's
   section; the refusal says how many are left), credentials `refused` unechoed, `ProjectError` codes `not_found`, `forbidden`,

@@ -4,7 +4,7 @@
  * tests are the accounts'), and an App whose routes are served as a server serves them.
  */
 
-import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger, type Target, withAbortSignal } from "@pikit/core";
+import { type App, type AppContext, BACKGROUND_CONTEXT, type Clock, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger, type Target, withAbortSignal } from "@pikit/core";
 import {
   type AdminAuth,
   type AgentObserver,
@@ -386,7 +386,7 @@ export interface Served {
  * An App of `components`, started, whose `http.route`s are served as a server serves them at `origin`
  * (a path, or a whole URL of another host); `stop` it.
  */
-export async function serve(components: ComponentDefinition[], config: Record<string, unknown> = {}, target: Target = "server", origin = "http://pikit.test"): Promise<Served> {
+export async function serve(components: ComponentDefinition[], config: Record<string, unknown> = {}, target: Target = "server", origin = "http://pikit.test", clock?: Clock): Promise<Served> {
   const logged: Logged[] = [];
   const logger: Logger = {
     ...silentLogger,
@@ -402,7 +402,7 @@ export async function serve(components: ComponentDefinition[], config: Record<st
       return { start: () => void (routes = handle) };
     },
   });
-  const app = await defineApp({ components: [...components, server], config, logger, target }).create();
+  const app = await defineApp({ components: [...components, server], config, logger, target, ...(clock !== undefined && { clock }) }).create();
   await app.start();
   return {
     app,
