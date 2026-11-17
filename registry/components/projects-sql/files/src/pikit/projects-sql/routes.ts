@@ -5,6 +5,10 @@
  * as the operator (`{ kind: "operator", id }`): the project's actor decides, as for anyone.
  *
  * - `GET /admin/api/projects?archived=&cursor=&limit=`: a page of every project (removed ones too).
+ * - `POST /admin/api/projects` `{ space?, name, description?, owner, agents? }`: a new project, `201`
+ *   with it; `space` adopts an existing space (a Google Chat space's key), else a new one. A space that
+ *   has a project already is `409` `{ error: "space_taken", id }` with that project's id, so a script
+ *   adopting spaces may run again.
  * - `GET /admin/api/projects/:id`: `{ project, members, instructions?, documents, links }`.
  * - `GET /admin/api/projects/:id/history?before=&limit=`: a page of its log, newest first.
  * - `GET /admin/api/projects/:id/documents/:doc?part=&version=`: a part of a document.
@@ -20,7 +24,7 @@
  */
 
 import type { AppContext, Pikit } from "@pikit/core";
-import { type Caller, type ChangePageRequest, isJsonObject, isProjectId, type Operator, type Principal, ProjectError, type ProjectStore } from "@pikit/contracts";
+import { type Caller, type ChangePageRequest, isJsonObject, isProjectId, type NewProject, type Operator, type Principal, ProjectError, type ProjectStore } from "@pikit/contracts";
 
 export const ROUTE = "/admin/api/projects";
 const MAX_BODY = 16 * 1024;
@@ -82,6 +86,24 @@ export function provideRoutes(pikit: Pikit, store: () => ProjectStore): void {
     return value as unknown as Principal;
   };
 
+  const NEW_PROJECT = new Set(["space", "name", "description", "owner", "agents"]);
+  /** The body of `POST /admin/api/projects`, its shape only: the store checks the rest (`invalid`, `refused`). */
+  const newProjectIn = (fields: Record<string, unknown>): NewProject | Response => {
+    const { space, name, description, owner, agents } = fields;
+    const invalid = json({ error: "invalid_request", message: "the body is { space?, name, description?, owner: { channel, id }, agents? }" }, 400);
+    if (Object.keys(fields).some((key) => !NEW_PROJECT.has(key))) return invalid;
+    if (typeof name !== "string" || (space !== undefined && typeof space !== "string") || (description !== undefined && typeof description !== "string")) return invalid;
+    if (!isJsonObject(owner) || typeof owner.channel !== "string" || typeof owner.id !== "string") return invalid;
+    if (agents !== undefined && (!Array.isArray(agents) || agents.some((agent) => typeof agent !== "string"))) return invalid;
+    return {
+      name,
+      owner: owner as unknown as Principal,
+      ...(space !== undefined && { space }),
+      ...(description !== undefined && { description }),
+      ...(agents !== undefined && { agents: agents as string[] }),
+    };
+  };
+
   pikit.provideKeyed("http.route", `GET ${ROUTE}`, async (request, ctx) => {
     const operator = await auth.get()?.verify(request, ctx);
     if (operator === undefined) return unauthorized();
@@ -102,6 +124,26 @@ export function provideRoutes(pikit: Pikit, store: () => ProjectStore): void {
     } catch (error) {
       if (error instanceof ProjectError) return json({ error: error.code, message: error.message }, STATUS[error.code] ?? 400);
       throw error;
+    }
+  });
+
+  pikit.provideKeyed("http.route", `POST ${ROUTE}`, async (request, ctx) => {
+    const operator = await auth.get()?.verify(request, ctx);
+    if (operator === undefined) return unauthorized();
+    const caller: Caller = { kind: "operator", id: operator.id };
+    const fields = await body(request);
+    if (fields instanceof Response) return fields;
+    const input = newProjectIn(fields);
+    if (input instanceof Response) return input;
+    try {
+      const project = await store().create(input, caller, ctx);
+      acted(ctx, caller, project.id, "create");
+      return json(project, 201);
+    } catch (error) {
+      if (!(error instanceof ProjectError)) throw error;
+      // The space has a project: which one, so the caller can tell it is done (removed ones too).
+      const existing = error.code === "space_taken" && input.space !== undefined ? await store().get(input.space, caller, ctx) : undefined;
+      return json({ error: error.code, message: error.message, ...(existing !== undefined && { id: existing.id }) }, STATUS[error.code] ?? 400);
     }
   });
 
