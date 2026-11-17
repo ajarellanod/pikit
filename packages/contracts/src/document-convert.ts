@@ -93,7 +93,7 @@ export function isTextType(type: string): boolean {
 /** `bytes` as text when they are valid UTF-8 with no NUL, else `undefined` (a binary file). */
 export function textOf(bytes: Uint8Array): string | undefined {
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
     return text.includes(String.fromCharCode(0)) ? undefined : text;
   } catch {
     return undefined;
