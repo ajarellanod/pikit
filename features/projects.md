@@ -798,7 +798,9 @@ project"). neural-agents does this (its `agents/docs/projects.md`).
    real stores found and fixed what the doubles hid (the core budget unreadable, now
    `Project.coreTokens`; members listed by key on a tie and versions newest first, now the owner first
    then in the order added, and oldest first; the rule id copied in channel-web, now memory's
-   `memoryItemId`; the three extensions' cache windows named apart, now `freshMs` and `noProjectMs`).
+   `memoryItemId`; the three extensions' cache windows named apart, now `freshMs` and `noProjectMs`;
+   a delegated child never asked its offers, so offered none of a declaring extension's tools, now
+   asked before its task).
 2. **Knowledge and files**: documents with versions and search in projects-sql, `document.convert` and
    convert-workers-ai, `space.files` with its log and text search in tool-space-files
    (`project_file_save`, `project_file_get`), memory-sql's Worker half, authors, log and restore,
