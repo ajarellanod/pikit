@@ -150,7 +150,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    // Planned provider: projects-sql (features/projects.md). Never offered: a project store is a choice.
+    // Provider: projects-sql (features/projects.md). Never offered: a project store is a choice.
     summary:
       "Projects, each the record of one space shared by its members (one owner) and agents: its members, instructions and documents with versions, links, and their change log with restore; every call checked against its caller.",
   },

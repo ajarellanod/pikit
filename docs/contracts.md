@@ -35,15 +35,15 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.command` | keyed | admin-api, memory-recall, runtime-pi | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, scheduler-admit | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | tool-notify, admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, repo-github-app, scheduler-sql, settings-store, storage-kv-sql, tool-mcp-oauth, tool-space-files, provider-failover? | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, projects-sql, repo-github-app, scheduler-sql, settings-store, storage-kv-sql, tool-mcp-oauth, tool-space-files, provider-failover? | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, tool-notify, health-registry?, tool-mcp? | `createKeyValueConformance` |
 | `storage.blob` | single | storage-blob-fs, storage-blob-s3 | execution-cloudflare-sandbox, tool-space-files, execution-boat?, execution-gondolin?, workspace-local? | `createBlobConformance` |
-| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-mcp-oauth, tool-notify, tool-space-files, provider-failover? | `createMailboxConformance` |
-| `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-mcp-oauth, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, provider-failover?, settings-store? | `createMailboxConformance` |
-| `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-cloudflare-sandbox, execution-serve, health-registry, repo-github-app, settings-store, tool-mcp-oauth | server-bun? | `createHttpRouteConformance` (run by servers) |
-| `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store?, tool-mcp-oauth? | `createAdminAuthConformance` |
+| `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, projects-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-mcp-oauth, tool-notify, tool-space-files, provider-failover? | `createMailboxConformance` |
+| `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, projects-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-mcp-oauth, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, provider-failover?, settings-store? | `createMailboxConformance` |
+| `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, projects-sql, scheduler-sql, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
+| `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-cloudflare-sandbox, execution-serve, health-registry, projects-sql, repo-github-app, settings-store, tool-mcp-oauth | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, projects-sql?, repo-github-app?, settings-store?, tool-mcp-oauth? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-boat, execution-cloudflare-sandbox, execution-remote, execution-serve, repo-github-app, repo-github-token, storage-blob-s3, tool-websearch-brave, tool-websearch-gemini, execution-gondolin?, extension-tracing?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, channel-google-chat?, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
@@ -58,8 +58,8 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `approvals` | single | approvals-sql | admin-approvals, extension-approvals | `createApprovalsConformance` (approvals-sql's `conformance.ts`) |
 | `workspace` | single | execution-boat, execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
-| `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
-| `projects` | single | none | none | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
+| `memory` | single | memory-sql | memory-recall, memory-summaries, projects-sql? | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
+| `projects` | single | projects-sql | none | `createProjectsConformance`, with `changeLogCases` |
 | `space.files` | single | none | none | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
 | `principals` | single | none | none | none (no kit provider: neural-agents' people directory) |
 | `document.convert` | single | none | none | none yet (planned provider: convert-workers-ai) |
@@ -1063,8 +1063,8 @@ Crypto, `AWS_SES_*`). Consumer: channel-web's accounts (being built). Suite:
 The contracts of [projects](../features/projects.md): a project is the record of one space, shared by
 its members and agents, with no approvals and every change logged. They are in `@pikit/contracts`
 (not a registry's own) because several kit components use each of them (channel-web, projects-context,
-memory-recall, tool-space-files, projects-sql). None has a provider yet: projects-sql,
-tool-space-files' `space.files`, convert-workers-ai are being built; `principals` has none in the kit.
+memory-recall, tool-space-files, projects-sql). projects-sql provides `projects`; tool-space-files'
+`space.files` and convert-workers-ai are being built; `principals` has none in the kit.
 
 ### `Author` and `Change` ([change.ts](../packages/contracts/src/change.ts))
 
@@ -1141,13 +1141,16 @@ interface ProjectStore {
   takes), `mergeSearchHits` (one from each store in turn, each ref once) and `addedToProject(title)`, the
   line every tool that adds to a project ends its result with.
 
-Planned provider: projects-sql (an index actor and one actor per project). Users: channel-web,
-projects-context, memory-recall, projects-sql's admin routes. Suite: `createProjectsConformance`
+Provider: [projects-sql](../registry/components/projects-sql/README.md) (a directory actor and one
+actor per project, over `storage.sql`; a Worker half and the admin routes `/admin/api/projects*`).
+Users (being built): channel-web, projects-context, memory-recall. Suite: `createProjectsConformance`
 (`@pikit/contracts/testing`), with the note's negative cases (a non-member writes nothing, a removed
 member's writes stop, sourced members expire, an agent stays in its space, the owner's acts, restore
 exact, the log not rewritable by members, conflicts, the core budget, search in its project,
 credentials, malformed callers, context `unchanged`, removal and recovery, restart) and
-`changeLogCases` over documents.
+`changeLogCases` over documents (with a repeat, retention, a redaction and a write failing before its
+commit, through the subject's `advance` and optional `failNextCommit`); projects-sql passes it on a
+server and in the workerd lane. One provider: `experimental`.
 
 ### `space.files` ([space-files.ts](../packages/contracts/src/space-files.ts))
 
@@ -1159,14 +1162,14 @@ what agents alone saved, `mayTrash`), `search` and `text` (a file's text when it
 or converted with `document.convert`), `changes`, `restore`, `redact` (operators), `purge` (a removed
 project's space). Trusted code only: the caller decides who may act on a space and sets the author.
 `SpaceFilesError` codes `invalid`, `not_found`, `forbidden`, `limit`, `refused`, `gone`. Planned
-provider: tool-space-files. Users: channel-web, projects-context, projects-sql.
+provider: tool-space-files. Users: channel-web, projects-context.
 
 ### `principals` ([principals.ts](../packages/contracts/src/principals.ts), optional)
 
 The person behind a channel identity: `of(principal)` (the principal first, then the identities a
 directory links to the same person by a verified email) and `find(email)` (only people the directory
 knows; `[]` otherwise). Absent, a principal is only itself. No kit provider (rule 1): neural-agents'
-people directory provides it. Users: channel-web, memory-recall, projects-sql's routes.
+people directory provides it. Users: channel-web, memory-recall.
 
 ### `document.convert` ([document-convert.ts](../packages/contracts/src/document-convert.ts), optional)
 
@@ -1175,7 +1178,7 @@ document's text as Markdown (PDF, Office, OpenDocument, HTML, XML, CSV), at most
 never empty; `ConvertError` codes `invalid`, `too_large`, `empty`, `failed`, `unavailable`, never
 quoting the document; nothing kept. Helpers for its users: `isTextType`, `mediaTypeOf`, `textOf`,
 `cutText`. Absent, only text types are read. Planned provider: convert-workers-ai (Workers AI's
-`toMarkdown`). Users: projects-sql's and channel-web's document routes, tool-space-files.
+`toMarkdown`). Users: channel-web's document routes, tool-space-files.
 
 ## A registry's own contracts
 
