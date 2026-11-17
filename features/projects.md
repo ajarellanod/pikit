@@ -4,9 +4,13 @@
 client's project whose brief, reference documents, rules, notes and files every agent and every person
 of it shares and changes, in the web chat and in the client's Google Chat space alike)
 
-**Specified:** no: a proposal (2026-11-17), written for neural-agents (its web chat's signature
-feature, `agents/docs/projects.md` there). Nothing below is built; the contracts are sketches to
-build from, each with the component that consumes it. Revised the same day after the operator's
+**Specified:** yes, steps 0 to 2 of the build order are built (2026-11-17; written for neural-agents, its
+web chat's signature feature, `agents/docs/projects.md` there): the contracts, the components and the
+adapter's `offerTools`, each built against doubles of the others, then integrated and proved end to
+end with the real components on a server (`tests/acceptance/projects.test.ts`) and on Cloudflare
+(`tests/workerd/test/projects-e2e.workerd.ts`), and channel-web's route suite run over the real stores
+(`registry/components/channel-web/projects-stores.test.ts`). Step 3 (linked places) and the open
+questions below are not. First written as a proposal, revised the same day after the operator's
 decision: **projects are collaborative**. "Anyone in the project can add new things. The idea of a
 project is that common rules, common information, context and what happens in the associated chats
 are proposed and shared." So there is no editor role and no approval in a project; safety comes from
@@ -15,8 +19,8 @@ Revised again the same day (the operator's decisions): inside a project an agent
 (`project_search` over everything of the project, `project_read` for any item), one section
 (`<project>`, memory and files folded in), and one family of tools (`project_note`, `project_rule`,
 `project_file_save`, `project_file_get`, `project_link`), each adding tool saying "Added to the
-project: <title>"; outside projects nothing changes. The contracts are written, in `@pikit/contracts`
-(section "The contracts"); the components are being built against them.
+project: <title>"; outside projects nothing changes. The contracts are in `@pikit/contracts` (section
+"The contracts").
 
 **Needed by:** nothing required. It answers two open questions of [spaces](spaces.md) ("shared rooms
 in the web chat: a project with members whose chats are shared", "instructions per space other than
@@ -168,14 +172,14 @@ leave the Google Chat space, not by hand).
 | Component | Kind | Provides | Requires | What it is |
 |---|---|---|---|---|
 | `projects-sql` (built) | `projects` | `projects`, `http.route` `/admin/api/projects*`, a dashboard view | `storage.sql`, `actor.mailbox`, `actor.inbox`, `wakeups`; `admin.auth`? `memory`? | the store: the index actor and one actor per project (with its change log), passing `createProjectsConformance`; a Worker half (`projects-sql-worker`) giving `projects` over the mailbox and serving the admin routes; the purge of a removed project (its tables, `memory.purge`). Not `space.files?`: tool-space-files uses `projects`, and each using the other is a dependency cycle the kernel refuses; the space's files' purge is open |
-| `projects-context` (new) | `projects` | `agent.extension` `project` | `projects`; `memory`? `space.files`? | the agents' one view of a project: the `<project>` section and the read tools `project_search` (federated over the three stores), `project_read`, and `project_link` |
-| `channel-web` (changed) | `channel` | the project routes and page | `projects`? `space.files`? `memory`? `principals`? `document.convert`? | projects through `projects` (its own table goes); shared reads; context, files, memory and History tabs; undo |
+| `projects-context` (new, built) | `projects` | `agent.extension` `project` | `projects`; `memory`? `space.files`? | the agents' one view of a project: the `<project>` section and the read tools `project_search` (federated over the three stores), `project_read`, and `project_link` |
+| `channel-web` (changed, built) | `channel` | the project routes and page | `projects`? `space.files`? `memory`? `principals`? `document.convert`? | projects through `projects` (its own table goes); shared reads; context, files, memory and History tabs; undo |
 | `tool-space-files` (changed, built) | `tool` | `space.files` in both Apps, `agent.extension` `space-files` | as today, and `wakeups` (the trash's purge); `projects`? `document.convert`? | the archive as a capability other components call (people's uploads), provenance, trash, text search, a change log; in a project's space its tools are `project_file_save` and `project_file_get` (`offerTools`), and it shows no section of its own |
-| `memory-sql` (changed) | `memory` | `memory` in both Apps | as today | a Worker half (memory.md's "Later"), who kept each memory and from where, a change log with restore, `replace`, `redact`, `purge(owner)` |
-| `memory-recall` (changed) | `memory` | as today | `memory`; `projects`? `principals`? | in a project's space: `project_note` and `project_rule` (active at once) in place of `remember`, `forget`, `recall`, `read_memory` and `propose_rule`, no section of its own (the `<project>` section shows the memory), `/rules` for members only; `propose_preference` and `/prefs` as everywhere; elsewhere unchanged |
-| `convert-workers-ai` (new, `durable`) | `convert` | `document.convert` | `WORKERS_HOST` (an `AI` binding) | a document's text (PDF, Office, HTML, CSV) through Workers AI's `toMarkdown` |
-| `@pikit/contracts` (changed, written) | — | `change.ts` (`Principal`, `Author`, `Change`, `parseAuthor`), `projects.ts`, `space-files.ts`, `principals.ts`, `document-convert.ts`; `changeLogCases` and `createProjectsConformance` in `/testing` | — | the vocabulary and the contracts every component above builds against |
-| `@pikit/pi-adapter` (changed) | — | `offerTools`: which of an extension's tools a conversation's model is offered | — | what shows one family of tools per space (section "What an agent sees") |
+| `memory-sql` (changed, built) | `memory` | `memory` in both Apps | as today | a Worker half (memory.md's "Later"), who kept each memory and from where, a change log with restore, `replace`, `redact`, `purge(owner)` |
+| `memory-recall` (changed, built) | `memory` | as today | `memory`; `projects`? `principals`? | in a project's space: `project_note` and `project_rule` (active at once) in place of `remember`, `forget`, `recall`, `read_memory` and `propose_rule`, no section of its own (the `<project>` section shows the memory), `/rules` for members only; `propose_preference` and `/prefs` as everywhere; elsewhere unchanged |
+| `convert-workers-ai` (new, `durable`, built) | `convert` | `document.convert` | `WORKERS_HOST` (an `AI` binding) | a document's text (PDF, Office, HTML, CSV) through Workers AI's `toMarkdown` |
+| `@pikit/contracts` (changed, built) | — | `change.ts` (`Principal`, `Author`, `Change`, `parseAuthor`), `projects.ts`, `space-files.ts`, `principals.ts`, `document-convert.ts`; `changeLogCases` and `createProjectsConformance` in `/testing` | — | the vocabulary and the contracts every component above builds against |
+| `@pikit/pi-adapter` (changed, built) | — | `offerTools`: which of an extension's tools a conversation's model is offered | — | what shows one family of tools per space (section "What an agent sees") |
 
 Absent, not flags (P4): channel-web without `projects` has no projects (chats only), and an agent that
 does not name `project` sees none; memory-recall and tool-space-files without `projects` behave as
@@ -789,14 +793,18 @@ project"). neural-agents does this (its `agents/docs/projects.md`).
    the change log and restore; both actors; the suite; admin routes and view), projects-context (the
    `<project>` section, `project_search`, `project_read`, `project_link`, and the adapter's
    `offerTools`), channel-web on `projects` (overview with recent activity, members, instructions,
-   shared chats, History). channel-web's part (with its step 2 tabs, notices and the migration) is
-   built against the contracts with doubles (branch `feat/projects-channel-web`, 2026-11-17): its
-   README says what is proved and what waits for the real stores.
+   shared chats, History). Built (2026-11-17), each against doubles of the others, then integrated
+   (branch `feat/projects`): the server and workerd e2e tests and channel-web's route suite over the
+   real stores found and fixed what the doubles hid (the core budget unreadable, now
+   `Project.coreTokens`; members listed by key on a tie and versions newest first, now the owner first
+   then in the order added, and oldest first; the rule id copied in channel-web, now memory's
+   `memoryItemId`; the three extensions' cache windows named apart, now `freshMs` and `noProjectMs`).
 2. **Knowledge and files**: documents with versions and search in projects-sql, `document.convert` and
    convert-workers-ai, `space.files` with its log and text search in tool-space-files
    (`project_file_save`, `project_file_get`), memory-sql's Worker half, authors, log and restore,
    memory-recall's project policy (`project_note`, `project_rule` active, members' commands, no
-   section of its own), channel-web's documents, files and memory tabs and the in-chat notice.
+   section of its own), channel-web's documents, files and memory tabs and the in-chat notice. Built
+   (2026-11-17).
 3. **Linked places**: adopted spaces (a Google Chat space), sourced members, `project.items`, rooms in a
    project.
 4. **Later**: `storage.blob.links` (signed GET and PUT URLs: storage-blob-s3 presigned, a server route
@@ -841,6 +849,19 @@ logs) is pikit's, as memory is.
 - A Google Chat space's members as a kit membership source: channel-google-chat would need the Chat
   API's `spaces.members` (neural-agents built it as a local edit).
 - How a document from Drive is read: the person's token, a service account, or only a copy uploaded.
+- An agent that names `memory` or `space-files` but not `project` gets, in a project's space, the
+  project's write tools but neither the `<project>` section nor `project_search`: memory-recall and
+  tool-space-files render no section there, so it never sees the project's rules. Either a start-time
+  warning for such an agent, or memory-recall's own section when the request's agent does not select
+  `project` (a section sees the resolved agent; `offerTools` sees only the conversation).
+- A request's `Sender` carries no display name, so `Author.for` has none: projects-context names the
+  person from the project's members; someone outside them (a client's Google Chat user not synced) shows
+  as `channel:id`. A `Sender.name` given by channels (display only) would fix it at the source.
+- A purged project's space keeps its files: projects-sql cannot use `space.files` (with
+  tool-space-files using `projects`, a dependency cycle the kernel refuses). tool-space-files could
+  purge a space whose project is gone, or a component of its own could.
+- `credentialSettingProblem` splits on whitespace only: a key inside a URL (`?key=sk-...`) passes it.
+  projects-sql also splits on URL separators; memory-sql and channel-web's other inputs do not.
 - `offerTools` (section "What an agent sees") is built as a general extension feature (any extension,
   any async predicate on the conversation, asked at each admission). Open: whether an extension needs
   to ask for a re-evaluation between messages (today a change applies from the next message), and

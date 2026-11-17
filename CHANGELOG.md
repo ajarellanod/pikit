@@ -39,6 +39,25 @@ line names its area.
   files, links) and the tools `project_search` (one search over `projects`, the space's memory and its
   files), `project_read` (any item by its ref) and `project_link`, offered only in a project's space
   (`offerTools`). Over `projects`; `memory` and `space.files` optional.
+- Projects ([features/projects.md](features/projects.md)): a project is the record of one space,
+  shared by its members, collaborative, every change in History with its author and undone by any
+  member. **projects-sql** (new, both targets) is the store (`projects`: a directory actor and one
+  actor per project, members with one owner, instructions and documents with versions, links, a change
+  log with exact restore; a Worker half, the admin routes `/admin/api/projects*` and a dashboard view).
+  **channel-web** keeps its projects there (its own `channel_web_projects` carried over once, same ids
+  and spaces, then dropped): a project's page with Overview, Context (instructions, core and reference
+  documents), Files, Memory, Members, Chats (every member's) and History (the three logs merged, with
+  Undo), and a chat's "Added to the project" notices. **memory-sql** keeps who kept each memory and a
+  change log per owner (`replace`, `restore`, `redact`, `purge`, a Worker half); **memory-recall**
+  gives a project's space `project_note` and `project_rule` (active at once) and members' `/rules`;
+  **tool-space-files** provides `space.files` (people's uploads, versions, trash, text search, a log)
+  and `project_file_save`/`project_file_get` in a project's space. An agent naming `project`,
+  `memory` and `space-files` sees one family of tools per space (the adapter's `offerTools`):
+  `project_*` in a project's, today's elsewhere. memory-recall, tool-space-files and projects-context
+  take the same two windows, `freshMs` and `noProjectMs` (tool-space-files' fixed minute is now a
+  setting; projects-context's `noneMs` is renamed): give the three the same values. projects-context's
+  `coreTokens` defaults to the project's own budget, and names the person a run answered as the
+  project's members name them.
 - convert-workers-ai (new, Cloudflare): `document.convert` through Workers AI's `toMarkdown` (the
   Worker's `AI` binding: add `"ai": { "binding": "AI" }` to `wrangler.jsonc`): PDF, Office,
   OpenDocument, HTML, XML, CSV as Markdown; never images.
@@ -250,6 +269,15 @@ line names its area.
 
 ### Contracts
 
+- Projects' vocabulary (features/projects.md): `Principal`, `Author` and `Change` (`change.ts`, with
+  `changeLogCases`); the capabilities `projects` (`createProjectsConformance`), `space.files`,
+  `principals` and `document.convert`. `Project.coreTokens` says the store's budget of core
+  documents; `members` lists the owner first, then in the order added; `versions` oldest first. The
+  suite holds an operator to the owner's acts on any project (what channel-web's removal of a user
+  does). memory's `contract.ts` names a rule or preference by its words (`memoryItemId`,
+  `memoryWords`), the one id every component that adds one uses. `createMemoryMailbox({ observe })`
+  sees each call (a test counting what reached an actor). The adapter's `offerTools(extension,
+  offered)`: an extension's tools chosen per conversation at each admission.
 - `storage.blob` streams: `putStream(key, body, { contentType?, sha256? })` resolves with the size and
   SHA-256 stored and replaces the value only once all of it arrived and was checked (a body that
   fails, past `maxStreamBytes` or with another SHA-256, `BlobChecksumError`, stores nothing);
