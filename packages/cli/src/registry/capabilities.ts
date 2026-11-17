@@ -172,7 +172,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    // Planned provider: convert-workers-ai (durable).
+    // Provider: convert-workers-ai (durable, Workers AI's toMarkdown). A server provider comes with a user.
     summary: "A document's text as Markdown from its bytes (PDF, Office, OpenDocument, HTML, CSV): what makes an uploaded file a project's document, or a saved file searchable.",
   },
   "conversations.registry": {

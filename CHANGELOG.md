@@ -33,6 +33,15 @@ line names its area.
 
 ### Components
 
+- projects-context (new): the agents' one view of a project (features/projects.md), the extension
+  `project`: a stable `<project>` section (members, instructions, rules with their source, the run's
+  people's preferences, core documents within the agent's budget, the rest listed, notes, summaries,
+  files, links) and the tools `project_search` (one search over `projects`, the space's memory and its
+  files), `project_read` (any item by its ref) and `project_link`, offered only in a project's space
+  (`offerTools`). Over `projects`; `memory` and `space.files` optional.
+- convert-workers-ai (new, Cloudflare): `document.convert` through Workers AI's `toMarkdown` (the
+  Worker's `AI` binding: add `"ai": { "binding": "AI" }` to `wrangler.jsonc`): PDF, Office,
+  OpenDocument, HTML, XML, CSV as Markdown; never images.
 - router-rules: a rule matches lists, `conversations` and `actors` (a message matches when its chat
   is one of them, its sender one of them), instead of one `conversation` and one `actor`: one rule
   sends many chats to one agent. A list is never empty and names each id once (at most 1,000). The

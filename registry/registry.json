@@ -132,6 +132,14 @@
       ],
       "path": "components/conversations-kv"
     },
+    "convert-workers-ai": {
+      "version": "0.0.1",
+      "description": "A document's text as Markdown through Workers AI's toMarkdown (the Worker's AI binding): PDF, Office, OpenDocument, HTML, XML, CSV; never images. Provides document.convert on Cloudflare.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/convert-workers-ai"
+    },
     "credentials-do": {
       "version": "0.0.1",
       "description": "The model providers' credentials on Cloudflare, API keys and subscription logins (OAuth) alike, kept by one Durable Object that every conversation asks; an expiring token is refreshed once, under that object's lock. `pikit configure --login` uploads a login made on your machine.",
