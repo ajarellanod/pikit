@@ -144,8 +144,14 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 Scheduling, approvals, health and degradation policy, deduplication, routing, storage, channels,
 delivery, the dashboard, self-knowledge and self-change. Each is a capability (in `@pikit/contracts`, or declared by the registry component that defines it, as scheduler-sql declares `scheduler`) and a component (the dashboard's UI
 is a project's choice over its component, `admin-api`, §5); what every component of one must do alike (admitting a
-message, delivering answers) is a contracts helper, its policy passed in by the component (§3.3). A
-new kernel export is a decision recorded here.
+message, delivering answers) is a contracts helper, its policy passed in by the component (§3.3).
+Who changed what, in a store that keeps a history people read (a project's record, a space's memory
+and files: features/projects.md), is shared vocabulary in `@pikit/contracts`, not a capability:
+`Author` and `Change` (`packages/contracts/src/change.ts`), recorded by each store in the same
+transaction as the change, its author set from what the calling component authenticated and checked on
+arrival (`parseAuthor`), its log append-only (restore appends; only an operator's redaction, retention
+and a purge remove), every store held to it by one suite (`changeLogCases`). A new kernel export is a
+decision recorded here.
 
 **What a component asks of the CLI** stays out of the kernel and out of the CLI too: the component
 ships it as a file of its own directory, and the CLI (or the deployment component) calls it with a

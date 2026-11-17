@@ -32,6 +32,13 @@ const noMemory: MemoryStore = {
   approve: async () => false,
   forget: async () => false,
   remember: async () => {},
+  replace: async () => undefined,
+  changes: async () => ({ items: [] }),
+  restore: async () => {
+    throw new Error("nothing to restore");
+  },
+  redact: async () => {},
+  purge: async () => {},
 };
 /** The registry's record of each key: its space, as a channel gave it. */
 const registryOf = (spaces: Map<string, string>) =>
@@ -183,7 +190,14 @@ test("a conversation quiet for idleMinutes is summarized once into its space's m
   expect(w.memories()).toEqual([
     {
       owner: { type: "space", space: SPACE },
-      memory: { id: "summary:c1:e2", kind: "summary", status: "active", text: "Summary: Person: I like tea\nAssistant: Tea it is.", createdAt: w.clock.now() },
+      memory: {
+        id: "summary:c1:e2",
+        kind: "summary",
+        status: "active",
+        text: "Summary: Person: I like tea\nAssistant: Tea it is.",
+        createdAt: w.clock.now(),
+        by: { kind: "component", name: "memory-summaries" },
+      },
     },
   ]);
 

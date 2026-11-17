@@ -27,7 +27,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineComponent } from "@pikit/core";
-import { type AgentCommand, CONVERSATION, type ConversationRef, RUN_REQUESTS, type Sender } from "@pikit/contracts";
+import { type AgentCommand, type Author, CONVERSATION, type ConversationRef, RUN_REQUESTS, type Sender } from "@pikit/contracts";
 import { defineExtension, defineTool, type Extension, section } from "@pikit/pi-adapter/extensions";
 import Type, { type Static } from "typebox";
 import type { Memory, MemoryKind, MemoryOwner, MemoryStore } from "./contract.ts";
@@ -129,6 +129,13 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
   /** The people the run answers: its requests' person senders, the latest last. */
   const people = async (context: Context) => peopleOf((await context.value(RUN_REQUESTS)?.list(context))?.map((request) => request.sender) ?? [], config.machineChannels);
   const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
+  /** Who a tool's write is by: the agent, the conversation it works in, and the person the run answers. */
+  const agentAuthor = async (context: Context): Promise<Author> => {
+    const conversation = context.value(CONVERSATION);
+    if (conversation === undefined) throw new Error("memory: not in a conversation");
+    const person = (await people(context)).at(-1);
+    return { kind: "agent", agent: conversation.agent, conversation: conversation.key, ...(person !== undefined && { for: person }) };
+  };
 
   const remember = defineTool({
     name: "remember",
@@ -141,7 +148,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     async execute(args, api, context) {
       const { owner, ctx } = scopeOf(context);
       const id = `${api.conversationId}:${api.callId}`;
-      await memory().remember(owner, { id, kind: "fact", status: "active", text: args.fact, createdAt: ctx.clock.now() }, ctx);
+      await memory().remember(owner, { id, kind: "fact", status: "active", text: args.fact, createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
       return text(`Remembered (id ${id}).`);
     },
   });
@@ -154,7 +161,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     replay: "safe",
     async execute(args, _api, context) {
       const { owner, ctx } = scopeOf(context);
-      const removed = await memory().forget(owner, args.id, { kinds: ["fact", "summary"] }, ctx);
+      const removed = await memory().forget(owner, args.id, { kinds: ["fact", "summary"] }, await agentAuthor(context), ctx);
       return text(removed ? `Forgotten (id ${args.id}).` : `Nothing kept under id ${args.id}.`);
     },
   });
@@ -199,7 +206,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     async execute(args, _api, context) {
       const { owner, ctx } = scopeOf(context);
       const id = await itemId("rule", args.rule);
-      await memory().remember(owner, { id, kind: "rule", status: "pending", text: normalized(args.rule), createdAt: ctx.clock.now() }, ctx);
+      await memory().remember(owner, { id, kind: "rule", status: "pending", text: normalized(args.rule), createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
       const kept = await memory().get(owner, id, ctx);
       if (kept?.status === "active") return text(`That is a rule already (id ${id}).`);
       return text(`Proposed (id ${id}): it waits for a person to approve it with /rules approve ${id}, or reject it with /rules reject ${id}.`);
@@ -220,7 +227,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
       if (person === undefined) throw new Error("no person sent this run's messages (a delegated or scheduled run): a preference is proposed only to the person who wrote");
       const owner = personOwner(person);
       const id = await itemId("preference", args.preference);
-      await memory().remember(owner, { id, kind: "preference", status: "pending", text: normalized(args.preference), createdAt: ctx.clock.now() }, ctx);
+      await memory().remember(owner, { id, kind: "preference", status: "pending", text: normalized(args.preference), createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
       const kept = await memory().get(owner, id, ctx);
       if (kept?.status === "active") return text(`That is a preference of ${personName(person)} already (id ${id}).`);
       return text(`Proposed for ${personName(person)} (id ${id}): it waits for them to approve it with /prefs approve ${id}, or reject it with /prefs reject ${id}.`);
@@ -272,6 +279,8 @@ export function createMemoryCommand(managed: Managed, memory: () => MemoryStore)
     async run(conversation, args, ctx, sender) {
       const owner = managed.owner(conversation, sender);
       const store = memory();
+      // Who typed it: a channel's sender, in this chat; or the operator's dashboard.
+      const by: Author = sender === undefined ? { kind: "operator", id: "dashboard" } : { kind: "person", principal: { channel: sender.channel, id: sender.id }, conversation: conversation.key };
       const [verb = "", ...words] = args.split(/\s+/).filter((each) => each !== "");
       const rest = args.slice(args.indexOf(verb) + verb.length).trim();
       const id = words[0] ?? "";
@@ -290,18 +299,18 @@ export function createMemoryCommand(managed: Managed, memory: () => MemoryStore)
           if (rest === "") throw new Error(`Write the ${kind}: /${command} add <${kind}>`);
           if (rest.length > ITEM_MAX) throw new Error(`A ${kind} is at most ${ITEM_MAX} characters`);
           const itemIdOf = await itemId(kind, rest);
-          await store.remember(owner, { id: itemIdOf, kind, status: "active", text: normalized(rest), createdAt: ctx.clock.now() }, ctx);
+          await store.remember(owner, { id: itemIdOf, kind, status: "active", text: normalized(rest), createdAt: ctx.clock.now(), by }, ctx);
           // Proposed before with the same words: added now, so approved.
-          await store.approve(owner, itemIdOf, kind, ctx);
+          await store.approve(owner, itemIdOf, kind, by, ctx);
           return { text: `Added (id ${itemIdOf}).` };
         }
         case "approve":
-          if (!(await store.approve(owner, id, kind, ctx))) throw new Error(`No ${kind} ${id} to approve: /${command} lists them`);
+          if (!(await store.approve(owner, id, kind, by, ctx))) throw new Error(`No ${kind} ${id} to approve: /${command} lists them`);
           return { text: `Approved (id ${id}).` };
         case "reject":
-          return { text: (await store.forget(owner, id, { kinds: [kind], status: "pending" }, ctx)) ? `Rejected (id ${id}).` : `No proposed ${kind} ${id}.` };
+          return { text: (await store.forget(owner, id, { kinds: [kind], status: "pending" }, by, ctx)) ? `Rejected (id ${id}).` : `No proposed ${kind} ${id}.` };
         case "remove":
-          return { text: (await store.forget(owner, id, { kinds: [kind] }, ctx)) ? `Removed (id ${id}).` : `No ${kind} ${id}.` };
+          return { text: (await store.forget(owner, id, { kinds: [kind] }, by, ctx)) ? `Removed (id ${id}).` : `No ${kind} ${id}.` };
         default:
           throw new Error(`Unknown: /${command} ${verb}. Use ${usage}`);
       }

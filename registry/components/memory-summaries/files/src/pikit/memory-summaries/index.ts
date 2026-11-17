@@ -207,7 +207,7 @@ export default defineComponent({
             const key = String(row.conversation_key);
             const space = (await conversations.get().get(key, ctx))?.space;
             const owner = memory.get().ownerOf({ key, agent: String(row.agent), conversationId, ...(space !== undefined && { space }) });
-            await memory.get().remember(owner, { id: `summary:${conversationId}:${read.newest}`, kind: "summary", status: "active", text, createdAt: ctx.clock.now() }, ctx);
+            await memory.get().remember(owner, { id: `summary:${conversationId}:${read.newest}`, kind: "summary", status: "active", text, createdAt: ctx.clock.now(), by: { kind: "component", name: "memory-summaries" } }, ctx);
           }
         }
         await sql.get().run(`UPDATE ${CONVERSATIONS} SET summarized_entry = COALESCE(?, summarized_entry), due = NULL WHERE conversation_id = ?`, [read?.newest ?? null, conversationId]);

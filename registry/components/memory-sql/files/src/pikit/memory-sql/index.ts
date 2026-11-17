@@ -177,6 +177,11 @@ export function searchAttempts(query: string): string[] {
   return [...new Set([quoted.join(" AND "), `"${words.join(" ")}"`, quoted.join(" OR ")])];
 }
 
+/** What a method of the contract this version does not build yet answers. */
+const notBuilt = (method: string): never => {
+  throw new ActorCallError("failed", `memory-sql: ${method} is not built yet`);
+};
+
 export default defineComponent({
   name: "memory-sql",
   config: Config,
@@ -195,9 +200,16 @@ export default defineComponent({
       list: async (owner, filter, limit, ctx) => (await call(owner, CALL.list, { ...filterFields(filter), limit }, ctx)) as Memory[],
       get: async (owner, id, ctx) => ((await call(owner, CALL.get, { id }, ctx)) as Memory | null) ?? undefined,
       remember: async (owner, memory, ctx) => void (await call(owner, CALL.remember, { memory }, ctx)),
-      approve: async (owner, id, kind, ctx) => (await call(owner, CALL.approve, { id, kind }, ctx)) === true,
-      forget: async (owner, id, filter, ctx) => (await call(owner, CALL.forget, { id, ...filterFields(filter) }, ctx)) === true,
+      // Authors, the change log, replace, restore, redact and purge (features/projects.md) are not built
+      // yet: `by` is not kept, and the new methods refuse.
+      approve: async (owner, id, kind, _by, ctx) => (await call(owner, CALL.approve, { id, kind }, ctx)) === true,
+      forget: async (owner, id, filter, _by, ctx) => (await call(owner, CALL.forget, { id, ...filterFields(filter) }, ctx)) === true,
       search: async (owner, query, limit, ctx) => (await call(owner, CALL.search, { query, limit }, ctx)) as MemoryMatch[],
+      replace: async () => notBuilt("replace"),
+      changes: async () => notBuilt("changes"),
+      restore: async () => notBuilt("restore"),
+      redact: async () => notBuilt("redact"),
+      purge: async () => notBuilt("purge"),
     } satisfies MemoryStore);
 
     const columns = "id, kind, status, text, created_at";

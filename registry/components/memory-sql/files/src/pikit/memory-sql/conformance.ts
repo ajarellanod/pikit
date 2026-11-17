@@ -9,7 +9,8 @@
 
 import { type AppContext, type ComponentDefinition, defineApp, defineComponent, type Handle, silentLogger, type Target } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
-import { type Memory, type MemoryKind, MEMORY_TEXT_MAX, type MemoryOwner, type MemoryStatus, type MemoryStore } from "./contract.ts";
+import type { Author } from "@pikit/contracts";
+import { type Memory, type MemoryKind, MEMORY_TEXT_MAX, type MemoryOwner, type MemoryStatus, type MemoryStore, type NewMemory } from "./contract.ts";
 
 export interface MemoryFixture {
   /** The components of one App over the case's storage: called again for each App of the case (a restart). */
@@ -29,8 +30,12 @@ const GROUP = "memory";
 function check(condition: boolean, what: string): void {
   if (!condition) throw new Error(`${GROUP}: ${what}`);
 }
-const same = (actual: unknown, expected: unknown, what: string) =>
-  check(JSON.stringify(actual) === JSON.stringify(expected), `${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+/** A memory's author and `updatedAt` are not compared here: these cases are about what is kept, where and how it is found. */
+const plain = (value: unknown) => JSON.stringify(value, (key, field) => (key === "by" || key === "updatedAt" ? undefined : field));
+const same = (actual: unknown, expected: unknown, what: string) => check(plain(actual) === plain(expected), `${what}: expected ${plain(expected)}, got ${plain(actual)}`);
+
+/** Who the cases' writes are by: a person typing a command in a Google Chat space. */
+const BY: Author = { kind: "person", principal: { channel: "googlechat", id: "users/conformance" }, conversation: "googlechat:spaces/conformance" };
 
 /** A key in the shape of Anthropic's: what no memory may keep, and no refusal may echo. */
 const CREDENTIAL = "sk-ant-api03-memoryconformance0123456789abcd";
@@ -54,8 +59,8 @@ const owners = () => {
   } satisfies Record<string, MemoryOwner>;
 };
 type Owners = ReturnType<typeof owners>;
-const item = (kind: MemoryKind, id: string, text: string, createdAt: number, status: MemoryStatus = "active"): Memory => ({ id, kind, status, text, createdAt });
-const fact = (id: string, text: string, createdAt: number): Memory => item("fact", id, text, createdAt);
+const item = (kind: MemoryKind, id: string, text: string, createdAt: number, status: MemoryStatus = "active"): NewMemory => ({ id, kind, status, text, createdAt, by: BY });
+const fact = (id: string, text: string, createdAt: number): NewMemory => item("fact", id, text, createdAt);
 const ids = (memories: readonly Memory[]) => memories.map((m) => m.id);
 const FACTS = { kinds: ["fact"] } as const;
 const DATA = { kinds: ["fact", "summary"] } as const;
@@ -160,14 +165,14 @@ export function createMemoryConformance(factory: () => MemoryFixture | Promise<M
       await memory.remember(TEAM, item("rule", "r", "Use metric units", 1, "pending"), ctx);
       await memory.remember(TEAM, fact("f", "likes tea", 2), ctx);
       await memory.remember(ANA, item("preference", "p", "Short answers", 3, "pending"), ctx);
-      same(await memory.approve(TEAM, "r", "fact", ctx), false, "a pending rule approved as a fact");
+      same(await memory.approve(TEAM, "r", "fact", BY, ctx), false, "a pending rule approved as a fact");
       same((await memory.get(TEAM, "r", ctx))?.status, "pending", "the rule after that");
-      same(await memory.approve(TEAM, "r", "rule", ctx), true, "approving the pending rule");
-      same(await memory.approve(TEAM, "r", "rule", ctx), true, "approving it again");
+      same(await memory.approve(TEAM, "r", "rule", BY, ctx), true, "approving the pending rule");
+      same(await memory.approve(TEAM, "r", "rule", BY, ctx), true, "approving it again");
       same((await memory.get(TEAM, "r", ctx))?.status, "active", "the rule after approve");
-      same(await memory.approve(TEAM, "nobody", "rule", ctx), false, "an unknown id");
-      same(await memory.approve(TEAM, "f", "rule", ctx), false, "a fact is no rule");
-      same(await memory.approve(ANA, "p", "preference", ctx), true, "approving the preference");
+      same(await memory.approve(TEAM, "nobody", "rule", BY, ctx), false, "an unknown id");
+      same(await memory.approve(TEAM, "f", "rule", BY, ctx), false, "a fact is no rule");
+      same(await memory.approve(ANA, "p", "preference", BY, ctx), true, "approving the preference");
       same(await memory.list(ANA, { kinds: ["preference"], status: "active" }, 10, ctx), [item("preference", "p", "Short answers", 3)], "the preference after approve");
     }),
     appCase("forget removes one memory the filter takes; an unknown id, or one the filter leaves, is false and stays", async ({ memory, ctx, TEAM }) => {
@@ -175,12 +180,12 @@ export function createMemoryConformance(factory: () => MemoryFixture | Promise<M
       await memory.remember(TEAM, fact("b", "likes cake", 2), ctx);
       await memory.remember(TEAM, item("rule", "r", "Answer in Spanish", 3), ctx);
       await memory.remember(TEAM, item("rule", "p", "Use metric units", 4, "pending"), ctx);
-      same(await memory.forget(TEAM, "a", DATA, ctx), true, "forgetting a fact");
-      same(await memory.forget(TEAM, "a", DATA, ctx), false, "forgetting it again");
-      same(await memory.forget(TEAM, "nobody", DATA, ctx), false, "an unknown id");
-      same(await memory.forget(TEAM, "r", DATA, ctx), false, "a rule, with a filter of facts and summaries");
-      same(await memory.forget(TEAM, "r", { kinds: ["rule"], status: "pending" }, ctx), false, "an active rule, with a filter of pending ones");
-      same(await memory.forget(TEAM, "p", { kinds: ["rule"], status: "pending" }, ctx), true, "rejecting the pending rule");
+      same(await memory.forget(TEAM, "a", DATA, BY, ctx), true, "forgetting a fact");
+      same(await memory.forget(TEAM, "a", DATA, BY, ctx), false, "forgetting it again");
+      same(await memory.forget(TEAM, "nobody", DATA, BY, ctx), false, "an unknown id");
+      same(await memory.forget(TEAM, "r", DATA, BY, ctx), false, "a rule, with a filter of facts and summaries");
+      same(await memory.forget(TEAM, "r", { kinds: ["rule"], status: "pending" }, BY, ctx), false, "an active rule, with a filter of pending ones");
+      same(await memory.forget(TEAM, "p", { kinds: ["rule"], status: "pending" }, BY, ctx), true, "rejecting the pending rule");
       same(ids(await memory.list(TEAM, { kinds: ["fact", "rule"] }, 10, ctx)), ["b", "r"], "what is left");
     }),
     appCase("another owner's memories are never listed, got, searched, approved or forgotten, even under the same id", async ({ memory, ctx, TEAM, OTHER, TRADER, ANA, BOB }) => {
@@ -195,14 +200,14 @@ export function createMemoryConformance(factory: () => MemoryFixture | Promise<M
       same(ids(await memory.list(OTHER, FACTS, 10, ctx)), ["b"], "the other space's list");
       same(ids(await memory.list(TRADER, FACTS, 10, ctx)), ["t"], "the trader's list");
       same(await memory.get(TEAM, "b", ctx), undefined, "another space's fact, got from the team");
-      same(await memory.approve(TEAM, "r", "rule", ctx), false, "another space's rule, approved from the team");
+      same(await memory.approve(TEAM, "r", "rule", BY, ctx), false, "another space's rule, approved from the team");
       same((await memory.get(OTHER, "r", ctx))?.status, "pending", "the other space's rule after that");
-      same(await memory.approve(BOB, "p", "preference", ctx), false, "Ana's preference, approved as Bob");
+      same(await memory.approve(BOB, "p", "preference", BY, ctx), false, "Ana's preference, approved as Bob");
       same(await memory.list(BOB, { kinds: ["preference"] }, 10, ctx), [], "Bob's preferences");
-      same(await memory.forget(BOB, "p", { kinds: ["preference"] }, ctx), false, "Ana's preference, forgotten as Bob");
+      same(await memory.forget(BOB, "p", { kinds: ["preference"] }, BY, ctx), false, "Ana's preference, forgotten as Bob");
       // The same id in another owner is another memory: forgetting the team's leaves it.
       await memory.remember(OTHER, fact("a", "the other space's own a", 6), ctx);
-      same(await memory.forget(TEAM, "a", DATA, ctx), true, "forgetting the team's a");
+      same(await memory.forget(TEAM, "a", DATA, BY, ctx), true, "forgetting the team's a");
       same(ids(await memory.list(OTHER, FACTS, 10, ctx)), ["b", "a"], "the other space's list after the team's forget");
       same(ids(await memory.list(ANA, { kinds: ["preference"] }, 10, ctx)), ["p"], "Ana's preferences after all that");
     }),
@@ -239,7 +244,7 @@ export function createMemoryConformance(factory: () => MemoryFixture | Promise<M
       }
       same(await memory.search(TEAM, "?!", 10, ctx), [], "a query with no word finds nothing");
       same(await memory.search(TEAM, "pizza", 10, ctx), [], "a word nothing has");
-      await memory.forget(TEAM, "s", DATA, ctx);
+      await memory.forget(TEAM, "s", DATA, BY, ctx);
       same(ids(await memory.search(TEAM, "tea", 10, ctx)), ["a"], "a forgotten memory is never found");
     }),
     appCase("a text holding a credential, an empty one or one too long is refused, keeps nothing and is never echoed", async ({ memory, ctx, TEAM, ANA }) => {
@@ -263,7 +268,7 @@ export function createMemoryConformance(factory: () => MemoryFixture | Promise<M
       try {
         await first.memory.remember(TEAM, fact("a", "likes tea", 1), first.ctx);
         await first.memory.remember(TEAM, item("rule", "r", "Answer in Spanish", 2, "pending"), first.ctx);
-        await first.memory.approve(TEAM, "r", "rule", first.ctx);
+        await first.memory.approve(TEAM, "r", "rule", BY, first.ctx);
         await first.memory.remember(ANA, item("preference", "p", "Short answers", 3, "pending"), first.ctx);
       } finally {
         await first.stop();

@@ -80,3 +80,9 @@ export { createDeployerProtocolConformance } from "./deployer.ts";
 
 export type { EmailApiFailure, EmailApiFake, EmailSenderFixture, SentEmail } from "./email.ts";
 export { createEmailSenderConformance } from "./email.ts";
+
+export type { ChangeLogAuthors, ChangeLogSubject } from "./change-log.ts";
+export { changeLogCases, LOG_AGENT, LOG_AUTHORS, LOG_OPERATOR, LOG_OTHER, LOG_PERSON } from "./change-log.ts";
+
+export type { ProjectsFixture, ProjectsSubject } from "./projects.ts";
+export { createProjectsConformance } from "./projects.ts";

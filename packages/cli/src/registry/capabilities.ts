@@ -146,6 +146,35 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Values an operator changes live from the dashboard, read when used: each component declares its own (a schema, defaults).",
   },
+  projects: {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Planned provider: projects-sql (features/projects.md). Never offered: a project store is a choice.
+    summary:
+      "Projects, each the record of one space shared by its members (one owner) and agents: its members, instructions and documents with versions, links, and their change log with restore; every call checked against its caller.",
+  },
+  "space.files": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Planned provider: tool-space-files (features/projects.md, "Files").
+    summary: "The files a space keeps, people's uploads and agents' saves alike: versions with their authors, a trash, text search, a change log with restore; for trusted code (routes, tools).",
+  },
+  principals: {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // No kit provider: it comes with its first user's directory (neural-agents' people).
+    summary: "The person behind a channel identity: the other identities a directory links to it, and who a verified email names; absent, a principal is only itself.",
+  },
+  "document.convert": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Planned provider: convert-workers-ai (durable).
+    summary: "A document's text as Markdown from its bytes (PDF, Office, OpenDocument, HTML, CSV): what makes an uploaded file a project's document, or a saved file searchable.",
+  },
   "conversations.registry": {
     mode: "single",
     definedIn: "@pikit/contracts",

@@ -6,7 +6,9 @@
 // shared by who asks and who draws it (`questionPart`, `answerText`), the check of what the contracts take as a JSON object (`isJsonObject`), the grammar of `http.route`
 // keys (`parseHttpRouteKey`, `matchesHttpRoute`), who a conversation is with as an operator reads it
 // (the `conversation.describe` pipeline: `describeStage`, `describeConversation`, `cleanParty`) and the envelopes of an actor's call and stream
-// (`answerCall`, `callResult`, `answerStream`, `streamResult`), so that no provider has its own. No policy: what a protocol waits, retries and says
+// (`answerCall`, `callResult`, `answerStream`, `streamResult`), who changed what in a store's log (`Author`, `Change`, `parseAuthor`:
+// change.ts) and the projects' contracts (`projects`, `space.files`, `principals`, `document.convert`, the agents' federated search's
+// `ProjectSearchHit`), so that no provider has its own. No policy: what a protocol waits, retries and says
 // is its caller's, passed in. Each contract has a stability level (SPEC K8); the capabilities'
 // levels are in the catalogue (`packages/cli/src/registry/capabilities.ts`). What only Cloudflare
 // components use (`WORKERS_HOST`) is in `@pikit/contracts/cloudflare`, not here.
@@ -162,5 +164,98 @@ export type { AppMessageParts, MessageContent, MessagePart } from "./parts.ts";
 export { foldParts, messagePieces, partProblem } from "./parts.ts";
 export type { Question, QuestionAnswer, QuestionField, QuestionOption, QuestionPart, QuestionValue } from "./question.ts";
 export { answerProblem, answerText, QUESTION_FIELD_KINDS, QUESTION_FIELD_NAME, questionPart, questionProblem } from "./question.ts";
+export type { Author, Change, ChangeAction, ChangeItem, ChangePage, ChangePageRequest, Principal } from "./change.ts";
+export {
+  AUTHOR_PART_MAX,
+  CHANGE_PAGE_MAX,
+  CHANGE_RETENTION_DAYS,
+  CHANGE_TITLE_MAX,
+  ChangeInputError,
+  changeTitle,
+  parseAuthor,
+  parseChangePageRequest,
+  parsePrincipal,
+  pastRetention,
+  PRINCIPAL_NAME_MAX,
+  principalKey,
+  samePrincipal,
+} from "./change.ts";
+export type { Principals } from "./principals.ts";
+export type {
+  Caller,
+  DocumentInput,
+  DocumentMode,
+  DocumentRead,
+  Instructions,
+  ItemVersion,
+  Link,
+  Member,
+  MemberSync,
+  NewProject,
+  Project,
+  ProjectContext,
+  ProjectDocument,
+  ProjectErrorCode,
+  ProjectItemKind,
+  ProjectItemRef,
+  ProjectListQuery,
+  ProjectRole,
+  ProjectSearchHit,
+  ProjectStore,
+  ProjectUpdate,
+} from "./projects.ts";
+export {
+  addedToProject,
+  authorOf,
+  CONTEXT_MEMBERS,
+  CORE_TOKENS_DEFAULT,
+  DOCUMENT_MAX,
+  DOCUMENT_TITLE_MAX,
+  estimateTokens,
+  formatItemRef,
+  INSTRUCTIONS_MAX,
+  isProjectId,
+  LINK_NOTE_MAX,
+  LINK_URL_MAX,
+  linkUrlProblem,
+  memberIsCurrent,
+  mergeSearchHits,
+  OWNER_RESTORES,
+  parseCaller,
+  parseItemRef,
+  PROJECT_DESCRIPTION_MAX,
+  PROJECT_DOCUMENTS_MAX,
+  PROJECT_ITEM_KINDS,
+  PROJECT_LINKS_MAX,
+  PROJECT_NAME_MAX,
+  PROJECT_SPACE_PREFIX,
+  PROJECT_TEXT_MAX,
+  PROJECT_TEXT_WITH_VERSIONS_MAX,
+  PROJECT_TOMBSTONE_DAYS,
+  ProjectError,
+  projectNameProblem,
+  PROJECTS_OWNED_MAX,
+  projectSpace,
+  READ_PART,
+  restoreNeedsOwner,
+  roleOfMembers,
+  SEARCH_MAX,
+  SEARCH_PART,
+  STALE_AFTER_MS_DEFAULT,
+} from "./projects.ts";
+export type { ListedSpaceFile, NewSpaceFile, SpaceFile, SpaceFileMatch, SpaceFiles, SpaceFilesErrorCode, SpaceFilesUsage, SpaceFileText } from "./space-files.ts";
+export {
+  mayTrash,
+  SPACE_FILE_DESCRIPTION_MAX,
+  SPACE_FILE_NAME_MAX,
+  SPACE_FILE_TEXT_PART,
+  SPACE_FILES_LIST_MAX,
+  SPACE_FILES_TRASH_DAYS,
+  SpaceFilesError,
+  spaceFileDescriptionProblem,
+  spaceFileNameProblem,
+} from "./space-files.ts";
+export type { ConvertErrorCode, ConvertInput, DocumentConverter } from "./document-convert.ts";
+export { CONVERT_MIN_MAX_BYTES, CONVERT_TEXT_MAX, ConvertError, cutText, isTextType, mediaTypeOf, TEXT_TYPES, textOf } from "./document-convert.ts";
 export type { AnswerDelivery, AnswerDeliveryOptions, DeliveryPolicy } from "./delivery.ts";
 export { answerContent, answersOnlyTheDashboard, DASHBOARD_REQUEST_PREFIX, isDashboardRequest, startAnswerDelivery } from "./delivery.ts";

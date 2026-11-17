@@ -59,6 +59,10 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `workspace` | single | execution-boat, execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
 | `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
+| `projects` | single | none | none | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
+| `space.files` | single | none | none | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
+| `principals` | single | none | none | none (no kit provider: neural-agents' people directory) |
+| `document.convert` | single | none | none | none yet (planned provider: convert-workers-ai) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web),
@@ -1054,6 +1058,125 @@ Providers, variables only (a `fetch` to an HTTP API, both targets): email-resend
 Crypto, `AWS_SES_*`). Consumer: channel-web's accounts (being built). Suite:
 `createEmailSenderConformance`, against a fake of each provider's HTTP API (both providers).
 
+## Projects: who changed what, and a space's record
+
+The contracts of [projects](../features/projects.md): a project is the record of one space, shared by
+its members and agents, with no approvals and every change logged. They are in `@pikit/contracts`
+(not a registry's own) because several kit components use each of them (channel-web, projects-context,
+memory-recall, tool-space-files, projects-sql). None has a provider yet: projects-sql,
+tool-space-files' `space.files`, convert-workers-ai are being built; `principals` has none in the kit.
+
+### `Author` and `Change` ([change.ts](../packages/contracts/src/change.ts))
+
+Shared vocabulary of the append-only change logs three stores keep (projects-sql, memory-sql,
+tool-space-files) and one page merges (channel-web's History).
+
+```ts
+type Principal = { channel: string; id: string; name?: string };   // a Sender's shape; name shown, never checked
+type Author =
+  | { kind: "person"; principal: Principal; conversation?: string }  // conversation: the chat a command was typed in
+  | { kind: "agent"; agent: string; conversation: string; for?: Principal } // for: the person the run answered
+  | { kind: "operator"; id: string }
+  | { kind: "component"; name: string };
+type Change = { n; at; by: Author; action: "added" | "changed" | "removed" | "restored";
+  item: { kind; id; title }; version?; restores?; restorable: boolean; redacted?: { at; by } };
+```
+
+- The author is set by the component that took the change, from what it authenticated, never from a
+  model's or a page's words; every actor checks it on arrival with `parseAuthor` (`parsePrincipal`,
+  `ChangeInputError`, never echoing the value).
+- Every change is logged with its author in the same transaction as the change; a repeat that changes
+  nothing logs nothing. `n` is gapless per log, never reused nor rewritten: no method edits or deletes
+  an entry; `restore(n)` appends a `restored` entry and brings back exactly the state before `n` (its
+  original author kept on the item). Exceptions, not members': an operator's `redact(n)` (who and when
+  stay, `redacted` shows it, `restorable: false`), retention (`CHANGE_RETENTION_DAYS`, 365) and an
+  owner's purge. Past retention or redacted, a restore is `gone`.
+- Helpers: `changeTitle` (one line, 120 characters), `principalKey`, `samePrincipal`, `pastRetention`,
+  `parseChangePageRequest` (`{ before?, limit }`, newest first, at most `CHANGE_PAGE_MAX`).
+
+Suite: `changeLogCases(group, open, authors?)` (`@pikit/contracts/testing`), run inside each store's
+suite with a subject that adds, changes, removes and restores one kind of its items: one entry per
+change with its author, versions growing, restore exact (an addition, a change, a removal, a restore of
+a restore), the earlier entries byte for byte after every operation, and with the optional fixture
+methods a repeat that logs nothing, retention (`gone`), redaction, and a write failing before its
+commit leaving neither item nor entry. `change-log.test.ts` checks the cases catch five broken stores.
+
+### `projects` ([projects.ts](../packages/contracts/src/projects.ts))
+
+```ts
+interface ProjectStore {
+  create(input, caller, ctx); list(query, caller, ctx); locate(id, ctx);          // the directory
+  get(space, caller, ctx); roleOf(space, principals, ctx); update(space, change, caller, ctx);
+  members(space, page, caller, ctx); addMember(...); removeMember(...); transferOwnership(...); syncMembers(...);
+  instructions(space, { version? }, caller, ctx); setInstructions(space, { text, ifVersion }, caller, ctx);
+  documents(...); putDocument(space, { id?, title, text, mode: "core" | "reference", source?, ifVersion? }, caller, ctx);
+  removeDocument(...); read(space, id, { part, version? }, caller, ctx); versions(...);
+  search(space, query, limit, caller, ctx): Promise<ProjectSearchHit[]>;
+  links(...); addLink(...); removeLink(...);
+  context(space, known, caller, ctx): Promise<ProjectContext | "unchanged" | undefined>;
+  changes(space, page, caller, ctx); restore(space, n, caller, ctx); redact(space, n, caller, ctx);
+  remove(space, caller, ctx); recover(space, caller, ctx);
+}
+```
+
+- A project is the record of one space (`Project.space`, fixed for good; `project:<id>` for a new one,
+  an existing space adopted by a trusted caller; one project a space, `space_taken`).
+- `Caller` is `people` (every principal the channel authenticated for one person), `operator`,
+  `component` or `agent` (its `spaceOf(CONVERSATION)`, conversation, and the person it answers). Every
+  call is checked in the project's actor: a non-member and a missing project are both `not_found`; an
+  owner's act by a member, an agent outside its space or writing what people write, people naming a
+  space or an id, a sourced member removed by hand, are `forbidden`.
+- Collaborative: any member changes the record's name and description, instructions, documents, links,
+  adds people and restores; the owner alone archives, removes, transfers, removes others, sets
+  `agents`, and restores the record's and members' changes (`OWNER_RESTORES`); exactly one owner,
+  always. Agents read, search and add links. `redact` is operators', `syncMembers` components'.
+- Membership: `manual` members never expire; a sourced member counts while `checkedAt` is within
+  `staleAfterMs` (`memberIsCurrent`, `roleOfMembers`: `roleOf`'s one rule, owner wins).
+- Versions and `ifVersion` (`conflict`), bounds (`limit`: the core documents within `coreTokens`, said
+  how many are left), credentials `refused` unechoed, `ProjectError` codes `not_found`, `forbidden`,
+  `conflict`, `gone`, `space_taken`, `limit`, `refused`, `invalid`.
+- The agents' one read path spans three stores, so its vocabulary is here: `ProjectSearchHit` (`ref`,
+  `kind`: `instructions`, `document`, `link`, `rule`, `note`, `summary`, `file`; title, snippet, author,
+  version, part, date), `ProjectItemRef` with `formatItemRef`/`parseItemRef` (what `project_read`
+  takes), `mergeSearchHits` (one from each store in turn, each ref once) and `addedToProject(title)`, the
+  line every tool that adds to a project ends its result with.
+
+Planned provider: projects-sql (an index actor and one actor per project). Users: channel-web,
+projects-context, memory-recall, projects-sql's admin routes. Suite: `createProjectsConformance`
+(`@pikit/contracts/testing`), with the note's negative cases (a non-member writes nothing, a removed
+member's writes stop, sourced members expire, an agent stays in its space, the owner's acts, restore
+exact, the log not rewritable by members, conflicts, the core budget, search in its project,
+credentials, malformed callers, context `unchanged`, removal and recovery, restart) and
+`changeLogCases` over documents.
+
+### `space.files` ([space-files.ts](../packages/contracts/src/space-files.ts))
+
+The files a space keeps, people's uploads and agents' saves alike: `list`, `file`, `get`, `download`
+(a stream), `save(space, { name, description, bytes, type?, id? }, by, ctx)` (the one function the tools
+and the upload route call: names, limits, a credential's shape in a text file refused, bytes first,
+then the row and its log entry), `versions`, `trash` (30 days, `SPACE_FILES_TRASH_DAYS`; an agent only
+what agents alone saved, `mayTrash`), `search` and `text` (a file's text when it has one: text types,
+or converted with `document.convert`), `changes`, `restore`, `redact` (operators), `purge` (a removed
+project's space). Trusted code only: the caller decides who may act on a space and sets the author.
+`SpaceFilesError` codes `invalid`, `not_found`, `forbidden`, `limit`, `refused`, `gone`. Planned
+provider: tool-space-files. Users: channel-web, projects-context, projects-sql.
+
+### `principals` ([principals.ts](../packages/contracts/src/principals.ts), optional)
+
+The person behind a channel identity: `of(principal)` (the principal first, then the identities a
+directory links to the same person by a verified email) and `find(email)` (only people the directory
+knows; `[]` otherwise). Absent, a principal is only itself. No kit provider (rule 1): neural-agents'
+people directory provides it. Users: channel-web, memory-recall, projects-sql's routes.
+
+### `document.convert` ([document-convert.ts](../packages/contracts/src/document-convert.ts), optional)
+
+`accepts(type)`, `maxBytes`, `convert({ bytes, type, name? }, ctx): Promise<{ text } | undefined>`: a
+document's text as Markdown (PDF, Office, OpenDocument, HTML, XML, CSV), at most `CONVERT_TEXT_MAX`,
+never empty; `ConvertError` codes `invalid`, `too_large`, `empty`, `failed`, `unavailable`, never
+quoting the document; nothing kept. Helpers for its users: `isTextType`, `mediaTypeOf`, `textOf`,
+`cutText`. Absent, only text types are read. Planned provider: convert-workers-ai (Workers AI's
+`toMarkdown`). Users: projects-sql's and channel-web's document routes, tool-space-files.
+
 ## A registry's own contracts
 
 A registry adds a capability without changing the CLI: the defining component declares it in
@@ -1105,17 +1228,27 @@ What the agents of a space remember, and what each person prefers
 
 ```ts
 type MemoryOwner = { type: "space"; space: string } | { type: "agent"; agent: string } | { type: "person"; channel: string; id: string };
-type Memory = { id: string; kind: "fact" | "summary" | "rule" | "preference"; status: "active" | "pending"; text: string; createdAt: number };
+type Memory = { id: string; kind: "fact" | "summary" | "rule" | "preference"; status: "active" | "pending"; text: string; createdAt: number; updatedAt?: number; by?: Author };
+type NewMemory = Memory without updatedAt, with by: Author;   // what remember and replace take
 interface MemoryStore {
   ownerOf(conversation): MemoryOwner;                         // its space's (spaceOf), or its agent's own (the provider's config)
   list(owner, { kinds, status? }, limit, ctx): Promise<Memory[]>;
   get(owner, id, ctx): Promise<Memory | undefined>;
-  remember(owner, memory, ctx): Promise<void>;                // idempotent by id
-  approve(owner, id, kind, ctx): Promise<boolean>;            // pending -> active
-  forget(owner, id, { kinds, status? }, ctx): Promise<boolean>;
-  search(owner, query, limit, ctx): Promise<MemoryMatch[]>;   // full text (FTS5), ranked, with snippets
+  remember(owner, memory: NewMemory, ctx): Promise<void>;     // idempotent by id
+  approve(owner, id, kind, by, ctx): Promise<boolean>;        // pending -> active
+  forget(owner, id, { kinds, status? }, by, ctx): Promise<boolean>;
+  replace(owner, id, memory: NewMemory, ctx): Promise<Memory | undefined>; // new words as one change
+  search(owner, query, limit, ctx, filter?): Promise<MemoryMatch[]>;       // FTS5; default facts and summaries
+  changes(owner, page, ctx): Promise<ChangePage>;             // its change log (rule, note, summary, preference)
+  restore(owner, n, by, ctx): Promise<Change>;
+  redact(owner, n, by, ctx): Promise<void>;                   // operators only
+  purge(owner, ctx): Promise<void>;                           // a removed project's space
 }
 ```
+
+Authors, the change log, `replace`, `restore`, `redact` and `purge` are the contract
+([features/projects.md](../features/projects.md)); memory-sql does not build them yet (it keeps no
+`by`, and the new methods refuse), and its suite runs `changeLogCases` once it does.
 
 Per owner: a space's memory is shared by every agent working there, an agent kept apart has its own
 across its spaces, a person has their preferences. A space or an agent keeps facts, summaries and

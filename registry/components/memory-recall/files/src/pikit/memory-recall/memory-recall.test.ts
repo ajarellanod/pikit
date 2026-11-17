@@ -11,7 +11,7 @@ import { type AppContext, BACKGROUND_CONTEXT, type Context, defineApp, defineCom
 import { createManualClock } from "@pikit/core/testing";
 import { CONVERSATION, type ConversationRef, RUN_REQUESTS, type Sender, spaceOf } from "@pikit/contracts";
 import type {} from "@pikit/pi-adapter";
-import type { Memory, MemoryOwner, MemoryStore } from "./contract.ts";
+import type { Memory, MemoryOwner, MemoryStore, NewMemory } from "./contract.ts";
 import memoryRecall, { createMemoryRecall, itemId, MEMORY, memoryText, peopleOf, prefsCommand, rulesCommand, summaryLine } from "./index.ts";
 
 const CONFIG = { limit: 30, summaries: 3, rules: 50, preferences: 20, machineChannels: ["delegate", "scheduler"] };
@@ -40,6 +40,13 @@ function fakeMemory(agentScope: readonly string[] = []) {
       return at >= 0;
     },
     search: async (owner, query) => of(owner).filter((m) => (m.kind === "fact" || m.kind === "summary") && m.text.toLowerCase().includes(query.toLowerCase())).map((m) => ({ ...m, snippet: m.text })),
+    replace: async () => undefined,
+    changes: async () => ({ items: [] }),
+    restore: async () => {
+      throw new Error("the fake keeps no log");
+    },
+    redact: async () => {},
+    purge: async () => {},
   };
   return { store, all: (owner: MemoryOwner) => [...of(owner)] };
 }
@@ -57,7 +64,9 @@ const runContext = (conversation: ConversationRef, senders: readonly (Sender | u
     { list: async () => senders.map((sender, i) => ({ requestId: `r${i}`, ...(sender !== undefined && { sender }) })) },
     withContextValue(CONVERSATION, conversation, BACKGROUND_CONTEXT),
   );
-const item = (kind: Memory["kind"], id: string, text: string, status: Memory["status"] = "active", createdAt = 1): Memory => ({ id, kind, status, text, createdAt });
+/** Who the test's own writes are by. */
+const BY = { kind: "operator", id: "test" } as const;
+const item = (kind: Memory["kind"], id: string, text: string, status: Memory["status"] = "active", createdAt = 1): NewMemory => ({ id, kind, status, text, createdAt, by: BY });
 
 /** The extension over `store`, its tools by name, and how to call one in a run. */
 function extensionOver(store: MemoryStore) {
@@ -220,7 +229,7 @@ test("propose_rule and propose_preference keep a pending item once; a preference
   );
   await call("propose_rule", { rule: "answer in spanish" }, runContext(thread(), [ana]));
   expect(all({ type: "space", space: SPACE }).map((m) => [m.id, m.kind, m.status, m.text])).toEqual([[id, "rule", "pending", "Answer in Spanish"]]);
-  await store.approve({ type: "space", space: SPACE }, id, "rule", ctx);
+  await store.approve({ type: "space", space: SPACE }, id, "rule", BY, ctx);
   expect(await call("propose_rule", { rule: "Answer in Spanish" }, runContext(thread(), [ana]))).toBe(`That is a rule already (id ${id}).`);
 
   const pref = await itemId("preference", "Short answers");

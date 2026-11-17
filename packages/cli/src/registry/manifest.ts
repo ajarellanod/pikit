@@ -67,6 +67,10 @@ export const KINDS: readonly string[] = [
   "expose",
   // One email to one person (`email.send`): `email-ses`, `email-resend`.
   "email",
+  // A space's record, its people and context (`projects`, features/projects.md): `projects-sql`, `projects-context`.
+  "projects",
+  // A document's text from its bytes (`document.convert`): `convert-workers-ai`.
+  "convert",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */
