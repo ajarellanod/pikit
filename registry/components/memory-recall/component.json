@@ -2,7 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "memory-recall",
   "version": "0.0.1",
-  "description": "The memory extension for the agents that name it: a stable section with the space's rules, facts and summaries and the preferences of the people a run answers; the tools remember, forget, recall, read_memory, propose_rule and propose_preference; the commands /rules and /prefs, over memory.",
+  "description": "The memory extension for the agents that name it: a stable section with the space's rules, facts and summaries and the preferences of the people a run answers; the tools remember, forget, recall, read_memory, propose_rule and propose_preference; in a project's space (with projects) project_note and project_rule, active at once, and no section; the commands /rules and /prefs (a project's members' in its space), over memory.",
   "targets": [
     "server",
     "durable"
@@ -16,7 +16,10 @@
     ]
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "projects",
+      "principals"
+    ]
   },
   "provides": [
     "agent.extension",
