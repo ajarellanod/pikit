@@ -337,7 +337,11 @@ test("limits: a file too large, a space full of files or of bytes is refused bef
   await save("ten", 10);
   expect(await codeOf(save("third", 1))).toBe("limit");
   await s.files.trash(SPACE, "ten", ANA, s.ctx);
+  // Refused before a byte is written: with every put failing, the answer is still the limit.
+  s.broken.put = true;
   expect(await failure(save("third", 1))).toContain("the space already keeps 2 files");
+  expect(await failure(save("big", 101))).toBe("the file has 101 bytes; a saved file has at most 100");
+  s.broken.put = false;
   expect(await s.kept(SPACE)).toHaveLength(2);
 });
 
