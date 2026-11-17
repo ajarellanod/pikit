@@ -59,9 +59,9 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `workspace` | single | execution-boat, execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
 | `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
-| `projects` | single | none | none | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
+| `projects` | single | none | memory-recall? | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
 | `space.files` | single | none | none | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
-| `principals` | single | none | none | none (no kit provider: neural-agents' people directory) |
+| `principals` | single | none | memory-recall? | none (no kit provider: neural-agents' people directory) |
 | `document.convert` | single | none | none | none yet (planned provider: convert-workers-ai) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every

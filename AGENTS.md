@@ -40,6 +40,8 @@
 
 - Cloudflare Containers (wrangler 4.143): named `images` need `scheduling_policy: "durable_object"`, and such a container refuses `max_instances` and `instance_type` (the size is `ctx.container.start({ instance })`). Check a containers config with `wrangler deploy --dry-run` (it builds the images with Docker) before documenting it. In a container, overlayfs cannot rename a directory of the image itself (EXDEV): move entries into it instead.
 
+- Never use `git stash` in a worktree to compare against a clean tree: the stash list is shared by every worktree of the repository, and a `git stash` with nothing to stash followed by `git stash pop` pops another agent's stash (it happened once; it was put back with `git stash store`). Compare with `git worktree add` of the commit, or `git show <rev>:<path>`.
+
 # Contract rules
 
 When adding or changing a contract in `@pikit/contracts`, a Pi-typed contract in `@pikit/pi-adapter`,
