@@ -96,7 +96,19 @@ import {
   type SqlDatabase,
 } from "@pikit/contracts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { AgentConfigs, AgentStateDoc, asRecorded, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
+import {
+  AgentConfigs,
+  AgentStateDoc,
+  asRecorded,
+  ConversationDoc,
+  type DurableExtension,
+  type DurableModels,
+  type DurableTool,
+  effectiveState,
+  OFFER_TIMEOUT_MS,
+  type Offers,
+  offerOf,
+} from "./agent.ts";
 import { createAnswerLog } from "./answers.ts";
 import { AGENT_DELEGATION, type ConversationDelegations, createDelegation } from "./delegation.ts";
 import { runContext, toChord } from "./context.ts";
@@ -133,6 +145,11 @@ export interface DurableRuntimeOptions {
   skill?(name: string): AgentSkill | undefined;
   /** pi-ai 1.0's models: every model the agents may name (`provider/modelId`). */
   models: DurableModels;
+  /**
+   * How long an extension's `offerTools` may take at an admission before it counts as failed (default
+   * `OFFER_TIMEOUT_MS`): the conversation then keeps the tools that extension offered last, or none.
+   */
+  offerTimeoutMs?: number;
   /**
    * Where runs report when no caller context is known. Derive it once from `start`'s context:
    * `ctx.derive(() => BACKGROUND_CONTEXT)`, never `start`'s context itself (its deadline). Its values
@@ -907,6 +924,22 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     refs.set(id, conversation);
   };
 
+  /**
+   * What the extensions of `agent` that declare `offerTools` offer the conversation now (`evaluateOffers`),
+   * asked before an admission's commit (they may call other actors, which a commit must not wait for).
+   * `undefined` when none of them may declare one: the admission then keeps what is recorded.
+   */
+  const offersOf = async (harness: Harness, id: ConversationId, given: ConversationRef, agent: AgentDefinition, ctx: AppContext): Promise<Offers | undefined> => {
+    // Without `prepare` the extensions are the definition's: none declaring a choice, nothing to read.
+    if (agent.prepare === undefined && !(agent.extensions ?? []).some((name) => typeof name === "string" && offerOf(options.extension?.(name)) !== undefined)) return undefined;
+    const chord = toChord(ctx);
+    const recorded = await harness.snapshot(ConversationDoc, id, chord);
+    const stored = await harness.snapshot(AgentStateDoc, id, chord);
+    const conversation = recorded === undefined ? given : asRecorded(given, recorded);
+    const previous = recorded?.offered === undefined ? undefined : (copyJson(recorded.offered as unknown as JsonValue) as Offers);
+    return config.evaluateOffers(agent, conversation, effectiveState(agent, stored), previous, ctx, options.offerTimeoutMs ?? OFFER_TIMEOUT_MS);
+  };
+
   const conversationIdOf = (ref: Pick<ConversationRef, "conversationId" | "key">): ConversationId => {
     const id = durableId(ref.conversationId);
     if (id === undefined) throw new Unopenable("conversation_missing", `conversation ${ref.key}: "${ref.conversationId}" is not a pi-durable conversation id`);
@@ -1113,7 +1146,9 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       try {
         admission = await inLine(id, async () => {
           const conversation = await conversationOf(harness, ref, ctx);
-          // One commit: the duplicate check, the agent `prepare` gives, and the admission's time.
+          // Asked before the commit, in the line: no other admission of the conversation records between.
+          const offered = await offersOf(harness, id, given, agent, ctx);
+          // One commit: the duplicate check, the agent `prepare` gives (with the tools offered now), and the admission's time.
           const existing = await conversation.commit(async (tx) => {
             const found = await tx.submissionByRequest(id, requestId);
             if (found !== undefined) {
@@ -1121,7 +1156,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
               return found;
             }
             const stored = copyJson(await tx.doc(AgentStateDoc, id)) as { [key: string]: JsonValue };
-            ref = await config.apply(tx, id, given, agent, effectiveState(agent, stored), logger);
+            ref = await config.apply(tx, id, given, agent, effectiveState(agent, stored), logger, offered);
             const admissions = await tx.doc(AdmissionsDoc);
             if (admissions.conversations[String(id)] === undefined) admissions.conversations[String(id)] = {};
             (admissions.conversations[String(id)] as { [requestId: string]: number })[requestId] = now();

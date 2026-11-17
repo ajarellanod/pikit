@@ -23,6 +23,21 @@
  * task). The conversation's record is also its `ConversationDoc`
  * (`input.read.snapshot(ConversationDoc, input.conversationId, context)`).
  *
+ * An extension may choose, per conversation, which of its tools the model is offered:
+ *
+ *   offerTools(defineExtension({ name: "memory", tools: [remember, projectNote] }), async (conversation, ctx) =>
+ *     (await isProject(spaceOf(conversation), ctx)) ? ["project_note"] : ["remember"]);
+ *
+ * The runtime asks at each admission of a message (before its commit: it may call other actors) and
+ * keeps the answer with the conversation (`ConversationDoc.offered`), so a restart, a state update or a
+ * reopened Harness offers the same until the next admission. A tool not offered is not sent to the
+ * model, and a call to it by name is refused (`tool_unavailable`, the tool never runs); nested calls
+ * (`executeTool`) do not find it either. `undefined` offers every tool of the extension. A failure (a
+ * throw, a rejection, a wrong answer, `OFFER_TIMEOUT_MS`) keeps the conversation's last answer, or
+ * offers none of the extension's tools when there is none: closed, so a store that cannot be reached
+ * never shows a family of tools the extension meant to hide. Keep a tool's own refusal outside its
+ * family's spaces as a second line (an answer changes from the next admission, not mid-run).
+ *
  * Neutral: it runs on every target.
  */
 
@@ -40,4 +55,5 @@ export {
   wrapTool,
 } from "@earendil-works/pi-durable";
 export type { Extension, PromptInput, PromptSection, ToolExecutionApi, ToolRegistration } from "@earendil-works/pi-durable";
-export { ConversationDoc } from "./agent.ts";
+export { ConversationDoc, OFFER_TIMEOUT_MS, offerTools } from "./agent.ts";
+export type { Offers, ToolOffer } from "./agent.ts";

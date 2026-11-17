@@ -490,10 +490,13 @@ project from `projects.get(space, { kind: "component", name })`, remembered for 
 "none"). How a tool is not offered is the adapter's (`@pikit/pi-adapter`, changed): `offerTools(extension,
 offered)`, an async choice of the extension's tools by name for a conversation, made by runtime-pi
 when it admits a message (before the admission's commit: a mailbox call is no statement), kept in the
-conversation's record and applied by `apply` as pi-durable's `modelTools` (`remove`), so a reopen or a
-state update offers the same and a space adopted as a project changes the tools from the next message.
-A tool not offered can still be called by other tools (pi-durable's `modelTools` never widens). Until
-that lands, and as a second line of defence after it, every tool refuses outside its family's spaces
+conversation's record (`ConversationDoc.offered`) and applied by `apply` to `pi.agent`'s enabled tools
+(not pi-durable's `modelTools`, which would leave them to nested calls and to a `tool_search` load), so
+a reopen or a state update offers the same and a space adopted as a project changes the tools from the
+next message. A tool not offered is never sent to the model, nor run when called by name
+(`tool_unavailable`); a failing choice keeps the conversation's last answer, else offers none of that
+extension's tools (built: the adapter's README, "Offered tools"). As a second line of defence (an
+answer changes between messages, not mid-run), every tool refuses outside its family's spaces
 with a pointer ("This space is a project: use project_note"), saying the same thing in one place per
 extension.
 
@@ -833,10 +836,10 @@ logs) is pikit's, as memory is.
 - A Google Chat space's members as a kit membership source: channel-google-chat would need the Chat
   API's `spaces.members` (neural-agents built it as a local edit).
 - How a document from Drive is read: the person's token, a service account, or only a copy uploaded.
-- `offerTools` (section "What an agent sees") is the adapter's first per-conversation choice of tools:
-  whether it should become a general extension feature (an extension's tools offered by a predicate on
-  the conversation) or stay this one rule; until it lands, the tools of the other family are offered
-  and refuse with a pointer.
+- `offerTools` (section "What an agent sees") is built as a general extension feature (any extension,
+  any async predicate on the conversation, asked at each admission). Open: whether an extension needs
+  to ask for a re-evaluation between messages (today a change applies from the next message), and
+  whether sections should get the same per-conversation switch (today each section decides itself).
 
 ## Sources
 
