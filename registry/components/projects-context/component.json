@@ -1,0 +1,41 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "projects-context",
+  "version": "0.0.1",
+  "description": "The agents' one view of a project, for the agents that name the extension project: a stable section with the project's members, instructions, rules with their source, core documents, notes, files and links; the tools project_search (one search over the project, its memory and its files), project_read and project_link, over projects, memory and space.files.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "adapter": "0.0.1",
+    "capabilities": [
+      "projects"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "memory",
+      "space.files"
+    ]
+  },
+  "provides": [
+    "agent.extension"
+  ],
+  "extensions": [
+    "project"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "@pikit/pi-adapter": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
