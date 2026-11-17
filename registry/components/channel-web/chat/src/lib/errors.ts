@@ -79,13 +79,19 @@ const TEXTS: Record<string, string> = {
   INTERNAL_SERVER_ERROR: "Something failed on the server. Try again.",
 };
 
-/** The chat API's codes whose own message says why better than a fixed text. */
-const SAYS_WHY = new Set(["DENIED", "REJECTED", "INVALID_REQUEST"]);
+/**
+ * The chat API's codes whose own message says why better than a fixed text: a refusal, and a project
+ * store's (an owner's act, a newer version, a bound, a credential's shape: never echoed by the server).
+ */
+const SAYS_WHY = new Set(["DENIED", "REJECTED", "INVALID_REQUEST", "FORBIDDEN", "CONFLICT", "LIMIT", "REFUSED", "INVALID", "GONE", "UNSUPPORTED", "NOT_EMPTY", "SPACE_TAKEN"]);
 
 /** A person's text for `code`, else `fallback`. */
 export function errorText(code: string, fallback?: string): string {
   const key = normalCode(code);
-  if (SAYS_WHY.has(key) && fallback !== undefined && fallback !== "") return fallback;
+  const said = fallback === undefined || fallback === "" ? undefined : fallback.charAt(0).toLocaleUpperCase() + fallback.slice(1);
+  if (SAYS_WHY.has(key) && said !== undefined) return said;
+  // What is not found, when it is no conversation (a project, a file, a member): as the server says.
+  if (key === "NOT_FOUND" && said !== undefined && fallback !== "no such conversation") return said;
   return TEXTS[key] ?? (fallback !== undefined && fallback !== "" ? fallback : `That did not work (${code}).`);
 }
 

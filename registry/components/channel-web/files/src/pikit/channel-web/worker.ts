@@ -6,7 +6,9 @@
  * vouches for, checked here). The page's files are bundled in (`chat-files.ts`).
  *
  * It needs `secrets` (`CHANNEL_WEB_AUTH_SECRET`, to check the cookie cache; `PIKIT_PUBLIC_URL` when
- * set) and `actor.mailbox` (actors-do); `admin.auth` for the operator's routes. The page's config
+ * set) and `actor.mailbox` (actors-do); `admin.auth` for the operator's routes; for projects, the
+ * stores' Worker halves (`projects`, and `space.files`, `memory`, `principals`, `document.convert` when
+ * given), whose routes run here (`project-routes.ts`). The page's config
  * (`GET /chat/api/config`: the sign-in methods, the live sign-up mode, whether email is sent) is the
  * accounts actor's, whose App holds the accounts, their secrets and `email.send`: one call
  * (`channel-web.config`), its answer kept `CONFIG_CACHE_MS`. So is the agent Routing would choose for a
@@ -26,6 +28,7 @@ import { avatarHosts, createAssets } from "./assets.ts";
 import { ACCOUNTS_KEY, CALL } from "./calls.ts";
 import { CHAT_FILES } from "./chat-files.ts";
 import { AUTH_SECRET, Config, configProblem, MIN_AUTH_SECRET, PUBLIC_URL } from "./config.ts";
+import { provideProjectRoutes } from "./project-routes.ts";
 import { createRemoteBackend } from "./remote.ts";
 import { provideRoutes } from "./routes.ts";
 import { type AccountsWiring, BETTER_AUTH } from "./wiring.ts";
@@ -44,6 +47,12 @@ export function createChannelWebWorker(wiring: AccountsWiring = BETTER_AUTH) {
       const secrets = pikit.use("secrets");
       const mailbox = pikit.use("actor.mailbox");
       const auth = pikit.useOptional("admin.auth");
+      // Projects (project-routes.ts): the stores' Worker halves give them here, where the routes run.
+      const projects = pikit.useOptional("projects");
+      const spaceFiles = pikit.useOptional("space.files");
+      const memory = pikit.useOptional("memory");
+      const principals = pikit.useOptional("principals");
+      const convert = pikit.useOptional("document.convert");
       const assets = createAssets(CHAT_FILES, () => avatarHosts(config.signIn.social));
       const backend = createRemoteBackend(() => mailbox.get());
       let accounts: Accounts | undefined;
@@ -71,9 +80,15 @@ export function createChannelWebWorker(wiring: AccountsWiring = BETTER_AUTH) {
       const routed = async (userId: string, ctx: AppContext): Promise<string | undefined> =>
         ((await mailbox.get().call(ACCOUNTS_KEY, CALL.routed, { userId }, ctx)) as { agent?: string }).agent;
 
-      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => "durable", rate, routed, assets });
+      const projectAccess = provideProjectRoutes(pikit, {
+        services: { projects: () => projects.get(), files: () => spaceFiles.get(), memory: () => memory.get(), principals: () => principals.get(), convert: () => convert.get() },
+        accounts: accountsNow,
+        backend: () => backend,
+        chatConfig,
+      });
+      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => "durable", rate, routed, assets, projects: projectAccess });
       // The Worker's host is its route's: Cloudflare routes by it, so a client cannot make it another's.
-      provideAdminRoutes(pikit, { auth, accounts: accountsNow, backend: () => backend, origin: (request) => linkOrigin(request.url, publicUrl, true) });
+      provideAdminRoutes(pikit, { auth, accounts: accountsNow, backend: () => backend, projects: projectAccess, origin: (request) => linkOrigin(request.url, publicUrl, true) });
 
       return {
         async start(ctx) {

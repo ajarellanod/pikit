@@ -54,8 +54,9 @@ document is a fact); the rest is deleted after a while (retention, below).
 ## Who gives a space
 - **channel-google-chat**: the chat's own key (what the key is in "chat" mode) for every thread of it,
   so a chat switching modes keeps one space.
-- **channel-web**: a chat created in a project is in that user's project's space; a chat with no project
-  is its own. A chat's project is fixed when it is made.
+- **channel-web**: a chat created in a project is in the project's space (`Project.space`, from the
+  project store: [projects](projects.md)), shared by the project's members; a chat with no project is
+  its own. A chat's project is fixed when it is made.
 - **Telegram**: both channels answer private chats only, each its own space, so they give none.
 
 ## What uses it

@@ -58,11 +58,11 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `approvals` | single | approvals-sql | admin-approvals, extension-approvals | `createApprovalsConformance` (approvals-sql's `conformance.ts`) |
 | `workspace` | single | execution-boat, execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
-| `memory` | single | memory-sql | memory-recall, memory-summaries, projects-context?, projects-sql? | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
-| `projects` | single | projects-sql | projects-context, memory-recall?, tool-space-files? | `createProjectsConformance`, with `changeLogCases` |
-| `space.files` | single | tool-space-files | projects-context? | `changeLogCases` in its provider's suite (tool-space-files' `space-files.test.ts`, and the workerd lane) |
-| `principals` | single | none | memory-recall? | none (no kit provider: neural-agents' people directory) |
-| `document.convert` | single | convert-workers-ai | tool-space-files? | none (one provider: convert-workers-ai's tests against a fake binding) |
+| `memory` | single | memory-sql | memory-recall, memory-summaries, channel-web?, projects-context?, projects-sql? | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
+| `projects` | single | projects-sql | projects-context, channel-web?, memory-recall?, tool-space-files? | `createProjectsConformance`, with `changeLogCases` |
+| `space.files` | single | tool-space-files | channel-web?, projects-context? | `changeLogCases` in its provider's suite (tool-space-files' `space-files.test.ts`, and the workerd lane) |
+| `principals` | single | none | channel-web?, memory-recall? | none (no kit provider: neural-agents' people directory) |
+| `document.convert` | single | convert-workers-ai | channel-web?, tool-space-files? | none (one provider: convert-workers-ai's tests against a fake binding) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web),
@@ -376,7 +376,7 @@ repeat. Channels that run them: channel-google-chat, channel-telegram, channel-t
 once per platform message) and channel-web (once per request id), each with a config `commands`:
 `"user"` (the default: the commands whose audience is `"user"`, so no channel names another
 component's commands), `"all"`, or names. Spaces given today: channel-google-chat (the chat's own key for each of its threads) and
-channel-web (`web:<user>:project:<id>` for a chat made in a project). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
+channel-web (a chat made in a project: the project's `Project.space`, `project:<id>`, or for a project carried over from channel-web's own table `web:<user>:project:<id>`). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
 when a capability fails. Identity is captured before either pipeline runs: mutating the original
 object in place or replacing it cannot bypass the check, including the reserved `dashboard:` ids
 that channels cannot admit. A dispatch rejected with `AgentUnavailableError` (the conversation's agent

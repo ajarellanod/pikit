@@ -10,9 +10,10 @@
  * - **The key is the session's.** A route names a conversation by the chat id in its path only, and the
  *   key is `keyOf(user, chat id)`, built in one place (`refOf`): another user's chat id names no
  *   conversation of theirs, and is `404` as one that never existed.
- * - **A project is the session's user's too**: `/projects/:id`, `?project=` and a new chat's `project`
- *   name only one of theirs (the index answers by user and id): another user's is `404`, checked before
- *   any chat is made in it.
+ * - **Projects are the project store's** (`projects`, optional: `project-routes.ts`): `?project=` and a
+ *   new chat's `project` name only one the user is a member of (`404` otherwise, checked before any chat
+ *   is made in it), and a message in a project's chat goes only while its author is a member and its
+ *   agent one the project allows (`403`): `RouteOptions.projects` decides, here before anything else.
  * - **A change needs the page's header** (`x-pikit-chat: 1`, `CHAT_CLIENT_HEADER`): `400` without, so a
  *   page of another site cannot make a signed-in browser send, rename, archive, delete or stop anything.
  * - **Bodies are bounded**: a message at most what its images and files in base64 and its text need on
@@ -41,7 +42,7 @@
 
 import type { AppContext, Pikit } from "@pikit/core";
 import { ActorCallError, type HttpRoute } from "@pikit/contracts";
-import Type, { type Static } from "typebox";
+import Type, { type Static, type TSchema } from "typebox";
 import Value from "typebox/value";
 import type { AccountUser, Accounts } from "./accounts/types.ts";
 import {
@@ -55,7 +56,6 @@ import {
   type ChatEvent,
   type ChatMe,
   type ChatPage,
-  type ChatProject,
   type ChatSendResponse,
   type ChatSignInMethod,
   type ChatStartResponse,
@@ -67,7 +67,6 @@ import {
   MAX_IMAGES,
   MAX_TEXT,
   NO_PROJECT,
-  PROJECT_NAME_MAX,
   SEARCH_MAX,
   TITLE_MAX,
 } from "./api.ts";
@@ -76,6 +75,7 @@ import type { ChatBackend, ChatRef, NewMessage } from "./backend.ts";
 import { chatIdFor, filesBytesOf, filesProblem, imagesProblem, isChatId, isProjectId, keyOf, newChatId, REQUEST_ID, requestIdOf } from "./chat.ts";
 import { type ChannelWebConfig, providerName, type SignUpSettings, type VisibilitySettings } from "./config.ts";
 import { routedAgent } from "./routed.ts";
+import type { ProjectAccess } from "./project-routes.ts";
 import { createEventProjector, projectEntry } from "./visibility.ts";
 
 export const API = "/chat/api";
@@ -121,9 +121,12 @@ const StartBody = Type.Object(
   { additionalProperties: false },
 );
 const RenameBody = Type.Object({ title: Type.String({ minLength: 1, maxLength: TITLE_MAX * 4 }) }, { additionalProperties: false });
-const ProjectBody = Type.Object({ name: Type.String({ minLength: 1, maxLength: PROJECT_NAME_MAX * 4 }) }, { additionalProperties: false });
 
-/** The status of each refusal a backend throws; any other is `503`. */
+/**
+ * The status of each refusal a backend or a store throws (an `ActorCallError`, or a store's own error:
+ * `ProjectError`, `SpaceFilesError`, `ConvertError`, memory's, `ChangeInputError`, by their `code`);
+ * any other is `503`.
+ */
 const STATUS: Record<string, number> = {
   not_found: 404,
   invalid_request: 400,
@@ -133,9 +136,31 @@ const STATUS: Record<string, number> = {
   rejected: 422,
   no_route: 500,
   not_empty: 409,
+  // The stores' (projects, space.files, memory, document.convert): the store decides, the route says it.
+  forbidden: 403,
+  conflict: 409,
+  space_taken: 409,
+  gone: 410,
+  invalid: 400,
+  refused: 400,
+  limit: 400,
+  empty: 422,
+  failed: 422,
+  unsupported: 415,
 };
+/** The errors whose `code` is a refusal to answer with (`STATUS`), wherever they come from. */
+const REFUSALS = new Set(["ActorCallError", "ProjectError", "SpaceFilesError", "ConvertError", "ChangeInputError"]);
+/** `error`'s code, when it is a refusal `STATUS` knows. */
+export function refusalOf(error: unknown): { status: number; code: string; message: string } | undefined {
+  if (!(error instanceof Error) || (!REFUSALS.has(error.name) && !(error instanceof ActorCallError))) return undefined;
+  const code = (error as { code?: unknown }).code;
+  // A converter's `failed` is the file's (damaged, encrypted); an actor's is the call's: 503.
+  if (code === "failed" && error.name !== "ConvertError") return undefined;
+  const status = typeof code === "string" ? STATUS[code] : undefined;
+  return status === undefined ? undefined : { status, code: code as string, message: error.message };
+}
 
-const json = <T>(status: number, body: T, headers: Record<string, string> = {}): Response =>
+export const json = <T>(status: number, body: T, headers: Record<string, string> = {}): Response =>
   Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
 export const failure = (status: number, error: string, message?: string): Response =>
   json<ChatError>(status, { error, ...(message !== undefined && message !== "" && { message }) });
@@ -149,7 +174,7 @@ function withCookies(response: Response, cookies: readonly string[]): Response {
 }
 
 /** A refusal to answer with its status (thrown by a handler). */
-class Refused extends Error {
+export class Refused extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
@@ -166,18 +191,11 @@ function chatIdOf(request: Request): string {
   return id;
 }
 
-/** The `:id` of `/chat/api/projects/:id`: a project id, or `404`. */
-function projectIdOf(request: Request): string {
-  const id = new URL(request.url).pathname.split("/")[4] ?? "";
-  if (!isProjectId(id)) throw new Refused(404, "not_found", "no such project");
-  return id;
-}
-
 /** The conversation `user` names with `chatId`: the only place a route makes a key. */
 const refOf = (user: AccountUser, chatId: string): ChatRef => ({ userId: user.id, chatId, key: keyOf(user.id, chatId) });
 
 /** `?limit&cursor`, checked. */
-function pageOf(request: Request): { limit: number; cursor?: string } {
+export function pageOf(request: Request): { limit: number; cursor?: string } {
   const params = new URL(request.url).searchParams;
   const limit = params.get("limit");
   let value = DEFAULT_LIMIT;
@@ -189,8 +207,8 @@ function pageOf(request: Request): { limit: number; cursor?: string } {
   return { limit: value, ...(cursor !== null && { cursor }) };
 }
 
-/** The body, read up to `max` bytes (`413` past it, before more is read), as JSON. */
-async function bodyOf(request: Request, max: number): Promise<unknown> {
+/** The body's bytes, read up to `max` (`413` past it, before more is read). */
+export async function bytesOf(request: Request, max: number): Promise<Uint8Array> {
   if (Number(request.headers.get("content-length") ?? 0) > max) throw new Refused(413, "too_large", `a body is at most ${Math.round(max / 1024)} KB`);
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -213,6 +231,12 @@ async function bodyOf(request: Request, max: number): Promise<unknown> {
     bytes.set(chunk, at);
     at += chunk.byteLength;
   }
+  return bytes;
+}
+
+/** The body, read up to `max` bytes (`413` past it, before more is read), as JSON. */
+export async function bodyOf(request: Request, max: number): Promise<unknown> {
+  const bytes = await bytesOf(request, max);
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
@@ -221,7 +245,7 @@ async function bodyOf(request: Request, max: number): Promise<unknown> {
 }
 
 /** `value` against `schema`, or `400` with the first problem. */
-function checked<S extends typeof SendBody | typeof StartBody | typeof RenameBody | typeof ProjectBody>(schema: S, value: unknown): Static<S> {
+export function checked<S extends TSchema>(schema: S, value: unknown): Static<S> {
   if (Value.Check(schema, value)) return value as Static<S>;
   const [first] = Value.Errors(schema, value);
   throw new Refused(400, "invalid_request", `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}`);
@@ -245,13 +269,6 @@ async function messageOf(request: Request, target: string, first = false): Promi
     ...(body.agent !== undefined && { agent: body.agent }),
     ...(body.project !== undefined && { project: body.project }),
   };
-}
-
-/** A project's name from the request's body: spaces collapsed, 1 to `PROJECT_NAME_MAX` characters. */
-async function projectNameOf(request: Request): Promise<string> {
-  const name = checked(ProjectBody, await bodyOf(request, MAX_SMALL_BODY)).name.replace(/\s+/g, " ").trim();
-  if (name === "" || name.length > PROJECT_NAME_MAX) throw new Refused(400, "invalid_request", `/name: 1 to ${PROJECT_NAME_MAX} characters`);
-  return name;
 }
 
 /**
@@ -290,9 +307,9 @@ function projected(events: AsyncIterable<ChatEvent>, visibility: VisibilitySetti
 }
 
 /** A conversation as `config` lets users see it: its agent only when it is one they may pick. */
-function shownConversation(conversation: ChatConversation, config: ChatConfig): ChatConversation {
+export function shownConversation<C extends ChatConversation>(conversation: C, config: ChatConfig): C {
   const { agent, ...rest } = conversation;
-  return agent !== undefined && config.agents.some((each) => each.name === agent) ? conversation : rest;
+  return agent !== undefined && config.agents.some((each) => each.name === agent) ? conversation : (rest as C);
 }
 
 /**
@@ -374,6 +391,8 @@ export interface RouteOptions {
    */
   routed?(userId: string, ctx: AppContext): Promise<string | undefined>;
   assets: Assets;
+  /** What the project store lets (`project-routes.ts`); absent when there is none: a project named is `404`. */
+  projects?: ProjectAccess;
 }
 
 /** The values an operator changes live (`settings`), else the config's. */
@@ -428,49 +447,59 @@ export function methodsOf(config: ChannelWebConfig, email: boolean): ChatSignInM
   ];
 }
 
-/** Registers every chat route of the App `pikit` sets up, and the page's files. */
-export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
-  /** A route whose refusals and failures are its JSON answer. */
-  const answering =
-    (key: string, handler: HttpRoute): HttpRoute =>
-    async (request, ctx) => {
-      try {
-        return await handler(request, ctx);
-      } catch (error) {
-        if (error instanceof Refused) return failure(error.status, error.code, error.message);
-        if (error instanceof ActorCallError) {
-          const status = STATUS[error.code];
-          if (status !== undefined) return failure(status, error.code, error.message);
-        }
-        ctx.logger.warn("channel-web: a request could not be served; the page may send it again", {
-          route: key,
-          ...(error instanceof ActorCallError && { code: error.code }),
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return failure(503, "unavailable", "the assistant could not take this now: try again in a moment");
-      }
-    };
+/** A route whose refusals and failures are its JSON answer. */
+export const answering =
+  (key: string, handler: HttpRoute): HttpRoute =>
+  async (request, ctx) => {
+    try {
+      return await handler(request, ctx);
+    } catch (error) {
+      if (error instanceof Refused) return failure(error.status, error.code, error.message);
+      const refused = refusalOf(error);
+      if (refused !== undefined) return failure(refused.status, refused.code, refused.message);
+      ctx.logger.warn("channel-web: a request could not be served; the page may send it again", {
+        route: key,
+        ...(error instanceof ActorCallError && { code: error.code }),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return failure(503, "unavailable", "the assistant could not take this now: try again in a moment");
+    }
+  };
 
-  /** A route for a signed-in user: `401` without one; a change also needs the page's header. */
-  const user = (key: string, handler: (request: Request, ctx: AppContext, user: AccountUser) => Promise<Response>): void => {
+/** Registers a route for a signed-in user: `401` without one; a change also needs the page's header. */
+export type UserRoute = (key: string, handler: (request: Request, ctx: AppContext, user: AccountUser) => Promise<Response>) => void;
+
+/** The `UserRoute` of the App `pikit` sets up, over its accounts. */
+export function userRoutes(pikit: Pikit, accounts: () => Accounts): UserRoute {
+  return (key, handler) => {
     const changes = !key.startsWith("GET ");
     pikit.provideKeyed(
       "http.route",
       key,
       answering(key, async (request, ctx) => {
         if (changes && request.headers.get(CHAT_CLIENT_HEADER) !== "1") return failure(400, "invalid_request", `send the header ${CHAT_CLIENT_HEADER}: 1`);
-        const session = await options.accounts().user(request, ctx);
+        const session = await accounts().user(request, ctx);
         if (session === undefined) return failure(401, "unauthorized");
         return withCookies(await handler(request, ctx, session.user), session.cookies);
       }),
     );
   };
+}
+
+/** Registers every chat route of the App `pikit` sets up, and the page's files. */
+export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
+  const user = userRoutes(pikit, () => options.accounts());
   const backend = () => options.backend();
 
   pikit.provideKeyed(
     "http.route",
     `GET ${API}/config`,
-    answering(`GET ${API}/config`, async (_request, ctx) => json<ChatConfig>(200, await options.chatConfig(ctx))),
+    answering(`GET ${API}/config`, async (_request, ctx) => {
+      const config = await options.chatConfig(ctx);
+      // Whether there are projects is this App's: its routes are where the project store is used.
+      const features = options.projects?.features();
+      return json<ChatConfig>(200, features === undefined ? config : { ...config, projects: features });
+    }),
   );
 
   // better-auth's own: sign in and out, OAuth callbacks, links, sessions. Its answer as it made it.
@@ -514,6 +543,8 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     const given = params.get("project");
     if (given !== null && given !== NO_PROJECT && !isProjectId(given)) throw new Refused(404, "not_found", "no such project");
     const project = given === null ? undefined : given === NO_PROJECT ? "" : given;
+    // Only a project the user is a member of (the store says): any other is no project, 404.
+    if (project !== undefined && project !== "") await projectsOf(options).listing(me, project, ctx);
     const listed = await backend().list(me.id, { ...pageOf(request), archived: archived === "1", ...(q !== "" && { q }), ...(project !== undefined && { project }) }, ctx);
     // The policy only when there is an agent to say or not.
     if (!listed.items.some((each) => each.agent !== undefined)) return json<ChatPage<ChatConversation>>(200, listed);
@@ -537,48 +568,32 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     if (agent !== undefined && !(await options.chatConfig(ctx)).agents.some((each) => each.name === agent)) {
       throw new Refused(400, "invalid_request", "/agent: not an assistant you may pick");
     }
-    // Only a project of the user's: another's is no project (404), and its space is never named.
+    // Only a project the user is a member of (another is no project, 404), not archived (403), with an
+    // agent it allows (400): its space is the project's, never one the page names.
+    let made: { agent?: string; space?: string } = agent === undefined ? {} : { agent };
     if (project !== undefined) {
       if (!isProjectId(project)) throw new Refused(404, "not_found", "no such project");
-      await backend().project(me.id, project, ctx);
+      made = await projectsOf(options).starting(me, project, agent, ctx);
     }
     // The page's request id names the conversation too: a retry reaches the same one.
     const chatId = given === undefined ? newChatId() : await chatIdFor(me.id, given);
     const requestId = requestIdOf(given);
-    const started = await backend().start(refOf(me, chatId), { ...message, requestId, ...(agent !== undefined && { agent }), ...(project !== undefined && { project }) }, ctx);
+    const started = await backend().start(
+      refOf(me, chatId),
+      { ...message, requestId, ...(made.agent !== undefined && { agent: made.agent }), ...(project !== undefined && made.space !== undefined && { project, space: made.space }) },
+      ctx,
+    );
     ctx.logger.info("channel-web: a user started a conversation", {
       user: me.id,
       chat: chatId,
       requestId,
       admission: started.admission,
-      ...(agent !== undefined && { agent }),
+      ...(made.agent !== undefined && { agent: made.agent }),
       ...(project !== undefined && { project }),
       ...commandFacts(started),
       ...facts(message),
     });
     return json<ChatStartResponse>(201, { id: chatId, ...started });
-  });
-
-  user(`GET ${API}/projects`, async (_request, ctx, me) => json<ChatPage<ChatProject>>(200, await backend().projects(me.id, ctx)));
-
-  user(`POST ${API}/projects`, async (request, ctx, me) => {
-    const made = await backend().createProject(me.id, await projectNameOf(request), ctx);
-    ctx.logger.info("channel-web: a user made a project", { user: me.id, project: made.id });
-    return json<ChatProject>(201, made);
-  });
-
-  user(`PATCH ${API}/projects/:id`, async (request, ctx, me) => {
-    const id = projectIdOf(request);
-    const renamed = await backend().renameProject(me.id, id, await projectNameOf(request), ctx);
-    ctx.logger.info("channel-web: a user renamed a project", { user: me.id, project: id });
-    return json<ChatProject>(200, renamed);
-  });
-
-  user(`DELETE ${API}/projects/:id`, async (request, ctx, me) => {
-    const id = projectIdOf(request);
-    await backend().deleteProject(me.id, id, ctx);
-    ctx.logger.info("channel-web: a user deleted a project", { user: me.id, project: id });
-    return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
   });
 
   /** A conversation as the user may see it (its agent only when one they may pick). */
@@ -652,6 +667,11 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     const chatId = chatIdOf(request);
     const { requestId: given, ...message } = await messageOf(request, options.limits());
     const requestId = requestIdOf(given);
+    // In a project's chat, only while its author is a member and its agent one the project allows (403).
+    if (options.projects !== undefined) {
+      const conversation = await backend().conversation(refOf(me, chatId), ctx);
+      if (conversation.project !== undefined) await options.projects.posting(me, conversation, ctx);
+    }
     const sent = await backend().send(refOf(me, chatId), { ...message, requestId }, ctx);
     ctx.logger.info("channel-web: a user sent a message", { user: me.id, chat: chatId, requestId, admission: sent.admission, ...commandFacts(sent), ...facts(message) });
     return json<ChatSendResponse>(202, sent);
@@ -680,6 +700,15 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
 }
 
 const heartbeatOf = (options: RouteOptions): number => options.config.heartbeatMs;
+
+/** The project access, or: no project store, so every project named is no project (`404`). */
+function projectsOf(options: RouteOptions): ProjectAccess {
+  if (options.projects !== undefined) return options.projects;
+  const none = (): never => {
+    throw new Refused(404, "not_found", "no such project");
+  };
+  return { features: () => undefined, starting: none, posting: async () => {}, listing: none, userRemoved: async () => {} };
+}
 
 /** What the log says of a command typed: its name and what came of it, never its arguments or note. */
 const commandFacts = (sent: ChatSendResponse) => (sent.command === undefined ? {} : { command: sent.command.name, outcome: sent.command.outcome });

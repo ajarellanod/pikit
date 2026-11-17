@@ -9,7 +9,7 @@
  *
  * | Type | Message | Answer |
  * |---|---|---|
- * | `channel-web.start` | `{ userId, chatId, text, images?, files?, requestId, agent?, project? }` | `ChatSendResponse`: the conversation made with its first message (with `agent`, the agent the user picked; with `project`, one of the user's projects, its space: the Worker checked both) |
+ * | `channel-web.start` | `{ userId, chatId, text, images?, files?, requestId, agent?, project?, space? }` | `ChatSendResponse`: the conversation made with its first message (with `agent`, the agent it is made with; with `project` and `space`, a project the user is a member of and its space: the Worker checked them with the project store) |
  * | `channel-web.send` | the same | `ChatSendResponse` |
  * | `channel-web.conversation` | `{ userId, chatId }` | `ChatConversation` |
  * | `channel-web.rename` | `{ userId, chatId, title }` | `ChatConversation` |
@@ -28,12 +28,11 @@
  * | Type | Message | Answer |
  * |---|---|---|
  * | `channel-web.list` | `{ userId, limit, cursor?, archived?, q?, project? }` | `ChatPage<ChatConversation>`: not archived, or with `archived: true` the archived ones; with `q`, those whose title holds it; with `project`, that project's (`""`: of none); `not_found` for a project not the user's |
- * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations and projects leave the index |
- * | `channel-web.projects` | `{ userId }` | `ChatPage<ChatProject>`: the user's projects |
- * | `channel-web.project` | `{ userId, id }` | `ChatProject`, or `not_found` (another user's too) |
- * | `channel-web.project.create` | `{ userId, name }` | `ChatProject` (`invalid_request` past `MAX_PROJECTS`) |
- * | `channel-web.project.rename` | `{ userId, id, name }` | `ChatProject`, or `not_found` |
- * | `channel-web.project.delete` | `{ userId, id }` | `{}`, or `not_found`, `not_empty` |
+ * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations leave the index |
+ * | `channel-web.project.conversations` | `{ id, limit, cursor? }` | `ChatPage<ProjectConversation>`: every user's conversations of project `id` (the Worker checked the caller is a member) |
+ * | `channel-web.project.conversation` | `{ id, chatId }` | `{ userId }`: whose that conversation of project `id` is, or `not_found` |
+ * | `channel-web.project.chats` | `{ ids }` | `{ chats: Record<id, number> }`: how many conversations each project has |
+ * | `channel-web.project.migrate` | `{}` | `{ made }`: the projects this channel kept itself carried over to the project store of this App, once (`migrateProjects`) |
  * | `channel-web.config` | `{}` | `ChatConfig`: the page's config as the accounts' App makes it (its methods, its live settings: sign-up mode, visibility, the agents users may pick; whether it sends email) |
  * | `channel-web.rate` | `{ userId }` | `{ retryAfter? }`: one message of the user's counted (`messagesPerMinute`); `retryAfter` (seconds) when it is one too many |
  * | `channel-web.routed` | `{ userId }` | `{ agent? }`: the agent this App's `route.resolve` names for a new chat of the user, a dry run (`routed.ts`); absent when it denies or halts |
@@ -46,8 +45,8 @@
  */
 
 import type { AppContext } from "@pikit/core";
-import { ActorCallError, type ActorInbox, type JsonValue } from "@pikit/contracts";
-import { type ChatConfig, type ChatFile, type ChatImage, MAX_IMAGES, PROJECT_NAME_MAX, SEARCH_MAX } from "./api.ts";
+import { ActorCallError, type ActorInbox, type JsonValue, type ProjectStore } from "@pikit/contracts";
+import { type ChatConfig, type ChatFile, type ChatImage, MAX_IMAGES, SEARCH_MAX } from "./api.ts";
 import { type ChatBackend, type ChatRef, createIndex, type FirstMessage, type NewMessage, refusal } from "./backend.ts";
 import { isChatId, isProjectId, keyOf, REQUEST_ID } from "./chat.ts";
 import type { RateLimiter } from "./rate.ts";
@@ -72,11 +71,10 @@ export const CALL = {
   image: "channel-web.image",
   rate: "channel-web.rate",
   routed: "channel-web.routed",
-  projects: "channel-web.projects",
-  project: "channel-web.project",
-  createProject: "channel-web.project.create",
-  renameProject: "channel-web.project.rename",
-  deleteProject: "channel-web.project.delete",
+  projectConversations: "channel-web.project.conversations",
+  projectConversation: "channel-web.project.conversation",
+  projectChats: "channel-web.project.chats",
+  migrateProjects: "channel-web.project.migrate",
 } as const;
 export const LIVE = "channel-web.live";
 export const SEEN = "channel-web.seen";
@@ -139,19 +137,14 @@ function projectIdOf(value: unknown): string {
   return value;
 }
 
-/** A conversation's first message, and the agent picked and its project, if any. */
+/** A conversation's first message, and the agent picked and its project with its space, if any. */
 function firstOf(message: JsonValue): FirstMessage {
-  const { agent, project } = fieldsOf(message);
+  const { agent, project, space } = fieldsOf(message);
   if (agent !== undefined && (typeof agent !== "string" || agent === "")) throw refusal("invalid_request", 'channel-web: "agent" is an agent\'s name');
-  return { ...messageOf(message), ...(typeof agent === "string" && { agent }), ...(project !== undefined && { project: projectIdOf(project) }) };
+  if ((project === undefined) !== (space === undefined)) throw refusal("invalid_request", 'channel-web: "project" comes with its "space"');
+  if (space !== undefined && (typeof space !== "string" || space === "" || space.length > 1024)) throw refusal("invalid_request", 'channel-web: "space" is a space');
+  return { ...messageOf(message), ...(typeof agent === "string" && { agent }), ...(project !== undefined && { project: projectIdOf(project), space: space as string }) };
 }
-
-/** A project's name, as the route cleaned it. */
-const projectNameOf = (fields: Fields): string => {
-  const name = text(fields, "name");
-  if (name.length > PROJECT_NAME_MAX) throw refusal("invalid_request", `channel-web: "name" is at most ${PROJECT_NAME_MAX} characters`);
-  return name;
-};
 
 const ROW_FIELDS = { key: "string", userId: "string", chatId: "string", agent: "string", project: "string", title: "string", createdAt: "number", lastActivity: "number", hidden: "boolean", archived: "boolean", busy: "boolean", version: "number" } as const;
 
@@ -227,7 +220,7 @@ export function accountsOnly(inbox: ActorInbox): Pick<ActorInbox, "answer" | "ha
  * only there (`accountsOnly`).
  * Call it in `start`.
  */
-export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (ctx: AppContext) => Promise<ChatConfig>, rate: RateLimiter): void {
+export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (ctx: AppContext) => Promise<ChatConfig>, rate: RateLimiter, projects: () => ProjectStore | undefined = () => undefined): void {
   const inbox = accountsOnly(calls);
   inbox.answer(CALL.rate, async (_key, message, ctx) => {
     const retryAfter = rate.take(text(fieldsOf(message), "userId"), ctx.clock.now());
@@ -240,7 +233,7 @@ export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (c
     return agent === undefined ? {} : { agent };
   });
   inbox.handle(SEEN, async (_key, message) => store.seen(rowsOf(message)));
-  const index = createIndex(store);
+  const index = createIndex(store, projects);
   const userOf = (message: JsonValue): string => text(fieldsOf(message), "userId");
   inbox.answer(CALL.list, async (_key, message, ctx) => {
     const { archived, q, project } = fieldsOf(message);
@@ -250,17 +243,19 @@ export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (c
     const query = { ...pageOf(message), archived: archived === true, ...(typeof q === "string" && q !== "" && { q }), ...(inProject !== undefined && { project: inProject }) };
     return json(await index.list(userOf(message), query, ctx));
   });
-  inbox.answer(CALL.projects, async (_key, message, ctx) => json(await index.projects(userOf(message), ctx)));
-  inbox.answer(CALL.project, async (_key, message, ctx) => json(await index.project(userOf(message), projectIdOf(fieldsOf(message).id), ctx)));
-  inbox.answer(CALL.createProject, async (_key, message, ctx) => json(await index.createProject(userOf(message), projectNameOf(fieldsOf(message)), ctx)));
-  inbox.answer(CALL.renameProject, async (_key, message, ctx) => {
+  inbox.answer(CALL.projectConversations, async (_key, message, ctx) => json(await index.projectConversations(projectIdOf(fieldsOf(message).id), pageOf(message), ctx)));
+  inbox.answer(CALL.projectConversation, async (_key, message, ctx) => {
     const fields = fieldsOf(message);
-    return json(await index.renameProject(userOf(message), projectIdOf(fields.id), projectNameOf(fields), ctx));
+    const chatId = text(fields, "chatId");
+    if (!isChatId(chatId)) throw refusal("invalid_request", 'channel-web: "chatId" is a chat id');
+    return json(await index.projectConversation(projectIdOf(fields.id), chatId, ctx));
   });
-  inbox.answer(CALL.deleteProject, async (_key, message, ctx) => {
-    await index.deleteProject(userOf(message), projectIdOf(fieldsOf(message).id), ctx);
-    return {};
+  inbox.answer(CALL.projectChats, async (_key, message, ctx) => {
+    const { ids } = fieldsOf(message);
+    if (!Array.isArray(ids) || ids.length > 1000) throw refusal("invalid_request", 'channel-web: "ids" is a list of at most 1000 project ids');
+    return { chats: json(await index.projectChats(ids.map(projectIdOf), ctx)) };
   });
+  inbox.answer(CALL.migrateProjects, async (_key, _message, ctx) => ({ made: await index.migrateProjects(ctx) }));
   inbox.answer(CALL.forget, async (_key, message) => {
     await store.forget(text(fieldsOf(message), "userId"));
     return {};

@@ -1,17 +1,17 @@
 /**
  * The user's projects (`#/projects`, the sidebar's Projects), in the same page as Conversations (`Page`:
  * its width, its two-tone title, "New project" where Conversations has "New chat"): a search by name
- * (on the projects read once: at most 100) and the order (newest first, or by name) where
- * Conversations has its search and "Archived", then cards, two a row on a wide screen, each a
- * project's name and when it was made, opening its page (`#/projects/<id>`, its chats) and with its
- * menu (a new chat in it, Rename, Delete: `useProjectMenu`). "New project" (`useNewProject`) asks a
- * name, makes it and opens it.
+ * (on the projects read once) and the order (most recently changed first, or by name), "Archived" (the
+ * archived ones instead, read only), then cards, two a row on a wide screen, each a project's name, what
+ * it is for, the user's role, its members and chats, opening its page (`#/projects/<id>`) and with its
+ * menu (`useProjectMenu`). "New project" (`useNewProject`) asks a name and a description, makes it and
+ * opens it.
  *
- * A project is a place the user's chats share (what the assistant keeps for it: rules, memory, saved
- * files); a chat is made in one or in none, for good.
+ * A project is a place its members share (its chats, context, files and memory); a chat is made in
+ * one or in none, for good.
  */
 
-import { Folder, Plus, Search, Sort } from "iconoir-react";
+import { Archive, Folder, Plus, Search, Sort } from "iconoir-react";
 import { useState } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
@@ -19,6 +19,9 @@ import EmptyState from "@/components/bui/EmptyState";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import { Page } from "@/components/bui/Page";
 import SearchField from "@/components/bui/SearchField";
+import { Switch } from "@/components/bui/Switch";
+import type { ChatPage, ChatProject } from "@/lib/chat-api";
+import { useGet } from "@/lib/client";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { type ProjectOrder, shownProjects } from "@/lib/project-list";
 import { useProjects } from "@/lib/projects";
@@ -35,9 +38,12 @@ export function ProjectsScreen() {
   const newProject = useNewProject();
   const [query, setQuery] = useState("");
   const [order, setOrder] = useState<ProjectOrder>("recent");
+  const [archived, setArchived] = useState(false);
   usePageTitle(config.name, "Projects");
+  const archive = useGet<ChatPage<ChatProject>>(archived ? "/projects?archived=1" : null);
 
-  const items = projects.items;
+  const items = archived ? archive.data?.items : projects.items;
+  const error = archived ? archive.error : projects.error;
   const searched = query.trim() !== "";
   const shown = items === undefined ? undefined : shownProjects(items, query, order);
 
@@ -57,23 +63,33 @@ export function ProjectsScreen() {
           <Button
             variant="quiet"
             size="xs"
-            aria-label={order === "recent" ? "Newest first: order by name" : "By name: order newest first"}
+            aria-label={order === "recent" ? "Recently changed first: order by name" : "By name: order by recent changes"}
             onClick={() => setOrder((now) => (now === "recent" ? "name" : "recent"))}
           >
-            <Sort width={14} height={14} strokeWidth={1.9} aria-hidden /> {order === "recent" ? "Newest first" : "By name"}
+            <Sort width={14} height={14} strokeWidth={1.9} aria-hidden /> {order === "recent" ? "Recent first" : "By name"}
           </Button>
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px] text-ink-2">
+            <Switch checked={archived} onChange={setArchived} size="sm" label="Archived" />
+            <span aria-hidden>Archived</span>
+          </label>
         </div>
-        {projects.error !== undefined && <ErrorNote error={projects.error} title="The projects cannot be read" />}
-        {shown === undefined && projects.error === undefined && (
+        {error !== undefined && <ErrorNote error={error} title="The projects cannot be read" />}
+        {shown === undefined && error === undefined && (
           <div className="flex items-center gap-2.5 text-[13px] text-ink-3">
             <LoaderGrid /> Loading
           </div>
         )}
         {shown !== undefined && shown.length === 0 && (
           <EmptyState
-            icon={searched ? <Search /> : <Folder />}
-            title={searched ? `No project named with “${query.trim()}”` : "No projects yet"}
-            hint={searched ? "Search finds words of a name, in any case." : "A project's chats share what the assistant keeps for it: its rules, its memory, its saved files."}
+            icon={searched ? <Search /> : archived ? <Archive /> : <Folder />}
+            title={searched ? `No project named with “${query.trim()}”` : archived ? "No archived projects" : "No projects yet"}
+            hint={
+              searched
+                ? "Search finds words of a name, in any case."
+                : archived
+                  ? "A project its owner archives is listed here, read only."
+                  : "A project is shared by its members: its chats, its instructions and documents, its files and what its assistants remember."
+            }
           />
         )}
         {shown !== undefined && shown.length > 0 && (
@@ -87,9 +103,11 @@ export function ProjectsScreen() {
                   <a href={`#${projectPath(project.id)}`} title={project.name} className="truncate text-[14px] font-medium text-ink outline-none after:absolute after:inset-0 after:content-['']">
                     {project.name}
                   </a>
-                  <time className="text-[12.5px] text-ink-3" dateTime={new Date(project.createdAt).toISOString()}>
-                    {DATE.format(project.createdAt)}
-                  </time>
+                  {project.description !== "" && <span className="truncate text-[12.5px] text-ink-2">{project.description}</span>}
+                  <span className="text-[12.5px] text-ink-3">
+                    {project.role === "owner" ? "Yours" : "Member"} · {project.members === 1 ? "1 member" : `${project.members} members`} · {project.chats === 1 ? "1 chat" : `${project.chats} chats`} ·{" "}
+                    <time dateTime={new Date(project.updatedAt).toISOString()}>{DATE.format(project.updatedAt)}</time>
+                  </span>
                 </span>
                 <ActionsMenu
                   actions={projectMenu(project)}

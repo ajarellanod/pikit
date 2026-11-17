@@ -5,12 +5,12 @@
 
 import type { ChatProject } from "./chat-api.ts";
 
-/** Newest first, or by name. */
+/** Most recently changed first, or by name. */
 export type ProjectOrder = "recent" | "name";
 
 /** `items` found by `query` (any case, anywhere in the name), in `order`. */
-export function shownProjects(items: readonly ChatProject[], query: string, order: ProjectOrder): ChatProject[] {
+export function shownProjects<P extends Pick<ChatProject, "name" | "updatedAt">>(items: readonly P[], query: string, order: ProjectOrder): P[] {
   const needle = query.trim().toLocaleLowerCase();
   const found = needle === "" ? [...items] : items.filter((project) => project.name.toLocaleLowerCase().includes(needle));
-  return found.sort((a, b) => (order === "name" ? a.name.localeCompare(b.name) : b.createdAt - a.createdAt));
+  return found.sort((a, b) => (order === "name" ? a.name.localeCompare(b.name) : b.updatedAt - a.updatedAt));
 }

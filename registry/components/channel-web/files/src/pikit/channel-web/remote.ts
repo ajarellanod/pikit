@@ -4,6 +4,9 @@
  * list and their projects are the accounts actor's index (`ACCOUNTS_KEY`), one call, no call per
  * conversation.
  *
+ * - **Projects** are the project store's, which the Worker's App reaches itself (`project-routes.ts`); the
+ *   index answers only what it keeps: a project's conversations, every member's, and how many, and the
+ *   migration of the projects this channel kept itself (in the accounts actor, whose table they are).
  * - **Live events are streamed**: the object's `channel-web.live` stream, one RPC, as on a server. The
  *   object stays in memory while it is open; a stream cut by an eviction or a deploy ends, and the page
  *   reconnects.
@@ -13,8 +16,8 @@
 
 import type { AppContext } from "@pikit/core";
 import type { ActorMailbox, JsonValue } from "@pikit/contracts";
-import type { ChatConversation, ChatEvent, ChatImage, ChatPage, ChatProject, ChatSendResponse, ChatTranscriptEntry } from "./api.ts";
-import type { ChatBackend, ChatRef, FirstMessage } from "./backend.ts";
+import type { ChatConversation, ChatEvent, ChatImage, ChatPage, ChatSendResponse, ChatTranscriptEntry } from "./api.ts";
+import type { ChatBackend, ChatRef, FirstMessage, ProjectConversation } from "./backend.ts";
 import { ACCOUNTS_KEY, CALL, LIVE } from "./calls.ts";
 
 export function createRemoteBackend(mailbox: () => ActorMailbox): ChatBackend {
@@ -24,13 +27,10 @@ export function createRemoteBackend(mailbox: () => ActorMailbox): ChatBackend {
 
   return {
     list: (userId, { archived, ...query }, ctx) => call<ChatPage<ChatConversation>>(ACCOUNTS_KEY, CALL.list, { userId, ...query, ...(archived === true && { archived }) }, ctx),
-    projects: (userId, ctx) => call<ChatPage<ChatProject>>(ACCOUNTS_KEY, CALL.projects, { userId }, ctx),
-    project: (userId, id, ctx) => call<ChatProject>(ACCOUNTS_KEY, CALL.project, { userId, id }, ctx),
-    createProject: (userId, name, ctx) => call<ChatProject>(ACCOUNTS_KEY, CALL.createProject, { userId, name }, ctx),
-    renameProject: (userId, id, name, ctx) => call<ChatProject>(ACCOUNTS_KEY, CALL.renameProject, { userId, id, name }, ctx),
-    async deleteProject(userId, id, ctx) {
-      await call<JsonValue>(ACCOUNTS_KEY, CALL.deleteProject, { userId, id }, ctx);
-    },
+    projectConversations: (id, page, ctx) => call<ChatPage<ProjectConversation>>(ACCOUNTS_KEY, CALL.projectConversations, { id, ...page }, ctx),
+    projectConversation: (id, chatId, ctx) => call<{ userId: string }>(ACCOUNTS_KEY, CALL.projectConversation, { id, chatId }, ctx),
+    projectChats: async (ids, ctx) => (await call<{ chats: Record<string, number> }>(ACCOUNTS_KEY, CALL.projectChats, { ids: [...ids] }, ctx)).chats,
+    migrateProjects: async (ctx) => (await call<{ made: number }>(ACCOUNTS_KEY, CALL.migrateProjects, {}, ctx)).made,
     start: (ref, message, ctx) => call<ChatSendResponse>(ref.key, CALL.start, sendable(ref, message), ctx),
     send: (ref, message, ctx) => call<ChatSendResponse>(ref.key, CALL.send, sendable(ref, message), ctx),
     conversation: (ref, ctx) => call<ChatConversation>(ref.key, CALL.conversation, named(ref), ctx),

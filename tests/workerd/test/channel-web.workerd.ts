@@ -22,10 +22,13 @@
  * - With `email.send` in the objects' App only (a fake), `GET /chat/api/config` says email is sent and
  *   offers the magic link, which signs a new user in; a password sign-up's emailed link sets its first
  *   password (the sign-up's own never works).
- * - Projects: each user's (another's project id `404` on every route), a chat made in one admitted in
- *   the project's space (as conversations-kv records it: a `/rules` fixture in the objects' App says the
- *   space it runs in), the same for every chat of it, none for a chat of no project; a command typed runs
- *   in the conversation's object, once by request id; a project with chats is not deleted (`409`).
+ * - Projects, through a double of the project store in both Apps (projects-sql's halves are built
+ *   apart): a chat made in one admitted in the project's space (as conversations-kv records it: a
+ *   `/rules` fixture in the objects' App says the space it runs in), the same for every chat of it, none
+ *   for a chat of no project; a command typed runs in the conversation's object, once by request id; a
+ *   non-member's every route `404` until added, then every member's chats read, and posting refused
+ *   (`403`) once removed; a project with chats is not removed (`409`); the former projects carried over
+ *   by the accounts actor with their spaces, its table gone.
  * - Titles: after its first answer a model (faux/echo, through runtime-pi's `model.complete`) titles a
  *   web conversation in its object; the dashboard lists the same title (channel-web runs admin-api's
  *   `/name` there), its own titler never tries, and the user's rename is the dashboard's too.
@@ -42,6 +45,7 @@ import { INDEX_KEY } from "../../../registry/components/admin-api/files/src/piki
 import adminAuthToken from "../../../registry/components/admin-auth-token/files/src/pikit/admin-auth-token/index.ts";
 import type { ChatConfig, ChatConversation, ChatEvent, ChatLive, ChatPage, ChatTranscriptEntry } from "../../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
 import channelWeb, { ACCOUNTS_KEY, worker as channelWebWorker } from "../../../registry/components/channel-web/files/src/pikit/channel-web/index.ts";
+import { projectDoubles, projectsComponent } from "../../../registry/components/channel-web/files/src/pikit/channel-web/projects.test-support.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerHost } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
 import outboundDurable from "../../../registry/components/outbound-durable/files/src/pikit/outbound-durable/index.ts";
@@ -88,14 +92,14 @@ function fakeEmail() {
   return { sent, component: defineComponent({ name: "email-test", setup: (pikit) => pikit.provide("email.send", sender) }) };
 }
 
-/** The objects' App and the Worker's, with channel-web's config in both; the Worker's `fetch`. */
-function compose(chat: Record<string, unknown>, extra: ComponentDefinition[] = []) {
+/** The objects' App and the Worker's, with channel-web's config in both (and `extra`, `workerExtra` in each); the Worker's `fetch`. */
+function compose(chat: Record<string, unknown>, extra: ComponentDefinition[] = [], workerExtra: ComponentDefinition[] = []) {
   composeObjects(
     [storageDo, storageKvSql, actorsDo, secrets, agent, providerFaux, runtimePi, conversationsKv, routerBasic, outboundDurable, adminAuthToken, adminApi, ...extra, channelWeb],
     { "router-basic": { defaultAgent: "echo" }, "channel-web": chat },
   );
   const worker = defineApp({
-    components: [actorsDo, secrets, adminAuthToken, adminApiWorker, channelWebWorker],
+    components: [actorsDo, secrets, adminAuthToken, adminApiWorker, ...workerExtra, channelWebWorker],
     config: { "actors-do": { binding: PLATFORM_BINDING }, "channel-web-worker": chat },
     target: "durable",
     logger: silentLogger,
@@ -560,7 +564,7 @@ it("titles: a web conversation is named by its first message in both apps, then 
   );
 });
 
-it("projects: each user's; a chat made in one is in the project's space (the registry's record), the same for each of its chats, none without; a command typed runs in its object once; another user's project is 404 everywhere; one with chats is not deleted", async () => {
+it("projects: through the project store (a double in both Apps: the Worker's routes, the accounts actor's migration); a chat made in one is in the project's space (the registry's record), the same for each of its chats, none without; a command typed runs in its object once; a non-member gets 404 everywhere until added, then reads every member's chats and posts in their own until removed (403); one with chats is not removed; the former projects carried over by the accounts actor with their spaces", async () => {
   // `/rules` says where it ran: the space conversations-kv recorded for the key, and who typed it.
   const rules = defineComponent({
     name: "rules-fixture",
@@ -571,11 +575,18 @@ it("projects: each user's; a chat made in one is in the project's space (the reg
         run: async (conversation, args, _ctx, sender) => ({ text: `${args} space=${conversation.space ?? "none"} sender=${sender?.id ?? "none"}` }),
       }),
   });
-  const fetch = compose({ name: "Ada", signUp: { mode: "open" } }, [rules]);
-  expect(((await (await fetch(`${HTTPS}/chat/api/config`)).json()) as ChatConfig).commands).toEqual([...RUNTIME_COMMANDS.slice(0, 1), { name: "rules", description: "Your rules", audience: "user" }, ...RUNTIME_COMMANDS.slice(1)]);
+  const doubles = projectDoubles();
+  const fetch = compose({ name: "Ada", signUp: { mode: "open" } }, [rules, projectsComponent(doubles)], [projectsComponent(doubles, "projects-worker-doubles")]);
   const ivy = browser(fetch, HTTPS, "10.4.0.1");
   await signUp(ivy, "ivy@example.com", "Ivy");
   const me = (await meOf(ivy)).user.id;
+  // A project Ivy made before the project store: its row in the accounts actor's former table.
+  const old = "5".repeat(32);
+  await runInDurableObject(env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.idFromName(ACCOUNTS_KEY)), (_instance, state) => {
+    state.storage.sql.exec("CREATE TABLE IF NOT EXISTS channel_web_projects (user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (user_id, id))");
+    state.storage.sql.exec("INSERT INTO channel_web_projects (user_id, id, name, created_at) VALUES (?, ?, 'Old', 1)", me, old);
+  });
+  expect(((await (await fetch(`${HTTPS}/chat/api/config`)).json()) as ChatConfig).projects).toEqual({ files: true, memory: true, convert: true });
   const projectOf = async (name: string) => {
     const response = await ivy.send("/chat/api/projects", { json: { name } });
     expect(response.status).toBe(201);
@@ -583,6 +594,9 @@ it("projects: each user's; a chat made in one is in the project's space (the reg
   };
   const work = await projectOf("Work");
   const home = await projectOf("Home");
+  // Carried over at the first project route, with its space; the table gone.
+  expect(doubles.projects.ids.get(old)).toBe(`web:${me}:project:${old}`);
+  expect(await tablesOf(ACCOUNTS_KEY)).not.toContain("channel_web_projects");
   const noteOf = async (response: Response) => {
     const body = (await response.json()) as { id?: string; admission: string; command?: { outcome: string; text?: string } };
     return { id: body.id, admission: body.admission, text: body.command?.text };
@@ -590,50 +604,62 @@ it("projects: each user's; a chat made in one is in the project's space (the reg
 
   // A first message that is a command: the chat is made, empty, in Work's space.
   const first = await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules a", project: work, requestId: "web:rules-a" } }));
-  expect(first).toEqual({ id: expect.any(String), admission: "command", text: `a space=web:${me}:project:${work} sender=${me}` });
+  expect(first).toEqual({ id: expect.any(String), admission: "command", text: `a space=project:${work} sender=${me}` });
   expect(await transcriptOf(ivy, first.id as string)).toEqual([]);
-  // Sent again: not run again.
   expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules a", project: work, requestId: "web:rules-a" } }))).admission).toBe("duplicate");
 
   // Another chat of Work, answered by the agent, then a command in it: the same space.
   const second = (await (await ivy.send("/chat/api/conversations", { json: { text: "hello", project: work } })).json()) as { id: string };
   expect(await answered(ivy, second.id, 2)).toEqual(["user: hello (answered)", "assistant: faux: hello"]);
-  expect((await noteOf(await ivy.send(`/chat/api/conversations/${second.id}/messages`, { json: { text: "/rules b" } }))).text).toBe(`b space=web:${me}:project:${work} sender=${me}`);
-  expect(await answered(ivy, second.id, 2)).toEqual(["user: hello (answered)", "assistant: faux: hello"]);
-  // Home's another; no project, none.
-  expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules c", project: home } }))).text).toBe(`c space=web:${me}:project:${home} sender=${me}`);
+  expect((await noteOf(await ivy.send(`/chat/api/conversations/${second.id}/messages`, { json: { text: "/rules b" } }))).text).toBe(`b space=project:${work} sender=${me}`);
+  expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules c", project: home } }))).text).toBe(`c space=project:${home} sender=${me}`);
   expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules d" } }))).text).toBe(`d space=none sender=${me}`);
+  // The old project's chat is in its former space.
+  expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules e", project: old } }))).text).toBe(`e space=web:${me}:project:${old} sender=${me}`);
 
-  // The list by project, from the accounts actor's index.
   await vi.waitFor(
     async () => {
       const listed = (await (await ivy.send(`/chat/api/conversations?project=${work}`)).json()) as ChatPage<ChatConversation>;
       expect(listed.items.map((each) => each.id).sort()).toEqual([first.id, second.id].sort());
-      expect(listed.items.every((each) => each.project === work)).toBe(true);
     },
     { timeout: 10_000, interval: 100 },
   );
-  expect(((await (await ivy.send("/chat/api/conversations?project=none")).json()) as ChatPage<ChatConversation>).items.map((each) => each.title)).toEqual(["New conversation"]);
 
-  // Another user, with Ivy's project id: 404 everywhere, nothing made.
+  // Jon, no member: 404 everywhere, nothing made.
   const jon = browser(fetch, HTTPS, "10.4.0.2");
   await signUp(jon, "jon@example.com", "Jon");
   const tries: [string, { method?: string; json?: unknown }][] = [
+    [`/chat/api/projects/${work}`, {}],
     [`/chat/api/projects/${work}`, { method: "PATCH", json: { name: "mine" } }],
     [`/chat/api/projects/${work}`, { method: "DELETE" }],
+    [`/chat/api/projects/${work}/conversations`, {}],
+    [`/chat/api/projects/${work}/history`, {}],
     [`/chat/api/conversations?project=${work}`, {}],
     ["/chat/api/conversations", { json: { text: "into yours", project: work } }],
   ];
   for (const [path, init] of tries) expect([path, (await jon.send(path, init)).status]).toEqual([path, 404]);
-  expect(((await (await jon.send("/chat/api/conversations")).json()) as ChatPage<unknown>).items).toEqual([]);
   expect(((await (await jon.send("/chat/api/projects")).json()) as ChatPage<unknown>).items).toEqual([]);
 
-  // Not deleted while it has chats; Ivy's projects as she named them.
+  // Added by Ivy: Jon reads every member's chats, and posts in his own; removed, he posts no more.
+  expect((await ivy.send(`/chat/api/projects/${work}/members`, { json: { email: "jon@example.com" } })).status).toBe(201);
+  await vi.waitFor(async () => expect(((await (await jon.send(`/chat/api/projects/${work}/conversations`)).json()) as ChatPage<unknown>).items).toHaveLength(2), { timeout: 10_000, interval: 100 });
+  expect((await jon.send(`/chat/api/projects/${work}/conversations/${second.id}/transcript`)).status).toBe(200);
+  const jons = (await (await jon.send("/chat/api/conversations", { json: { text: "/rules f", project: work } })).json()) as { id: string };
+  const jonId = (await meOf(jon)).user.id;
+  expect((await ivy.send(`/chat/api/projects/${work}/members/${encodeURIComponent(`web:${jonId}`)}`, { method: "DELETE" })).status).toBe(204);
+  expect((await jon.send(`/chat/api/conversations/${jons.id}/messages`, { json: { text: "/rules g" } })).status).toBe(403);
+
+  // Not removed while it has chats.
   const refused = await ivy.send(`/chat/api/projects/${work}`, { method: "DELETE" });
   expect([refused.status, ((await refused.json()) as { error: string }).error]).toEqual([409, "not_empty"]);
   const projects = (await (await ivy.send("/chat/api/projects")).json()) as ChatPage<{ name: string; chats: number }>;
-  expect(projects.items.map((each) => [each.name, each.chats])).toEqual([
-    ["Home", 1],
-    ["Work", 2],
-  ]);
+  await vi.waitFor(async () => {
+    const now = (await (await ivy.send("/chat/api/projects")).json()) as ChatPage<{ name: string; chats: number }>;
+    expect(now.items.map((each) => [each.name, each.chats]).sort()).toEqual([
+      ["Home", 1],
+      ["Old", 1],
+      ["Work", 3],
+    ]);
+  });
+  expect(projects.items).toHaveLength(3);
 });

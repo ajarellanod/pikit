@@ -49,6 +49,14 @@ export async function request<T>(method: string, path: string, body?: unknown, s
   return (text === "" ? undefined : JSON.parse(text)) as T;
 }
 
+/** `POST path` with `file`'s bytes as the body (its type the content type): an upload. The JSON answered. */
+export async function upload<T>(path: string, file: Blob): Promise<T> {
+  const headers = new Headers({ accept: "application/json", [CHAT_CLIENT_HEADER]: "1", "content-type": file.type === "" ? "application/octet-stream" : file.type });
+  const response = await send(path, { method: "POST", headers, body: file });
+  if (!response.ok) throw await failure(path, response);
+  return (await response.json()) as T;
+}
+
 export const get = <T>(path: string, signal?: AbortSignal): Promise<T> => request<T>("GET", path, undefined, signal);
 export const post = <T>(path: string, body?: unknown): Promise<T> => request<T>("POST", path, body ?? {});
 

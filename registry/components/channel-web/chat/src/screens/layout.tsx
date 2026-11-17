@@ -5,11 +5,12 @@
  * opening Settings, the theme and Sign out), and the screen in a window beside it. On a narrow screen
  * the sidebar starts folded to its icons, and Conversations lists them full width.
  *
- * Projects (`useProjects`) are listed on their own page (`#/projects`, `screens/projects.tsx`), never in
- * the sidebar; "New project" there asks a name (`useNewProject`) and opens it. A project's page
- * (`#/projects/<id>`) lists its chats; its menu (`useProjectMenu`) starts a new chat in it
- * (`#/?project=<id>`), renames it, or deletes it once it has no chats (the server refuses before: its
- * words are shown). A chat's project is fixed when it is made.
+ * Projects (`useProjects`, when the App has them: `ChatConfig.projects`) are listed on their own page
+ * (`#/projects`, `screens/projects.tsx`), never in the sidebar; "New project" there asks a name and a
+ * description (`useNewProject`) and opens it. A project's page (`#/projects/<id>`, `screens/project/`)
+ * has its tabs; its menu (`useProjectMenu`) starts a new chat in it (`#/?project=<id>`), renames it,
+ * and for its owner archives it (or puts it back) and removes it once it has no chats (the server
+ * refuses before: its words are shown); a member leaves it. A chat's project is fixed when it is made.
  *
  * A conversation has one menu wherever it shows (the sidebar's row, the list's, its own header):
  * Rename, Archive (Restore when archived), Delete (`useConversationMenu`, `bui/ActionsMenu`). Renaming
@@ -28,10 +29,14 @@ import { createPortal } from "react-dom";
 import type { ActionsMenuItem } from "@/components/bui/ActionsMenu";
 import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem } from "@/components/bui/SidebarNav";
 import { ThemeToggle } from "@/components/bui/ThemeToggle";
-import { ConfirmDialog, RenameDialog } from "@/components/chat/dialog";
+import { Button } from "@/components/bui/Button";
+import { ConfirmDialog, Dialog, RenameDialog } from "@/components/chat/dialog";
+import { FormNote, TextField } from "@/components/chat/field";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { TabBar } from "@/components/pikit/tab-bar";
-import { type ChatConversation, type ChatProject, PROJECT_NAME_MAX, TITLE_MAX } from "@/lib/chat-api";
+import { type ChatConversation, type ChatProject, memberKey, PROJECT_DESCRIPTION_MAX, PROJECT_NAME_MAX, TITLE_MAX } from "@/lib/chat-api";
+import { request } from "@/lib/client";
+import { projectApi } from "@/lib/project";
 import { useConversations } from "@/lib/conversations";
 import { asError } from "@/lib/errors";
 import { chatIdOf, chatPath, go } from "@/lib/location";
@@ -39,11 +44,12 @@ import { useProjects } from "@/lib/projects";
 import { newChatPath, PROJECTS_PATH, projectIdOf, projectPath, type Route, settingsSectionOf } from "@/lib/routes";
 import { useSession } from "@/lib/session";
 import { AssistantBadge } from "./auth-card";
+import { TextArea } from "./project/parts";
 import { SettingsModal } from "./settings";
 
 /** A conversation's menu, the same everywhere: its items for `conversation`; `changed` hears it was renamed, archived, restored or deleted. */
 export type ConversationMenu = (conversation: ChatConversation, changed?: () => void) => ActionsMenuItem[];
-/** A project's menu, the same everywhere: a new chat in it, Rename, Delete. */
+/** A project's menu, the same everywhere: a new chat in it, Rename; the owner's Archive and Delete; a member's Leave. */
 export type ProjectMenu = (project: ChatProject) => ActionsMenuItem[];
 
 /** What a new chat starts with: an assistant chosen, a project it is made in. */
@@ -143,6 +149,7 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
   const [making, setMaking] = useState(false);
   const [renamingProject, setRenamingProject] = useState<ChatProject>();
   const [deletingProject, setDeletingProject] = useState<ChatProject>();
+  const [leavingProject, setLeavingProject] = useState<ChatProject>();
   const [problem, setProblem] = useState<{ error: Error; title: string }>();
   const [settings, setSettings] = useState<string>();
   const [draft, setDraft] = useState(0);
@@ -183,13 +190,30 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
     );
   };
 
+  const { update } = projects;
   const projectMenu: ProjectMenu = useCallback(
-    (project) => [
-      { key: "new", label: "New chat here", icon: <Plus />, onSelect: () => newChat({ project: project.id }) },
-      { key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenamingProject(project) },
-      { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeletingProject(project) },
-    ],
-    [newChat],
+    (project) => {
+      const archive = (archived: boolean) => {
+        setProblem(undefined);
+        update(project.id, { archived }).then(
+          () => undefined,
+          (error: unknown) => setProblem({ error: asError(error), title: `“${project.name}” could not be changed` }),
+        );
+      };
+      return [
+        ...(project.archived ? [] : [{ key: "new", label: "New chat here", icon: <Plus />, onSelect: () => newChat({ project: project.id }) }]),
+        { key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenamingProject(project) },
+        ...(project.role === "owner"
+          ? [
+              project.archived
+                ? { key: "unarchive", label: "Put back from the archive", icon: <Undo />, onSelect: () => archive(false) }
+                : { key: "archive", label: "Archive (read only)", icon: <Archive />, onSelect: () => archive(true) },
+              { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeletingProject(project) },
+            ]
+          : [{ key: "leave", label: "Leave", icon: <LogOut />, danger: true, onSelect: () => setLeavingProject(project) }]),
+      ];
+    },
+    [newChat, update],
   );
 
   const { archive } = conversations;
@@ -216,14 +240,18 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
   const items: SidebarItem[] = [
     { key: "new", label: "New chat", icon: <Plus />, active: route.path === "/" && shownProject === undefined, href: href("/"), onSelect: () => newChat() },
     { key: "chats", label: "Conversations", icon: <ChatBubble />, active: route.path === "/chats", href: href("/chats"), onSelect: () => go("/chats") },
-    {
-      key: "projects",
-      label: "Projects",
-      icon: <Folder />,
-      active: route.path === PROJECTS_PATH || projectIdOf(route.path) !== undefined,
-      href: href(PROJECTS_PATH),
-      onSelect: () => go(PROJECTS_PATH),
-    },
+    ...(projects.enabled
+      ? [
+          {
+            key: "projects",
+            label: "Projects",
+            icon: <Folder />,
+            active: route.path === PROJECTS_PATH || projectIdOf(route.path) !== undefined,
+            href: href(PROJECTS_PATH),
+            onSelect: () => go(PROJECTS_PATH),
+          },
+        ]
+      : []),
   ];
   const pick = (id: string) => go(chatPath(id));
   const newProject = useCallback(() => setMaking(true), []);
@@ -309,17 +337,11 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
           renaming.changed?.();
         }}
       />
-      <RenameDialog
+      <NewProjectDialog
         open={making}
-        title=""
-        max={PROJECT_NAME_MAX}
-        heading="New project"
-        label="Name"
-        placeholder="Work"
-        action="Make it"
         onClose={() => setMaking(false)}
-        onRename={async (name) => {
-          const made = await projects.create(name);
+        onMake={async (name, description) => {
+          const made = await projects.create(name, description);
           go(projectPath(made.id));
         }}
       />
@@ -340,16 +362,35 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
         title="Delete this project?"
         description={
           deletingProject === undefined ? "" : deletingProject.chats === 0 ? (
-            <>“{deletingProject.name}” has no chats: it goes for good.</>
+            <>“{deletingProject.name}” has no chats: it goes, with its context, files and memory, for every member.</>
           ) : (
             <>
-              “{deletingProject.name}” still has {deletingProject.chats === 1 ? "a chat" : `${deletingProject.chats} chats`}: only a project with none is deleted. Delete them first.
+              “{deletingProject.name}” has {deletingProject.chats === 1 ? "a chat" : `${deletingProject.chats} chats`}, which its members still read: archive it instead, and it stays, read only.
             </>
           )
         }
         action="Delete"
         onClose={() => setDeletingProject(undefined)}
         onConfirm={() => deletingProject !== undefined && removeProject(deletingProject)}
+      />
+      <ConfirmDialog
+        open={leavingProject !== undefined}
+        title="Leave this project?"
+        description={<>You no longer see “{leavingProject?.name ?? ""}”, its chats or its files. A member can add you again.</>}
+        action="Leave"
+        onClose={() => setLeavingProject(undefined)}
+        onConfirm={() => {
+          const project = leavingProject;
+          if (project === undefined) return;
+          setProblem(undefined);
+          request<void>("DELETE", projectApi(project.id, `/members/${encodeURIComponent(memberKey({ channel: "web", id: me.user.id }))}`)).then(
+            () => {
+              projects.reload();
+              if (shownProject === project.id) go(PROJECTS_PATH, true);
+            },
+            (error: unknown) => setProblem({ error: asError(error), title: `You could not leave “${project.name}”` }),
+          );
+        }}
       />
       <ConfirmDialog
         open={deleting !== undefined}
@@ -360,5 +401,54 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
         onConfirm={() => deleting !== undefined && remove(deleting)}
       />
     </ShellContext.Provider>
+  );
+}
+
+/** "New project": its name and what it is for; made, its owner the user. */
+function NewProjectDialog({ open, onClose, onMake }: { open: boolean; onClose: () => void; onMake: (name: string, description: string) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [problem, setProblem] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    setName("");
+    setDescription("");
+    setProblem(undefined);
+  }, [open]);
+  const make = async () => {
+    if (name.trim() === "" || saving) return;
+    setSaving(true);
+    try {
+      await onMake(name.trim(), description.trim());
+      onClose();
+    } catch (error) {
+      setProblem(asError(error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Dialog open={open} title="New project" description="A place its members share: its chats, instructions, documents, files and what its assistants remember. You add the people after." onClose={onClose}>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void make();
+        }}
+      >
+        <TextField label="Name" value={name} onChange={setName} maxLength={PROJECT_NAME_MAX} placeholder="AECC 2027" required autoFocus />
+        <TextArea label="What it is for" value={description} onChange={setDescription} rows={3} maxLength={PROJECT_DESCRIPTION_MAX} placeholder="The client's 2027 campaign: media plan, budget and reports" required={false} />
+        {problem !== undefined && <FormNote>{problem}</FormNote>}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={name.trim() === "" || saving} aria-busy={saving}>
+            Make it
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }

@@ -6,9 +6,10 @@ platform, see and continue only their own conversations, watch the answer as it 
 images and files and stop a run. A conversation reads as the dashboard's (the same JSON: a transcript of
 pi-ai messages and `agent.observe`'s live state), cut to what the operator lets users see (thinking,
 tools, the Context panel); the operator may let them pick an assistant, and they search their
-conversations by title. They organize their chats in projects, whose chats share what the App keeps
-per space (memory, instructions, saved files), and type the commands the operator lets them
-(`/rules`, `/prefs`). The operator invites, bans and removes them from the dashboard. The operator's
+conversations by title. With a project store (`projects`) they work in projects shared with other
+users: each project's page has its context (instructions, documents), files, memory, members, chats and
+History, and its chats share what the App keeps for the project's space ([features/projects.md](https://github.com/ajarellanod/pikit/blob/main/features/projects.md)). They
+type the commands the operator lets them (`/rules`, `/prefs`). The operator invites, bans and removes them from the dashboard. The operator's
 dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
 
 - **Provides:** `http.route`: the chat API (`/chat/api/*`, `api.ts`), better-auth's routes
@@ -20,7 +21,7 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
   the accounts actor.
 - **Requires:** `secrets`, `conversations.registry`, `agent.runtime`, `agent.observe` (the live
   view), `agent.submissions` (answers, and the states of messages whose run's end no event brought),
-  `storage.kv` (the delivery cursor; whose each title is), `storage.sql` (accounts, conversations, projects, transcripts, the commands typed). A router
+  `storage.kv` (the delivery cursor; whose each title is), `storage.sql` (accounts, conversations, transcripts, the commands typed; the former projects' table until it is carried over). A router
   (`router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (answers stored before they are written), `wakeups`
   (delivery on a Durable Object), `settings` (sign-up, visibility and the agents users may pick change
@@ -31,6 +32,11 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
   `agent.command` (admin-api's `/name`: the dashboard lists a web conversation by the chat's title,
   "Titles" below; and the commands users may type, `commands`), `workspace` or `execution` (where a
   file a user attaches is written: "Files" below; without either, the page offers images only).
+  For projects ("Projects" below), where the routes run (the default half on a server, the Worker's
+  half on Cloudflare: each store's Worker half gives it there): `projects` (the project store: without
+  it there are no projects), `space.files` (a project's Files), `memory` (its Memory: memory-sql's
+  contract, `contract.ts`, an identical copy), `principals` (a person's other identities; a member
+  named by a directory's email), `document.convert` (a document from a PDF or an Office file).
 - **Targets:** `server` and `durable`, from one code (below).
 - **Installs to:** `src/pikit/channel-web/`; with a UI, its view and Settings section to
   `src/dashboard/src/views/channel-web/` and `src/dashboard/src/settings/channel-web/`. Adds the command
@@ -191,22 +197,54 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
   makes. Every route builds it from the session's user and the path's chat id, in one function
   (`keyOf`, `chat.ts`): a user can name no other user's conversation. Another user's chat id is `404`
   on every route, as one that never existed (tested adversarially on both targets' code paths).
-- **Projects.** A user's projects are their own: every project route and the list by project build
-  from the session's user, and another user's project id is `404` everywhere (rename, delete, the list,
-  a new chat in it), as one that never existed: nothing made or dispatched (tested adversarially on
-  both targets' code paths). At most `MAX_PROJECTS` (100) a user; a name 1 to 60 characters.
-  `GET /chat/api/conversations?project=<id>` lists one project's (searched and archived alike),
-  `?project=none` those of no project.
-- **A chat's project and space, for good.** A chat is made in a project or in none
-  (`ChatStartRequest.project`) and stays there: no moving. One made in a project is admitted with its
-  space (`AdmitOptions.space` = `web:<user id>:project:<project id>`, `projectSpace`: opaque to all but
-  the channel), which `conversations.registry` records with the key's first resolve: every chat of the
-  project shares what the App keeps per space (memory, instructions, saved files); another project or
-  user is another space. A chat of no project gives none: it is its own space.
-- **Deleting a project** is refused (`409 not_empty`) while it has chats (archived ones too; deleted
-  ones do not count): delete them first. So no chat ever changes place behind its user's back. On
-  Cloudflare the index learns of a new chat a moment after its object made it: a chat made in a
-  project deleted at that very moment lists with those of no project, its space kept.
+- **Projects** (with `projects`; `project-routes.ts`, the routes in `api.ts`): the project store's, not
+  this channel's. Every project route builds its caller from the session (`{ kind: "people",
+  principals }`: `{ channel: "web", id, name }` first, then `principals.of` when given) and an author
+  from it (`{ kind: "person", principal }`), never from the page's words; finds the project's space with
+  `locate(id)`; and lets the store decide. A non-member, a missing or removed project are `404` alike,
+  with nothing read or written; an owner's act by a member `403`; a write over a newer version `409`; a
+  restore past retention `410`; past a bound or a credential's shape `400` (never echoed; a file past
+  its size `413`). `space.files` and `memory` check no person: their routes ask `projects.roleOf` first,
+  and a non-member is `404` before anything of them is read or written (tested by recording every call
+  of their doubles). A document converted from a file (`document.convert`) is read only after that
+  check too.
+- **Collaborative, as the store says**: any member changes the name and description, instructions
+  (over a version: another member's newer one is `409`, never overwritten), documents (core or
+  reference; from text, an uploaded file, or a saved file, its source kept), files, the rules and notes
+  of the project's space (active at once: nothing waits in a project; a rule's id is its words', as
+  memory-recall makes it, so the page's and `/rules`' are one rule), links, adds people by email (a
+  user of this chat, verified when the App sends email, or a person `principals.find` knows; never an
+  address from outside) and restores. The owner alone sets the project's agents (only among those
+  users may pick: a project never opens an agent the operator did not offer), archives, removes,
+  hands it over and removes others. A project with chats is not removed (`409 not_empty`): archived.
+- **History** (`GET .../history`): the project's log, its space's memory's and its files' merged newest
+  first, one log's entries always in its order (a k-way merge by time), with a cursor that keeps each
+  log's place: paging gives every entry once (tested against the three logs' union). Undo is `POST
+  .../history/:log/:n/restore`, through the store that holds the entry, by its rules (the project's own
+  record and members: the owner's). No route edits or deletes an entry.
+- **A chat in a project** is made only by a member, in a project not archived (`403`), with an agent
+  the project allows when it names some (its first when the page picks none; another `400`), in the
+  project's space (`Project.space`, recorded with the key's first resolve, for good). A message in it
+  goes only while its author is a member, the project is not archived and its agent is still allowed
+  (`403`, nothing dispatched). Every member lists the project's chats (`.../conversations`) and reads
+  another's transcript, cut by the policy as their own; only its author writes in it.
+- **A chat's notices** (`GET .../conversations/:id/notices`): the entries of the three logs whose author
+  worked in this chat (`by.conversation` is its key: an agent's note, rule, file or link, its author's
+  `/rules`), with those undone since said so: the page shows "Added to the project" under the answer
+  that made it, with Undo, whatever the model said.
+- **Files downloaded** (`GET .../files/:name`) are attachments with `nosniff` and a sandboxing CSP,
+  never shown in the page's origin (a file is anyone's upload).
+- **The former projects** (this channel's `channel_web_projects`, from before the project store) are
+  carried over at the first project request, by a trusted call (`{ kind: "component", name:
+  "channel-web" }`): each with its id, its space `web:<user>:project:<id>` (so its chats keep their
+  memory and files, its pending rules pending), its name and its user as owner; each row dropped once
+  made, the table once empty. Idempotent: a project the store has (a run cut after its create) is left
+  as it is. Without a project store nothing moves. On Cloudflare the accounts actor does it (the table
+  is its), asked once by each Worker.
+- **A user removed** by the operator: each project they own goes to its oldest current manual member
+  (else is archived), and they leave every project (as the operator; logged, never failing the removal).
+- `GET /chat/api/conversations?project=<id>` lists the user's own chats of a project they are a member
+  of, `?project=none` those of none.
 - **Commands typed in the chat** (`commands`) go through `admitInbound` with the commands allowed: a
   `/name args` naming one is routed like any message (a denied user runs nothing: `403`), runs in its
   conversation with the user as sender (`{ channel: "web", id }`), and is never dispatched: nothing of
@@ -347,8 +385,9 @@ In `start`, `actor.inbox`'s `scope` says where it runs:
 - **Cloudflare** (`"one"`): the default export goes in each conversation's Durable Object, which
   admits the Worker's messages, answers its calls about this conversation (`calls.ts`), keeps its
   transcript, stores what its runs wrote and tells the users' index (`channel-web.seen`) of each change. One
-  object, `channel-web:accounts`, holds the accounts and the index (the users' conversations and projects), and answers the Worker's
-  `channel-web.auth.*` calls (`wiring.ts`). Every object registers those handlers and the index's
+  object, `channel-web:accounts`, holds the accounts and the index (the users' conversations), and answers the Worker's
+  `channel-web.auth.*` calls (`wiring.ts`), the index's about projects (a project's conversations, every
+  member's, and how many) and the migration of the former projects (their table is its). Every object registers those handlers and the index's
   (one class), but only `channel-web:accounts` answers them: any other refuses (`no_handler`). The Worker's half (`export const worker`, config key
   `channel-web-worker`) serves the routes: a call to the conversation's object, the list one call to
   the index, live events a stream from the object, better-auth's routes forwarded as JSON with every
@@ -359,7 +398,11 @@ In `start`, `actor.inbox`'s `scope` says where it runs:
   actor sends), never in the Worker's. The Worker cuts the transcript and the live events the objects
   give it by that config's `visibility`: a change shows within 10 s. The Worker's App has no router:
   `ChatMe.suggestedAgent` is the accounts actor's dry run of its App's `route.resolve`
-  (`channel-web.routed`, one call per `/chat/api/me` when users may pick an assistant).
+  (`channel-web.routed`, one call per `/chat/api/me` when users may pick an assistant). The project
+  routes run in the Worker over the stores' Worker halves (`projects`, `space.files`, `memory`, and
+  `principals`, `document.convert` when given): a project route costs the store's calls, plus one
+  call to the index for its chats; a message in a project's chat one more call to its object (its
+  project) and the store's `get`.
 
 On Cloudflare one script holds both Apps: channel-web adds about 1.3 MiB to it (265 KiB gzip; better-auth,
 its core, zod, jose, OpenTelemetry's conventions), measured with wrangler 4.143.0 on a Worker of
@@ -405,15 +448,33 @@ under an https `PIKIT_PUBLIC_URL`).
   transcript, a failed write `503` with nothing stored or dispatched, the bounds, named as not kept
   without a workspace; checked against a broken channel: no write, no names kept, a larger total on
   Cloudflare, each failed), refusals, the operator's routes, the live `signUp` setting, what setup declares, the
-  lifecycle suite. Projects: made, renamed, listed with their chats, at most
-  `MAX_PROJECTS`, refused deletion while they have chats, removed with their user; the list by project
-  (`none`, search within, archived apart); isolation (another user's project id `404` on every route,
-  nothing made or dispatched); the space two chats of a project share (another project's, another
-  user's, none without a project; an agent picked too). Commands: listed in the config (the default,
+  lifecycle suite. Commands: listed in the config (the default,
   `"all"`, `[]`), run in the conversation with the user as sender, never dispatched nor in the
   transcript, once by request id, a failure's message, a routing denial running nothing and keeping no
   claim, a first message that is a command making the chat in its project's space, a command for some
   agents listed with the offered ones only and refused in another agent's chat.
+- `projects.test.ts`: every project route over doubles of the five capabilities
+  (`projects.test-support.ts`), each first for who may not (`401`, `400` without the header, `404` for a
+  non-member with every call of `space.files` and `memory` recorded as none and the logs byte for byte
+  unchanged, `403` for a member's owner act), then what it does: projects (made, listed, archived apart,
+  the overview's counts and recent changes, removal `409` then `204`), members (by email, a directory's
+  person, unknown `404`, leave, the owner's removals and hand-over, principals linked), instructions
+  (`409` behind `ifVersion`, versions, a credential refused unechoed), documents (text, an uploaded text
+  file, a PDF through `document.convert`, `415` without one, a saved file's text with its source, the core
+  budget's `400` saying what is left, a new mode keeping the text, parts, versions), files (upload by a
+  person, idempotent by id, versions with their authors, download headers, trash and restore, `413`,
+  a credential refused), memory (rules active with memory-recall's id, notes, replace, proposals from
+  before the project), links, History (paged across the three logs: every entry once, each log in its
+  order; restore through each store; the owner's acts `403` for a member; no route edits an entry) and
+  its merge (pure), a chat in a project (its space, its agents, archived `403`, a non-member's `404`
+  making nothing), posting (a removed member, an agent no longer allowed, an archived project: `403`,
+  nothing dispatched; a chat of no project asks nothing), every member's chats and another's transcript,
+  the notices (from this chat only, undone ones said, an undone undo), the migration (same ids and
+  spaces, owners, the table dropped, idempotent, nothing without a store, a failure retried) and a
+  removed user's projects. Each guarantee checked against a broken route (the `roleOf` check dropped,
+  posting unchecked, a cursor per page instead of per log, the migration without `locate` or keeping its
+  rows, notices unfiltered, a chat started without the project's space, posting ignoring the agents):
+  each fails a test.
 - `visibility.test.ts`: each policy value on messages, entries and the live value (a hidden block
   left out of the partial, a change only to what is hidden sending nothing), and what never shows under the defaults.
 - Security cases: a spoofed `Host` gets no link nor email and `400` (accounts, the operator's routes),
@@ -436,10 +497,12 @@ under an https `PIKIT_PUBLIC_URL`).
   delete, isolation, live events cut in the Worker, entries told live from the object, the policy and
   the agents from the accounts actor's config, an agent picked reaching the object, `/me`'s suggested
   agent from the accounts actor's dry run, the search in the index, image limits, an unreachable object, the index's versions (not busy after a run that ended
-  before its admission returned), removal. Projects in the accounts actor (one call each), a chat made in one reaching its
-  object with its space, the list by project from the index, `409` then `204`; another user's project id
-  `404` everywhere with no object made; commands listed by the accounts actor's config and run in the
-  conversation's object, once by request id.
+  before its admission returned), removal. Projects with the project store in the Worker (a double in
+  both Apps): the calls each route makes, a chat made in one reaching its object with the project's
+  space, every member's chats and another's transcript from the index and the object, `409` then `204`;
+  a non-member's every route `404` with no object made and no file or memory read; the index refusing
+  ids that are no project's or chat's; the migration in the accounts actor, asked once by the Worker;
+  commands listed by the accounts actor's config and run in the conversation's object, once by request id.
 - `accounts-wiring.test.ts`: the real accounts (better-auth) through the routes, on a server and
   forwarded to the accounts actor on Cloudflare (the cookie cache first, its renewal sent back after a
   database read); chat and admin sessions never open each other's routes; every better-auth route the
@@ -466,6 +529,13 @@ under an https `PIKIT_PUBLIC_URL`).
   password sign-up verifies first, an invitation is emailed; a model's title (faux/echo) the same in
   the chat and the dashboard (admin-api's titler never trying), and a rename the dashboard's too. Projects: a chat made in one is in the project's space as conversations-kv records it (a
   `/rules` fixture says the space it runs in), the same for each chat of it, none without; a command
-  typed runs in its object once; another user's project id `404` everywhere; `409` while it has chats.
+  typed runs in its object once; a non-member's every route `404` until added, then every member's
+  chats read and posting refused once removed; `409` while it has chats; the former projects carried
+  over by the accounts actor with their spaces (a double of the project store in both Apps:
+  projects-sql's halves are built apart).
 
-Not covered yet: the page, the view and the Settings section in a browser (the page's projects and command notes are checked by its build and `scripts/chat.test.ts` only).
+Not covered yet: the page, the view and the Settings section in an automated browser test (the page's
+projects and command notes are checked by its build and `scripts/chat.test.ts`; the project page was
+tried by hand in a browser over the doubles); the project routes against a real project store
+(projects-sql), tool-space-files' `space.files` and memory-sql's new methods, built apart: the doubles
+(`projects.test-support.ts`) keep only the rules the routes rely on.
