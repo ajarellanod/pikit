@@ -29,6 +29,7 @@ import { runEntryId } from "./entries.ts";
 import channelWeb, { createChannelWeb, NAME, usersPagePath } from "./index.ts";
 import { avatarHosts, cspOf } from "./assets.ts";
 import { maxBodyOf } from "./routes.ts";
+import { MemoryProjects, projectsComponent } from "./projects.test-support.ts";
 import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, liveReader, OPERATOR, PIXEL, Runtime, router, SECRETS, type Served, secretsOf, serve } from "./runtime.test-support.ts";
 
 const apps: Served[] = [];
@@ -1094,7 +1095,26 @@ test("what setup declares", async () => {
     name: NAME,
     provides: ["http.route"],
     requires: ["secrets", "conversations.registry", "agent.runtime", "agent.observe", "agent.submissions", "storage.kv", "storage.sql"],
-    optional: ["wakeups", "outbound.queue", "workspace", "execution", "actor.inbox", "actor.mailbox", "settings", "email.send", "admin.auth", "agent.definition", "agent.directory", "model.complete", "agent.command"],
+    optional: [
+      "wakeups",
+      "outbound.queue",
+      "workspace",
+      "execution",
+      "actor.inbox",
+      "actor.mailbox",
+      "settings",
+      "email.send",
+      "admin.auth",
+      "agent.definition",
+      "agent.directory",
+      "model.complete",
+      "agent.command",
+      "projects",
+      "space.files",
+      "memory",
+      "principals",
+      "document.convert",
+    ],
   });
 });
 
@@ -1159,6 +1179,9 @@ test("a conversation's user with no name is named by their email; one the accoun
 
 type ChatProjectJson = { id: string; name: string; createdAt: number; chats: number };
 
+/** A project store (a double): the projects' own routes are tested in `projects.test.ts`. */
+const projectStore = () => projectsComponent({ projects: new MemoryProjects() });
+
 /** `user` makes a project named `name`. */
 async function project(c: Chat, user: string, name: string): Promise<ChatProjectJson> {
   const response = await c.served.fetch(`${API}/projects`, post(user, { name }));
@@ -1167,121 +1190,6 @@ async function project(c: Chat, user: string, name: string): Promise<ChatProject
 }
 const titlesOf = async (c: Chat, user: string, query = ""): Promise<string[]> =>
   ((await (await c.served.fetch(`${API}/conversations${query}`, as(user))).json()) as { items: ChatConversation[] }).items.map((each) => each.title);
-
-test("PROJECTS: made, listed by name with their chats, renamed; a chat made in one keeps it; the list by project (none: those of no project), searched within, archived apart; a project with chats is not deleted (409), an empty one is", async () => {
-  const c = await chat();
-  const work = await project(c, "ana", "  Work   stuff ");
-  expect(work).toEqual({ id: expect.stringMatching(/^[0-9a-f]{32}$/), name: "Work stuff", createdAt: expect.any(Number), chats: 0 });
-  const home = await project(c, "ana", "Home");
-  for (const name of ["", "   ", "x".repeat(61)]) expect({ name, status: (await c.served.fetch(`${API}/projects`, post("ana", { name }))).status }).toEqual({ name, status: 400 });
-
-  const report = await start(c, "ana", "the quarterly report", { project: work.id });
-  await Bun.sleep(3);
-  const slides = await start(c, "ana", "slides for the report", { project: work.id });
-  await Bun.sleep(3);
-  await start(c, "ana", "garden report", { project: home.id });
-  await Bun.sleep(3);
-  const loose = await start(c, "ana", "a loose report");
-  expect(await (await c.served.fetch(`${API}/conversations/${report.id}`, as("ana"))).json()).toMatchObject({ id: report.id, project: work.id });
-  expect(await (await c.served.fetch(`${API}/conversations/${loose.id}`, as("ana"))).json()).not.toHaveProperty("project");
-
-  expect(await titlesOf(c, "ana")).toEqual(["A loose report", "Garden report", "Slides for the report", "The quarterly report"]);
-  expect(await titlesOf(c, "ana", `?project=${work.id}`)).toEqual(["Slides for the report", "The quarterly report"]);
-  expect(await titlesOf(c, "ana", "?project=none")).toEqual(["A loose report"]);
-  expect(await titlesOf(c, "ana", `?project=${work.id}&q=QUARTERLY`)).toEqual(["The quarterly report"]);
-  expect(await titlesOf(c, "ana", `?project=${home.id}&q=quarterly`)).toEqual([]);
-  await c.served.fetch(`${API}/conversations/${slides.id}/archive`, as("ana", { method: "POST" }));
-  expect(await titlesOf(c, "ana", `?project=${work.id}`)).toEqual(["The quarterly report"]);
-  expect(await titlesOf(c, "ana", `?project=${work.id}&archived=1`)).toEqual(["Slides for the report"]);
-
-  const renamed = await c.served.fetch(`${API}/projects/${work.id}`, post("ana", { name: "Office" }, "PATCH"));
-  expect(await renamed.json()).toEqual({ ...work, name: "Office", chats: 2 });
-  const listed = (await (await c.served.fetch(`${API}/projects`, as("ana"))).json()) as { items: ChatProjectJson[] };
-  expect(listed.items.map((each) => [each.name, each.chats])).toEqual([
-    ["Home", 1],
-    ["Office", 2],
-  ]);
-
-  // Not deleted while it has chats, archived ones too; deleted chats do not count.
-  const refused = await c.served.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }));
-  expect({ status: refused.status, body: await refused.json() }).toMatchObject({ status: 409, body: { error: "not_empty" } });
-  await c.served.fetch(`${API}/conversations/${report.id}`, as("ana", { method: "DELETE" }));
-  expect((await c.served.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(409);
-  await c.served.fetch(`${API}/conversations/${slides.id}`, as("ana", { method: "DELETE" }));
-  expect((await c.served.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
-  expect(((await (await c.served.fetch(`${API}/projects`, as("ana"))).json()) as { items: ChatProjectJson[] }).items.map((each) => each.name)).toEqual(["Home"]);
-  // Gone: 404 everywhere, and no new chat in it.
-  expect((await c.served.fetch(`${API}/projects/${work.id}`, post("ana", { name: "x" }, "PATCH"))).status).toBe(404);
-  expect((await c.served.fetch(`${API}/conversations?project=${work.id}`, as("ana"))).status).toBe(404);
-  expect((await c.served.fetch(`${API}/conversations`, post("ana", { text: "x", project: work.id }))).status).toBe(404);
-});
-
-test("PROJECTS: at most MAX_PROJECTS a user; a removed user's projects go with their conversations", async () => {
-  const c = await chat({ admin: true });
-  for (let i = 0; i < 100; i++) await project(c, "ben", `p${i}`);
-  const past = await c.served.fetch(`${API}/projects`, post("ben", { name: "one more" }));
-  expect({ status: past.status, body: await past.json() }).toMatchObject({ status: 400, body: { error: "invalid_request" } });
-  await project(c, "ana", "still mine");
-  expect((await c.served.fetch("/admin/api/channel-web/users/ben", { method: "DELETE", headers: OPERATOR })).status).toBe(204);
-  c.accounts.add("ben");
-  expect(await (await c.served.fetch(`${API}/projects`, as("ben"))).json()).toEqual({ items: [] });
-  expect(((await (await c.served.fetch(`${API}/projects`, as("ana"))).json()) as { items: unknown[] }).items.length).toBe(1);
-});
-
-test("PROJECT ISOLATION: user B naming user A's project id gets 404 on every route (rename, delete, the list, a new chat in it), nothing made or dispatched; A's project untouched", async () => {
-  const c = await chat();
-  const mine = await project(c, "ana", "Secret project");
-  await start(c, "ana", "inside", { project: mine.id });
-  const dispatched = c.runtime.dispatched.length;
-  const attempts: [string, string, unknown?][] = [
-    ["PATCH", `/projects/${mine.id}`, { name: "theirs" }],
-    ["DELETE", `/projects/${mine.id}`],
-    ["GET", `/conversations?project=${mine.id}`],
-    ["GET", `/conversations?project=${mine.id}&archived=1`],
-    ["POST", "/conversations", { text: "into yours", project: mine.id }],
-  ];
-  for (const [method, path, body] of attempts) {
-    const response = await c.served.fetch(`${API}${path}`, as("ben", { method, ...(body !== undefined && { body: JSON.stringify(body) }) }));
-    expect({ method, path, status: response.status, body: await response.json() }).toEqual({ method, path, status: 404, body: { error: "not_found", message: "no such project" } });
-  }
-  expect(await (await c.served.fetch(`${API}/projects`, as("ben"))).json()).toEqual({ items: [] });
-  // A path or a project that is not a project id is 404 too.
-  for (const bad of ["x", mine.id.toUpperCase(), crypto.randomUUID()]) {
-    expect((await c.served.fetch(`${API}/projects/${bad}`, as("ana", { method: "DELETE" }))).status).toBe(404);
-    expect((await c.served.fetch(`${API}/conversations?project=${bad}`, as("ana"))).status).toBe(404);
-    expect((await c.served.fetch(`${API}/conversations`, post("ana", { text: "x", project: bad }))).status).toBe(404);
-  }
-  expect(c.runtime.dispatched.length).toBe(dispatched);
-  expect(c.runtime.pointers.size).toBe(1);
-  const listed = (await (await c.served.fetch(`${API}/projects`, as("ana"))).json()) as { items: ChatProjectJson[] };
-  expect(listed.items).toEqual([{ ...mine, chats: 1 }]);
-});
-
-test("SPACE: a chat made in a project is admitted with the project's space, the same for every chat of it; another project or user another; a chat of no project none (its own space); a chat with an agent picked too", async () => {
-  const agents = defineComponent({ name: "agents-test", setup: (pikit) => pikit.provideKeyed("agent.definition", "helper", { name: "helper", model: "test/model" }) });
-  const c = await chat({ config: { agents: ["helper"] }, components: [agents] });
-  const work = await project(c, "ana", "Work");
-  const home = await project(c, "ana", "Home");
-  const theirs = await project(c, "ben", "Work");
-  const spaceOf = (user: string, id: string) => c.runtime.pointers.get(keyOf(user, id))?.space;
-  const a = await start(c, "ana", "one", { project: work.id });
-  const b = await start(c, "ana", "two", { project: work.id, agent: "helper" });
-  const h = await start(c, "ana", "three", { project: home.id });
-  const t = await start(c, "ben", "four", { project: theirs.id });
-  const none = await start(c, "ana", "five");
-  expect(spaceOf("ana", a.id)).toBe(`web:ana:project:${work.id}`);
-  expect(spaceOf("ana", b.id)).toBe(spaceOf("ana", a.id));
-  expect(c.runtime.pointers.get(keyOf("ana", b.id))?.agent).toBe("helper");
-  expect(spaceOf("ana", h.id)).toBe(`web:ana:project:${home.id}`);
-  expect(spaceOf("ben", t.id)).toBe(`web:ben:project:${theirs.id}`);
-  expect(spaceOf("ana", none.id)).toBeUndefined();
-  // Dispatched in that conversation: the runtime sees the space with it.
-  expect(c.runtime.dispatched.find((each) => each.requestId === a.requestId)?.conversation.space).toBe(`web:ana:project:${work.id}`);
-  // A later message keeps it; a space is no key of the channel.
-  await c.served.fetch(`${API}/conversations/${a.id}/messages`, post("ana", { text: "more" }));
-  expect(c.runtime.dispatched.at(-1)?.conversation.space).toBe(`web:ana:project:${work.id}`);
-  expect(parseKey(`web:ana:project:${work.id}`)).toBeUndefined();
-});
 
 /** Commands of the App: `/rules` (a note, or a failure) and `/prefs`, for users, and an operator's `/name`; who ran each. */
 function commandsOf() {
@@ -1308,7 +1216,7 @@ function commandsOf() {
 
 test("COMMANDS: those for users (rules and prefs here) are listed by default in the config and run in their conversation with the user as sender, never dispatched nor in the transcript; their outcome answered; the same request id runs once; another /word goes to the agent", async () => {
   const commands = commandsOf();
-  const c = await chat({ components: [commands.component] });
+  const c = await chat({ components: [commands.component, projectStore()] });
   const config = (await (await c.served.fetch(`${API}/config`)).json()) as ChatConfig;
   expect(config.commands).toEqual([
     { name: "prefs", description: "The prefs", audience: "user" },
@@ -1321,7 +1229,7 @@ test("COMMANDS: those for users (rules and prefs here) are listed by default in 
 
   const sent = await c.served.fetch(`${API}/conversations/${first.id}/messages`, post("ana", { text: "/rules   answer in French ", requestId: "web:cmd-1" }));
   expect({ status: sent.status, body: await sent.json() }).toEqual({ status: 202, body: { requestId: "web:cmd-1", admission: "command", command: { name: "rules", outcome: "ran", text: "kept: answer in French" } } });
-  expect(commands.typed()).toEqual([{ name: "rules", key: keyOf("ana", first.id), space: `web:ana:project:${work.id}`, args: "answer in French", sender: { channel: "web", id: "ana" } }]);
+  expect(commands.typed()).toEqual([{ name: "rules", key: keyOf("ana", first.id), space: `project:${work.id}`, args: "answer in French", sender: { channel: "web", id: "ana" } }]);
   expect(c.runtime.dispatched.length).toBe(dispatched);
   expect(await transcriptOf(c, "ana", first.id)).toEqual(before);
   // Never its arguments or note in the log.
@@ -1354,7 +1262,7 @@ test("COMMANDS: a first message that is a command makes the chat (empty, New con
     name: "gate-test",
     setup: (pikit) => pikit.pipeline("route.resolve", (value) => (deny ? { ...value, decision: { agent: "", access: "deny" } } : value), { priority: 100 }),
   });
-  const c = await chat({ components: [commands.component, gate] });
+  const c = await chat({ components: [commands.component, gate, projectStore()] });
   const work = await project(c, "ana", "Work");
   const made = await c.served.fetch(`${API}/conversations`, post("ana", { text: "/rules be brief", requestId: "web:first-cmd", project: work.id }));
   expect(made.status).toBe(201);
@@ -1363,7 +1271,7 @@ test("COMMANDS: a first message that is a command makes the chat (empty, New con
   expect(await (await c.served.fetch(`${API}/conversations/${body.id}`, as("ana"))).json()).toMatchObject({ id: body.id, title: "New conversation", project: work.id, busy: false });
   expect(await transcriptOf(c, "ana", body.id)).toEqual([]);
   expect(c.runtime.dispatched).toEqual([]);
-  expect(commands.typed()).toEqual([{ name: "rules", key: keyOf("ana", body.id), space: `web:ana:project:${work.id}`, args: "be brief", sender: { channel: "web", id: "ana" } }]);
+  expect(commands.typed()).toEqual([{ name: "rules", key: keyOf("ana", body.id), space: `project:${work.id}`, args: "be brief", sender: { channel: "web", id: "ana" } }]);
   expect(await titlesOf(c, "ana", `?project=${work.id}`)).toEqual(["New conversation"]);
 
   const retried = await c.served.fetch(`${API}/conversations`, post("ana", { text: "/rules be brief", requestId: "web:first-cmd", project: work.id }));

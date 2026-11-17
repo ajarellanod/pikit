@@ -24,9 +24,11 @@
  * (`conversations.registry.resolve`): routing still allows or denies the message, and a key keeps the
  * agent it was made with.
  *
- * **A project** (`createIndex`, beside the list) is the user's own: another user's id is `not_found`.
- * A conversation made in one is admitted with its space (`projectSpace`), recorded with the key's first
- * resolve, for good; one of no project gives none (it is its own space).
+ * **A project** is the project store's (`projects`, `project-routes.ts`): the routes check who may make
+ * a conversation in one and give its space (`FirstMessage.space`, `Project.space`), with which the
+ * conversation is admitted, recorded with the key's first resolve, for good; one of no project gives
+ * none (it is its own space). The index lists a project's conversations, every member's, and counts them
+ * (`createIndex`); it carries over the projects this channel kept itself before (`migrateProjects`).
  *
  * **A command** typed in a chat (`LocalContracts.commands`, `commandOf`) claims its request id before it
  * runs (`claimCommand`), then goes through `admitInbound` with the commands: routed like any message,
@@ -53,6 +55,7 @@ import {
   commandOf,
   type ConversationRegistry,
   type InboundOutcome,
+  type ProjectStore,
 } from "@pikit/contracts";
 import {
   type ChatCommandResult,
@@ -61,17 +64,15 @@ import {
   type ChatFile,
   type ChatImage,
   type ChatPage,
-  type ChatProject,
   type ChatSendResponse,
   type ChatTranscriptEntry,
   MAX_FILE_BYTES,
   MAX_FILES,
-  MAX_PROJECTS,
 } from "./api.ts";
-import { base64Bytes, CHANNEL, filesBytesOf, filesProblem, firstTitle, imagesProblem, newProjectId, projectSpace } from "./chat.ts";
+import { base64Bytes, CHANNEL, filesBytesOf, filesProblem, firstTitle, imagesProblem, projectSpace } from "./chat.ts";
 import { userEntryOf } from "./entries.ts";
 import { liveEvents } from "./live.ts";
-import type { ChatStore, ConversationRow, EntryRow, ListQuery, MessageState, ProjectRow } from "./store.ts";
+import type { ChatStore, ConversationRow, EntryRow, ListQuery, MessageState } from "./store.ts";
 
 /** A user's conversation, as the routes name it: the key is `keyOf(userId, chatId)`. JSON. */
 export type ChatRef = { userId: string; chatId: string; key: string };
@@ -80,25 +81,31 @@ export type ChatRef = { userId: string; chatId: string; key: string };
 export type NewMessage = { text: string; images?: ChatImage[]; files?: ChatFile[]; requestId: string };
 
 /**
- * A conversation's first message, the agent the user picked (one the route allowed) and the project it
- * is made in (one of the user's: the route checked it). JSON.
+ * A conversation's first message, the agent it is made with (one the route allowed) and the project it
+ * is made in with that project's space (`Project.space`: the route checked the user is a member). JSON.
  */
-export type FirstMessage = NewMessage & { agent?: string; project?: string };
+export type FirstMessage = NewMessage & { agent?: string; project?: string; space?: string };
 
-/** The users' index: their conversations' list and their projects. On a server the App's store; on Cloudflare the accounts actor's. */
+/** One of a project's conversations, any member's: whose it is. */
+export type ProjectConversation = ChatConversation & { userId: string };
+
+/** The users' index: their conversations' list, and every project's. On a server the App's store; on Cloudflare the accounts actor's. */
 export interface ChatIndex {
-  /** The user's conversations, newest activity first (with `q`, those whose title holds it; with `project`, that project's). Throws `invalid_cursor`, and `not_found` for a project not the user's. */
+  /** The user's conversations, newest activity first (with `q`, those whose title holds it; with `project`, that project's, `""`: of none: the route checked the user is a member). Throws `invalid_cursor`. */
   list(userId: string, query: ListQuery, ctx: AppContext): Promise<ChatPage<ChatConversation>>;
-  /** The user's projects, by name. */
-  projects(userId: string, ctx: AppContext): Promise<ChatPage<ChatProject>>;
-  /** The user's project `id`. Throws `not_found` (none, or another user's). */
-  project(userId: string, id: string, ctx: AppContext): Promise<ChatProject>;
-  /** A new project. Throws `invalid_request` past `MAX_PROJECTS`. */
-  createProject(userId: string, name: string, ctx: AppContext): Promise<ChatProject>;
-  /** Throws `not_found`. */
-  renameProject(userId: string, id: string, name: string, ctx: AppContext): Promise<ChatProject>;
-  /** Throws `not_found`, and `not_empty` while a conversation of the user's (not deleted) is in it. */
-  deleteProject(userId: string, id: string, ctx: AppContext): Promise<void>;
+  /** Every user's conversations (not deleted) of project `id`, newest activity first: the route checked the caller is a member. Throws `invalid_cursor`. */
+  projectConversations(id: string, page: { limit: number; cursor?: string }, ctx: AppContext): Promise<ChatPage<ProjectConversation>>;
+  /** Whose the conversation `chatId` of project `id` is; `not_found` when it is no conversation of it (or a deleted one). */
+  projectConversation(id: string, chatId: string, ctx: AppContext): Promise<{ userId: string }>;
+  /** How many conversations (not deleted) each of the projects `ids` has. */
+  projectChats(ids: readonly string[], ctx: AppContext): Promise<Record<string, number>>;
+  /**
+   * The projects this channel kept itself (its former table, `channel_web_projects`) carried over to the
+   * project store, once: each with its id, its space (`web:<user>:project:<id>`, so its chats keep their
+   * memory and files), its name and its user as owner, by a trusted call; then the table goes. Idempotent:
+   * a project the store has already is left as it is. Without a project store, nothing moves. How many it made.
+   */
+  migrateProjects(ctx: AppContext): Promise<number>;
 }
 
 export interface ChatBackend extends ChatIndex {
@@ -128,7 +135,7 @@ export interface ChatBackend extends ChatIndex {
   forget(userId: string, ctx: AppContext): Promise<void>;
 }
 
-export type RefusalCode = "not_found" | "invalid_request" | "invalid_cursor" | "too_large" | "denied" | "rejected" | "no_route" | "not_empty";
+export type RefusalCode = "not_found" | "invalid_request" | "invalid_cursor" | "too_large" | "denied" | "rejected" | "no_route" | "not_empty" | "forbidden";
 
 export const refusal = (code: RefusalCode, message: string): ActorCallError => new ActorCallError(code, message);
 export const NOT_FOUND = "no such conversation";
@@ -150,6 +157,8 @@ export interface LocalContracts {
   commands?(): CommandLookup;
   /** Where a message's files are written (`workspace`, else `execution`). Absent, or neither installed: each is named to the agent as not kept. */
   files?(): AttachmentTargets;
+  /** The App's project store, when there is one: the index's migration (`migrateProjects`). */
+  projects?(): ProjectStore | undefined;
   /** The titles (`titles.ts`): a new conversation's first title, a user's rename. Absent: the row's title alone. */
   titles?: {
     creating(key: string, title: string): () => void;
@@ -187,8 +196,6 @@ export const conversationOf = (row: ConversationRow, busy = row.busy): ChatConve
   ...(row.project !== "" && { project: row.project }),
 });
 
-const projectOf = (row: ProjectRow): ChatProject => ({ id: row.id, name: row.name, createdAt: row.createdAt, chats: row.chats });
-
 /** What a command came to, as the page is told it. */
 const commandResultOf = (name: string, outcome: CommandOutcome): ChatCommandResult =>
   outcome.kind === "ran"
@@ -198,39 +205,51 @@ const commandResultOf = (name: string, outcome: CommandOutcome): ChatCommandResu
 /** The title of a conversation whose first message was a command: nothing of it names the conversation. */
 export const COMMAND_TITLE = "New conversation";
 
-/** The users' index over `store` (its list and projects tables): a server's, and the accounts actor's on Cloudflare. */
-export function createIndex(store: ChatStore): ChatIndex {
-  const owned = async (userId: string, id: string): Promise<ProjectRow> => {
-    const found = await store.project(userId, id);
-    if (found === undefined) throw refusal("not_found", NO_PROJECT);
-    return found;
-  };
+/** Who carries the former projects over: trusted code, the channel itself. */
+export const MIGRATION_CALLER = { kind: "component", name: "channel-web" } as const;
+
+/**
+ * The users' index over `store` (its list): a server's, and the accounts actor's on Cloudflare. `projects`
+ * is the App's project store, when there is one (the migration's).
+ */
+export function createIndex(store: ChatStore, projects: () => ProjectStore | undefined = () => undefined): ChatIndex {
   return {
     async list(userId, query) {
-      // Another user's project is no project: 404, as one that never existed.
-      if (query.project !== undefined && query.project !== "") await owned(userId, query.project);
       const listed = await store.list(userId, query);
       return { items: listed.items.map((row) => conversationOf(row)), ...(listed.next !== undefined && { next: listed.next }) };
     },
-    async projects(userId) {
-      return { items: (await store.projects(userId)).map(projectOf) };
+    async projectConversations(id, page) {
+      const listed = await store.listProject(id, page);
+      return { items: listed.items.map((row) => ({ ...conversationOf(row), userId: row.userId })), ...(listed.next !== undefined && { next: listed.next }) };
     },
-    async project(userId, id) {
-      return projectOf(await owned(userId, id));
+    async projectConversation(id, chatId) {
+      const row = await store.projectConversation(id, chatId);
+      if (row === undefined) throw refusal("not_found", NOT_FOUND);
+      return { userId: row.userId };
     },
-    async createProject(userId, name, ctx) {
-      const id = newProjectId();
-      if (!(await store.createProject({ userId, id, name, createdAt: ctx.clock.now() }, MAX_PROJECTS))) throw refusal("invalid_request", `at most ${MAX_PROJECTS} projects`);
-      return projectOf(await owned(userId, id));
+    async projectChats(ids) {
+      return store.projectChats(ids);
     },
-    async renameProject(userId, id, name) {
-      if (!(await store.renameProject(userId, id, name))) throw refusal("not_found", NO_PROJECT);
-      return projectOf(await owned(userId, id));
-    },
-    async deleteProject(userId, id) {
-      const deleted = await store.deleteProject(userId, id);
-      if (deleted === "not_found") throw refusal("not_found", NO_PROJECT);
-      if (deleted === "not_empty") throw refusal("not_empty", "this project has conversations: delete them first");
+    async migrateProjects(ctx) {
+      const target = projects();
+      if (target === undefined) return 0;
+      let made = 0;
+      for (const row of await store.formerProjects()) {
+        // Already carried over (a run cut after its create): as it is.
+        if ((await target.locate(row.id, ctx)) === undefined) {
+          try {
+            await target.create({ id: row.id, space: projectSpace(row.userId, row.id), name: row.name, owner: { channel: CHANNEL, id: row.userId } }, MIGRATION_CALLER, ctx);
+            made++;
+          } catch (error) {
+            // Its space has a project already (made by another run, or adopted): the space is what counts.
+            if ((error as { code?: unknown }).code !== "space_taken") throw error;
+          }
+        }
+        await store.dropFormerProject(row.userId, row.id);
+      }
+      await store.dropFormerProjects();
+      if (made > 0) ctx.logger.info("channel-web: its former projects were carried over to the project store", { projects: made });
+      return made;
     },
   };
 }
@@ -269,12 +288,12 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
   };
 
   /**
-   * `message` through the inbound path into `ref`'s conversation (in `project`'s space, when it is one:
-   * recorded with the key's first resolve); stored once admitted. `create` makes the conversation's row
+   * `message` through the inbound path into `ref`'s conversation (in `space`, its project's, when it is
+   * one: recorded with the key's first resolve); stored once admitted. `create` makes the conversation's row
    * then (its first message's title). A command typed (`commands`) runs instead, once by its request id
    * (`ranCommand`).
    */
-  const admit = async (ref: ChatRef, message: NewMessage, { create, project }: { create: boolean; project: string }, ctx: AppContext): Promise<ChatSendResponse> => {
+  const admit = async (ref: ChatRef, message: NewMessage, { create, project, space }: { create: boolean; project: string; space?: string }, ctx: AppContext): Promise<ChatSendResponse> => {
     const images = message.images ?? [];
     const wrong = imagesProblem(images, contracts.limits());
     if (wrong !== undefined) throw refusal(wrong.status === 413 ? "too_large" : "invalid_request", wrong.message);
@@ -325,7 +344,8 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
           conversations: contracts.conversations(),
           runtime: contracts.runtime(),
           key: ref.key,
-          ...(project !== "" && { space: projectSpace(ref.userId, project) }),
+          // A new conversation's space (its project's); the registry keeps the one it recorded first.
+          ...(space !== undefined && { space }),
           // Only when this message claimed its id as a command: a stage that made one of another message runs none.
           ...(typed !== undefined && allowed !== undefined && { commands: allowed }),
           ...(attached.files.length > 0 && targets !== undefined && { beforeDispatch: (conversation) => writeAttachments(attached.files, conversation, targets, ctx, "channel-web") }),
@@ -427,18 +447,20 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
   };
 
   return {
-    ...createIndex(store),
+    ...createIndex(store, () => contracts.projects?.()),
 
-    async start(ref, { agent, project: picked, ...message }, ctx) {
+    async start(ref, { agent, project: picked, space: given, ...message }, ctx) {
       const row = await store.conversation(ref.key);
       // A retry of the same first message (its chat id is the request id's): the same conversation, in its project.
       if (row !== undefined && (row.hidden || row.userId !== ref.userId)) throw refusal("not_found", NOT_FOUND);
       const project = row?.project ?? picked ?? "";
+      // The project's space, as the route found it: recorded with the key's first resolve, for good.
+      const space = project !== "" && project === picked ? given : undefined;
       // Made with the agent picked: admitInbound's resolve then finds it, whatever the router names.
       if (row === undefined && agent !== undefined) {
-        await contracts.conversations().resolve(ref.key, agent, { channel: CHANNEL, ...(project !== "" && { space: projectSpace(ref.userId, project) }) }, ctx);
+        await contracts.conversations().resolve(ref.key, agent, { channel: CHANNEL, ...(space !== undefined && { space }) }, ctx);
       }
-      return admit(ref, message, { create: row === undefined, project }, ctx);
+      return admit(ref, message, { create: row === undefined, project, ...(space !== undefined && { space }) }, ctx);
     },
 
     async conversation(ref, ctx) {

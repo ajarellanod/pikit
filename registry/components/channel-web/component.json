@@ -36,7 +36,12 @@
       "agent.definition",
       "agent.directory",
       "model.complete",
-      "agent.command"
+      "agent.command",
+      "projects",
+      "space.files",
+      "memory",
+      "principals",
+      "document.convert"
     ]
   },
   "provides": [
@@ -72,7 +77,12 @@
         "agent.definition",
         "agent.directory",
         "model.complete",
-        "agent.command"
+        "agent.command",
+        "projects",
+        "space.files",
+        "memory",
+        "principals",
+        "document.convert"
       ]
     },
     "worker": {
@@ -84,7 +94,12 @@
         "actor.mailbox"
       ],
       "optional": [
-        "admin.auth"
+        "admin.auth",
+        "projects",
+        "space.files",
+        "memory",
+        "principals",
+        "document.convert"
       ]
     }
   },

@@ -25,9 +25,11 @@
  * - **Who a conversation is with**, for the dashboard (its stage of `conversation.describe`): its
  *   user's name and email, as the accounts know them (on Cloudflare one call to the accounts actor),
  *   its ids, and a link to the Web users page showing that user (`usersPagePath`).
- * - **Projects** (`createIndex`, `backend.ts`): each user's, beside the list; a conversation made in one
- *   is admitted with its space (`projectSpace`, `chat.ts`), so what the App keeps per space (memory,
- *   instructions, files) is shared by that project's conversations.
+ * - **Projects** (`project-routes.ts`, with `projects` installed): the project store's, shared by their
+ *   members; a conversation made in one is admitted with the project's space (`Project.space`), so what
+ *   the App keeps per space (memory, files, the project's record) is shared by its conversations, and
+ *   every member reads them. The projects this channel kept itself before are carried over once
+ *   (`migrateProjects`, `backend.ts`), then their table goes.
  * - **Commands typed in the chat** (`commands`, the config's names of `agent.command`) run in their
  *   conversation through `admitInbound`, never dispatched, at most once by request id.
  * - **What users see** (`visibility`: thinking, tools, context) and **the agents they may pick**
@@ -75,6 +77,7 @@ import { runEntryId, runMessages, userEntryOf } from "./entries.ts";
 import { provideAdminRoutes } from "./admin-routes.ts";
 import { createRateLimiter } from "./rate.ts";
 import { createTitles } from "./titles.ts";
+import { provideProjectRoutes } from "./project-routes.ts";
 import { chatConfigOf, provideRoutes, type LiveSettings } from "./routes.ts";
 import { type ConversationRow, createChatStore } from "./store.ts";
 import { type AccountsWiring, BETTER_AUTH } from "./wiring.ts";
@@ -133,6 +136,13 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       // Titles: a model's, through the runtime's models; each one given to the App's `/name` (admin-api's).
       const completion = pikit.useOptional("model.complete");
       const commands = pikit.useKeyed("agent.command");
+      // Projects (features/projects.md): the record and its members, the space's files and memory, a
+      // person's other identities, a document's text from a file. Absent `projects`: no projects.
+      const projects = pikit.useOptional("projects");
+      const spaceFiles = pikit.useOptional("space.files");
+      const memory = pikit.useOptional("memory");
+      const principals = pikit.useOptional("principals");
+      const convert = pikit.useOptional("document.convert");
       /** The commands users may type in a chat: the App's, cut by the config's `commands`. */
       const typed = () => allowedCommands(commands, config.commands);
 
@@ -218,6 +228,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         titles,
         commands: typed,
         files: () => ({ workspace: workspace.get(), execution: execution.get() }),
+        projects: () => projects.get(),
         wake: async (ctx) => {
           await delivery?.wake(ctx).catch((error: unknown) => ctx.logger.warn("channel-web: could not ask for answers to be delivered; the next run's end does", { error: String(error) }));
         },
@@ -276,11 +287,18 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       const chatConfig = (ctx: AppContext) =>
         chatConfigOf({ config, target: limits, settings: liveSettings, agents: agentsOf, commands: () => listAgentCommands(typed()), email: email.get() !== undefined, files: workspace.get() !== undefined || execution.get() !== undefined }, ctx);
 
-      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => limits, rate: async (userId, ctx) => rate.take(userId, ctx.clock.now()), assets });
+      const projectAccess = provideProjectRoutes(pikit, {
+        services: { projects: () => projects.get(), files: () => spaceFiles.get(), memory: () => memory.get(), principals: () => principals.get(), convert: () => convert.get() },
+        accounts: accountsNow,
+        backend: () => backend,
+        chatConfig,
+      });
+      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => limits, rate: async (userId, ctx) => rate.take(userId, ctx.clock.now()), assets, projects: projectAccess });
       provideAdminRoutes(pikit, {
         auth,
         accounts: accountsNow,
         backend: () => backend,
+        projects: projectAccess,
         origin: (request) => linkOrigin(request.url, secretsRead?.publicUrl, trustHost),
       });
       pikit.pipeline("conversation.describe", describeStage(describer), { id: NAME });
@@ -385,7 +403,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
           trustHost = true;
           tell = (rows, now) => send.send(ACCOUNTS_KEY, SEEN, { rows: rows.map((row) => ({ ...row })) }, now);
           answerConversationCalls(calls, backend);
-          answerIndexCalls(calls, store, chatConfig, rate);
+          answerIndexCalls(calls, store, chatConfig, rate, () => projects.get());
           wiring.answer(calls, localAccounts);
           await startDelivery(ctx);
         },

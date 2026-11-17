@@ -12,10 +12,14 @@
  * conversation key is `web:<user id>:<chat id>`, built from the session's user. A chat id of another
  * user's is `404`, as one that never existed.
  *
- * A user organizes their conversations in projects (`ChatProject`, their own: another user's project id
- * is `404` too). A conversation's project is fixed when it is made (`ChatStartRequest.project`): the
- * project is the place its conversations share (what the App keeps per space: memory, instructions,
- * files). A project with conversations is not deleted (`409 not_empty`): delete them first.
+ * With a project store installed (`projects`; `ChatConfig.projects` says so), conversations are made in
+ * projects (`ChatProject`): each the record of one space, shared by its members (one owner), whose chats,
+ * instructions, documents, files, memory and links every member reads and changes, every change in its
+ * History with its author, and undone by any member (features/projects.md). A non-member's (and a missing
+ * project's) id is `404` on every route, as one that never existed. A conversation's project is fixed when
+ * it is made (`ChatStartRequest.project`): it is in the project's space. Its author posts in it while a
+ * member, with an agent the project allows (`403` otherwise); every member reads it. A project with
+ * conversations is not deleted (`409 not_empty`): it is archived. Without `projects` there are none.
  *
  * A message whose text is `/name args` for one of `ChatConfig.commands` runs that command in its
  * conversation instead of reaching the agent: the answer says what came of it (`ChatSendResponse.command`),
@@ -33,19 +37,40 @@
  * | `GET /chat/api/config` | `ChatConfig` (no session needed) |
  * | `/chat/api/auth/*` | better-auth's own routes (sign in, sign up, OAuth callbacks, links, sessions) |
  * | `GET /chat/api/me` | `ChatMe`: the user, their sign-in methods, and the assistant Routing picks for their new chat (`suggestedAgent`) |
- * | `GET /chat/api/projects` | `ChatPage<ChatProject>`: every project of the user's (at most `MAX_PROJECTS`), by name |
- * | `POST /chat/api/projects` | `ChatProjectRequest` → `201 ChatProject` (`400` past `MAX_PROJECTS`) |
- * | `PATCH /chat/api/projects/:id` | `ChatProjectRequest` → `200 ChatProject` |
- * | `DELETE /chat/api/projects/:id` | `204`; `409 not_empty` while it has conversations (archived ones too; deleted ones not) |
+ * | `GET /chat/api/projects?archived` | `ChatPage<ChatProject>`: the user's projects (a member or the owner), newest change first; with `archived=1` the archived ones |
+ * | `POST /chat/api/projects` | `ChatProjectRequest` → `201 ChatProject`, its owner the user (`400` past `MAX_PROJECTS` owned) |
+ * | `GET /chat/api/projects/:id` | `ChatProjectOverview`: the project, its counts, the core documents' budget, the latest ten changes |
+ * | `PATCH /chat/api/projects/:id` | `ChatProjectUpdate` → `200 ChatProject` (`agents`, `archived`: the owner's, `403` otherwise; `agents` among `ChatConfig.agents`) |
+ * | `DELETE /chat/api/projects/:id` | `204` (the owner's); `409 not_empty` while it has conversations (any member's, archived ones too): archive it |
+ * | `GET`, `POST /chat/api/projects/:id/members` | `ChatPage<ChatMember>`; `ChatMemberRequest` (an email the App knows) → `201 ChatMember` (any member) |
+ * | `DELETE /chat/api/projects/:id/members/:member` | `204`: oneself (leave), or the owner another (`:member` its `memberKey`, URI-encoded) |
+ * | `POST /chat/api/projects/:id/owner` | `ChatPrincipal` → `200 ChatProject`: the owner hands the project to a member |
+ * | `GET`, `PUT /chat/api/projects/:id/instructions` | `ChatInstructionsRead` (`?version=`); `ChatInstructionsRequest` → `200 ChatInstructions` (`409` behind `ifVersion`) |
+ * | `GET /chat/api/projects/:id/instructions/versions` | `ChatPage<ChatVersion>` |
+ * | `GET`, `POST /chat/api/projects/:id/documents` | `ChatDocuments`; `ChatDocumentRequest` (text, or a saved file) → `201 ChatDocument` (`400 limit` past the core budget, saying what is left) |
+ * | `POST /chat/api/projects/:id/documents/upload?title&mode` | a file's bytes → `201 ChatDocument`: its text (a text type), or converted (`document.convert`); `415` for one it cannot read |
+ * | `GET`, `PATCH`, `DELETE /chat/api/projects/:id/documents/:doc` | `ChatDocumentRead` (`?part&version`); `ChatDocumentUpdate` → `ChatDocument`; `204` |
+ * | `GET /chat/api/projects/:id/documents/:doc/versions` | `ChatPage<ChatVersion>` |
+ * | `GET`, `POST /chat/api/projects/:id/files` | `ChatFiles` (`?trashed=1`: the trash); a file's bytes (`?name&description&id`) → `201 ChatSpaceFile` (needs `space.files`) |
+ * | `GET`, `DELETE /chat/api/projects/:id/files/:name` | the bytes (`?version=`), an attachment; `204`: to the trash for 30 days |
+ * | `GET /chat/api/projects/:id/files/:name/versions`, `POST …/restore` | `ChatPage<ChatSpaceFile>`; `200 ChatChange`: a trashed name back |
+ * | `GET`, `POST /chat/api/projects/:id/memory` | `ChatMemory`; `ChatMemoryRequest` → `201 ChatMemoryItem`, active at once (needs `memory`) |
+ * | `PATCH`, `DELETE /chat/api/projects/:id/memory/:item`, `POST …/approve` | new words → `ChatMemoryItem`; `204`; a proposal from before the project → `ChatMemoryItem` |
+ * | `GET`, `POST /chat/api/projects/:id/links`, `DELETE …/links/:link` | `ChatPage<ChatLink>`; `ChatLinkRequest` → `201 ChatLink`; `204` |
+ * | `GET /chat/api/projects/:id/history?limit&cursor` | `ChatPage<ChatChange>`: the project's, its memory's and its files' logs merged, newest first |
+ * | `POST /chat/api/projects/:id/history/:log/:n/restore` | `200 ChatChange`: the state before change `n` of `log` back, through the store that holds it (the owner's for members and the project's own record) |
+ * | `GET /chat/api/projects/:id/conversations?limit&cursor` | `ChatPage<ChatProjectConversation>`: every member's chats of the project |
+ * | `GET /chat/api/projects/:id/conversations/:chat/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`: a member's chat, read only |
+ * | `GET /chat/api/conversations/:id/notices` | `ChatNotices`: what was added to its project from this chat (the logs' entries whose author's conversation is it) |
  * | `GET /chat/api/conversations?limit&cursor&archived&q&project` | `ChatPage<ChatConversation>`, newest activity first: those not archived, or with `archived=1` the archived ones; with `q`, only those whose title holds it (any case); with `project`, only that project's (`none`: those of no project) |
- * | `POST /chat/api/conversations` | `ChatStartRequest` → `201 ChatStartResponse` (a command too: the conversation is made, the command ran in it; `429` past `ChatConfig`'s rate; `400` for an `agent` not in `ChatConfig.agents`; `404` for a `project` not the user's) |
+ * | `POST /chat/api/conversations` | `ChatStartRequest` → `201 ChatStartResponse` (a command too: the conversation is made, the command ran in it; `429` past `ChatConfig`'s rate; `400` for an `agent` not in `ChatConfig.agents` or not one the project allows; `404` for a `project` the user is no member of; `403` in an archived one) |
  * | `GET /chat/api/conversations/:id` | `ChatConversation` |
  * | `PATCH /chat/api/conversations/:id` | `ChatRenameRequest` → `200 ChatConversation` |
  * | `POST /chat/api/conversations/:id/archive`, `…/unarchive` | `200 ChatConversation`: listed apart, or back in the list (new activity lists an archived one again) |
  * | `DELETE /chat/api/conversations/:id` | `204`: out of the list, gone for the user (nothing of the runtime's is deleted) |
  * | `GET /chat/api/conversations/:id/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`, newest first, at most `PAGE_JSON_MAX` characters of stored JSON (then fewer than `limit`, and `next`) |
  * | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | the bytes of image `n` of the user's message `messageId` (a user message's image part's `url`), its type, cached privately |
- * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`413` past a message's bounds: its images, its files) |
+ * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`413` past a message's bounds: its images, its files; `403` in a project's chat once its author is no member, or its agent no longer allowed) |
  * | `GET /chat/api/conversations/:id/events` | server-sent events, one `ChatEvent` per `data:` line, a `live` with `["r", ChatLive]` first |
  * | `POST /chat/api/conversations/:id/abort` | `200 ChatAbortResponse` |
  */
@@ -82,8 +107,18 @@ export const PAGE_JSON_MAX = 1024 * 1024;
 export const SEARCH_MAX = 200;
 /** The longest project name, in characters. */
 export const PROJECT_NAME_MAX = 60;
-/** The most projects a user has. */
+/** The longest project description, in characters. */
+export const PROJECT_DESCRIPTION_MAX = 500;
+/** The most projects a user owns. */
 export const MAX_PROJECTS = 100;
+/** The largest file a project's page uploads (a saved file, or a document's), in bytes. */
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/** The longest instructions, in characters. */
+export const INSTRUCTIONS_MAX = 8_000;
+/** The longest memory (a rule, a note), in characters. */
+export const MEMORY_TEXT_MAX = 4_000;
+/** The logs a project's History merges (`ChatChange.log`): the project's own, its memory's, its files'. */
+export const HISTORY_LOGS = ["project", "memory", "files"] as const;
 /** `GET /chat/api/conversations?project=` for the conversations of no project. */
 export const NO_PROJECT = "none";
 
@@ -162,6 +197,8 @@ export interface ChatConfig {
   agents: ChatAgent[];
   /** The commands users may type in a chat (`/name args`): those the operator allows that the App has. */
   commands: ChatCommand[];
+  /** Whether conversations are made in projects (`projects` installed), and what their pages show; absent: no projects. */
+  projects?: ChatProjectFeatures;
 }
 
 /** The signed-in user. */
@@ -191,21 +228,273 @@ export interface ChatPage<T> {
   next?: string;
 }
 
-/** One of the user's projects: a place several of their conversations share. */
+/** A channel's identity (`@pikit/contracts`' `Principal`): a user of this chat is `{ channel: "web", id: <user id> }`. `name`: shown, never checked. */
+export interface ChatPrincipal {
+  channel: string;
+  id: string;
+  name?: string;
+}
+
+/** Who made a change and from where (`@pikit/contracts`' `Author`): a person (from a page, or a command typed in a chat), an agent (in a chat, answering a person), an operator, trusted code. */
+export type ChatAuthor =
+  | { kind: "person"; principal: ChatPrincipal; conversation?: string }
+  | { kind: "agent"; agent: string; conversation: string; for?: ChatPrincipal }
+  | { kind: "operator"; id: string }
+  | { kind: "component"; name: string };
+
+export type ChatProjectRole = "owner" | "member";
+
+/** What a project's page can show besides its record: what the App installs (`ChatConfig.projects`). */
+export interface ChatProjectFeatures {
+  /** Files people upload and agents save (`space.files`). */
+  files: boolean;
+  /** The space's rules, notes and summaries (`memory`). */
+  memory: boolean;
+  /** Documents from files that are not text (PDF, Office...: `document.convert`). */
+  convert: boolean;
+}
+
+/** One of the user's projects: the record of a space its members (and their agents) share. */
 export interface ChatProject {
   /** What `:id` is in the routes, and `ChatConversation.project`. */
   id: string;
   /** 1 to `PROJECT_NAME_MAX` characters. */
   name: string;
-  /** Epoch ms it was made. */
-  createdAt: number;
-  /** How many of the user's conversations are in it (archived ones too). */
+  /** 0 to `PROJECT_DESCRIPTION_MAX` characters. */
+  description: string;
+  /** The assistants a chat of it may be made with; empty: those the chat offers. The owner's to set. */
+  agents: string[];
+  owner: ChatPrincipal;
+  /** The user's role in it. */
+  role: ChatProjectRole;
+  /** How many members (the owner included). */
+  members: number;
+  /** Archived: read only, listed apart (`?archived=1`). */
+  archived: boolean;
+  /** How many conversations it has, every member's (archived ones too). */
   chats: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface ChatProjectRequest {
   /** 1 to `PROJECT_NAME_MAX` characters. */
   name: string;
+  description?: string;
+}
+
+/** A change of a project's record: any member its name and description; the owner its agents and archive. */
+export interface ChatProjectUpdate {
+  name?: string;
+  description?: string;
+  agents?: string[];
+  archived?: boolean;
+}
+
+/** One entry of a log a project's History merges (`@pikit/contracts`' `Change`, and the log it is in). */
+export interface ChatChange {
+  /** `project` (its record, members, instructions, documents, links), `memory` (rules, notes, summaries) or `files`. */
+  log: (typeof HISTORY_LOGS)[number];
+  /** Its number in its log: what `POST .../history/:log/:n/restore` takes. */
+  n: number;
+  at: number;
+  by: ChatAuthor;
+  action: "added" | "changed" | "removed" | "restored";
+  /** `kind`: `project`, `member`, `instructions`, `document`, `link`, `rule`, `note`, `summary`, `file`. */
+  item: { kind: string; id: string; title: string };
+  version?: number;
+  /** For `restored`: the change whose earlier state came back. */
+  restores?: number;
+  /** Whether its earlier state can still come back (`false` past a year, or redacted). */
+  restorable: boolean;
+  redacted?: { at: number; by: ChatAuthor };
+}
+
+/** A project's page: the record, what it holds, and its latest changes. */
+export interface ChatProjectOverview {
+  project: ChatProject;
+  /** Its documents, and the estimated tokens of the core ones (always in an agent's context) against the budget. */
+  documents: number;
+  coreTokens: number;
+  coreBudget: number;
+  links: number;
+  /** With `space.files`: its files' names and bytes (versions and trash included). */
+  files?: { names: number; bytes: number };
+  /** With `memory`: its active rules, notes and summaries. */
+  memory?: { rules: number; notes: number; summaries: number };
+  /** The ten latest changes, newest first (History has them all). */
+  recent: ChatChange[];
+}
+
+export interface ChatMember {
+  principal: ChatPrincipal;
+  role: ChatProjectRole;
+  /** `manual` (added by someone), or the source a component keeps in step (a Google Chat space). */
+  source: string;
+  /** Whether it counts now: a sourced member stops counting when its source was not checked lately. */
+  current: boolean;
+  /** Whether it is the user. */
+  you: boolean;
+  by: ChatAuthor;
+  at: number;
+}
+
+export interface ChatMemberRequest {
+  /** An email the App knows (a user of this chat; a person its directory knows). */
+  email: string;
+}
+
+/** A member as `DELETE .../members/:member` names it: `<channel, URI-encoded>:<id>`, the whole URI-encoded in the path. */
+export const memberKey = (principal: { channel: string; id: string }): string => `${encodeURIComponent(principal.channel)}:${principal.id}`;
+
+export interface ChatInstructions {
+  text: string;
+  version: number;
+  by: ChatAuthor;
+  at: number;
+}
+
+/** The instructions (absent: none written yet). */
+export interface ChatInstructionsRead {
+  instructions?: ChatInstructions;
+}
+
+export interface ChatInstructionsRequest {
+  /** At most `INSTRUCTIONS_MAX` characters. */
+  text: string;
+  /** The version the text was written over (`0`: none yet): a newer one is `409`, the newer kept. */
+  ifVersion: number;
+}
+
+/** One version of the instructions or of a document. */
+export interface ChatVersion {
+  version: number;
+  by: ChatAuthor;
+  at: number;
+  chars: number;
+  title?: string;
+  mode?: "core" | "reference";
+}
+
+export interface ChatDocument {
+  id: string;
+  title: string;
+  /** `core`: whole in every request of the project's agents (within the budget); `reference`: found and read when needed. */
+  mode: "core" | "reference";
+  chars: number;
+  tokens: number;
+  version: number;
+  /** Made from a saved file. */
+  source?: { file: string; fileVersion: number };
+  by: ChatAuthor;
+  at: number;
+}
+
+export interface ChatDocuments {
+  items: ChatDocument[];
+  coreTokens: number;
+  coreBudget: number;
+}
+
+/** A part of a document's text, 20,000 characters a part. */
+export interface ChatDocumentRead {
+  document: ChatDocument;
+  text: string;
+  part: number;
+  parts: number;
+}
+
+/** A new document: its text given, or a saved file's (converted when it is not text). */
+export interface ChatDocumentRequest {
+  title: string;
+  mode: "core" | "reference";
+  text?: string;
+  file?: { name: string; version?: number };
+}
+
+/** A new version of a document (its title, mode or text), over `ifVersion`. */
+export interface ChatDocumentUpdate {
+  title?: string;
+  mode?: "core" | "reference";
+  text?: string;
+  ifVersion: number;
+}
+
+/** A saved file of the project (its newest version, or one of its versions). */
+export interface ChatSpaceFile {
+  name: string;
+  version: number;
+  /** How many versions it has (in a list). */
+  versions?: number;
+  description: string;
+  size: number;
+  type?: string;
+  by: ChatAuthor;
+  createdAt: number;
+  trashedAt?: number;
+  /** Whether its text is searched by the agents (`indexed`), or only its name and description (`none`). */
+  text: "indexed" | "none";
+}
+
+export interface ChatFiles {
+  items: ChatSpaceFile[];
+  usage: { files: number; names: number; bytes: number };
+}
+
+export interface ChatMemoryItem {
+  id: string;
+  /** `note`: what the agents noted (a fact); `rule`: what every agent of the project follows; `summary`: of a quiet chat. */
+  kind: "rule" | "note" | "summary";
+  /** `pending`: a rule proposed before the space was a project, waiting for a member. */
+  status: "active" | "pending";
+  text: string;
+  createdAt: number;
+  updatedAt?: number;
+  /** Who kept it, and from where; absent on what was kept before authors were recorded. */
+  by?: ChatAuthor;
+}
+
+/** The project's memory, oldest first in each. */
+export interface ChatMemory {
+  rules: ChatMemoryItem[];
+  notes: ChatMemoryItem[];
+  summaries: ChatMemoryItem[];
+  /** Rules proposed before the space was a project: added or discarded by any member. */
+  proposed: ChatMemoryItem[];
+}
+
+export interface ChatMemoryRequest {
+  kind: "rule" | "note";
+  /** 1 to `MEMORY_TEXT_MAX` characters. */
+  text: string;
+}
+
+export interface ChatLink {
+  id: string;
+  url: string;
+  title: string;
+  note?: string;
+  by: ChatAuthor;
+  at: number;
+}
+
+export interface ChatLinkRequest {
+  url: string;
+  title: string;
+  note?: string;
+}
+
+/** A chat of a project, any member's: who made it (`userId`, `mine`). */
+export interface ChatProjectConversation extends ChatConversation {
+  userId: string;
+  mine: boolean;
+}
+
+/** What was added to a chat's project from it (newest first): agents' notes, rules, files and links, a member's commands. */
+export interface ChatNotices {
+  /** The chat's project; absent: none (then `items` is empty). */
+  project?: string;
+  items: ChatChange[];
 }
 
 /** One of the user's conversations. */
@@ -360,7 +649,7 @@ export interface ChatSendRequest {
 export interface ChatStartRequest extends ChatSendRequest {
   /** The assistant the conversation is made with: one of `ChatConfig.agents` (else `400`). Absent: the router decides. */
   agent?: string;
-  /** The project the conversation is made in, for good: one of the user's (`ChatProject.id`, else `404`). Absent: none. */
+  /** The project the conversation is made in, for good: one the user is a member of (`ChatProject.id`, else `404`). Absent: none. */
   project?: string;
 }
 
@@ -405,7 +694,10 @@ export interface ChatError {
   /**
    * `unauthorized` (401), `invalid_request` (400), `not_found` (404), `too_large` (413), `rate_limited`
    * (429: too many messages a minute, `retry-after` says when to send again), `not_empty` (409: a project
-   * that still has conversations), `denied`
+   * that still has conversations), `conflict` (409: a change made over a version that is not the newest
+   * any more), `forbidden` (403: an owner's act, a project's chat its author may not post in any more),
+   * `gone` (410: a change too old to undo), `refused` (400: a credential's shape, never echoed), `limit`
+   * (400: past a project's bounds, saying which), `unsupported` (415: a file that cannot be read as text), `denied`
    * (403: the router refused the message, `message` says why), `rejected` (422: a stage refused it),
    * `no_route` (500: no router installed), `unavailable` (503: on Cloudflare an object did not answer).
    */

@@ -296,8 +296,8 @@ describe("live events", () => {
     expect(parseRoute(`#${newChatPath({ project: "p1" })}`).query.get("project")).toBe("p1");
   });
 
-  test("the projects page: found by any part of the name in any case, newest first or by name", () => {
-    const project = (id: string, name: string, createdAt: number) => ({ id, name, createdAt, chats: 0 });
+  test("the projects page: found by any part of the name in any case, most recently changed first or by name", () => {
+    const project = (id: string, name: string, updatedAt: number) => ({ id, name, updatedAt });
     const items = [project("a", "Looker Helper", 2), project("b", "software agent", 3), project("c", "Tag Manager Helper", 1)];
     expect(shownProjects(items, "", "recent").map((each) => each.id)).toEqual(["b", "a", "c"]);
     expect(shownProjects(items, "", "name").map((each) => each.id)).toEqual(["a", "b", "c"]);

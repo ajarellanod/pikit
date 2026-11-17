@@ -8,7 +8,7 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { type App, type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type App, type AppContext, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import {
   ActorCallError,
   type ActorCallHandler,
@@ -20,6 +20,7 @@ import {
   callResult,
   describeConversation,
   type JsonValue,
+  type SqlDatabase,
   streamResult,
 } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
@@ -27,6 +28,7 @@ import { type ChatConfig, type ChatConversation, type ChatTranscriptEntry, MAX_D
 import { ACCOUNTS_KEY, CALL, SEEN } from "./calls.ts";
 import { runEntryId } from "./entries.ts";
 import { createChannelWeb, NAME } from "./index.ts";
+import { type ProjectDoubles, projectDoubles, projectsComponent } from "./projects.test-support.ts";
 import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, liveReader, OPERATOR, PIXEL, Runtime, router, type Served, secretsOf, serve } from "./runtime.test-support.ts";
 import { createChannelWebWorker } from "./worker.ts";
 
@@ -39,6 +41,8 @@ interface FakeObject {
   handlers: Map<string, ActorInboxHandler>;
   streams: Map<string, ActorStreamHandler>;
   ctx: AppContext;
+  /** Its `storage.sql`. */
+  sql: SqlDatabase;
 }
 
 /** The objects, by key, each started at its first message or call, as Durable Objects are. */
@@ -54,6 +58,8 @@ class Platform {
     readonly accounts: FakeAccounts,
     /** channel-web's config in every object's App (the default App's). */
     readonly config: Record<string, unknown> = {},
+    /** More components in every object's App (the project store's default half). */
+    readonly extra: ComponentDefinition[] = [],
   ) {}
 
   readonly mailbox: ActorMailbox = {
@@ -125,14 +131,22 @@ class Platform {
         });
       },
     });
+    let sql: SqlDatabase | undefined;
+    const probe = defineComponent({
+      name: "sql-probe",
+      setup(pikit) {
+        const handle = pikit.use("storage.sql");
+        return { start: () => void (sql = handle.get()) };
+      },
+    });
     const app = await defineApp({
-      components: [secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, agents, platform, createChannelWeb({ accounts: this.accounts.wiring() })],
+      components: [secretsOf(), runtime.component(), kvOf(), sqliteStorage(), probe, router, agents, platform, ...this.extra, createChannelWeb({ accounts: this.accounts.wiring() })],
       config: { [NAME]: this.config },
       target: "durable",
       logger: silentLogger,
     }).create();
     await app.start();
-    return { app, runtime, answers, handlers, streams, ctx: app.context() };
+    return { app, runtime, answers, handlers, streams, ctx: app.context(), sql: sql as SqlDatabase };
   }
 
   async stop(): Promise<void> {
@@ -147,14 +161,18 @@ afterEach(async () => {
   for (const platform of platforms.splice(0)) await platform.stop();
 });
 
-async function cloud(config: Record<string, unknown> = {}): Promise<{ platform: Platform; worker: Served; accounts: FakeAccounts }> {
+/**
+ * The Worker and its objects; with `doubles`, a project store (and the rest) both Apps reach, as the
+ * stores' two halves give it: the Worker's routes use it, the accounts actor's migration too.
+ */
+async function cloud(config: Record<string, unknown> = {}, doubles?: ProjectDoubles): Promise<{ platform: Platform; worker: Served; accounts: FakeAccounts }> {
   const accounts = new FakeAccounts();
   accounts.add("ana");
   accounts.add("ben");
-  const platform = new Platform(accounts, config);
+  const platform = new Platform(accounts, config, doubles === undefined ? [] : [projectsComponent(doubles)]);
   platforms.push(platform);
   const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", platform.mailbox) });
-  const served = await serve([secretsOf(), mailbox, adminAuth, createChannelWebWorker(accounts.wiring())], {}, "durable");
+  const served = await serve([secretsOf(), mailbox, adminAuth, ...(doubles === undefined ? [] : [projectsComponent(doubles, "projects-worker-doubles")]), createChannelWebWorker(accounts.wiring())], {}, "durable");
   workers.push(served);
   return { platform, worker: served, accounts };
 }
@@ -406,11 +424,10 @@ test("only the accounts actor answers the index's calls: a conversation's object
     [CALL.config, {}],
     [CALL.rate, { userId: "ana" }],
     [CALL.routed, { userId: "ana" }],
-    [CALL.projects, { userId: "ana" }],
-    [CALL.project, { userId: "ana", id: "a".repeat(32) }],
-    [CALL.createProject, { userId: "ana", name: "x" }],
-    [CALL.renameProject, { userId: "ana", id: "a".repeat(32), name: "x" }],
-    [CALL.deleteProject, { userId: "ana", id: "a".repeat(32) }],
+    [CALL.projectConversations, { id: "a".repeat(32), limit: 10 }],
+    [CALL.projectConversation, { id: "a".repeat(32), chatId: id }],
+    [CALL.projectChats, { ids: ["a".repeat(32)] }],
+    [CALL.migrateProjects, {}],
   ] as const) {
     const refused = await platform.mailbox.call(key, type, message, w.app.context()).catch((error: unknown) => error);
     expect({ type, code: (refused as ActorCallError).code }).toEqual({ type, code: "no_handler" });
@@ -504,51 +521,69 @@ test("who a conversation is with, in its object: its user read from the accounts
 
 type ProjectJson = { id: string; name: string; chats: number };
 
-test("PROJECTS on the Worker: the accounts actor's (one call each); a chat made in one reaches its object with it, admitted in the project's space; the list by project from the index; deleted once empty (409 before)", async () => {
-  const { platform, worker: w } = await cloud();
+test("PROJECTS on the Worker: the project store is the Worker's (its routes there); the index answers its chats in one call (the former projects carried over once first, in the accounts actor); a chat made in one reaches its object with the project's space; every member's chats from the index, another's transcript from its object; removed once empty (409 before)", async () => {
+  const doubles = projectDoubles();
+  const { platform, worker: w } = await cloud({}, doubles);
   platform.calls.length = 0;
   const made = await w.fetch(`${API}/projects`, post("ana", { name: "Work" }));
   expect(made.status).toBe(201);
   const work = (await made.json()) as ProjectJson;
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.createProject}`]);
+  // Made in the store; the migration asked once, of the accounts actor.
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.migrateProjects}`]);
+  expect(await (await w.fetch(`${API}/projects/${work.id}/members`, post("ana", { email: "ben@example.com" }))).json()).toMatchObject({ principal: { channel: "web", id: "ben" } });
 
   platform.calls.length = 0;
   const started = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "the report", project: work.id }))).json()) as { id: string; requestId: string };
   const key = `web:ana:${started.id}`;
-  // Counted, the project checked (the accounts actor's), then the conversation's object.
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `${ACCOUNTS_KEY} ${CALL.project}`, `${key} ${CALL.start}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+  // Counted, then the conversation's object (the project checked in the Worker's store).
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `${key} ${CALL.start}`, `${ACCOUNTS_KEY} ${SEEN}`]);
   const { runtime } = await platform.object(key);
-  expect(runtime.pointers.get(key)?.space).toBe(`web:ana:project:${work.id}`);
-  expect(runtime.dispatched.at(-1)?.conversation.space).toBe(`web:ana:project:${work.id}`);
-  const other = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "another", project: work.id }))).json()) as { id: string };
-  expect((await platform.object(`web:ana:${other.id}`)).runtime.pointers.get(`web:ana:${other.id}`)?.space).toBe(`web:ana:project:${work.id}`);
-  const loose = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "loose" }))).json()) as { id: string };
-  expect((await platform.object(`web:ana:${loose.id}`)).runtime.pointers.get(`web:ana:${loose.id}`)?.space).toBeUndefined();
-
-  expect(await (await w.fetch(`${API}/conversations/${started.id}`, as("ana"))).json()).toMatchObject({ project: work.id });
+  expect(runtime.pointers.get(key)?.space).toBe(`project:${work.id}`);
+  expect(runtime.dispatched.at(-1)?.conversation.space).toBe(`project:${work.id}`);
+  const bens = (await (await w.fetch(`${API}/conversations`, post("ben", { text: "another", project: work.id }))).json()) as { id: string; requestId: string };
+  expect((await platform.object(`web:ben:${bens.id}`)).runtime.pointers.get(`web:ben:${bens.id}`)?.space).toBe(`project:${work.id}`);
+  // Posting asks the object for its project, then the store.
   platform.calls.length = 0;
-  const inWork = (await (await w.fetch(`${API}/conversations?project=${work.id}`, as("ana"))).json()) as { items: ChatConversation[] };
-  // Made in the same millisecond, maybe: their order is the chat ids'.
-  expect(inWork.items.map((each) => each.title).sort()).toEqual(["Another", "The report"]);
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`]);
-  expect(((await (await w.fetch(`${API}/conversations?project=none`, as("ana"))).json()) as { items: ChatConversation[] }).items.map((each) => each.title)).toEqual(["Loose"]);
+  expect((await w.fetch(`${API}/conversations/${bens.id}/messages`, post("ben", { text: "more" }))).status).toBe(202);
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `web:ben:${bens.id} ${CALL.conversation}`, `web:ben:${bens.id} ${CALL.send}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+
+  platform.calls.length = 0;
   expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toMatchObject({ items: [{ id: work.id, name: "Work", chats: 2 }] });
-  expect(await (await w.fetch(`${API}/projects/${work.id}`, post("ana", { name: "Office" }, "PATCH"))).json()).toMatchObject({ id: work.id, name: "Office" });
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.projectChats}`]);
+  platform.calls.length = 0;
+  const all = (await (await w.fetch(`${API}/projects/${work.id}/conversations`, as("ben"))).json()) as { items: { title: string; userId: string; mine: boolean }[] };
+  expect(all.items.map((each) => [each.title, each.userId, each.mine]).sort()).toEqual([
+    ["Another", "ben", true],
+    ["The report", "ana", false],
+  ]);
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.projectConversations}`, `${ACCOUNTS_KEY} ${CALL.config}`]);
+  platform.calls.length = 0;
+  const read = await w.fetch(`${API}/projects/${work.id}/conversations/${started.id}/transcript`, as("ben"));
+  expect(read.status).toBe(200);
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.projectConversation}`, `${key} ${CALL.transcript}`]);
 
   expect((await w.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(409);
-  for (const id of [started.id, other.id]) expect((await w.fetch(`${API}/conversations/${id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
+  expect((await w.fetch(`${API}/conversations/${started.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
+  expect((await w.fetch(`${API}/conversations/${bens.id}`, as("ben", { method: "DELETE" }))).status).toBe(204);
   expect((await w.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
   expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toEqual({ items: [] });
 });
 
-test("PROJECT ISOLATION on the Worker: user B with user A's project id gets 404 on every route; no object is made for it; A's project untouched", async () => {
-  const { platform, worker: w } = await cloud();
+test("PROJECT ISOLATION on the Worker: a non-member with a member's project id gets 404 on every route; no object is made; the index refuses ids that are no project's or chat's", async () => {
+  const doubles = projectDoubles();
+  const { platform, worker: w } = await cloud({}, doubles);
   const mine = (await (await w.fetch(`${API}/projects`, post("ana", { name: "Secret" }))).json()) as ProjectJson;
-  await w.fetch(`${API}/conversations`, post("ana", { text: "inside", project: mine.id }));
+  const inside = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "inside", project: mine.id }))).json()) as { id: string };
   const objects = [...platform.objects.keys()];
   const attempts: [string, string, unknown?][] = [
+    ["GET", `/projects/${mine.id}`],
     ["PATCH", `/projects/${mine.id}`, { name: "theirs" }],
     ["DELETE", `/projects/${mine.id}`],
+    ["GET", `/projects/${mine.id}/memory`],
+    ["GET", `/projects/${mine.id}/files`],
+    ["GET", `/projects/${mine.id}/history`],
+    ["GET", `/projects/${mine.id}/conversations`],
+    ["GET", `/projects/${mine.id}/conversations/${inside.id}/transcript`],
     ["GET", `/conversations?project=${mine.id}`],
     ["POST", "/conversations", { text: "into yours", project: mine.id }],
   ];
@@ -557,15 +592,38 @@ test("PROJECT ISOLATION on the Worker: user B with user A's project id gets 404 
     expect({ method, path, status: response.status, body: await response.json() }).toMatchObject({ method, path, status: 404, body: { error: "not_found" } });
   }
   expect([...platform.objects.keys()]).toEqual(objects);
+  expect([doubles.files.calls, doubles.memory.calls]).toEqual([[], []]);
   expect(await (await w.fetch(`${API}/projects`, as("ben"))).json()).toEqual({ items: [] });
-  expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toMatchObject({ items: [{ id: mine.id, name: "Secret", chats: 1 }] });
-  // The index refuses a project id that is not one, before it reads anything.
-  const forged = await platform.mailbox.call(ACCOUNTS_KEY, CALL.list, { userId: "ana", limit: 10, project: "x" }, w.app.context()).catch((error: unknown) => error);
-  expect((forged as ActorCallError).code).toBe("invalid_request");
+  for (const [type, message] of [
+    [CALL.list, { userId: "ana", limit: 10, project: "x" }],
+    [CALL.projectConversations, { id: "x", limit: 10 }],
+    [CALL.projectConversation, { id: mine.id, chatId: "x" }],
+    [CALL.projectChats, { ids: ["x"] }],
+  ] as const) {
+    const forged = await platform.mailbox.call(ACCOUNTS_KEY, type, message, w.app.context()).catch((error: unknown) => error);
+    expect({ type, code: (forged as ActorCallError).code }).toEqual({ type, code: "invalid_request" });
+  }
+});
+
+test("MIGRATION on Cloudflare: the accounts actor (whose table it is) carries the former projects over to its App's project store when the Worker first asks, then the table goes; asked again, nothing more", async () => {
+  const doubles = projectDoubles();
+  const { platform, worker: w } = await cloud({}, doubles);
+  const accounts = await platform.object(ACCOUNTS_KEY);
+  const id = "4".repeat(32);
+  await accounts.sql.run("CREATE TABLE IF NOT EXISTS channel_web_projects (user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (user_id, id))");
+  await accounts.sql.run("INSERT INTO channel_web_projects (user_id, id, name, created_at) VALUES ('ana', ?, 'Old', 1)", [id]);
+  expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toMatchObject({ items: [{ id, name: "Old", role: "owner" }] });
+  expect(doubles.projects.ids.get(id)).toBe(`web:ana:project:${id}`);
+  expect(await accounts.sql.query("SELECT name FROM sqlite_master WHERE name = 'channel_web_projects'")).toEqual([]);
+  expect(await platform.mailbox.call(ACCOUNTS_KEY, CALL.migrateProjects, {}, w.app.context())).toEqual({ made: 0 });
+  // The Worker asks once: later project routes call no more.
+  platform.calls.length = 0;
+  await w.fetch(`${API}/projects/${id}`, as("ana"));
+  expect(platform.calls).not.toContain(`${ACCOUNTS_KEY} ${CALL.migrateProjects}`);
 });
 
 test("COMMANDS on the Worker: listed by the accounts actor's config; typed, it runs in the conversation's object (its space, the user as sender), nothing dispatched; the same request id runs once", async () => {
-  const { platform, worker: w } = await cloud();
+  const { platform, worker: w } = await cloud({}, projectDoubles());
   expect(((await (await w.fetch(`${API}/config`)).json()) as ChatConfig).commands).toEqual([{ name: "rules", description: "Your rules", audience: "user" }]);
   const work = (await (await w.fetch(`${API}/projects`, post("ana", { name: "Work" }))).json()) as ProjectJson;
   const first = await w.fetch(`${API}/conversations`, post("ana", { text: "/rules be brief", project: work.id, requestId: "web:c1" }));
@@ -573,7 +631,7 @@ test("COMMANDS on the Worker: listed by the accounts actor's config; typed, it r
   const made = (await first.json()) as { id: string; admission: string; command: unknown };
   expect(made).toMatchObject({ admission: "command", command: { name: "rules", outcome: "ran", text: "kept: be brief" } });
   const key = `web:ana:${made.id}`;
-  expect(platform.ran).toEqual([{ key, space: `web:ana:project:${work.id}`, args: "be brief", sender: "ana" }]);
+  expect(platform.ran).toEqual([{ key, space: `project:${work.id}`, args: "be brief", sender: "ana" }]);
   expect((await platform.object(key)).runtime.dispatched).toEqual([]);
   expect(((await (await w.fetch(`${API}/conversations?project=${work.id}`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id: made.id, title: "New conversation" }]);
   expect(await transcriptOf(w, "ana", made.id)).toEqual([]);

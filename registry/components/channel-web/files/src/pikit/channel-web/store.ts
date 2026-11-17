@@ -26,8 +26,9 @@
  *   page of entries holds at most `PAGE_JSON_MAX` characters of stored JSON (at least one entry).
  *   On Cloudflare, in the conversation's object.
  *
- * - **`channel_web_projects`**: each user's projects (id, name, when made), beside the users' index (on
- *   Cloudflare in the accounts actor): a project with conversations not deleted is not deleted.
+ * - **`channel_web_projects`**: the projects this channel kept itself before the project store
+ *   (`projects`) kept them: read once by the migration (`formerProjects`, beside the users' index; on
+ *   Cloudflare in the accounts actor), each row dropped once carried over, then the table.
  * - **`channel_web_commands`**: the commands typed in a conversation, by request id (claimed before it
  *   runs, then what came of it): a request id runs a command at most once. On Cloudflare, in the
  *   conversation's object.
@@ -93,8 +94,8 @@ export type Paged<T> = { items: T[]; next?: string };
  */
 export type ListQuery = { limit: number; cursor?: string; archived?: boolean; q?: string; project?: string };
 
-/** One of a user's projects, and how many of their conversations (not deleted) are in it. */
-export type ProjectRow = { userId: string; id: string; name: string; createdAt: number; chats: number };
+/** A project this channel kept itself before the project store (its former table). */
+export type FormerProjectRow = { userId: string; id: string; name: string; createdAt: number };
 
 /** What came of a command typed in a conversation (`ChatCommandResult`), as kept by its request id. */
 export type CommandRow = { name: string; outcome: "ran" | "failed" | "unfinished"; text?: string };
@@ -117,16 +118,18 @@ export interface ChatStore {
   /** The index's: `userId`'s conversations and projects leave it (the user was removed). */
   forget(userId: string): Promise<void>;
 
-  /** The index's: `userId`'s projects, by name. */
-  projects(userId: string): Promise<ProjectRow[]>;
-  /** The index's: `userId`'s project `id`, or `undefined` (none, or another user's). */
-  project(userId: string, id: string): Promise<ProjectRow | undefined>;
-  /** The index's: a new project of `userId`'s, unless they have `max` already (`false`). */
-  createProject(row: Omit<ProjectRow, "chats">, max: number): Promise<boolean>;
-  /** The index's: whether `userId` has the project `id`, renamed. */
-  renameProject(userId: string, id: string, name: string): Promise<boolean>;
-  /** The index's: `userId`'s project `id` deleted, unless a conversation (not deleted) is in it. */
-  deleteProject(userId: string, id: string): Promise<"deleted" | "not_found" | "not_empty">;
+  /** The index's: every user's conversations (not deleted) of project `id`, newest activity first. Throws `invalid_cursor`. */
+  listProject(id: string, page: { limit: number; cursor?: string }): Promise<Paged<ConversationRow>>;
+  /** The index's: the conversation `chatId` of project `id` (any user's, not deleted), or `undefined`. */
+  projectConversation(id: string, chatId: string): Promise<ConversationRow | undefined>;
+  /** The index's: how many conversations (not deleted) each of the projects `ids` has (`0` for none). */
+  projectChats(ids: readonly string[]): Promise<Record<string, number>>;
+  /** The index's: the former projects' rows (none once the table went). */
+  formerProjects(): Promise<FormerProjectRow[]>;
+  /** The index's: a former project's row, carried over. */
+  dropFormerProject(userId: string, id: string): Promise<void>;
+  /** The index's: the former projects' table, once every row was carried over. */
+  dropFormerProjects(): Promise<void>;
 
   /**
    * The conversation's: the command typed as request `id` claimed, before it runs (`false`: claimed
@@ -230,11 +233,7 @@ type EntrySqlRow = {
   size: number;
 };
 
-type ProjectSqlRow = { user_id: string; id: string; name: string; created_at: number; chats: number };
-/** A project and its conversations not deleted; its parameters: the user's id twice. */
-const PROJECT_SELECT =
-  `SELECT p.user_id, p.id, p.name, p.created_at, (SELECT COUNT(*) FROM ${CONVERSATIONS} c WHERE c.user_id = ? AND c.project = p.id AND c.hidden = 0) AS chats FROM ${PROJECTS} p`;
-const projectOf = (row: ProjectSqlRow): ProjectRow => ({ userId: row.user_id, id: row.id, name: row.name, createdAt: Number(row.created_at), chats: Number(row.chats) });
+type FormerProjectSqlRow = { user_id: string; id: string; name: string; created_at: number };
 
 const rowOf = (row: ConversationSqlRow): ConversationRow => ({
   key: row.key,
@@ -290,7 +289,6 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${ENTRIES}_order ON ${ENTRIES} (key, turn, pos, id)`);
       await database.run(`CREATE INDEX IF NOT EXISTS ${ENTRIES}_run ON ${ENTRIES} (key, run)`);
-      await database.run(`CREATE TABLE IF NOT EXISTS ${PROJECTS} (user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (user_id, id))`);
       await database.run(
         `CREATE TABLE IF NOT EXISTS ${COMMANDS} (key TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, outcome TEXT NOT NULL, text TEXT, at BIGINT NOT NULL, PRIMARY KEY (key, id))`,
       );
@@ -394,9 +392,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
     async list(userId, { limit, cursor, archived = false, q, project }) {
       const after = cursor === undefined ? undefined : parseCursor(cursor);
       const search = q === undefined || q.trim() === "" ? undefined : likeOf(q.trim());
-      // No project: none, or one deleted while a conversation was being made in it (it lists with none).
-      const inProject =
-        project === undefined ? "" : project === "" ? ` AND (project = '' OR project NOT IN (SELECT id FROM ${PROJECTS} WHERE user_id = ?))` : " AND project = ?";
+      const inProject = project === undefined ? "" : " AND project = ?";
       const rows = await (await db()).query<ConversationSqlRow>(
         `SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE user_id = ? AND hidden = 0 AND archived = ?` +
           inProject +
@@ -406,7 +402,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
         [
           userId,
           archived ? 1 : 0,
-          ...(project === undefined ? [] : project === "" ? [userId] : [project]),
+          ...(project === undefined ? [] : [project]),
           ...(search === undefined ? [] : [search]),
           ...(after === undefined ? [] : [after.at, after.at, after.id]),
           limit + 1,
@@ -418,44 +414,58 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
     },
 
     async forget(userId) {
-      const database = await db();
-      await database.run(`DELETE FROM ${CONVERSATIONS} WHERE user_id = ?`, [userId]);
-      await database.run(`DELETE FROM ${PROJECTS} WHERE user_id = ?`, [userId]);
+      await (await db()).run(`DELETE FROM ${CONVERSATIONS} WHERE user_id = ?`, [userId]);
     },
 
-    async projects(userId) {
-      const rows = await (await db()).query<ProjectSqlRow>(`${PROJECT_SELECT} WHERE p.user_id = ? ORDER BY p.name, p.id`, [userId, userId]);
-      return rows.map(projectOf);
-    },
-
-    async project(userId, id) {
-      const [row] = await (await db()).query<ProjectSqlRow>(`${PROJECT_SELECT} WHERE p.user_id = ? AND p.id = ?`, [userId, userId, id]);
-      return row === undefined ? undefined : projectOf(row);
-    },
-
-    async createProject(row, max) {
-      // One statement: two at once never make more than `max`.
-      const { changes } = await (await db()).run(
-        `INSERT INTO ${PROJECTS} (user_id, id, name, created_at) SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM ${PROJECTS} WHERE user_id = ?) < ?`,
-        [row.userId, row.id, row.name, Math.floor(row.createdAt), row.userId, max],
+    async listProject(id, { limit, cursor }) {
+      const after = cursor === undefined ? undefined : parseCursor(cursor);
+      const rows = await (await db()).query<ConversationSqlRow>(
+        `SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE project = ? AND hidden = 0` +
+          (after === undefined ? "" : " AND (last_activity < ? OR (last_activity = ? AND key > ?))") +
+          " ORDER BY last_activity DESC, key ASC LIMIT ?",
+        [id, ...(after === undefined ? [] : [after.at, after.at, after.id]), limit + 1],
       );
-      return changes > 0;
+      const items = rows.slice(0, limit).map(rowOf);
+      const last = items.at(-1);
+      return { items, ...(rows.length > limit && last !== undefined && { next: cursorOf(last.lastActivity, last.key) }) };
     },
 
-    async renameProject(userId, id, name) {
-      const { changes } = await (await db()).run(`UPDATE ${PROJECTS} SET name = ? WHERE user_id = ? AND id = ?`, [name, userId, id]);
-      return changes > 0;
+    async projectConversation(id, chatId) {
+      const [row] = await (await db()).query<ConversationSqlRow>(`SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE project = ? AND chat_id = ? AND hidden = 0 LIMIT 1`, [id, chatId]);
+      return row === undefined ? undefined : rowOf(row);
     },
 
-    async deleteProject(userId, id) {
+    async projectChats(ids) {
+      const counts: Record<string, number> = Object.fromEntries(ids.map((id) => [id, 0]));
+      for (let at = 0; at < ids.length; at += 100) {
+        const chunk = ids.slice(at, at + 100);
+        if (chunk.length === 0) continue;
+        const rows = await (await db()).query<{ project: string; chats: number }>(
+          `SELECT project, COUNT(*) AS chats FROM ${CONVERSATIONS} WHERE hidden = 0 AND project IN (${chunk.map(() => "?").join(", ")}) GROUP BY project`,
+          [...chunk],
+        );
+        for (const row of rows) counts[row.project] = Number(row.chats);
+      }
+      return counts;
+    },
+
+    async formerProjects() {
       const database = await db();
-      const { changes } = await database.run(
-        `DELETE FROM ${PROJECTS} WHERE user_id = ? AND id = ? AND NOT EXISTS (SELECT 1 FROM ${CONVERSATIONS} WHERE user_id = ? AND project = ? AND hidden = 0)`,
-        [userId, id, userId, id],
-      );
-      if (changes > 0) return "deleted";
-      const [found] = await database.query<{ id: string }>(`SELECT id FROM ${PROJECTS} WHERE user_id = ? AND id = ?`, [userId, id]);
-      return found === undefined ? "not_found" : "not_empty";
+      // Made here when it never was (a new App): read empty, then dropped. Dialect-neutral, no catalogue read.
+      await database.run(`CREATE TABLE IF NOT EXISTS ${PROJECTS} (user_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (user_id, id))`);
+      const rows = await database.query<FormerProjectSqlRow>(`SELECT user_id, id, name, created_at FROM ${PROJECTS} ORDER BY created_at, user_id, id`);
+      return rows.map((row) => ({ userId: row.user_id, id: row.id, name: row.name, createdAt: Number(row.created_at) }));
+    },
+
+    async dropFormerProject(userId, id) {
+      await (await db()).run(`DELETE FROM ${PROJECTS} WHERE user_id = ? AND id = ?`, [userId, id]);
+    },
+
+    async dropFormerProjects() {
+      const database = await db();
+      // Only an empty one: a row written meanwhile (an older App still running) waits for the next run.
+      const [left] = await database.query<{ n: number }>(`SELECT COUNT(*) AS n FROM ${PROJECTS}`);
+      if (Number(left?.n ?? 0) === 0) await database.run(`DROP TABLE IF EXISTS ${PROJECTS}`);
     },
 
     async claimCommand(key, id, name, at) {
