@@ -367,7 +367,7 @@ repeat. Channels that run them: channel-google-chat, channel-telegram, channel-t
 once per platform message) and channel-web (once per request id), each with a config `commands`:
 `"user"` (the default: the commands whose audience is `"user"`, so no channel names another
 component's commands), `"all"`, or names. Spaces given today: channel-google-chat (the chat's own key for each of its threads) and
-channel-web (`web:<user>:project:<id>` for a chat made in a project). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
+channel-web (a chat made in a project: the project's `Project.space`, `project:<id>`, or for a project carried over from channel-web's own table `web:<user>:project:<id>`). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
 when a capability fails. Identity is captured before either pipeline runs: mutating the original
 object in place or replacing it cannot bypass the check, including the reserved `dashboard:` ids
 that channels cannot admit. A dispatch rejected with `AgentUnavailableError` (the conversation's agent

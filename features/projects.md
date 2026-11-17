@@ -665,6 +665,7 @@ id that never existed, with nothing read.
 | `.../conversations`, `.../conversations/:chat/transcript` | member | every member's chats; another's read only, cut by `visibility` |
 | `POST /chat/api/conversations` with `project` | member | the agent must be one of `Project.agents` (when not empty), the space is `Project.space` |
 | `POST .../conversations/:id/messages` in a project's chat | member | its author, still a member, its agent still allowed (`403` otherwise) |
+| `GET /chat/api/conversations/:id/notices` | the chat's author, a member | the three logs' entries whose author worked in this chat (the in-chat "Added to the project" notice), those undone since said so |
 
 ## Guarantees, where each is enforced, how it is proved
 
@@ -783,7 +784,9 @@ project"). neural-agents does this (its `agents/docs/projects.md`).
    the change log and restore; both actors; the suite; admin routes and view), projects-context (the
    `<project>` section, `project_search`, `project_read`, `project_link`, and the adapter's
    `offerTools`), channel-web on `projects` (overview with recent activity, members, instructions,
-   shared chats, History).
+   shared chats, History). channel-web's part (with its step 2 tabs, notices and the migration) is
+   built against the contracts with doubles (branch `feat/projects-channel-web`, 2026-11-17): its
+   README says what is proved and what waits for the real stores.
 2. **Knowledge and files**: documents with versions and search in projects-sql, `document.convert` and
    convert-workers-ai, `space.files` with its log and text search in tool-space-files
    (`project_file_save`, `project_file_get`), memory-sql's Worker half, authors, log and restore,
