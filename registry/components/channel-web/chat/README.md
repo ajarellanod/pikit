@@ -37,8 +37,11 @@ again. A bundle that names the admin API (`/admin/api`) is refused.
 | Path | What |
 |---|---|
 | `src/app.tsx` | what the App offers and who is signed in, then the screen of the route |
-| `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar with New chat, Conversations and Projects, the conversation and project menus, the tabs, where a page's actions and side panel go), a new chat (the assistant picker), a conversation (the shared `ConversationView`), the conversations (every one, paged, search, archived: the shared `ConversationList`), the projects (cards: search, order, New project) and each project's chats, Settings (`settings.tsx`, a modal) |
-| `src/lib/projects.tsx` | the user's projects (made, renamed, deleted), for the pages |
+| `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar with New chat, Conversations and Projects, the conversation and project menus, New project with its description, the tabs, where a page's actions and side panel go), a new chat (the assistant picker; in a project, the assistants it allows), a conversation (the shared `ConversationView`; in a project, what was added to it from the chat, with Undo), the conversations (every one, paged, search, archived: the shared `ConversationList`), the projects (cards: search, order, archived, New project), Settings (`settings.tsx`, a modal) |
+| `src/screens/project/` | a project's page (with `ChatConfig.projects`): Overview (shared with its members, their initials, what it holds, the core documents' token meter, recent activity with Undo), Context (instructions with versions, documents core or reference from text or a file, links), Files (upload, versions, trash and restore, download, made a document), Memory (rules and notes with their source, editable by any member; summaries; proposals from before the project), Members (added by email; the owner's hand-over and removals; leave), Chats (every member's; another's read only), History (the three logs merged, Undo) |
+| `src/components/chat/project-notice.tsx` | "trader added to the project: rule …" under the answer that made it, from the project's logs, with Undo |
+| `src/lib/projects.tsx` | the user's projects (made, changed, archived, deleted), for the pages |
+| `src/lib/project.ts` | a project's API paths, who changed what as words, initials, sizes, the token budget (pure) |
 | `src/lib/project-list.ts` | the projects page's search and order (pure) |
 | `src/lib/chat-api.ts` | the chat API's JSON: a copy of channel-web's `api.ts` |
 | `src/lib/client.ts`, `auth.ts` | the API (`fetch`, the session cookie, `x-pikit-chat: 1` on changes) and better-auth's routes |
@@ -57,7 +60,9 @@ and `scripts/chat.test.ts` checks them; in your project `pikit upgrade` merges t
 |---|---|
 | `#/[?agent=<name>][&project=<id>]` | a new chat (with that assistant picked, in that project) |
 | `#/c/<chat id>` | a conversation |
-| `#/chats[?project=<id>]` | the conversations (of that project only) |
+| `#/chats` | the conversations |
+| `#/projects` | the projects (with `ChatConfig.projects`) |
+| `#/projects/<id>[/<tab>]` | a project's page at a tab: `context`, `files`, `memory`, `members`, `chats` (`?chat=<chat id>`: a member's chat, read only), `history` |
 | `#/settings[/<section>]` | Settings over a new chat, at `profile`, `password`, `accounts` (where linking a provider comes back), `sessions` or `appearance` |
 | `#/sign-in`, `#/sign-up`, `#/forgot` | signing in |
 | `#/set-password?token=…&email=…[&invite=1]` | where an invitation, a confirmation and a password reset land (the email shown read-only) |

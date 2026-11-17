@@ -21,7 +21,8 @@ import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../r
 import { base64Bytes, fileLimits, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
 import { failureText, INITIAL, type LiveEvent, type LiveState, reduce, type RunFailure } from "../registry/components/channel-web/chat/src/lib/transcript.ts";
 import { type ChatClient, chatSource, conversationsPath, transcriptPath } from "../registry/components/channel-web/chat/src/lib/source.ts";
-import { newChatPath, parseRoute, PROJECTS_PATH, projectIdOf, projectPath, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
+import { newChatPath, parseRoute, PROJECTS_PATH, projectIdOf, projectPath, projectRouteOf, screenKey, setPasswordOf, settingsSectionOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
+import { authorName, authorSource, budgetOf, changeSentence, chatOfKey, formatBytes, initialsOf, projectApi } from "../registry/components/channel-web/chat/src/lib/project.ts";
 import { shownProjects } from "../registry/components/channel-web/chat/src/lib/project-list.ts";
 import { readSse, SseParser } from "../registry/components/channel-web/chat/src/lib/sse.ts";
 import { onVisibleAgain } from "../registry/components/channel-web/chat/src/lib/visible.ts";
@@ -284,7 +285,8 @@ describe("live events", () => {
     expect(conversationsPath({ limit: 30, project: "none" })).toBe("/conversations?limit=30&project=none");
     // A new chat with an assistant and in a project; a project's chats.
     expect([newChatPath(), newChatPath({ agent: "helper" }), newChatPath({ agent: "helper", project: "p1" }), newChatPath({ project: "p1" })]).toEqual(["/", "/?agent=helper", "/?agent=helper&project=p1", "/?project=p1"]);
-    expect(projectPath("p1")).toBe("/projects/p1");
+    expect([projectPath("p1"), projectPath("p1", "overview"), projectPath("p1", "history")]).toEqual(["/projects/p1", "/projects/p1", "/projects/p1/history"]);
+    expect([projectRouteOf("/projects/p1"), projectRouteOf("/projects/p1/memory/"), projectRouteOf("/projects/p1/other")]).toEqual([{ id: "p1", tab: "overview" }, { id: "p1", tab: "memory" }, undefined]);
     expect([projectIdOf(projectPath("p1")), projectIdOf(`${projectPath("a b")}/`), projectIdOf(PROJECTS_PATH), projectIdOf("/projects/a/b"), projectIdOf("/projects/%E0"), projectIdOf("/chats")]).toEqual([
       "p1",
       "a b",
@@ -294,6 +296,28 @@ describe("live events", () => {
       undefined,
     ]);
     expect(parseRoute(`#${newChatPath({ project: "p1" })}`).query.get("project")).toBe("p1");
+  });
+
+  test("a project's page says who changed what: initials, authors and where they worked, a change as a sentence, sizes, the budget", () => {
+    expect([initialsOf("Ana García"), initialsOf("ana"), initialsOf("  luis.perez@x.com"), initialsOf(""), initialsOf("ünal öz")]).toEqual(["AG", "A", "LP", "?", "ÜÖ"]);
+    const chat = "web:ana:00000000-0000-4000-8000-000000000001";
+    expect(chatOfKey(chat)).toEqual({ userId: "ana", chatId: "00000000-0000-4000-8000-000000000001" });
+    expect([chatOfKey("googlechat:spaces/AAA:threads/t1"), chatOfKey(undefined), chatOfKey("web:ana:project:x")]).toEqual([undefined, undefined, undefined]);
+    const agent = { kind: "agent" as const, agent: "trader", conversation: chat, for: { channel: "web", id: "ana", name: "Ana" } };
+    const person = { kind: "person" as const, principal: { channel: "web", id: "ben", name: "Ben" } };
+    expect([authorName(agent, "ana"), authorName(person, "ana"), authorName(person, "ben"), authorName({ kind: "operator", id: "x" }), authorName(undefined)]).toEqual(["trader", "Ben", "you", "an operator", "someone"]);
+    expect([authorSource(agent, "ana"), authorSource(agent, "ben"), authorSource(person), authorSource({ ...person, conversation: chat })]).toEqual(["in a chat, answering you", "in a chat, answering Ana", undefined, "in a chat"]);
+    const change = { log: "memory" as const, n: 3, at: 1, by: agent, action: "added" as const, item: { kind: "rule", id: "r-1", title: "Target CPA 18 EUR" }, restorable: true };
+    expect(changeSentence(change, "ana")).toBe("trader added the rule “Target CPA 18 EUR”");
+    expect(changeSentence({ ...change, by: person, action: "changed", item: { kind: "instructions", id: "instructions", title: "Instructions" } }, "ben")).toBe("you changed the instructions");
+    expect(changeSentence({ ...change, redacted: { at: 2, by: { kind: "operator", id: "x" } } })).toBe("trader added the rule “(redacted)”");
+    expect([formatBytes(512), formatBytes(2048), formatBytes(5 * 1024 * 1024)]).toEqual(["512 B", "2.0 KB", "5.0 MB"]);
+    expect([budgetOf(4000, 8000), budgetOf(7000, 8000, 2000), budgetOf(9000, 8000)]).toEqual([
+      { share: 0.5, fits: true, left: 4000 },
+      { share: 0.875, fits: false, left: 1000 },
+      { share: 1, fits: false, left: 0 },
+    ]);
+    expect([projectApi("a b"), projectApi("p1", "/history?limit=3")]).toEqual(["/projects/a%20b", "/projects/p1/history?limit=3"]);
   });
 
   test("the projects page: found by any part of the name in any case, most recently changed first or by name", () => {

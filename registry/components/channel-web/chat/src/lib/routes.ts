@@ -39,19 +39,28 @@ export function settingsSectionOf(path: string): string | undefined {
 /** The user's projects, as cards (`screens/projects.tsx`). */
 export const PROJECTS_PATH = "/projects";
 
-/** A project's page: its chats. */
-export const projectPath = (id: string): string => `${PROJECTS_PATH}/${encodeURIComponent(id)}`;
+/** The tabs of a project's page (`#/projects/<id>/<tab>`; `overview` is the page itself). */
+export const PROJECT_TABS = ["overview", "context", "files", "memory", "members", "chats", "history"] as const;
+export type ProjectTab = (typeof PROJECT_TABS)[number];
 
-/** The project a project's page (`/projects/<id>`) is about; `undefined` for any other path. */
-export function projectIdOf(path: string): string | undefined {
-  const match = /^\/projects\/([^/]+)\/?$/.exec(path);
+/** A project's page, at `tab` (its overview without). */
+export const projectPath = (id: string, tab?: ProjectTab): string => `${PROJECTS_PATH}/${encodeURIComponent(id)}${tab === undefined || tab === "overview" ? "" : `/${tab}`}`;
+
+/** The project and tab a project's page (`/projects/<id>[/<tab>]`) is about; `undefined` for any other path. */
+export function projectRouteOf(path: string): { id: string; tab: ProjectTab } | undefined {
+  const match = /^\/projects\/([^/]+)(?:\/([a-z]+))?\/?$/.exec(path);
   if (match === null) return undefined;
+  const tab = (match[2] ?? "overview") as ProjectTab;
+  if (!PROJECT_TABS.includes(tab)) return undefined;
   try {
-    return decodeURIComponent(match[1] ?? "");
+    return { id: decodeURIComponent(match[1] ?? ""), tab };
   } catch {
     return undefined;
   }
 }
+
+/** The project a project's page is about; `undefined` for any other path. */
+export const projectIdOf = (path: string): string | undefined => projectRouteOf(path)?.id;
 
 /** New chat, with an assistant chosen and in a project when given. */
 export function newChatPath({ agent, project }: { agent?: string | undefined; project?: string | undefined } = {}): string {

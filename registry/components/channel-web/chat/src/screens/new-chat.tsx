@@ -10,8 +10,9 @@
  * router decides.
  *
  * In a project (`?project=<id>`, from the project's menu or its page) the chat is made in it, for good:
- * its name is a badge in the composer (as web search's in the dashboard; × leaves it), and the chats to
- * go on with are the project's.
+ * its name is a badge in the composer (as web search's in the dashboard; × leaves it), the picker offers
+ * only the assistants the project allows (its owner's choice, when made), and the chats to go on with are
+ * the project's.
  *
  * The commands the operator lets users type (`ChatConfig.commands`: `/rules`…) have the composer's "/"
  * menu (those for the assistant picked, `ChatCommand.agents`); one typed makes the chat (empty) and runs there, and the conversation opens with what it
@@ -58,6 +59,9 @@ export function NewChatScreen({ agent: asked, project }: { agent?: string | unde
   const inProject = projects.get(project);
   const agents = config.agents.map((each) => each.name);
   const [agent, setAgent] = useState(() => [asked, me.suggestedAgent].find((name) => name !== undefined && agents.includes(name)) ?? agents[0]);
+  // In a project that names its assistants, only those (the server refuses another).
+  const pickable = inProject !== undefined && inProject.agents.length > 0 ? agents.filter((name) => inProject.agents.includes(name)) : agents;
+  const chosen = agent !== undefined && pickable.includes(agent) ? agent : pickable[0];
   const [error, setError] = useState<Error>();
   const [stage, setStage] = useState(0);
   usePageTitle(config.name, "New chat");
@@ -82,7 +86,7 @@ export function NewChatScreen({ agent: asked, project }: { agent?: string | unde
   const begin = async (text: string, images: ChatImage[], files: ChatFile[] = []) => {
     setError(undefined);
     try {
-      const body: ChatStartRequest = { text, ...(images.length > 0 && { images }), ...(files.length > 0 && { files }), ...(agent !== undefined && { agent }), ...(project !== undefined && { project }) };
+      const body: ChatStartRequest = { text, ...(images.length > 0 && { images }), ...(files.length > 0 && { files }), ...(chosen !== undefined && { agent: chosen }), ...(project !== undefined && { project }) };
       const started = await post<ChatStartResponse>("/conversations", body);
       if (started.command !== undefined) conversations.addNote(started.id, started.command);
       // The conversation shows the message at once, before its transcript is read.
@@ -128,26 +132,26 @@ export function NewChatScreen({ agent: asked, project }: { agent?: string | unde
                       title: `Made in the project ${inProject?.name ?? ""}`,
                       href: `#${projectPath(project)}`,
                       icon: <Folder width={12} height={12} strokeWidth={2} aria-hidden />,
-                      onRemove: () => go(newChatPath({ agent })),
+                      onRemove: () => go(newChatPath({ agent: chosen })),
                       removeLabel: "Not in this project",
                     },
                   ]
             }
             commands={config.commands}
-            {...(agent !== undefined && { agent })}
+            {...(chosen !== undefined && { agent: chosen })}
             commandsMenu={config.commands.length > 0}
             commandsNote="Runs here, never sent to the assistant"
             onCommand={(name, args) => begin(args === "" ? `/${name}` : `/${name} ${args}`, [])}
-            placeholder={`Ask ${agent === undefined ? config.name : assistantName(agent)} anything…`}
+            placeholder={`Ask ${chosen === undefined ? config.name : assistantName(chosen)} anything…`}
             images={imageLimits(config.target)}
             {...(config.files && { files: fileLimits(config.target) })}
-            {...(agent !== undefined && {
+            {...(chosen !== undefined && {
               picker: {
                 label: "assistant",
-                options: agents.map((name) => ({ key: name, name: assistantName(name) })),
-                value: agent,
+                options: pickable.map((name) => ({ key: name, name: assistantName(name) })),
+                value: chosen,
                 onChange: setAgent,
-                ...(agents.length > 1 && { note: "A chat keeps the assistant it starts with." }),
+                ...(pickable.length > 1 && { note: inProject !== undefined && inProject.agents.length > 0 ? "The assistants this project allows. A chat keeps the one it starts with." : "A chat keeps the assistant it starts with." }),
               },
             })}
             onSend={start}

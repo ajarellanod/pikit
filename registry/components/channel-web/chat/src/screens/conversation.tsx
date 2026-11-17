@@ -17,6 +17,10 @@
  * one users may pick; else every one): one runs in this conversation and
  * what it answered shows as a quiet note (`CommandNoteRow`), never in the transcript.
  *
+ * In a project's chat, what its assistants (or its author's commands) added to the project from it
+ * shows under the answer that made it, from the project's logs (`.../notices`, read again when the
+ * conversation changes), with Undo: "trader added to the project: rule “Target CPA 18 EUR”".
+ *
  * An archived conversation is still talked to: a message lists it again (the server's rule), and the
  * page reads it again when the live stream says it changed.
  */
@@ -26,15 +30,17 @@ import { useEffect, useMemo } from "react";
 import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { Badge } from "@/components/bui/Badge";
 import { CommandNoteRow } from "@/components/chat/command-note";
+import { ProjectNoticeRow } from "@/components/chat/project-notice";
 import { ConversationView, type ThreadNote } from "@/components/pikit/conversation";
 import { ErrorNote } from "@/components/pikit/error-note";
-import type { ChatConversation, ChatSendRequest, ChatSendResponse } from "@/lib/chat-api";
+import type { ChatChange, ChatConversation, ChatNotices, ChatSendRequest, ChatSendResponse } from "@/lib/chat-api";
 import { follow, get, post, useGet } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
 import { ChatFailure } from "@/lib/errors";
 import { fileLimits, imageLimits } from "@/lib/images";
 import { assistantName } from "@/lib/names";
 import { useProjects } from "@/lib/projects";
+import { projectApi } from "@/lib/project";
 import { projectPath } from "@/lib/routes";
 import { usePageTitle, useSession } from "@/lib/session";
 import { chatSource, conversationPath } from "@/lib/source";
@@ -43,7 +49,7 @@ import { SidePanel, TabActions, titleOf, useConversationMenu, useNewChat } from 
 const client = { get, post, follow };
 
 export function ConversationScreen({ chatId }: { chatId: string }) {
-  const { config } = useSession();
+  const { config, me } = useSession();
   const conversations = useConversations();
   const menu = useConversationMenu();
   const newChat = useNewChat();
@@ -59,6 +65,9 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
   usePageTitle(config.name, conversation === undefined ? undefined : titleOf(conversation));
 
   const { reload: reloadSummary } = summary;
+  // What its project's logs say was added from here: read when it is a project's chat, again when it changes.
+  const notices = useGet<ChatNotices>(config.projects !== undefined && summary.data?.project !== undefined ? `${conversationPath(chatId)}/notices` : null);
+  const { reload: reloadNotices } = notices;
   useEffect(() => {
     if (conversation !== undefined) openTab(conversation);
   }, [conversation, openTab]);
@@ -87,7 +96,21 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
     if (answer.command !== undefined) addNote(chatId, answer.command);
     reloadList();
   };
-  const notes: ThreadNote[] = conversations.notesOf(chatId).map((note) => ({ key: `note-${note.id}`, at: note.at, node: <CommandNoteRow note={note} /> }));
+  const undo = async (change: ChatChange) => {
+    if (project === undefined) return;
+    await post(projectApi(project, `/history/${change.log}/${change.n}/restore`)).catch(() => undefined);
+    reloadNotices();
+  };
+  const notes: ThreadNote[] = [
+    ...conversations.notesOf(chatId).map((note) => ({ key: `note-${note.id}`, at: note.at, node: <CommandNoteRow note={note} /> })),
+    ...(project === undefined
+      ? []
+      : (notices.data?.items ?? []).map((change) => ({
+          key: `project-${change.log}-${change.n}`,
+          at: change.at,
+          node: <ProjectNoticeRow change={change} me={me.user.id} projectHref={`#${projectPath(project, "history")}`} onUndo={() => undo(change)} />,
+        }))),
+  ];
 
   return (
     <ConversationView
@@ -100,6 +123,7 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
       onChange={() => {
         reloadSummary();
         reloadList();
+        reloadNotices();
       }}
       actions={(contextButton) =>
         conversation !== undefined && (
