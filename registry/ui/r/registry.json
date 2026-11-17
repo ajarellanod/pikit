@@ -172,6 +172,12 @@
       "description": "health-registry's view: What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process. Its admin API routes come with the component (pikit add health-registry)."
     },
     {
+      "name": "projects-sql",
+      "type": "registry:file",
+      "title": "projects-sql",
+      "description": "projects-sql's view: Provides projects: one actor per project (its record, members with one owner, instructions and documents with every version and full-text search, links, an append-only change log with exact restore) and a directory actor, over storage.sql; every call checked against its caller; removed projects purged after 30 days. Admin routes and a dashboard view for operators. Its admin API routes come with the component (pikit add projects-sql)."
+    },
+    {
       "name": "repo-github-app-settings",
       "type": "registry:file",
       "title": "repo-github-app-settings",

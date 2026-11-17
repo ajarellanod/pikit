@@ -378,6 +378,15 @@
       ],
       "path": "components/projects-context"
     },
+    "projects-sql": {
+      "version": "0.0.1",
+      "description": "Provides projects: one actor per project (its record, members with one owner, instructions and documents with every version and full-text search, links, an append-only change log with exact restore) and a directory actor, over storage.sql; every call checked against its caller; removed projects purged after 30 days. Admin routes and a dashboard view for operators.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/projects-sql"
+    },
     "proposals-github": {
       "version": "0.0.1",
       "description": "proposals as GitHub pull requests (Cloudflare): a pikit/self/* branch the steward pushes gets its pull request, which an operator merges or closes from the dashboard; GitHub reached through the github contract (repo-github-app, repo-github-token); and the project's CI workflow. Dormant until GitHub is connected, after deploying.",
