@@ -1,0 +1,78 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "projects-sql",
+  "version": "0.0.1",
+  "title": "Projects: the record of a space, its people, instructions, documents and links, with History and undo",
+  "description": "Provides projects: one actor per project (its record, members with one owner, instructions and documents with every version and full-text search, links, an append-only change log with exact restore) and a directory actor, over storage.sql; every call checked against its caller; removed projects purged after 30 days. Admin routes and a dashboard view for operators.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "capabilities": [
+      "storage.sql",
+      "actor.mailbox",
+      "actor.inbox",
+      "wakeups"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "memory",
+      "admin.auth"
+    ]
+  },
+  "provides": [
+    "projects",
+    "http.route"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "projects",
+        "http.route"
+      ],
+      "requires": [
+        "storage.sql",
+        "actor.mailbox",
+        "actor.inbox",
+        "wakeups"
+      ],
+      "optional": [
+        "memory",
+        "admin.auth"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "projects",
+        "http.route"
+      ],
+      "requires": [
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth"
+      ]
+    }
+  },
+  "view": "view",
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@pikit/pi-adapter": "0.0.1"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

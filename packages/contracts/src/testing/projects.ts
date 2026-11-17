@@ -15,7 +15,7 @@
 
 import type { AppContext } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
-import type { Author, Change, Principal } from "../change.ts";
+import { type Author, CHANGE_RETENTION_DAYS, type Change, type Principal } from "../change.ts";
 import { type Caller, type ProjectDocument, type ProjectStore, projectSpace } from "../projects.ts";
 import { checker, expecter } from "./assert.ts";
 import { type ChangeLogSubject, changeLogCases } from "./change-log.ts";
@@ -33,6 +33,12 @@ export interface ProjectsSubject {
   coreTokens: number;
   /** Stops the provider and starts it again over the same storage: the new store. */
   restart?(): Promise<ProjectStore>;
+  /**
+   * Makes the provider's next write fail inside its transaction, after the item is written and before
+   * it commits (the change log's "a write that fails before it commits" case): a provider that writes
+   * its log entry apart from the item fails it.
+   */
+  failNextCommit?(): void;
   close(): Promise<void>;
 }
 
@@ -375,6 +381,19 @@ export function createProjectsConformance(fixture: ProjectsFixture): readonly Co
         const read = await projects.read(space, id, { part: 1 }, people(ANA), ctx);
         return read === undefined ? undefined : { title: read.document.title, mode: read.document.mode, text: read.text };
       },
+      async repeat(id, by) {
+        const read = await projects.read(space, id, { part: 1 }, people(ANA), ctx);
+        if (read === undefined) throw new Error(`${GROUP}: no document ${id} to write again`);
+        await projects.putDocument(space, { id, title: read.document.title, text: read.text, mode: read.document.mode }, callerOf(by), ctx);
+      },
+      async expire() {
+        subject.advance(CHANGE_RETENTION_DAYS * 86_400_000 + 1);
+      },
+      async redact(n, by) {
+        if (by.kind !== "operator") throw new Error(`${GROUP}: an operator redacts`);
+        await projects.redact(space, n + offset, { kind: "operator", id: by.id }, ctx);
+      },
+      ...(subject.failNextCommit !== undefined && { failNextCommit: () => subject.failNextCommit?.() }),
       async changes() {
         return (await allChanges(projects, space, people(ANA), ctx)).slice(offset).map((change) => ({ ...change, n: change.n - offset, ...(change.restores !== undefined && { restores: change.restores - offset }) }));
       },
