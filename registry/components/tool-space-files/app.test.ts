@@ -1,7 +1,7 @@
 /**
  * tool-space-files in a real App: runtime-pi runs the agents on a SQLite file, mailbox-local is every
  * space's actor, execution-local and workspace-local give each conversation (each chat key) a directory
- * of its own, and the model is provider-faux's `faux/scripted` (`call: <tool> <json>`,
+ * of its own, wakeups-timers runs the trash's sweep, a `projects` double knows one project's space, and the model is provider-faux's `faux/scripted` (`call: <tool> <json>`,
  * `echo-system <section>`, `echo-tools`). `storage.blob` is storage-blob-fs, a real provider on the
  * test's own directory.
  *
@@ -15,13 +15,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AppEvents, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentRuntime, type ConversationRef, defineAgent } from "@pikit/contracts";
+import { type AgentRuntime, type ConversationRef, defineAgent, type ProjectStore } from "@pikit/contracts";
 import { type ModelRequest, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import executionLocal from "../execution-local/files/src/pikit/execution-local/index.ts";
 import mailboxLocal from "../mailbox-local/files/src/pikit/mailbox-local/index.ts";
 import providerFaux from "../provider-faux/files/src/pikit/provider-faux/index.ts";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import storageBlobFs from "../storage-blob-fs/files/src/pikit/storage-blob-fs/index.ts";
+import wakeupsTimers from "../wakeups-timers/files/src/pikit/wakeups-timers/index.ts";
 import workspaceLocal from "../workspace-local/files/src/pikit/workspace-local/index.ts";
 import toolSpaceFiles from "./files/src/pikit/tool-space-files/index.ts";
 
@@ -39,6 +40,13 @@ const agentsComponent = defineComponent({ name: "agents-test", setup: (pikit) =>
 
 /** Bytes that are no UTF-8 text: every byte value, twice. */
 const BINARY = new Uint8Array(512).map((_, i) => (i * 7 + 3) % 256);
+
+/** The space that has a project, for the `projects` double. */
+const PROJECT_SPACE = "project:3f2a9c1b";
+const projects = defineComponent({
+  name: "projects-test",
+  setup: (pikit) => pikit.provide("projects", { get: async (space: string) => (space === PROJECT_SPACE ? { space } : undefined) } as unknown as ProjectStore),
+});
 
 /** An App over a SQLite file and a workspace root of their own; `ask` sends a message in a conversation and waits for its answer. */
 async function start(model: ComponentDefinition = providerFaux) {
@@ -60,6 +68,8 @@ async function start(model: ComponentDefinition = providerFaux) {
   const components = [
     sqliteStorage(join(dir, "pikit.db")),
     mailboxLocal,
+    wakeupsTimers,
+    projects,
     storageBlobFs,
     executionLocal,
     workspaceLocal,
@@ -178,6 +188,23 @@ test("a text file holding a secret is refused, and the model reads why; versions
   chat.write("plan.md", "two!");
   expect(await chat.ask(call("files_save", { path: "plan.md", description: "The plan, revised" }))).toStartWith("files_save: Saved plan.md (version 2, 4 B)");
   expect(await chat.ask(call("files_list", {}))).toMatch(/^files_list: 1 files \(2 versions, 7 B\) saved in this space:\n- plan\.md: The plan, revised \(4 B; version 2 of 2; saved .+ by assistant\)$/);
-  expect(await chat.ask(call("files_delete", { name: "plan.md" }))).toBe("files_delete: Deleted plan.md (2 versions) from this space's files.");
+  expect(await chat.ask(call("files_delete", { name: "plan.md" }))).toBe("files_delete: Deleted plan.md (2 versions) from this space's files; it stays in the trash 30 days.");
   expect(await chat.ask("echo-system space-files")).toBe("(no section space-files)");
+});
+
+test("one family per conversation (offerTools): a project's space is offered project_file_save and project_file_get, no section; another space the files_ family", async () => {
+  const s = await start();
+  const inProject = await s.conversation("web:u-ana:c-1", PROJECT_SPACE);
+  const plain = await s.conversation("chat:1", "team");
+
+  expect(await inProject.ask("echo-tools")).toBe("project_file_get, project_file_save");
+  expect(await plain.ask("echo-tools")).toBe("files_delete, files_get, files_list, files_save");
+
+  inProject.write("deck.md", "# Deck");
+  const saved = await inProject.ask(call("project_file_save", { path: "deck.md", description: "The deck" }));
+  expect(saved?.split("\n").at(-1)).toBe("Added to the project: deck.md");
+  expect(await inProject.ask("echo-system space-files")).toBe("(no section space-files)");
+  // Not offered: a call by name never runs (the runtime refuses it).
+  expect(await inProject.ask(call("files_list", {}))).toStartWith("files_list failed: ");
+  expect(await plain.ask(call("project_file_get", { name: "deck.md" }))).toStartWith("project_file_get failed: ");
 });

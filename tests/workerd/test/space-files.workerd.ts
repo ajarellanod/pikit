@@ -12,10 +12,13 @@
  *   calls `files_get` and reads the file back from its own workspace.
  * - A conversation of another space has no section and gets nothing; the space's object refuses a call
  *   for another space (`invalid`).
+ * - The Worker half (`worker`) gives `space.files` in the Worker's App: an upload there lands in the
+ *   space's object (its row, text and log entry), is found by search and read back, and is trashed and
+ *   restored, each change logged with its author.
  */
 
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { ActorCallError, type ActorMailbox, defineAgent } from "@pikit/contracts";
+import { ActorCallError, type ActorMailbox, type Author, defineAgent, type ListedSpaceFile, type SpaceFiles } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { afterEach, expect, it, vi } from "vitest";
 import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
@@ -26,9 +29,9 @@ import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/r
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import toolRead from "../../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
-import toolSpaceFiles from "../../../registry/components/tool-space-files/files/src/pikit/tool-space-files/index.ts";
+import toolSpaceFiles, { worker as spaceFilesWorker } from "../../../registry/components/tool-space-files/files/src/pikit/tool-space-files/index.ts";
 import { createMemoryBlobStorage, memoryBlob } from "../../../registry/components/tool-space-files/files/src/pikit/tool-space-files/memory-blob.test-support.ts";
-import { actorKey, CALL, type ListedFile } from "../../../registry/components/tool-space-files/files/src/pikit/tool-space-files/space.ts";
+import { actorKey, CALL } from "../../../registry/components/tool-space-files/files/src/pikit/tool-space-files/space.ts";
 import toolWrite from "../../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
 import { composeObjects, PLATFORM_BINDING } from "../src/platform.ts";
 import { resetObjects, workerEnv } from "./host.ts";
@@ -109,8 +112,8 @@ it("two conversations of a space, each in its own object, share a file through t
     );
 
     // The index is in the space's object.
-    const listed = (await worker.call(actorKey(space), CALL.list, { space, limit: 10 })) as { files: ListedFile[] };
-    expect(listed.files.map((f) => [f.name, f.size, f.agent])).toEqual([["notes.md", 16, "assistant"]]);
+    const listed = (await worker.call(actorKey(space), CALL.list, { space, limit: 10 })) as unknown as { files: ListedSpaceFile[] };
+    expect(listed.files.map((f) => [f.name, f.size, f.by])).toEqual([["notes.md", 16, { kind: "agent", agent: "assistant", conversation: thread1 }]]);
     expect([...(blobs.data.get("tool-space-files")?.keys() ?? [])]).toHaveLength(1);
 
     // The second thread, in an object of its own, sees it in its section and gets it into its own workspace.
@@ -134,5 +137,44 @@ it("two conversations of a space, each in its own object, share a file through t
     expect((refused as ActorCallError).code).toBe("invalid");
   } finally {
     await worker.app.stop();
+  }
+});
+
+it("the Worker half: an upload in the Worker's App lands in the space's object, is searched, read, trashed and restored with its log", async () => {
+  const blobs = createMemoryBlobStorage();
+  composeObjects([storageDo, storageKvSql, actorsDo, executionDo, memoryBlob(blobs), toolSpaceFiles], ACTORS);
+  let files: SpaceFiles | undefined;
+  const probe = defineComponent({
+    name: "test-space-files",
+    setup(pikit) {
+      const handle = pikit.use("space.files");
+      return { start: () => void (files = handle.get()) };
+    },
+  });
+  const app = await defineApp({ components: [actorsDo, memoryBlob(blobs), spaceFilesWorker, probe], config: ACTORS, target: "durable", logger: silentLogger }).create();
+  await app.start(withContextValue(WORKERS_HOST, { env: workerEnv }, BACKGROUND_CONTEXT));
+  try {
+    const ctx = app.context();
+    const half = files as SpaceFiles;
+    const space = `project:${crypto.randomUUID()}`;
+    const ana: Author = { kind: "person", principal: { channel: "web", id: "u-ana", name: "Ana" } };
+    const bytes = new TextEncoder().encode("The client wants the Valencia campaign in March.");
+
+    const saved = await half.save(space, { name: "brief.md", description: "The brief", bytes, type: "text/markdown" }, ana, ctx);
+    expect(saved).toMatchObject({ name: "brief.md", version: 1, by: ana, text: "indexed" });
+    expect((await half.search(space, "valencia", 5, ctx)).map((m) => [m.file.name, m.part])).toEqual([["brief.md", 1]]);
+    expect(new TextDecoder().decode((await half.get(space, "brief.md", {}, ctx))?.bytes)).toBe("The client wants the Valencia campaign in March.");
+    expect(await half.trash(space, "brief.md", ana, ctx)).toBe(true);
+    expect((await half.list(space, { limit: 10 }, ctx)).files).toEqual([]);
+    const restored = await half.restore(space, 2, ana, ctx);
+    expect([restored.action, restored.restores]).toEqual(["restored", 2]);
+    expect((await half.changes(space, { limit: 10 }, ctx)).items.map((c) => [c.n, c.action, c.by])).toEqual([
+      [3, "restored", ana],
+      [2, "removed", ana],
+      [1, "added", ana],
+    ]);
+    expect((await half.list(space, { limit: 10 }, ctx)).files.map((f) => f.name)).toEqual(["brief.md"]);
+  } finally {
+    await app.stop();
   }
 });

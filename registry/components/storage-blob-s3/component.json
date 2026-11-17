@@ -20,6 +20,9 @@
   "provides": [
     "storage.blob"
   ],
+  "apps": {
+    "worker": "default"
+  },
   "dependencies": {
     "@pikit/contracts": "0.0.1",
     "typebox": "1.3.27"

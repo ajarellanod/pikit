@@ -695,7 +695,7 @@
     },
     "tool-space-files": {
       "version": "0.0.1",
-      "description": "Files a space keeps on purpose, for the agents that name space-files: files_save, files_list, files_get and files_delete between a conversation's workspace and its space's archive (one actor per space, the bytes in storage.blob), and a stable section listing them.",
+      "description": "The files a space keeps, people's uploads and agents' saves alike: space.files (versions with their authors, a trash, text search, a change log with restore) over one actor per space and storage.blob, and for the agents that name space-files the files_ tools and a section, or in a project's space project_file_save and project_file_get.",
       "targets": [
         "server",
         "durable"

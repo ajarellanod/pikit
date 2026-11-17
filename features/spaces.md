@@ -66,8 +66,8 @@ document is a fact); the rest is deleted after a while (retention, below).
   approves them (`/rules`, `/prefs`); structured summaries (title, topics, entities, keywords,
   decisions, action items, facts, open questions) on both targets.
 - **Saved files**: `tool-space-files`, an agent extension (`space-files`): `files_save`,
-  `files_list`, `files_get`, `files_delete`, and a section listing the space's newest files, so every
-  conversation of the space knows they exist. A name saved again is a new version. An index actor per
+  `files_list`, `files_get`, `files_delete` (to a trash for 30 days, and only what agents saved), and a
+  section listing the space's newest files, so every conversation of the space knows they exist. A name saved again is a new version. An index actor per
   space (`space-files:<space>`), the bytes in `storage.blob` (written first, so the index never points at
   missing bytes). Limits: 25 MiB a file, 1 GiB and 500 files a space by default. A text file with a
   credential's shape is refused; a binary one cannot be checked. Every agent of the space sees them.
