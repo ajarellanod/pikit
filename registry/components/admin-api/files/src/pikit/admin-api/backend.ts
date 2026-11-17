@@ -14,7 +14,8 @@
  * reads it after a first line saying it is the operator's (`operatorPrompt`), which also asks for a web
  * search when the message does (only of an agent with `WEB_SEARCH_TOOL`), and its images in the
  * request (`AgentRequest.images`). A new conversation is one of the dashboard's own
- * (`dashboard:<uuid>`), with an agent of the App. A slash command (`agent.command`, the App's) runs
+ * (`dashboard:<uuid>`), with an agent of the App, in its operator's space (`operatorSpace`: every
+ * conversation an operator starts shares their memory and saved files). A slash command (`agent.command`, the App's) runs
  * in a conversation as the other actions do: only in a key's current one (`runAgentCommand`); the
  * prompt one answers (a prompt template's) is dispatched as an operator's message, as `send` does.
  * - **`createRemoteBackend`** (`remote.ts`): the Worker's, which reaches each conversation's object by
@@ -66,6 +67,7 @@ import {
   cleanTitle,
   isDashboardKey,
   operatorPrompt,
+  operatorSpace,
   SUMMARY_MAX,
   WEB_SEARCH_TOOL,
 } from "./api.ts";
@@ -385,8 +387,9 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       if (!agents.includes(message.agent)) throw refusal("unknown_agent", `no agent "${message.agent}" in the App: ${agents.join(", ") || "none"}`);
       // Before the key is made: a refused message makes no conversation.
       await searchable(message.agent, message, ctx);
-      // The dashboard's own conversation: its channel is the dashboard's, for good.
-      const conversation = await contracts.registry().resolve(message.key, message.agent, { channel: DASHBOARD_CHANNEL }, ctx);
+      // The dashboard's own conversation: its channel is the dashboard's, and its space its operator's, for good.
+      const place = { channel: DASHBOARD_CHANNEL, ...(message.operator !== undefined && { space: operatorSpace(message.operator) }) };
+      const conversation = await contracts.registry().resolve(message.key, message.agent, place, ctx);
       const admission = await dispatch(conversation, message, ctx);
       return { key: conversation.key, conversationId: conversation.conversationId, requestId: message.requestId, admission: admission.kind };
     },

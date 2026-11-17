@@ -11,8 +11,8 @@
  * | `admin-api.conversation` | `{ conversationId }` | `ApiConversation` |
  * | `admin-api.transcript` | `{ conversationId, limit?, cursor? }` | `ApiPage<ApiTranscriptEntry>`, fewer entries than `limit` when they would not fit in an answer (`ANSWER_CHARS`) |
  * | `admin-api.usage` | `{ conversationId }` | `ApiUsage` |
- * | `admin-api.message` | `{ conversationId, text, requestId, attachments?, webSearch? }` | `{ requestId, admission }`: the operator's follow-up |
- * | `admin-api.start` | `{ agent, text, requestId, attachments?, webSearch? }`, to the object of a `dashboard:` key | `ApiStartResponse`: the dashboard's own conversation |
+ * | `admin-api.message` | `{ conversationId, text, requestId, attachments?, webSearch?, operator? }` | `{ requestId, admission }`: the operator's follow-up |
+ * | `admin-api.start` | `{ agent, text, requestId, attachments?, webSearch?, operator? }`, to the object of a `dashboard:` key | `ApiStartResponse`: the dashboard's own conversation |
  * | `admin-api.abort` | `{ conversationId }` | `{ conversationId }` |
  * | `admin-api.reset` | `{ conversationId }` | `ApiResetResponse` |
  * | `admin-api.commands` | — | `ApiCommands`: this App's slash commands |
@@ -105,12 +105,12 @@ const seenOf = (message: JsonValue): IndexedConversation[] => {
 
 const json = (value: unknown): JsonValue => value as JsonValue;
 
-/** The message of a `message` or `start` call: its text and request id, its images checked again (the object's own limit), whether it asks for a web search. */
+/** The message of a `message` or `start` call: its text and request id, its images checked again (the object's own limit), whether it asks for a web search, its operator. */
 function messageOf(message: JsonValue): Message {
   const fields = fieldsOf(message);
   const written = fields.text;
   if (typeof written !== "string") throw refusal("invalid_request", 'admin-api: "text" is a string');
-  const { attachments, webSearch } = fields;
+  const { attachments, webSearch, operator } = fields;
   if (attachments !== undefined && !(Array.isArray(attachments) && attachments.every((each) => typeof fieldsOf(each).data === "string" && typeof fieldsOf(each).mimeType === "string"))) {
     throw refusal("invalid_request", 'admin-api: "attachments" is a list of images');
   }
@@ -118,7 +118,8 @@ function messageOf(message: JsonValue): Message {
   const wrong = attachmentsProblem(images, "durable");
   if (wrong !== undefined) throw refusal(wrong.status === 413 ? "too_large" : "invalid_request", `admin-api: ${wrong.message}`);
   if (webSearch !== undefined && typeof webSearch !== "boolean") throw refusal("invalid_request", 'admin-api: "webSearch" is a boolean');
-  return { text: written, requestId: text(message, "requestId"), ...(images.length > 0 && { attachments: images }), ...(webSearch === true && { webSearch }) };
+  if (operator !== undefined && (typeof operator !== "string" || operator === "")) throw refusal("invalid_request", 'admin-api: "operator" is a non-empty string');
+  return { text: written, requestId: text(message, "requestId"), ...(images.length > 0 && { attachments: images }), ...(webSearch === true && { webSearch }), ...(operator !== undefined && { operator }) };
 }
 
 /**

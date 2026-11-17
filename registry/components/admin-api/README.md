@@ -87,7 +87,9 @@ curl -N -H "Authorization: Bearer $PIKIT_ADMIN_TOKEN" http://localhost:3000/admi
 
 - **Its own conversations.** `POST /admin/api/conversations` makes a key `dashboard:<uuid>` and
   resolves it with one of the App's agents (`GET /admin/api/agents`: the code's or a live one; another
-  is `400 unknown_agent`) and the channel `dashboard` (`ConversationRef.channel`), then dispatches the first message. Its answers appear only in the dashboard:
+  is `400 unknown_agent`), the channel `dashboard` (`ConversationRef.channel`) and its operator's space
+  (`dashboard:operator:<id>`, `operatorSpace`: what the App keeps per space, memory and saved files, is
+  shared by every conversation that operator starts), then dispatches the first message. Its answers appear only in the dashboard:
   no channel delivers a `dashboard:` key, and none makes one, so no other channel can continue it.
 - **Another channel's conversation.** The operator's message is a follow-up, never a steer (with a run
   going, it waits for it), and its request id starts with `dashboard:` (`DASHBOARD_REQUEST_PREFIX`; a
@@ -328,8 +330,8 @@ still answers.
 - `admin-api.test.ts`, with a double for every contract (`runtime.test-support.ts`), routes picked the
   way a server picks them: what setup declares; `401` on every API route before anything is read;
   sessions; each route's answer and its `400` / `404` / `409`; the list from the index (filled at
-  start, moved by activity, paged through thousands); the dashboard's own conversations and the
-  operator's follow-ups (marked, never steer); the agents; images (reaching the request, their number,
+  start, moved by activity, paged through thousands); the dashboard's own conversations (in their
+  operator's space) and the operator's follow-ups (marked, never steer); the agents; images (reaching the request, their number,
   types and sizes checked: `400`, `413`) and web search (asked in the first line, only of an agent with
   the tool); ids with `.` and `/`; redacted config; server-sent events; messages logged without their
   text; the commands (listed, run as actions, `404` / `409` / `422`, a project's own, logged by name)
@@ -340,7 +342,8 @@ still answers.
 - `remote.test.ts`: the Worker's half over a fake platform whose every key is an App running the
   default export on `durable`: ids, the list from the index (order, pages, an object that does not
   answer), the index told at an object's start and on dispatch (once per conversation), a dashboard
-  conversation in its own object, reads, actions and their refusals across the call, the agents, images
+  conversation in its own object (its operator's space and sender across the call; a malformed operator
+  refused), reads, actions and their refusals across the call, the agents, images
   and web search across the call (over 1 MB `413` before any call), a transcript page answered shorter
   until it fits, live events over the object's stream (each event, the watch released when the client
   leaves, `404` and `503` before any stream), `401` before any call; commands listed from the index object and

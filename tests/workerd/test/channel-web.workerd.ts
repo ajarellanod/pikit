@@ -24,8 +24,8 @@
  *   password (the sign-up's own never works).
  * - Projects, through a double of the project store in both Apps (projects-sql's halves are built
  *   apart): a chat made in one admitted in the project's space (as conversations-kv records it: a
- *   `/rules` fixture in the objects' App says the space it runs in), the same for every chat of it, none
- *   for a chat of no project; a command typed runs in the conversation's object, once by request id; a
+ *   `/rules` fixture in the objects' App says the space it runs in), the same for every chat of it, the
+ *   user's personal space (`web:<user>`) for a chat of no project; a command typed runs in the conversation's object, once by request id; a
  *   non-member's every route `404` until added, then every member's chats read, and posting refused
  *   (`403`) once removed; a project with chats is not removed (`409`); the former projects carried over
  *   by the accounts actor with their spaces, its table gone.
@@ -564,7 +564,7 @@ it("titles: a web conversation is named by its first message in both apps, then 
   );
 });
 
-it("projects: through the project store (a double in both Apps: the Worker's routes, the accounts actor's migration); a chat made in one is in the project's space (the registry's record), the same for each of its chats, none without; a command typed runs in its object once; a non-member gets 404 everywhere until added, then reads every member's chats and posts in their own until removed (403); one with chats is not removed; the former projects carried over by the accounts actor with their spaces", async () => {
+it("projects: through the project store (a double in both Apps: the Worker's routes, the accounts actor's migration); a chat made in one is in the project's space (the registry's record), the same for each of its chats, the user's personal space without; a command typed runs in its object once; a non-member gets 404 everywhere until added, then reads every member's chats and posts in their own until removed (403); one with chats is not removed; the former projects carried over by the accounts actor with their spaces", async () => {
   // `/rules` says where it ran: the space conversations-kv recorded for the key, and who typed it.
   const rules = defineComponent({
     name: "rules-fixture",
@@ -613,7 +613,7 @@ it("projects: through the project store (a double in both Apps: the Worker's rou
   expect(await answered(ivy, second.id, 2)).toEqual(["user: hello (answered)", "assistant: faux: hello"]);
   expect((await noteOf(await ivy.send(`/chat/api/conversations/${second.id}/messages`, { json: { text: "/rules b" } }))).text).toBe(`b space=project:${work} sender=${me}`);
   expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules c", project: home } }))).text).toBe(`c space=project:${home} sender=${me}`);
-  expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules d" } }))).text).toBe(`d space=none sender=${me}`);
+  expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules d" } }))).text).toBe(`d space=web:${me} sender=${me}`);
   // The old project's chat is in its former space.
   expect((await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules e", project: old } }))).text).toBe(`e space=web:${me}:project:${old} sender=${me}`);
 

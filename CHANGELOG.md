@@ -33,6 +33,16 @@ line names its area.
 
 ### Components
 
+- channel-web and admin-api: a personal space. A web chat made in no project is in its user's space,
+  `web:<user>` (`personalSpace`), and a conversation an operator starts in the dashboard is in theirs,
+  `dashboard:operator:<id>` (`operatorSpace`): memory and saved files kept there reach every later
+  chat of that person, as a project's reach its chats. Before, each such chat was its own space, so a
+  fact `remember`ed in one was gone in the next. Only conversations made from now on: a space is
+  recorded with the key's first resolve, for good. memory-recall's `remember` tells the model the
+  space is not everywhere.
+- admin-api on Cloudflare: an operator's message reaches the conversation's object with its operator
+  (`admin-api.message` and `admin-api.start` carry `operator`), so the run's sender is
+  `{ channel: "dashboard", id }` there too, as on a server; it was dropped at the call.
 - projects-sql: `POST /admin/api/projects` (`{ space?, name, description?, owner, agents? }`, behind
   `admin.auth`): an operator makes a project, adopting an existing space (a Google Chat space's key) or
   a new one; a space that has one is `409` `space_taken` with that project's `id`. The dashboard's

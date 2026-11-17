@@ -8,7 +8,9 @@ pi-ai messages and `agent.observe`'s live state), cut to what the operator lets 
 tools, the Context panel); the operator may let them pick an assistant, and they search their
 conversations by title. With a project store (`projects`) they work in projects shared with other
 users: each project's page has its context (instructions, documents), files, memory, members, chats and
-History, and its chats share what the App keeps for the project's space ([features/projects.md](https://github.com/ajarellanod/pikit/blob/main/features/projects.md)). They
+History, and its chats share what the App keeps for the project's space ([features/projects.md](https://github.com/ajarellanod/pikit/blob/main/features/projects.md)). A
+chat made in no project is in its user's personal space (`web:<user>`): their chats of no project
+share its memory and saved files, and no one else's do. They
 type the commands the operator lets them (`/rules`, `/prefs`). The operator invites, bans and removes them from the dashboard. The operator's
 dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
 
@@ -531,7 +533,7 @@ under an https `PIKIT_PUBLIC_URL`).
   `email.send` in the default App only: the config says so, a magic link signs a new user in, a
   password sign-up verifies first, an invitation is emailed; a model's title (faux/echo) the same in
   the chat and the dashboard (admin-api's titler never trying), and a rename the dashboard's too. Projects: a chat made in one is in the project's space as conversations-kv records it (a
-  `/rules` fixture says the space it runs in), the same for each chat of it, none without; a command
+  `/rules` fixture says the space it runs in), the same for each chat of it, the user's personal space without; a command
   typed runs in its object once; a non-member's every route `404` until added, then every member's
   chats read and posting refused once removed; `409` while it has chats; the former projects carried
   over by the accounts actor with their spaces (a double of the project store in both Apps:

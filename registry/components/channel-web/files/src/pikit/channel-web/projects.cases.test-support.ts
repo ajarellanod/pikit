@@ -652,7 +652,7 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
     for (const method of ["PATCH", "DELETE", "PUT"]) expect((await call(c, "ana", method, `/projects/${work.id}/history/project/1`)).status).toBe(404);
   });
 
-  test("A CHAT IN A PROJECT: made by a member in the project's space (every chat of it the same), with an agent the project allows (its first when none is picked; another 400); not in an archived project (403); a non-member's attempt makes nothing (404)", async () => {
+  test("A CHAT IN A PROJECT: made by a member in the project's space (every chat of it the same; one of no project in its user's personal space), with an agent the project allows (its first when none is picked; another 400); not in an archived project (403); a non-member's attempt makes nothing (404)", async () => {
     const c = await chat();
     const work = await make(c, "ana", "Work");
     await join(c, "ana", work, "ben");
@@ -663,7 +663,8 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
     expect(c.runtime.pointers.get(keyOf("ben", b.id))).toMatchObject({ space, agent: "helper" });
     expect(c.runtime.dispatched.find((each) => each.requestId === a.requestId)?.conversation.space).toBe(space);
     const none = await start(c, "ana", "outside");
-    expect(c.runtime.pointers.get(keyOf("ana", none.id))?.space).toBeUndefined();
+    // Outside every project: the user's personal space.
+    expect(c.runtime.pointers.get(keyOf("ana", none.id))?.space).toBe("web:ana");
 
     await ok(c, "ana", "PATCH", `/projects/${work.id}`, { agents: ["helper"] });
     const picked = await start(c, "ana", "three", { project: work.id });
