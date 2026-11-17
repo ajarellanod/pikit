@@ -59,9 +59,9 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `workspace` | single | execution-boat, execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
 | `memory` | single | memory-sql | memory-recall, memory-summaries, projects-context?, projects-sql? | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
-| `projects` | single | projects-sql | projects-context | `createProjectsConformance`, with `changeLogCases` |
+| `projects` | single | projects-sql | projects-context, memory-recall? | `createProjectsConformance`, with `changeLogCases` |
 | `space.files` | single | none | projects-context? | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
-| `principals` | single | none | none | none (no kit provider: neural-agents' people directory) |
+| `principals` | single | none | memory-recall? | none (no kit provider: neural-agents' people directory) |
 | `document.convert` | single | convert-workers-ai | none | none (one provider: convert-workers-ai's tests against a fake binding) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
@@ -1258,25 +1258,37 @@ interface MemoryStore {
 }
 ```
 
-Authors, the change log, `replace`, `restore`, `redact` and `purge` are the contract
-([features/projects.md](../features/projects.md)); memory-sql does not build them yet (it keeps no
-`by`, and the new methods refuse), and its suite runs `changeLogCases` once it does.
+Authors, the change log, `replace`, `restore`, `redact` and `purge` ([features/projects.md](../features/projects.md)):
+every write names its `Author` (checked on arrival with `parseAuthor`, kept on the memory as `by`, with
+`updatedAt`); every change that changes something appends one entry to the owner's log in the same
+transaction (a repeat none); `restore(n)` puts back exactly the state before `n` (the original author
+included) as a `restored` entry of its own; `replace` is one change (one restore brings the old words
+back); `redact` is an operator's only (`forbidden` otherwise), `gone` past 365 days or redacted;
+`purge(owner)` for a removed project's space. `search`'s filter reaches rules too (default facts and
+summaries).
 
 Per owner: a space's memory is shared by every agent working there, an agent kept apart has its own
 across its spaces, a person has their preferences. A space or an agent keeps facts, summaries and
-rules; a person keeps preferences; rules and preferences are `pending` until a person approves them.
+rules; a person keeps preferences; a rule or preference is `active` or `pending` (an agent's proposal
+waiting for a person), the caller's choice: memory-recall keeps nothing pending in a project's space.
 `remember` idempotent by id (a proposal never demotes an active rule); a text with a known
 credential's shape (`credentialSettingProblem`), an empty one or one over 4000 characters refused,
 keeping nothing and never echoed; search over facts and summaries never a syntax error, whatever the
 query; committed before each call resolves. Provider: memory-sql (`storage.sql` of one actor per
 owner, `memory:space:<space>`, `memory:agent:<agent>`, `memory:person:<channel>:<id>`, reached
 through `actor.mailbox`; on Cloudflare the owner's Durable Object), whose config `agentScope` names
-the agents kept apart. Users: memory-recall (the `memory` extension: a stable section with the active
-rules, the run's people's preferences, facts and summaries; `remember`, `forget`, `recall`,
-`read_memory`, `propose_rule`, `propose_preference`; the commands `/rules` and `/prefs`),
-memory-summaries (a structured summary of each quiet conversation into its owner, from the answers
-feed; both targets). Suite: `createMemoryConformance`, on memory-sql over mailbox-local's double and
-over storage-do and actors-do in the workerd lane. One provider: `experimental`.
+the agents kept apart; its Worker half (`memory-sql-worker`) gives `memory` in the Worker's App
+through `actor.mailbox` only. Users: memory-recall (the `memory` extension: a stable section with the
+active rules, the run's people's preferences, facts and summaries; `remember`, `forget`, `recall`,
+`read_memory`, `propose_rule`, `propose_preference`; in a project's space, with optional `projects`,
+`project_note` and `project_rule`, active at once, through `offerTools`, and no section; the commands
+`/rules`, a project's members' in its space, and `/prefs`), memory-summaries (a structured summary of
+each quiet conversation into its owner, from the answers feed, by `{ kind: "component" }`; both
+targets), projects-context and channel-web (planned: `project_search`, the Memory and History tabs),
+each with an identical copy of `contract.ts` (memory-sql's `contract-copies.test.ts`). Suite:
+`createMemoryConformance` (with `changeLogCases` over rules), on memory-sql over mailbox-local's double,
+through its Worker half, and over storage-do and actors-do in the workerd lane (from an object's App
+and from the Worker's). One provider: `experimental`.
 
 ### `scheduler` (declared by scheduler-sql, [contract.ts](../registry/components/scheduler-sql/files/src/pikit/scheduler-sql/contract.ts))
 

@@ -9,12 +9,28 @@
 import { expect, test } from "bun:test";
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import { createManualClock } from "@pikit/core/testing";
-import { CONVERSATION, type ConversationRef, RUN_REQUESTS, type Sender, spaceOf } from "@pikit/contracts";
+import { CONVERSATION, type ConversationRef, type Principal, type Principals, type ProjectStore, RUN_REQUESTS, type Sender, samePrincipal, spaceOf } from "@pikit/contracts";
 import type {} from "@pikit/pi-adapter";
 import type { Memory, MemoryOwner, MemoryStore, NewMemory } from "./contract.ts";
-import memoryRecall, { createMemoryRecall, itemId, MEMORY, memoryText, peopleOf, prefsCommand, rulesCommand, summaryLine } from "./index.ts";
+import memoryRecall, {
+  createMemoryRecall,
+  createProjectsView,
+  IN_PROJECT,
+  itemId,
+  MEMORY,
+  memoryText,
+  OUTSIDE_PROJECT,
+  offeredTools,
+  PLAIN_TOOLS,
+  PROJECT_TOOLS,
+  peopleOf,
+  prefsCommand,
+  type ProjectsView,
+  rulesCommand,
+  summaryLine,
+} from "./index.ts";
 
-const CONFIG = { limit: 30, summaries: 3, rules: 50, preferences: 20, machineChannels: ["delegate", "scheduler"] };
+const CONFIG = { limit: 30, summaries: 3, rules: 50, preferences: 20, machineChannels: ["delegate", "scheduler"], freshMs: 5_000, noProjectMs: 60_000 };
 const keyOf = (owner: MemoryOwner) => JSON.stringify(owner);
 
 /** A fake `memory`, as memory-sql keeps it: per owner, idempotent by id; `agentScope` kept apart. */
@@ -68,9 +84,9 @@ const runContext = (conversation: ConversationRef, senders: readonly (Sender | u
 const BY = { kind: "operator", id: "test" } as const;
 const item = (kind: Memory["kind"], id: string, text: string, status: Memory["status"] = "active", createdAt = 1): NewMemory => ({ id, kind, status, text, createdAt, by: BY });
 
-/** The extension over `store`, its tools by name, and how to call one in a run. */
-function extensionOver(store: MemoryStore) {
-  const extension = createMemoryRecall(CONFIG, () => store, () => ctx);
+/** The extension over `store` (`projects`: which spaces have a project), its tools by name, and how to call one in a run. */
+function extensionOver(store: MemoryStore, projects?: ProjectsView) {
+  const extension = createMemoryRecall(CONFIG, () => store, () => ctx, projects);
   const tool = (name: string) => extension.tools?.find((each) => each.name === name);
   let calls = 0;
   const call = async (name: string, args: unknown, context: Context) => {
@@ -89,13 +105,13 @@ test("what setup declares: component.json's provides / requires / optional come 
     name: "memory-recall",
     provides: ["agent.extension", "agent.command"],
     requires: ["memory"],
-    optional: [],
+    optional: ["projects", "principals"],
   });
   expect(app.describe().capabilities["agent.extension"]?.keys).toEqual({ memory: "memory-recall" });
   expect(app.describe().capabilities["agent.command"]?.keys).toEqual({ rules: "memory-recall", prefs: "memory-recall" });
 });
 
-test("it provides one extension named like its key, with its section and six tools, every one safe to replay", () => {
+test("it provides one extension named like its key, with its section and eight tools (two families), every one safe to replay", () => {
   const { extension } = extensionOver(fakeMemory().store);
 
   expect(extension.name).toBe(MEMORY);
@@ -107,6 +123,8 @@ test("it provides one extension named like its key, with its section and six too
     ["read_memory", "safe"],
     ["propose_rule", "safe"],
     ["propose_preference", "safe"],
+    ["project_note", "safe"],
+    ["project_rule", "safe"],
   ]);
 });
 
@@ -305,4 +323,189 @@ test("/prefs: the sender's own preferences, in every space; refused without a se
   expect(await prefs.run(thread(), `remove ${short}`, ctx, ana)).toEqual({ text: `Removed (id ${short}).` });
   expect(all({ type: "person", ...ana }).map((m) => [m.text, m.status])).toEqual([["Formal tone", "active"]]);
   expect(all({ type: "person", ...bob })).toEqual([]);
+});
+
+// In a project's space (features/projects.md, "Memory in a project").
+
+const PROJECT_SPACE = "googlechat:spaces/P";
+const projectThread = (agent = "assistant", key = `${PROJECT_SPACE}:threads/T1`): ConversationRef => ({ key, agent, conversationId: "c1", space: PROJECT_SPACE });
+const carla: Sender = { channel: "web", id: "u-carla" };
+
+/**
+ * A fake `projects`: the spaces that have a project, each with its members (principals), counting the
+ * questions; and a fake `principals` linking Carla's web account to her Google Chat identity.
+ */
+function fakeProjects(members: Record<string, Principal[]> = { [PROJECT_SPACE]: [ana, { channel: "googlechat", id: "users/carla" }] }) {
+  const asked = { get: 0, roleOf: 0 };
+  const store = {
+    get: async (space: string) => {
+      asked.get++;
+      return members[space] === undefined ? undefined : { id: "p", space };
+    },
+    roleOf: async (space: string, principals: readonly Principal[]) => {
+      asked.roleOf++;
+      return members[space]?.some((member) => principals.some((principal) => samePrincipal(principal, member))) ? "member" : undefined;
+    },
+  } as unknown as ProjectStore;
+  const directory: Principals = {
+    of: async (principal) => (samePrincipal(principal, carla) ? [principal, { channel: "googlechat", id: "users/carla" }] : [principal]),
+    find: async () => [],
+  };
+  return { store, directory, asked, members };
+}
+const viewOf = (fake = fakeProjects(), withPrincipals = true) => createProjectsView(() => fake.store, () => (withPrincipals ? fake.directory : undefined), CONFIG);
+
+test("the tools offered: the project family in a project's space, today's elsewhere and without projects", async () => {
+  const view = viewOf();
+  expect(PLAIN_TOOLS).toEqual(["remember", "forget", "recall", "read_memory", "propose_rule", "propose_preference"]);
+  expect(await offeredTools(view, projectThread(), ctx)).toEqual(["project_note", "project_rule", "propose_preference"]);
+  // A delegated conversation is in its origin's space, and so in its project.
+  expect(await offeredTools(view, { key: "delegate:c1:1", agent: "researcher", conversationId: "c7", origin: projectThread() }, ctx)).toEqual([...PROJECT_TOOLS]);
+  expect(await offeredTools(view, thread(), ctx)).toEqual([...PLAIN_TOOLS]);
+  expect(await offeredTools(createProjectsView(() => undefined, () => undefined, CONFIG), projectThread(), ctx)).toEqual([...PLAIN_TOOLS]);
+});
+
+test("whether a space has a project is asked as memory-recall, remembered freshMs (none noProjectMs), never past it", async () => {
+  const clock = createManualClock(0);
+  const appCtx = (await defineApp({ components: [], logger: silentLogger, clock }).create()).context();
+  const fake = fakeProjects();
+  let caller: unknown;
+  const get = fake.store.get.bind(fake.store);
+  (fake.store as { get: ProjectStore["get"] }).get = async (space, who, c) => ((caller = who), get(space, who, c));
+  const view = viewOf(fake);
+  expect(await view.has(PROJECT_SPACE, appCtx)).toBe(true);
+  expect(caller).toEqual({ kind: "component", name: "memory-recall" });
+  expect(await view.has(PROJECT_SPACE, appCtx)).toBe(true);
+  expect(fake.asked.get).toBe(1);
+  await clock.advance(5_000);
+  expect(await view.has(PROJECT_SPACE, appCtx)).toBe(true);
+  expect(fake.asked.get).toBe(2);
+  // A space with none, adopted meanwhile: seen within noProjectMs.
+  expect(await view.has(SPACE, appCtx)).toBe(false);
+  fake.members[SPACE] = [ana];
+  await clock.advance(59_999);
+  expect(await view.has(SPACE, appCtx)).toBe(false);
+  await clock.advance(1);
+  expect(await view.has(SPACE, appCtx)).toBe(true);
+  // A failing store is not an answer: asked again next time.
+  (fake.store as { get: ProjectStore["get"] }).get = async () => {
+    throw new Error("projects unreachable");
+  };
+  await expect(view.has("googlechat:spaces/Z", appCtx)).rejects.toThrow("projects unreachable");
+});
+
+test("in a project's space: project_note and project_rule keep active memories in the space's, by the agent for the person, each result ending with Added to the project", async () => {
+  const { store, all } = fakeMemory(["trader"]);
+  const { call } = extensionOver(store, viewOf());
+  const space: MemoryOwner = { type: "space", space: PROJECT_SPACE };
+  const by = { kind: "agent", agent: "trader", conversation: `${PROJECT_SPACE}:threads/T1`, for: ana } as const;
+
+  // An agent memory-sql keeps apart writes in the space's memory too: in a project everything is shared.
+  expect(await call("project_note", { note: "Juan prefers calls on Tuesdays" }, runContext(projectThread("trader"), [ana]))).toBe(
+    "Kept as a note of the project (note:c1:call_1).\nAdded to the project: Juan prefers calls on Tuesdays",
+  );
+  const rule = await itemId("rule", "Target CPA 18 EUR");
+  expect(await call("project_rule", { rule: "Target  CPA 18 EUR" }, runContext(projectThread("trader"), [ana]))).toBe(
+    `Added as a rule of the project, active at once for every agent and chat in it (rule:${rule}).\nAdded to the project: Target CPA 18 EUR`,
+  );
+  expect(all(space)).toEqual([
+    { id: "c1:call_1", kind: "fact", status: "active", text: "Juan prefers calls on Tuesdays", createdAt: 0, by },
+    { id: rule, kind: "rule", status: "active", text: "Target CPA 18 EUR", createdAt: 0, by },
+  ]);
+  expect(all({ type: "agent", agent: "trader" })).toEqual([]);
+  // The same words again: by the same agent in the same chat (a replay) the same answer; by another, already a rule.
+  expect(await call("project_rule", { rule: "target cpa 18 eur" }, runContext(projectThread("trader"), [ana]))).toEndWith("Added to the project: target cpa 18 eur");
+  expect(await call("project_rule", { rule: "Target CPA 18 EUR" }, runContext(projectThread("assistant"), [bob]))).toBe(`That is a rule of the project already (rule:${rule}).`);
+  expect(all(space)).toHaveLength(2);
+  // Words proposed before the space was a project, added now by an agent as a project's rule: active, by it.
+  const metric = await itemId("rule", "Use metric units");
+  await store.remember(space, item("rule", metric, "Use metric units", "pending"), ctx);
+  expect(await call("project_rule", { rule: "Use metric units" }, runContext(projectThread(), [ana]))).toEndWith("Added to the project: Use metric units");
+  expect(all(space).find((m) => m.id === metric)?.status).toBe("active");
+});
+
+test("in a project's space today's tools refuse with a pointer and keep nothing; outside, the project's tools refuse with theirs", async () => {
+  const { store, all } = fakeMemory();
+  const space: MemoryOwner = { type: "space", space: PROJECT_SPACE };
+  await store.remember(space, item("fact", "f", "Acme's budget is 10k"), ctx);
+  const { call } = extensionOver(store, viewOf());
+  for (const [tool, args] of [
+    ["remember", { fact: "x" }],
+    ["forget", { id: "f" }],
+    ["recall", { query: "acme" }],
+    ["read_memory", { id: "f" }],
+    ["propose_rule", { rule: "Answer in Spanish" }],
+  ] as const) {
+    await expect(call(tool, args, runContext(projectThread(), [ana]))).rejects.toThrow(IN_PROJECT[tool]);
+  }
+  expect(all(space).map((m) => m.id)).toEqual(["f"]);
+  for (const [tool, args] of [
+    ["project_note", { note: "x" }],
+    ["project_rule", { rule: "Answer in Spanish" }],
+  ] as const) {
+    await expect(call(tool, args, runContext(thread(), [ana]))).rejects.toThrow(OUTSIDE_PROJECT[tool]);
+  }
+  expect(all({ type: "space", space: SPACE })).toEqual([]);
+  // Without projects installed, the project's tools refuse everywhere.
+  await expect(extensionOver(store).call("project_note", { note: "x" }, runContext(projectThread(), [ana]))).rejects.toThrow(OUTSIDE_PROJECT.project_note);
+  // propose_preference is a person's own, in every space.
+  expect(await call("propose_preference", { preference: "Short answers" }, runContext(projectThread(), [ana]))).toStartWith("Proposed for googlechat:users/ana");
+});
+
+test("in a project's space the section renders nothing (the project's section shows the memory); elsewhere as today", async () => {
+  const { store } = fakeMemory();
+  await store.remember({ type: "space", space: PROJECT_SPACE }, item("rule", "r-1", "Answer in Spanish"), ctx);
+  await store.remember({ type: "space", space: SPACE }, item("rule", "r-2", "Answer in English"), ctx);
+  const { render } = extensionOver(store, viewOf());
+  expect(await render(runContext(projectThread(), [ana]))).toBeUndefined();
+  expect(await render(runContext(thread(), [ana]))).toContain("- Answer in English (id r-2)");
+});
+
+test("/rules in a project's space: its members only (by any of their identities), the operator too; added active; pending ones from before stay pending until a member acts", async () => {
+  const { store, all } = fakeMemory(["trader"]);
+  const fake = fakeProjects();
+  const rules = rulesCommand(() => store, viewOf(fake));
+  const space: MemoryOwner = { type: "space", space: PROJECT_SPACE };
+  const before = await itemId("rule", "Use metric units");
+  // Proposed by an agent before the space was a project.
+  await store.remember(space, item("rule", before, "Use metric units", "pending"), ctx);
+
+  // Bob is no member: refused, nothing read or kept.
+  await expect(rules.run(projectThread(), "", ctx, bob)).rejects.toThrow("only its members manage its rules");
+  await expect(rules.run(projectThread(), "add Answer in Spanish", ctx, bob)).rejects.toThrow("only its members manage its rules");
+  await expect(rules.run(projectThread(), `approve ${before}`, ctx, bob)).rejects.toThrow("only its members");
+  expect(all(space).map((m) => [m.id, m.status])).toEqual([[before, "pending"]]);
+
+  // Ana is a member: added active, in the space's memory even for an agent kept apart, by her in this chat.
+  const spanish = await itemId("rule", "Answer in Spanish");
+  expect(await rules.run(projectThread("trader"), "add Answer in Spanish", ctx, ana)).toEqual({ text: `Added (id ${spanish}).` });
+  expect(all(space).find((m) => m.id === spanish)).toEqual({
+    id: spanish,
+    kind: "rule",
+    status: "active",
+    text: "Answer in Spanish",
+    createdAt: 0,
+    by: { kind: "person", principal: ana, conversation: `${PROJECT_SPACE}:threads/T1` },
+  });
+  expect(all({ type: "agent", agent: "trader" })).toEqual([]);
+  expect((await rules.run(projectThread(), "", ctx, ana))?.text).toBe(
+    [
+      "Rules of this project:",
+      `- Answer in Spanish (id ${spanish})`,
+      "Proposed before this space was a project, waiting (/rules approve <id> or /rules reject <id>):",
+      `- Use metric units (id ${before})`,
+    ].join("\n"),
+  );
+  // Carla, a member by her Google Chat identity, types it from the web: principals links them.
+  expect(await rules.run(projectThread(), `approve ${before}`, ctx, carla)).toEqual({ text: `Approved (id ${before}).` });
+  // Without principals her web account alone is no member.
+  await expect(rulesCommand(() => store, viewOf(fake, false)).run(projectThread(), "", ctx, carla)).rejects.toThrow("only its members");
+  // The operator, in the dashboard (no sender).
+  expect(await rules.run(projectThread(), `remove ${spanish}`, ctx)).toEqual({ text: `Removed (id ${spanish}).` });
+  expect(all(space).map((m) => [m.id, m.status])).toEqual([[before, "active"]]);
+  // Membership is asked each time, never remembered: a member removed is refused at once.
+  fake.members[PROJECT_SPACE] = [];
+  await expect(rules.run(projectThread(), "", ctx, ana)).rejects.toThrow("only its members");
+  // Outside projects, anyone the channel lets type it, as today.
+  expect(await rules.run(thread(), "add Answer in Spanish", ctx, bob)).toEqual({ text: `Added (id ${spanish}).` });
 });

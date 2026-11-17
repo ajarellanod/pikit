@@ -22,13 +22,37 @@
  *   and refuses without one. Each is harmless to repeat: adding a text twice keeps one.
  * - **Who is a person**: a sender whose channel is not one of `machineChannels` (a delegating agent's
  *   `delegate`, a scheduled job's `scheduler`).
+ * - **In a project's space** (features/projects.md, "Memory in a project"; with `projects` installed, a
+ *   space whose `projects.get(space, { kind: "component", name: "memory-recall" })` answers a project,
+ *   remembered `freshMs`, "none" `noProjectMs`): the model is offered `project_note` (a fact, active,
+ *   in the space's memory even for an agent memory-sql keeps apart), `project_rule` (a rule of the
+ *   space, active at once) and `propose_preference`, each adding tool's result ending with
+ *   `addedToProject(title)`; no section (projects-context's `<project>` shows the memory); `remember`,
+ *   `forget`, `recall`, `read_memory` and `propose_rule` are not offered (`offerTools`) and refuse with a
+ *   pointer if called. `/rules` there is the project's members' only (`projects.roleOf` of the sender's
+ *   principals, `principals.of` when given), the operator's in the dashboard, and adds rules active;
+ *   rules proposed before the space had a project stay pending until a member adds or rejects them.
+ *   Elsewhere (and without `projects`) everything is as above, and `project_note` and `project_rule` are
+ *   not offered (they refuse with a pointer if called). Authors are set here, from `CONVERSATION`,
+ *   `RUN_REQUESTS` and the command's sender, never from the model.
  *
  * Targets: `server` and `durable`: it imports nothing platform-specific.
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineComponent } from "@pikit/core";
-import { type AgentCommand, type Author, CONVERSATION, type ConversationRef, RUN_REQUESTS, type Sender } from "@pikit/contracts";
-import { defineExtension, defineTool, type Extension, section } from "@pikit/pi-adapter/extensions";
+import {
+  type AgentCommand,
+  addedToProject,
+  type Author,
+  CONVERSATION,
+  type ConversationRef,
+  type Principals,
+  type ProjectStore,
+  RUN_REQUESTS,
+  type Sender,
+  spaceOf,
+} from "@pikit/contracts";
+import { defineExtension, defineTool, type Extension, offerTools, section } from "@pikit/pi-adapter/extensions";
 import Type, { type Static } from "typebox";
 import type { Memory, MemoryKind, MemoryOwner, MemoryStore } from "./contract.ts";
 
@@ -52,6 +76,10 @@ const Config = Type.Object({
   preferences: Type.Integer({ minimum: 1, maximum: 200, default: 20 }),
   /** The channels whose senders are not people: their runs have no preferences and propose none. */
   machineChannels: Type.Array(Type.String({ minLength: 1 }), { default: ["delegate", "scheduler"] }),
+  /** How long a space's project (with `projects` installed) is remembered before it is asked again, in ms. */
+  freshMs: Type.Integer({ minimum: 0, maximum: 600_000, default: 5_000 }),
+  /** How long a space with no project is remembered as such, in ms. */
+  noProjectMs: Type.Integer({ minimum: 0, maximum: 3_600_000, default: 60_000 }),
 });
 
 export type MemoryRecallConfig = Static<typeof Config>;
@@ -118,8 +146,75 @@ export function peopleOf(senders: readonly (Sender | undefined)[], machineChanne
   return [...seen.values()];
 }
 
-/** The extension over `memory`; `within` puts a run's context under the App's. */
-export function createMemoryRecall(config: MemoryRecallConfig, memory: () => MemoryStore, within: (context: Context) => AppContext): Extension {
+/** The tools offered outside projects (today's), and in a project's space. */
+export const PLAIN_TOOLS = ["remember", "forget", "recall", "read_memory", "propose_rule", "propose_preference"] as const;
+export const PROJECT_TOOLS = ["project_note", "project_rule", "propose_preference"] as const;
+
+/** Where each of today's tools points to in a project's space: its refusal's words. */
+export const IN_PROJECT: Readonly<Record<string, string>> = {
+  remember: "This space is a project: keep notes with project_note.",
+  forget: "This space is a project: its people remove notes and rules on the project's page; agents remove nothing of a project.",
+  recall: "This space is a project: find its notes, rules and summaries with project_search.",
+  read_memory: "This space is a project: read any of its items with project_read.",
+  propose_rule: "This space is a project: add rules with project_rule (active at once for everyone in it).",
+};
+/** Where each project tool points to outside projects. */
+export const OUTSIDE_PROJECT: Readonly<Record<string, string>> = {
+  project_note: "This space has no project: keep notes with remember.",
+  project_rule: "This space has no project: propose rules with propose_rule (a person approves them).",
+};
+
+/** What memory-recall asks of projects: whether a space has one, and whether a sender is one of its members. */
+export interface ProjectsView {
+  has(space: string, ctx: AppContext): Promise<boolean>;
+  isMember(space: string, sender: Sender, ctx: AppContext): Promise<boolean>;
+}
+
+/** No projects installed: no space has one. */
+export const NO_PROJECTS: ProjectsView = { has: async () => false, isMember: async () => false };
+
+/** The most spaces whose answer is remembered at once. */
+const REMEMBERED_SPACES = 1_000;
+
+/**
+ * `projects` as memory-recall sees it (both optional: `undefined` when not installed). Whether a space
+ * has a project is asked as a component (`projects.get(space, { kind: "component", name })`) and
+ * remembered `freshMs` (a space with none `noProjectMs`): a cache, never a decision kept. Membership
+ * is never remembered: `roleOf` of the sender's principals (`principals.of`, else the sender alone).
+ */
+export function createProjectsView(projects: () => ProjectStore | undefined, principals: () => Principals | undefined, config: Pick<MemoryRecallConfig, "freshMs" | "noProjectMs">): ProjectsView {
+  const known = new Map<string, { project: boolean; until: number }>();
+  return {
+    async has(space, ctx) {
+      const store = projects();
+      if (store === undefined) return false;
+      const now = ctx.clock.now();
+      const kept = known.get(space);
+      if (kept !== undefined && kept.until > now) return kept.project;
+      const project = (await store.get(space, { kind: "component", name: "memory-recall" }, ctx)) !== undefined;
+      known.delete(space);
+      if (known.size >= REMEMBERED_SPACES) known.delete(known.keys().next().value as string);
+      known.set(space, { project, until: now + (project ? config.freshMs : config.noProjectMs) });
+      return project;
+    },
+    async isMember(space, sender, ctx) {
+      const store = projects();
+      if (store === undefined) return false;
+      const principal = { channel: sender.channel, id: sender.id };
+      const directory = principals();
+      const identities = directory === undefined ? [principal] : await directory.of(principal, ctx);
+      return (await store.roleOf(space, identities.length === 0 ? [principal] : identities, ctx)) !== undefined;
+    },
+  };
+}
+
+/** The tools `conversation`'s model is offered: the project family in a project's space, today's elsewhere. */
+export async function offeredTools(view: ProjectsView, conversation: ConversationRef, ctx: AppContext): Promise<string[]> {
+  return [...((await view.has(spaceOf(conversation), ctx)) ? PROJECT_TOOLS : PLAIN_TOOLS)];
+}
+
+/** The extension over `memory`; `within` puts a run's context under the App's; `projects` says which spaces have a project. */
+export function createMemoryRecall(config: MemoryRecallConfig, memory: () => MemoryStore, within: (context: Context) => AppContext, projects: ProjectsView = NO_PROJECTS): Extension {
   /** The conversation's owner and App context in a tool call or a section. */
   const scopeOf = (context: Context) => {
     const conversation = context.value(CONVERSATION);
@@ -136,6 +231,24 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     const person = (await people(context)).at(-1);
     return { kind: "agent", agent: conversation.agent, conversation: conversation.key, ...(person !== undefined && { for: person }) };
   };
+  /** Whether the conversation's space has a project. */
+  const inProject = async (context: Context): Promise<boolean> => {
+    const conversation = context.value(CONVERSATION);
+    if (conversation === undefined) throw new Error("memory: not in a conversation");
+    return projects.has(spaceOf(conversation), within(context));
+  };
+  /** Refuses `tool` in a project's space (a second line: it is not offered there), with its pointer. */
+  const outsideProjects = async (tool: string, context: Context) => {
+    if (await inProject(context)) throw new Error(IN_PROJECT[tool]);
+  };
+  /** The space's memory, for a tool of the project family: refused outside projects, with its pointer. */
+  const projectScope = async (tool: string, context: Context) => {
+    const conversation = context.value(CONVERSATION);
+    if (conversation === undefined) throw new Error("memory: not in a conversation");
+    if (!(await inProject(context))) throw new Error(OUTSIDE_PROJECT[tool]);
+    // In a project everything is shared: the space's memory, also for an agent memory-sql keeps apart.
+    return { owner: { type: "space", space: spaceOf(conversation) } as MemoryOwner, ctx: within(context) };
+  };
 
   const remember = defineTool({
     name: "remember",
@@ -146,6 +259,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     // Safe to run again after a crash: the write is idempotent by the call's id.
     replay: "safe",
     async execute(args, api, context) {
+      await outsideProjects("remember", context);
       const { owner, ctx } = scopeOf(context);
       const id = `${api.conversationId}:${api.callId}`;
       await memory().remember(owner, { id, kind: "fact", status: "active", text: args.fact, createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
@@ -160,6 +274,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     // Deleting twice is deleting once.
     replay: "safe",
     async execute(args, _api, context) {
+      await outsideProjects("forget", context);
       const { owner, ctx } = scopeOf(context);
       const removed = await memory().forget(owner, args.id, { kinds: ["fact", "summary"] }, await agentAuthor(context), ctx);
       return text(removed ? `Forgotten (id ${args.id}).` : `Nothing kept under id ${args.id}.`);
@@ -175,6 +290,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     // Read-only.
     replay: "safe",
     async execute(args, _api, context) {
+      await outsideProjects("recall", context);
       const { owner, ctx } = scopeOf(context);
       const found = await memory().search(owner, args.query, RECALL_LIMIT, ctx);
       return text(found.length === 0 ? "Nothing kept matches." : found.map((m) => `- [${m.kind}] ${oneLine(m.snippet)} (id ${m.id})`).join("\n"));
@@ -188,6 +304,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     // Read-only.
     replay: "safe",
     async execute(args, _api, context) {
+      await outsideProjects("read_memory", context);
       const { owner, ctx } = scopeOf(context);
       const found = await memory().get(owner, args.id, ctx);
       if (found === undefined) return text(`Nothing kept under id ${args.id}.`);
@@ -204,6 +321,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     // Idempotent by the rule's text: proposing it again keeps one, and never demotes an active rule.
     replay: "safe",
     async execute(args, _api, context) {
+      await outsideProjects("propose_rule", context);
       const { owner, ctx } = scopeOf(context);
       const id = await itemId("rule", args.rule);
       await memory().remember(owner, { id, kind: "rule", status: "pending", text: normalized(args.rule), createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
@@ -234,13 +352,53 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     },
   });
 
-  return defineExtension({
+  const projectNote = defineTool({
+    name: "project_note",
+    description:
+      "Keeps one short, lasting note in this project (a client's detail, a decision, what something is about), seen at once by every member and agent of it. " +
+      "A note, not an instruction: to change how agents behave here, add a rule. Never a password, key, code or other secret.",
+    parameters: Type.Object({ note: Type.String({ minLength: 1, maxLength: ITEM_MAX }) }),
+    // Safe to run again after a crash: the write is idempotent by the call's id.
+    replay: "safe",
+    async execute(args, api, context) {
+      const { owner, ctx } = await projectScope("project_note", context);
+      const id = `${api.conversationId}:${api.callId}`;
+      await memory().remember(owner, { id, kind: "fact", status: "active", text: args.note, createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
+      return text(`Kept as a note of the project (note:${id}).\n${addedToProject(args.note)}`);
+    },
+  });
+
+  const projectRule = defineTool({
+    name: "project_rule",
+    description:
+      "Adds a rule for how every agent behaves in this project (a convention, a standing instruction someone gave), active at once for everyone in it, " +
+      "listed with you as its author and this chat as its source; its people see and undo it. The project's instructions come first.",
+    parameters: Type.Object({ rule: Type.String({ minLength: 1, maxLength: ITEM_MAX }) }),
+    // Idempotent by the rule's words: adding it again keeps one.
+    replay: "safe",
+    async execute(args, _api, context) {
+      const { owner, ctx } = await projectScope("project_rule", context);
+      const by = await agentAuthor(context);
+      const id = await itemId("rule", args.rule);
+      const words = normalized(args.rule);
+      const before = await memory().get(owner, id, ctx);
+      if (before?.status === "active" && JSON.stringify(before.by) !== JSON.stringify(by)) return text(`That is a rule of the project already (rule:${id}).`);
+      await memory().remember(owner, { id, kind: "rule", status: "active", text: words, createdAt: ctx.clock.now(), by }, ctx);
+      // The same words proposed before the space was a project: added now, by this agent, so active.
+      await memory().approve(owner, id, "rule", by, ctx);
+      return text(`Added as a rule of the project, active at once for every agent and chat in it (rule:${id}).\n${addedToProject(words)}`);
+    },
+  });
+
+  const extension = defineExtension({
     name: MEMORY,
-    tools: [remember, forget, recall, readMemory, proposeRule, proposePreference],
+    tools: [remember, forget, recall, readMemory, proposeRule, proposePreference, projectNote, projectRule],
     sections: [
       section(MEMORY, async (_input, context) => {
         // Rendered in the conversation's scope: its ref, origin and space included.
         if (context.value(CONVERSATION) === undefined) return undefined;
+        // In a project's space the project's section (projects-context's) shows the memory.
+        if (await inProject(context)) return undefined;
         const { owner, ctx } = scopeOf(context);
         const store = memory();
         const [rules, facts, summaries, preferences] = await Promise.all([
@@ -255,6 +413,8 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
       }),
     ],
   });
+  // One family per space: the runtime offers the model only these at each admission.
+  return offerTools(extension, (conversation, ctx) => offeredTools(projects, conversation, ctx));
 }
 
 /** What `/rules` and `/prefs` manage: a space's (or agent's) rules, or the sender's preferences. */
@@ -267,8 +427,8 @@ interface Managed {
   title(owner: MemoryOwner): string;
 }
 
-/** One of the commands, over `memory`. */
-export function createMemoryCommand(managed: Managed, memory: () => MemoryStore): AgentCommand {
+/** One of the commands, over `memory`; `/rules` in a project's space is its members' (`projects`). */
+export function createMemoryCommand(managed: Managed, memory: () => MemoryStore, projects: ProjectsView = NO_PROJECTS): AgentCommand {
   const { kind, command } = managed;
   const usage = `/${command}, /${command} add <text>, /${command} approve <id>, /${command} reject <id> or /${command} remove <id>`;
   return {
@@ -277,7 +437,14 @@ export function createMemoryCommand(managed: Managed, memory: () => MemoryStore)
     // A chat's users type it: it acts only on their space's rules or their own preferences.
     audience: "user",
     async run(conversation, args, ctx, sender) {
-      const owner = managed.owner(conversation, sender);
+      // A project's rules are the space's, for its members only (the dashboard's operator too); every
+      // rule added there is active. Preferences are a person's in every space.
+      const space = spaceOf(conversation);
+      const project = kind === "rule" && (await projects.has(space, ctx));
+      if (project && sender !== undefined && !(await projects.isMember(space, sender, ctx))) {
+        throw new Error("This space is a project: only its members manage its rules. Ask a member to add you.");
+      }
+      const owner: MemoryOwner = project ? { type: "space", space } : managed.owner(conversation, sender);
       const store = memory();
       // Who typed it: a channel's sender, in this chat; or the operator's dashboard.
       const by: Author = sender === undefined ? { kind: "operator", id: "dashboard" } : { kind: "person", principal: { channel: sender.channel, id: sender.id }, conversation: conversation.key };
@@ -291,8 +458,11 @@ export function createMemoryCommand(managed: Managed, memory: () => MemoryStore)
           const active = items.filter((m) => m.status === "active");
           const pending = items.filter((m) => m.status === "pending");
           if (items.length === 0) return { text: `No ${kind}s yet: /${command} add <${kind}> adds one.` };
-          const parts = [`${managed.title(owner)}:`, ...(active.length === 0 ? ["(none active)"] : active.map(line))];
-          if (pending.length > 0) parts.push(`Proposed, waiting (/${command} approve <id> or /${command} reject <id>):`, ...pending.map(line));
+          const parts = [`${project ? "Rules of this project" : managed.title(owner)}:`, ...(active.length === 0 ? ["(none active)"] : active.map(line))];
+          if (pending.length > 0) {
+            const waiting = project ? "Proposed before this space was a project, waiting" : "Proposed, waiting";
+            parts.push(`${waiting} (/${command} approve <id> or /${command} reject <id>):`, ...pending.map(line));
+          }
           return { text: parts.join("\n") };
         }
         case "add": {
@@ -318,8 +488,8 @@ export function createMemoryCommand(managed: Managed, memory: () => MemoryStore)
   };
 }
 
-/** `/rules`: the rules of the conversation's space, or of its agent when memory-sql keeps it apart. */
-export const rulesCommand = (memory: () => MemoryStore): AgentCommand =>
+/** `/rules`: the rules of the conversation's space, or of its agent when memory-sql keeps it apart; a project's members' in a project's space. */
+export const rulesCommand = (memory: () => MemoryStore, projects: ProjectsView = NO_PROJECTS): AgentCommand =>
   createMemoryCommand(
     {
       kind: "rule",
@@ -328,6 +498,7 @@ export const rulesCommand = (memory: () => MemoryStore): AgentCommand =>
       title: (owner) => (owner.type === "agent" ? `Rules of the agent ${owner.agent}` : "Rules of this space"),
     },
     memory,
+    projects,
   );
 
 /** `/prefs`: the preferences of whoever typed it; refused without a sender (the dashboard). */
@@ -350,6 +521,9 @@ export default defineComponent({
   config: Config,
   setup(pikit, config) {
     const memory = pikit.use("memory");
+    const projects = pikit.useOptional("projects");
+    const principals = pikit.useOptional("principals");
+    const view = createProjectsView(() => projects.get(), () => principals.get(), config);
     let app: AppContext | undefined;
     /** The App's context with the run's values and cancellation: what `memory`'s methods take. */
     const within = (context: Context): AppContext => {
@@ -357,8 +531,8 @@ export default defineComponent({
       return app.derive(() => context);
     };
 
-    pikit.provideKeyed("agent.extension", MEMORY, createMemoryRecall(config, () => memory.get(), within));
-    pikit.provideKeyed("agent.command", "rules", rulesCommand(() => memory.get()));
+    pikit.provideKeyed("agent.extension", MEMORY, createMemoryRecall(config, () => memory.get(), within, view));
+    pikit.provideKeyed("agent.command", "rules", rulesCommand(() => memory.get(), view));
     pikit.provideKeyed("agent.command", "prefs", prefsCommand(() => memory.get()));
 
     return {

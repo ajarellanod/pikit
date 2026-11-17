@@ -335,7 +335,7 @@
     },
     "memory-recall": {
       "version": "0.0.1",
-      "description": "The memory extension for the agents that name it: a stable section with the space's rules, facts and summaries and the preferences of the people a run answers; the tools remember, forget, recall, read_memory, propose_rule and propose_preference; the commands /rules and /prefs, over memory.",
+      "description": "The memory extension for the agents that name it: a stable section with the space's rules, facts and summaries and the preferences of the people a run answers; the tools remember, forget, recall, read_memory, propose_rule and propose_preference; in a project's space (with projects) project_note and project_rule, active at once, and no section; the commands /rules and /prefs (a project's members' in its space), over memory.",
       "targets": [
         "server",
         "durable"
@@ -344,7 +344,7 @@
     },
     "memory-sql": {
       "version": "0.0.1",
-      "description": "What the agents of each space remember (facts, summaries, rules), and what each person prefers: one actor per owner (a space, an agent kept apart, a person), its storage.sql, full-text search. Declares and provides memory.",
+      "description": "What the agents of each space remember (facts, summaries, rules), and what each person prefers, with who kept each and a change log per owner (restore, redact, purge): one actor per owner (a space, an agent kept apart, a person), its storage.sql, full-text search. Declares and provides memory, in the Worker's App too.",
       "targets": [
         "server",
         "durable"

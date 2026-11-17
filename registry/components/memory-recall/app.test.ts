@@ -16,7 +16,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AppContext, type AppEvents, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDefinition, type AgentRuntime, type CommandLookup, type ConversationRef, defineAgent, runAgentCommand, type Sender } from "@pikit/contracts";
+import {
+  type AgentDefinition,
+  type AgentRuntime,
+  type CommandLookup,
+  type ConversationRef,
+  defineAgent,
+  type Principal,
+  type ProjectStore,
+  runAgentCommand,
+  type Sender,
+  samePrincipal,
+} from "@pikit/contracts";
 import { type ModelRequest, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import mailboxLocal from "../mailbox-local/files/src/pikit/mailbox-local/index.ts";
 import memorySql from "../memory-sql/files/src/pikit/memory-sql/index.ts";
@@ -25,6 +36,8 @@ import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import memoryRecall, { itemId } from "./files/src/pikit/memory-recall/index.ts";
 
 const cleanup: (() => void | Promise<void>)[] = [];
+/** Request ids, unique across the Apps of a test (a restart keeps a conversation's earlier requests). */
+let n = 0;
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
@@ -50,7 +63,7 @@ function databaseFile(): string {
 }
 
 /** An App over the SQLite file at `path` (trader kept apart); `ask` sends a message (from `sender`) in a conversation and waits for its answer. */
-async function start(path: string, model: ComponentDefinition = providerFaux) {
+async function start(path: string, model: ComponentDefinition = providerFaux, extra: ComponentDefinition[] = []) {
   const results: (AppEvents["agent.settled"] | AppEvents["agent.failed"])[] = [];
   let reached: { runtime: AgentRuntime; create: () => Promise<string>; commands: CommandLookup; ctx: AppContext } | undefined;
   const observer = defineComponent({
@@ -64,11 +77,10 @@ async function start(path: string, model: ComponentDefinition = providerFaux) {
       return { start: (ctx) => void (reached = { runtime: runtime.get(), create: () => conversations.get().create(ctx), commands, ctx }) };
     },
   });
-  const components = [sqliteStorage(path), mailboxLocal, memorySql, memoryRecall, agentsComponent(agents), model, runtimePi, observer];
+  const components = [sqliteStorage(path), mailboxLocal, memorySql, memoryRecall, agentsComponent(agents), model, runtimePi, observer, ...extra];
   const app = await defineApp({ components, logger: silentLogger, config: { "memory-sql": { agentScope: ["trader"] } } }).create();
   await app.start();
   cleanup.push(() => app.stop());
-  let n = 0;
   const live = () => reached ?? (() => { throw new Error("the observer has not started"); })();
   return {
     stop: () => app.stop(),
@@ -214,4 +226,69 @@ test("the section is sent once while the memory does not change", async () => {
   const carrying = requests.at(-1)?.messages.filter((message) => message.role === "system" && message.sections?.memory != null) ?? [];
   expect(carrying).toHaveLength(1);
   expect(carrying[0]?.role === "system" && carrying[0].sections?.memory).toContain("- Ana prefers tea (id ");
+});
+
+/** A fake `projects`: `SPACE_P` has a project whose members are `members` (what memory-recall asks: `get`, `roleOf`). */
+function projectsComponent(members: Principal[]) {
+  const store = {
+    get: async (space: string) => (space === SPACE_P ? { id: "p", space } : undefined),
+    roleOf: async (space: string, principals: readonly Principal[]) =>
+      space === SPACE_P && members.some((member) => principals.some((principal) => samePrincipal(member, principal))) ? "member" : undefined,
+  } as unknown as ProjectStore;
+  return defineComponent({ name: "projects-test", setup: (pikit) => pikit.provide("projects", store) });
+}
+const SPACE_P = "googlechat:spaces/P";
+
+test("in a project's space the model is offered the project family only, its rule is active at once with its source, and the memory section is not shown; elsewhere as today", async () => {
+  const s = await start(databaseFile(), providerFaux, [projectsComponent([ana])]);
+  const inProject = await s.conversation(`${SPACE_P}:threads/1`, "trader", SPACE_P);
+  const outside = await s.conversation(`${SPACE_A}:threads/1`, "assistant", SPACE_A);
+
+  expect(await s.ask(inProject, "echo-tools")).toBe("project_note, project_rule, propose_preference");
+  expect(await s.ask(outside, "echo-tools")).toBe("forget, propose_preference, propose_rule, read_memory, recall, remember");
+
+  const rule = await itemId("rule", "Target CPA 18 EUR");
+  expect(await s.ask(inProject, 'call: project_rule {"rule":"Target CPA 18 EUR"}')).toBe(
+    `project_rule: Added as a rule of the project, active at once for every agent and chat in it (rule:${rule}).\nAdded to the project: Target CPA 18 EUR`,
+  );
+  expect(await s.ask(inProject, 'call: project_note {"note":"Juan prefers calls on Tuesdays"}')).toMatch(/\nAdded to the project: Juan prefers calls on Tuesdays$/);
+  // Today's tools are not offered: called by name, refused without running.
+  expect(await s.ask(inProject, 'call: remember {"fact":"Acme budget is 10k"}')).toMatch(/^remember failed: [\s\S]*Tool remember is not available/);
+  expect(await s.ask(inProject, "echo-system memory")).toBe("(no section memory)");
+  // The rule is the space's, active, with its source: the agent (kept apart by memory-sql, yet writing the
+  // project's), the thread, and the person it answered.
+  expect(await s.command(inProject, "rules", "", ana)).toEqual({ kind: "ran", text: `Rules of this project:\n- Target CPA 18 EUR (id ${rule})` });
+  // Bob is no member of the project: refused.
+  expect(await s.command(inProject, "rules", "add Answer in Spanish", bob)).toMatchObject({ kind: "failed", message: expect.stringContaining("only its members") });
+
+  // Outside the project, as today: a proposed rule waits; the project's tools are not offered.
+  expect(await s.ask(outside, 'call: propose_rule {"rule":"Answer in Spanish"}')).toStartWith("propose_rule: Proposed (id ");
+  expect(await s.ask(outside, 'call: project_note {"note":"x"}')).toMatch(/^project_note failed: [\s\S]*Tool project_note is not available/);
+  expect(await s.ask(outside, "echo-system memory")).toBe("(no section memory)");
+});
+
+test("a space adopted as a project: its conversation's next message gets the project family; its earlier proposals stay pending until a member acts", async () => {
+  let adopted = false;
+  const store = {
+    get: async (space: string) => (adopted && space === SPACE_A ? { id: "p", space } : undefined),
+    roleOf: async (space: string, principals: readonly Principal[]) => (adopted && space === SPACE_A && principals.some((p) => samePrincipal(p, ana)) ? "member" : undefined),
+  } as unknown as ProjectStore;
+  const projects = () => defineComponent({ name: "projects-test", setup: (pikit) => pikit.provide("projects", store) });
+  const path = databaseFile();
+  const first = await start(path, providerFaux, [projects()]);
+  const thread = await first.conversation(`${SPACE_A}:threads/1`, "assistant", SPACE_A);
+  const metric = await itemId("rule", "Use metric units");
+  expect(await first.ask(thread, 'call: propose_rule {"rule":"Use metric units"}')).toStartWith("propose_rule: Proposed (id ");
+  await first.stop();
+
+  // Adopted (memory-recall remembers "no project" for noProjectMs, a minute: here a restart asks again).
+  adopted = true;
+  const second = await start(path, providerFaux, [projects()]);
+  expect(await second.ask(thread, "echo-tools")).toBe("project_note, project_rule, propose_preference");
+  expect(await second.command(thread, "rules", "", ana)).toEqual({
+    kind: "ran",
+    text: `Rules of this project:\n(none active)\nProposed before this space was a project, waiting (/rules approve <id> or /rules reject <id>):\n- Use metric units (id ${metric})`,
+  });
+  expect(await second.command(thread, "rules", `approve ${metric}`, ana)).toEqual({ kind: "ran", text: `Approved (id ${metric}).` });
+  expect(await second.command(thread, "rules", "", ana)).toEqual({ kind: "ran", text: `Rules of this project:\n- Use metric units (id ${metric})` });
 });

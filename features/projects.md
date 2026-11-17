@@ -366,8 +366,10 @@ projects-context asks for active rules too), `changes(owner, page, ctx)` (its lo
 ctx)` (operators only) and `purge(owner, ctx)` (a removed project's space). The store stays
 policy-free: whether a rule is kept `active` or `pending` is the caller's choice (rule 4). A Worker half
 gives `memory` in the Worker's App for channel-web's Memory tab. Facts stay active at once, and so do
-rules in a project's space (decision 5). The contract is written and memory-recall and memory-summaries
-already name their authors; memory-sql refuses the new methods (and keeps no `by`) until it is built.
+rules in a project's space (decision 5). Built: memory-sql keeps authors and the log (its suite runs
+`changeLogCases` over rules, on a server, through its Worker half and in workerd), memory-recall the
+project's policy (`project_note`, `project_rule`, members' `/rules`, `offerTools`), memory-summaries
+names itself as author.
 
 ### `document.convert` (`src/document-convert.ts`, optional for its users)
 

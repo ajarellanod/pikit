@@ -327,12 +327,23 @@ The model of the App tests is provider-faux's `faux/scripted` (`call: <tool> <js
    whose model calls `remember` (the fact lands in the space's object, another thread's section carries
    it), and memory-summaries summarizing a quiet thread from its object's alarm into the space's object.
 
+## Authors, the change log and projects
+
+Built for [projects](projects.md) (its section "Memory in a project"): every write names its author
+(`Author` of `@pikit/contracts`), and memory-sql keeps it on the memory (`by`, `updatedAt`) and keeps an
+append-only change log per owner, written in the same transaction as the change, with exact `restore`,
+`replace` (new words as one change), an operator's `redact`, retention (365 days) and `purge`;
+`search` takes a filter (rules too). memory-recall, in a space that has a project (optional
+`projects`), offers `project_note` and `project_rule` (active at once) instead of today's tools
+(`offerTools`), renders no section, and keeps `/rules` for the project's members; elsewhere nothing
+here changed. memory-sql's README and memory-recall's say how, and what proves it.
+
 ## Later
 - **A dashboard view**: admin routes (`http.route` `GET /admin/api/memory/*`, asking `admin.auth`)
   that use `memory`, and a view (a shadcn registry item that `pikit add` puts in `src/dashboard/`,
   SPEC §5): list a space's memory and rules, approve and forget. On Cloudflare routes run in the
-  Worker's App, which has no `storage.sql`: give memory-sql a Worker half (`apps.worker` in its
-  `component.json`) that provides `memory` through `actor.mailbox` only. Listing every space needs an
+  Worker's App, which has no `storage.sql`: memory-sql's Worker half (`memory-sql-worker`, built for
+  [projects](projects.md)) provides `memory` there through `actor.mailbox` only. Listing every space needs an
   index of owners (as the [conversation index](cloudflare-conversation-index.md) does for
   conversations).
 - **Facts without being asked**: a hook. `hook(GenerationTask, { onYield })` can nudge the model
