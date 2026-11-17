@@ -8,7 +8,7 @@ pi-ai messages and `agent.observe`'s live state), cut to what the operator lets 
 tools, the Context panel); the operator may let them pick an assistant, and they search their
 conversations by title. With a project store (`projects`) they work in projects shared with other
 users: each project's page has its context (instructions, documents), files, memory, members, chats and
-History, and its chats share what the App keeps for the project's space (features/projects.md). They
+History, and its chats share what the App keeps for the project's space ([features/projects.md](https://github.com/ajarellanod/pikit/blob/main/features/projects.md)). They
 type the commands the operator lets them (`/rules`, `/prefs`). The operator invites, bans and removes them from the dashboard. The operator's
 dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
 
