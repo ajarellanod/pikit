@@ -355,7 +355,8 @@ Everything the agent does with it (the section, the tools, a nudge) is a Pi exte
 
 ## Open questions
 - Who may manage a space's rules: today any sender the channel lets type `/rules`; an owner's or an
-  admin's approval (with [pairing](pairing.md)'s roles) may be wanted.
+  admin's approval (with [pairing](pairing.md)'s roles) may be wanted. [Projects](projects.md)
+  proposes an editor of the space's project, where it has one.
 - Which senders are people: memory-recall's `machineChannels` lists the kit's machine channels
   (`delegate`, `scheduler`); a marker on `Sender` (a kind, set by its producer) would say it in the
   contract instead.
