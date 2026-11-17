@@ -246,6 +246,7 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     name: "remember",
     description:
       "Keeps one short, lasting fact (a person's name, a client's detail, what a project is about), for every later conversation in this space. " +
+      "The space is the place this conversation belongs to (a group chat, or a person's own chats), never every conversation everywhere: say so when you keep one. " +
       "A fact, not an instruction: to change how you behave, propose a rule. Never a password, key, code or other secret.",
     parameters: Type.Object({ fact: Type.String({ minLength: 1, maxLength: ITEM_MAX }) }),
     // Safe to run again after a crash: the write is idempotent by the call's id.

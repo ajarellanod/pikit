@@ -26,8 +26,9 @@
  *
  * **A project** is the project store's (`projects`, `project-routes.ts`): the routes check who may make
  * a conversation in one and give its space (`FirstMessage.space`, `Project.space`), with which the
- * conversation is admitted, recorded with the key's first resolve, for good; one of no project gives
- * none (it is its own space). The index lists a project's conversations, every member's, and counts them
+ * conversation is admitted, recorded with the key's first resolve, for good; one of no project is in
+ * its user's personal space (`personalSpace`: their memory and saved files, shared by their chats of no
+ * project). The index lists a project's conversations, every member's, and counts them
  * (`createIndex`); it carries over the projects this channel kept itself before (`migrateProjects`).
  *
  * **A command** typed in a chat (`LocalContracts.commands`, `commandOf`) claims its request id before it
@@ -69,7 +70,7 @@ import {
   MAX_FILE_BYTES,
   MAX_FILES,
 } from "./api.ts";
-import { base64Bytes, CHANNEL, filesBytesOf, filesProblem, firstTitle, imagesProblem, projectSpace } from "./chat.ts";
+import { base64Bytes, CHANNEL, filesBytesOf, filesProblem, firstTitle, imagesProblem, personalSpace, projectSpace } from "./chat.ts";
 import { userEntryOf } from "./entries.ts";
 import { liveEvents } from "./live.ts";
 import type { ChatStore, ConversationRow, EntryRow, ListQuery, MessageState } from "./store.ts";
@@ -288,8 +289,8 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
   };
 
   /**
-   * `message` through the inbound path into `ref`'s conversation (in `space`, its project's, when it is
-   * one: recorded with the key's first resolve); stored once admitted. `create` makes the conversation's row
+   * `message` through the inbound path into `ref`'s conversation (in `space`, its project's or its
+   * user's own: recorded with the key's first resolve); stored once admitted. `create` makes the conversation's row
    * then (its first message's title). A command typed (`commands`) runs instead, once by its request id
    * (`ranCommand`).
    */
@@ -454,8 +455,8 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
       // A retry of the same first message (its chat id is the request id's): the same conversation, in its project.
       if (row !== undefined && (row.hidden || row.userId !== ref.userId)) throw refusal("not_found", NOT_FOUND);
       const project = row?.project ?? picked ?? "";
-      // The project's space, as the route found it: recorded with the key's first resolve, for good.
-      const space = project !== "" && project === picked ? given : undefined;
+      // The project's space, as the route found it, or the user's own for a chat of no project: recorded with the key's first resolve, for good.
+      const space = project === "" ? personalSpace(ref.userId) : project === picked ? given : undefined;
       // Made with the agent picked: admitInbound's resolve then finds it, whatever the router names.
       if (row === undefined && agent !== undefined) {
         await contracts.conversations().resolve(ref.key, agent, { channel: CHANNEL, ...(space !== undefined && { space }) }, ctx);

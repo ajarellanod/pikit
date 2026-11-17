@@ -307,7 +307,7 @@ test("one conversation and its transcript from its object; an unknown or malform
   expect(await down.json()).toMatchObject({ error: "unavailable" });
 });
 
-test("actions reach the object of the key, with its own id; its refusals cross the call; a reset answers qualified ids", async () => {
+test("actions reach the object of the key, with its own id and the operator as the message's sender; its refusals cross the call; a reset answers qualified ids", async () => {
   const { platform, worker: w } = await cloud();
   const runtime = await chat(platform, "telegram:1", true);
 
@@ -320,6 +320,8 @@ test("actions reach the object of the key, with its own id; its refusals cross t
       conversation: { key: "telegram:1", agent: "assistant", conversationId: "2" },
       prompt: `${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it.]\nstop and summarise`,
       whenBusy: "followUp",
+      // The operator crosses the call: the run's sender, as on a server.
+      sender: { channel: "dashboard", id: "ops" },
     },
   ]);
   expect(w.logged.find((each) => each.message.includes("sent a message"))?.fields).toMatchObject({ operator: "ops", conversation: "telegram:1" });
@@ -348,7 +350,18 @@ test("actions reach the object of the key, with its own id; its refusals cross t
   expect(runtime.dispatched.map((each) => each.conversation)).toEqual([{ key: "telegram:1", agent: "assistant", conversationId: "100" }]);
 });
 
-test("a conversation of the dashboard's own on the Worker: one call to the object of its new key, listed first at once", async () => {
+test("an object's message call with an operator that is not a non-empty string is refused (invalid_request), nothing dispatched", async () => {
+  const platform = new Platform();
+  platforms.push(platform);
+  const runtime = await chat(platform, "telegram:1");
+  const { ctx } = await platform.object("telegram:1");
+  for (const operator of ["", 7, null]) {
+    await expect(platform.mailbox.call("telegram:1", "admin-api.message", { conversationId: "1", text: "hi", requestId: "dashboard:x", operator }, ctx)).rejects.toMatchObject({ code: "invalid_request" });
+  }
+  expect(runtime.dispatched).toEqual([]);
+});
+
+test("a conversation of the dashboard's own on the Worker: one call to the object of its new key (in its operator's space, the operator its sender), listed first at once", async () => {
   const { platform, worker: w } = await cloud();
   await chat(platform, "telegram:1");
   await platform.active("telegram:1", 100);
@@ -363,7 +376,14 @@ test("a conversation of the dashboard's own on the Worker: one call to the objec
   expect(platform.calls).toEqual([`${body.key} admin-api.start`]);
   const { runtime } = await platform.object(body.key);
   expect(runtime.dispatched).toEqual([
-    { requestId: body.requestId, conversation: { key: body.key, agent: "assistant", channel: "dashboard", conversationId: "100" }, prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`, whenBusy: "followUp" },
+    {
+      requestId: body.requestId,
+      // In the operator's space, and from the operator: both cross the call to the object.
+      conversation: { key: body.key, agent: "assistant", channel: "dashboard", space: "dashboard:operator:ops", conversationId: "100" },
+      prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`,
+      whenBusy: "followUp",
+      sender: { channel: "dashboard", id: "ops" },
+    },
   ]);
   // Told to the index when the message was dispatched, before any run.
   expect((await platform.listed())[0]).toBe(body.conversationId);

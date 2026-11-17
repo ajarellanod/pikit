@@ -42,8 +42,8 @@ document is a fact); the rest is deleted after a while (retention, below).
   and restarts, as the channel; the runtime records it with the conversation (`ConversationDoc`), so a
   run sees it (`CONVERSATION`, `PrepareContext`) whatever ref reached it. A conversation never changes
   space. An empty space is refused.
-- `spaceOf(ref)`: the origin's space, else the origin's key. A channel that gives no space (a private
-  chat, the HTTP API) changes nothing: each conversation is its own space, as before. A delegated task
+- `spaceOf(ref)`: the origin's space, else the origin's key. A channel that gives no space (a Telegram
+  private chat, the HTTP API) changes nothing: each conversation is its own space, as before. A delegated task
   is in its origin's space, never in one of its own.
 - It is not where an answer goes (the key is) and not an access boundary by itself: who may write in a
   space is the channel's and the router's.
@@ -56,7 +56,10 @@ document is a fact); the rest is deleted after a while (retention, below).
   so a chat switching modes keeps one space.
 - **channel-web**: a chat created in a project is in the project's space (`Project.space`, from the
   project store: [projects](projects.md)), shared by the project's members; a chat with no project is
-  its own. A chat's project is fixed when it is made.
+  in its user's personal space, `web:<user>` (their memory and saved files, across all their chats of
+  no project). A chat's project is fixed when it is made.
+- **admin-api**: a conversation the dashboard starts is in its operator's space,
+  `dashboard:operator:<id>`, shared by every conversation that operator starts there.
 - **Telegram**: both channels answer private chats only, each its own space, so they give none.
 
 ## What uses it

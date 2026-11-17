@@ -62,11 +62,21 @@ export const newProjectId = (): string => crypto.randomUUID().replace(/-/g, "");
 /**
  * The space (`ConversationRef.space`) of `userId`'s project `projectId`: what its conversations share
  * (memory, instructions, files). Opaque to everyone else; its project id is not a chat id, so
- * `parseKey` never takes it for a key. A conversation of no project gives none: it is its own space.
+ * `parseKey` never takes it for a key. A conversation of no project is in its user's (`personalSpace`).
  */
 export function projectSpace(userId: string, projectId: string): string {
   if (userId === "" || !isProjectId(projectId)) throw new Error(`channel-web: no space for user "${userId}" and project "${projectId}"`);
   return `${KEY_PREFIX}${userId}:project:${projectId}`;
+}
+
+/**
+ * The space of `userId`'s chats made in no project: their personal memory and saved files, shared by all
+ * of them and by no one else. Not a key (`parseKey` finds no chat id in it) nor a project's space
+ * (`projectOfSpace` answers none).
+ */
+export function personalSpace(userId: string): string {
+  if (userId === "") throw new Error("channel-web: no personal space for an empty user");
+  return `${KEY_PREFIX}${userId}`;
 }
 
 /** The project of `userId` that `space` names (as `conversations.registry` recorded it), or `""` (none). */

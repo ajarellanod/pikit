@@ -347,7 +347,7 @@ test("POST …/messages: the client's request id is kept, and must be the dashbo
   expect(s.runtime.dispatched.length).toBe(1);
 });
 
-test("POST /admin/api/conversations: a conversation of the dashboard's own (dashboard:<uuid>), with an agent of the App and its first message", async () => {
+test("POST /admin/api/conversations: a conversation of the dashboard's own (dashboard:<uuid>), in its operator's space (dashboard:operator:<id>), with an agent of the App and its first message", async () => {
   const s = await started();
 
   const response = await s.fetch("/admin/api/conversations", post({ agent: "assistant", text: "what changed today?" }));
@@ -356,12 +356,12 @@ test("POST /admin/api/conversations: a conversation of the dashboard's own (dash
   expect(response.status).toBe(201);
   expect(body.key).toMatch(/^dashboard:[0-9a-f-]{36}$/);
   expect(body).toMatchObject({ conversationId: "c100", admission: "started", requestId: expect.stringMatching(/^dashboard:/) });
-  // The dashboard's conversation belongs to its channel, `dashboard`.
-  expect(s.runtime.pointers.get(body.key)).toEqual({ key: body.key, agent: "assistant", channel: "dashboard", conversationId: "c100" });
+  // The dashboard's conversation belongs to its channel, `dashboard`, and to its operator's space.
+  expect(s.runtime.pointers.get(body.key)).toEqual({ key: body.key, agent: "assistant", channel: "dashboard", space: "dashboard:operator:ops", conversationId: "c100" });
   expect(s.runtime.dispatched).toEqual([
     {
       requestId: body.requestId,
-      conversation: { key: body.key, agent: "assistant", channel: "dashboard", conversationId: "c100" },
+      conversation: { key: body.key, agent: "assistant", channel: "dashboard", space: "dashboard:operator:ops", conversationId: "c100" },
       prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`,
       whenBusy: "followUp",
       sender: { channel: "dashboard", id: "ops" },

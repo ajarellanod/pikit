@@ -24,7 +24,7 @@ import {
   TITLE_MAX,
 } from "./api.ts";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
-import { chatIdFor, cleanTitle, keyOf, parseKey } from "./chat.ts";
+import { chatIdFor, cleanTitle, keyOf, parseKey, projectOfSpace } from "./chat.ts";
 import { runEntryId } from "./entries.ts";
 import channelWeb, { createChannelWeb, NAME, usersPagePath } from "./index.ts";
 import { avatarHosts, cspOf } from "./assets.ts";
@@ -207,7 +207,7 @@ test("a conversation: started with its first message through admitInbound (the u
   expect(c.runtime.dispatched).toEqual([
     {
       requestId: started.requestId,
-      conversation: { key, agent: "assistant", channel: "web", conversationId: "c1" },
+      conversation: { key, agent: "assistant", channel: "web", space: "web:ana", conversationId: "c1" },
       prompt: "  What is   the plan\nfor today?",
       images: [{ mimeType: "image/png", data: PIXEL }],
       sender: { channel: "web", id: "ana" },
@@ -839,7 +839,7 @@ test("stop: the run of the key's current conversation is aborted", async () => {
   const { id } = await start(c, "ana", "hello");
   const aborted = await c.served.fetch(`${API}/conversations/${id}/abort`, post("ana", {}));
   expect(await aborted.json()).toEqual({ id });
-  expect(c.runtime.aborted).toEqual([{ key: `web:ana:${id}`, agent: "assistant", channel: "web", conversationId: "c1" }]);
+  expect(c.runtime.aborted).toEqual([{ key: `web:ana:${id}`, agent: "assistant", channel: "web", space: "web:ana", conversationId: "c1" }]);
   expect(c.served.logged.find((each) => each.message.includes("stopped a run"))?.fields).toEqual({ user: "ana", chat: id });
 });
 
@@ -1253,6 +1253,31 @@ test("COMMANDS: those for users (rules and prefs here) are listed by default in 
   }
   expect(c.runtime.dispatched.slice(dispatched).map((each) => each.prompt)).toEqual(["/name Mine now", "/unknown thing", "rules /rules"]);
   expect(commands.typed().map((each) => each.name)).toEqual(["rules", "rules", "prefs"]);
+});
+
+test("SPACES: a chat of no project is in its user's personal space (web:<user>), the same for every chat of theirs, never another user's; a project's chat is in the project's", async () => {
+  const commands = commandsOf();
+  const c = await chat({ components: [commands.component, projectStore()] });
+  const work = await project(c, "ana", "Work");
+  const first = await start(c, "ana", "hello");
+  const second = await start(c, "ana", "again");
+  const bens = await start(c, "ben", "hi");
+  const inProject = await start(c, "ana", "in work", { project: work.id });
+
+  // Recorded with the key's first resolve, and carried by every message dispatched into it.
+  const spaceOf = (user: string, id: string) => c.runtime.pointers.get(keyOf(user, id))?.space;
+  expect([spaceOf("ana", first.id), spaceOf("ana", second.id), spaceOf("ben", bens.id), spaceOf("ana", inProject.id)]).toEqual(["web:ana", "web:ana", "web:ben", `project:${work.id}`]);
+  expect(c.runtime.dispatched.map((each) => each.conversation.space)).toEqual(["web:ana", "web:ana", "web:ben", `project:${work.id}`]);
+  expect(parseKey("web:ana")).toBeUndefined();
+  expect(projectOfSpace("ana", "web:ana")).toBe("");
+
+  // A command runs there too, also in a chat it makes.
+  await c.served.fetch(`${API}/conversations/${first.id}/messages`, post("ana", { text: "/rules be brief" }));
+  const made = (await (await c.served.fetch(`${API}/conversations`, post("ana", { text: "/prefs" }))).json()) as { id: string };
+  expect(commands.typed().map((each) => [each.key, each.space])).toEqual([
+    [keyOf("ana", first.id), "web:ana"],
+    [keyOf("ana", made.id), "web:ana"],
+  ]);
 });
 
 test("COMMANDS: a first message that is a command makes the chat (empty, New conversation, in its project's space) and runs there; sent again it reaches the same chat and runs not; a routing denial runs nothing (403), and keeps no claim", async () => {

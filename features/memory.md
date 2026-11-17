@@ -19,7 +19,8 @@ below, "Later".
 - **Per space, shared by its agents:** facts the agents keep (`remember`), summaries of earlier
   conversations, and **rules** the space's people set (instructions every agent there follows). A
   space is the place several conversations share (`ConversationRef.space`: a Google Chat space whose
-  threads are each a conversation, a web chat project); a private chat is its own.
+  threads are each a conversation, a web chat project, a web user's chats of no project, an operator's
+  dashboard conversations); a conversation whose channel gives none is its own.
 - **Per person:** **preferences** (how they like answers) that follow them into every space and are
   shown only when they are among the people a run answers.
 - **Per agent, when it is kept apart:** its own facts, summaries and rules across every space it works

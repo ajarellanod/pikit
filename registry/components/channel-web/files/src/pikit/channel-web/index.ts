@@ -29,7 +29,9 @@
  *   members; a conversation made in one is admitted with the project's space (`Project.space`), so what
  *   the App keeps per space (memory, files, the project's record) is shared by its conversations, and
  *   every member reads them. The projects this channel kept itself before are carried over once
- *   (`migrateProjects`, `backend.ts`), then their table goes.
+ *   (`migrateProjects`, `backend.ts`), then their table goes. A conversation made in no project is in
+ *   its user's personal space (`personalSpace`, `web:<user>`): their chats of no project share its
+ *   memory and saved files, as a project's chats share the project's.
  * - **Commands typed in the chat** (`commands`, the config's names of `agent.command`) run in their
  *   conversation through `admitInbound`, never dispatched, at most once by request id.
  * - **What users see** (`visibility`: thinking, tools, context) and **the agents they may pick**

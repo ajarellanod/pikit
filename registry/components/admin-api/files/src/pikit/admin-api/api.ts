@@ -40,6 +40,13 @@ export const DASHBOARD_KEY_PREFIX = "dashboard:";
 /** Whether `key` is one of the dashboard's own conversations. */
 export const isDashboardKey = (key: string | undefined): boolean => key?.startsWith(DASHBOARD_KEY_PREFIX) === true;
 
+/**
+ * The space (`ConversationRef.space`) of the dashboard's own conversations an operator starts:
+ * `dashboard:operator:<id>`, so what the App keeps per space (memory, saved files) is the operator's,
+ * shared by every conversation they start here. Never a key (`dashboard:<uuid>`).
+ */
+export const operatorSpace = (operator: string): string => `${DASHBOARD_KEY_PREFIX}operator:${operator}`;
+
 /** How every message from the dashboard starts, as the agent reads it (`operatorPrompt`). */
 export const OPERATOR_NOTE = "[From the operator, in the pikit dashboard";
 

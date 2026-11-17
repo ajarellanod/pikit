@@ -307,6 +307,29 @@ it("slash commands in real objects: listed from the index object's App, run in t
   }
 });
 
+it("a conversation the dashboard starts is in its operator's space in its object (the operator crosses the call), the same for each one it starts", async () => {
+  const answers: string[] = [];
+  const seen: string[] = [];
+  const places = defineComponent({
+    name: "places-test",
+    setup(pikit) {
+      pikit.on("agent.dispatched", ({ conversation }) => void seen.push(`${conversation.key} ${conversation.space ?? "none"}`));
+    },
+  });
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers), places]);
+  const worker = await workerApp();
+  try {
+    const start = async (text: string) =>
+      (await (await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "scripted", text }) })).json()) as { key: string };
+    const one = await start("first");
+    const two = await start("second");
+    await vi.waitFor(() => expect(answers.length).toBe(2), { timeout: 10_000 });
+    expect(seen).toEqual([`${one.key} dashboard:operator:ops`, `${two.key} dashboard:operator:ops`]);
+  } finally {
+    await worker.stop();
+  }
+});
+
 it("a conversation whose runs fail is listed by its first message from its dispatch, told to the index (searched by it)", async () => {
   const answers: string[] = [];
   composeObjects([storageDo, storageKvSql, actorsDo, ...model("Provider is not configured: anthropic"), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
