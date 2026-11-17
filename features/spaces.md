@@ -103,8 +103,8 @@ section.
 ## Open questions
 - Shared rooms in the web chat (several people in one chat, live): the next step on the same pieces
   (a project with members whose chats are shared). Proposed in [projects](projects.md): a project is
-  the record of one space (members, roles, instructions, documents, files, links), a room made in it is
-  in its space.
+  the record of one space (members who all change it, instructions, documents, files, links, a
+  History), a room made in it is in its space.
 - Who may run which command from a chat beyond the channel's `commands` list ([policy tools](policy-tools.md)).
 - Instructions per space other than its rules (a folder of context per space). Proposed in
   [projects](projects.md): instructions and documents (whole or searched) of the space's project.
