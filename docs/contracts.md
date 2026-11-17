@@ -41,7 +41,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.blob` | single | storage-blob-fs, storage-blob-s3 | execution-cloudflare-sandbox, tool-space-files, execution-boat?, execution-gondolin?, workspace-local? | `createBlobConformance` |
 | `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-mcp-oauth, tool-notify, tool-space-files, provider-failover? | `createMailboxConformance` |
 | `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-mcp-oauth, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, provider-failover?, settings-store? | `createMailboxConformance` |
-| `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
+| `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, scheduler-sql, tool-space-files, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-cloudflare-sandbox, execution-serve, health-registry, repo-github-app, settings-store, tool-mcp-oauth | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, repo-github-app?, settings-store?, tool-mcp-oauth? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-env, secrets-workers | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, execution-boat, execution-cloudflare-sandbox, execution-remote, execution-serve, repo-github-app, repo-github-token, storage-blob-s3, tool-websearch-brave, tool-websearch-gemini, execution-gondolin?, extension-tracing?, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
@@ -59,10 +59,10 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `workspace` | single | execution-boat, execution-gondolin, execution-remote, workspace-local | execution-serve, channel-google-chat?, channel-telegram?, channel-telegram-webhook?, channel-web?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-space-files?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `scheduler` | single | scheduler-sql | scheduler-admit, scheduler-routines, tool-schedule | `createSchedulerConformance` (scheduler-sql's `conformance.ts`; declared by scheduler-sql, below) |
 | `memory` | single | memory-sql | memory-recall, memory-summaries | `createMemoryConformance` (memory-sql's `conformance.ts`; declared by memory-sql, below) |
-| `projects` | single | none | none | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
-| `space.files` | single | none | none | `changeLogCases` in its provider's suite (planned provider: tool-space-files) |
+| `projects` | single | none | tool-space-files? | `createProjectsConformance`, with `changeLogCases` (planned provider: projects-sql) |
+| `space.files` | single | tool-space-files | none | `changeLogCases` in its provider's suite (tool-space-files' `space-files.test.ts`, and the workerd lane) |
 | `principals` | single | none | none | none (no kit provider: neural-agents' people directory) |
-| `document.convert` | single | none | none | none yet (planned provider: convert-workers-ai) |
+| `document.convert` | single | none | tool-space-files? | none yet (planned provider: convert-workers-ai) |
 
 Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web),
@@ -1072,8 +1072,8 @@ Crypto, `AWS_SES_*`). Consumer: channel-web's accounts (being built). Suite:
 The contracts of [projects](../features/projects.md): a project is the record of one space, shared by
 its members and agents, with no approvals and every change logged. They are in `@pikit/contracts`
 (not a registry's own) because several kit components use each of them (channel-web, projects-context,
-memory-recall, tool-space-files, projects-sql). None has a provider yet: projects-sql,
-tool-space-files' `space.files`, convert-workers-ai are being built; `principals` has none in the kit.
+memory-recall, tool-space-files, projects-sql). `space.files` is provided by tool-space-files;
+projects-sql and convert-workers-ai are being built; `principals` has none in the kit.
 
 ### `Author` and `Change` ([change.ts](../packages/contracts/src/change.ts))
 
@@ -1167,8 +1167,14 @@ then the row and its log entry), `versions`, `trash` (30 days, `SPACE_FILES_TRAS
 what agents alone saved, `mayTrash`), `search` and `text` (a file's text when it has one: text types,
 or converted with `document.convert`), `changes`, `restore`, `redact` (operators), `purge` (a removed
 project's space). Trusted code only: the caller decides who may act on a space and sets the author.
-`SpaceFilesError` codes `invalid`, `not_found`, `forbidden`, `limit`, `refused`, `gone`. Planned
-provider: tool-space-files. Users: channel-web, projects-context, projects-sql.
+`SpaceFilesError` codes `invalid`, `not_found`, `forbidden`, `limit`, `refused`, `gone`.
+
+Provider: tool-space-files, on both targets: an index actor per space (`space-files:<space>`: rows,
+text parts in FTS5, the log, the trash's sweep on `wakeups`), the bytes in `storage.blob` written by the
+caller's App before the actor's one transaction; a Worker half (`worker`) gives it in the Worker's
+App, with a `storage.blob` every App reaches (storage-blob-s3 is in both). Its suite runs
+`changeLogCases` twice (people and a component; agents, who trash only what agents saved) and the
+contract's negative cases. Users (being built): channel-web, projects-context, projects-sql.
 
 ### `principals` ([principals.ts](../packages/contracts/src/principals.ts), optional)
 

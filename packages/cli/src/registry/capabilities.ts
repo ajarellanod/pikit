@@ -158,7 +158,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    // Planned provider: tool-space-files (features/projects.md, "Files").
+    // Provider: tool-space-files (features/projects.md, "Files"); its Worker half gives it in the Worker's App.
     summary: "The files a space keeps, people's uploads and agents' saves alike: versions with their authors, a trash, text search, a change log with restore; for trusted code (routes, tools).",
   },
   principals: {

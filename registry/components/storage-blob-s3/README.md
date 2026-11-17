@@ -13,6 +13,11 @@ pikit configure            # S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY
 It runs on both targets: plain `fetch`, each request signed with AWS Signature Version 4 over Web
 Crypto (`sigv4.ts`, checked against AWS's published S3 examples). No AWS SDK, no Node API.
 
+On Cloudflare it goes in both Apps (`apps.worker: "default"`): the Worker's and every Durable
+Object's. So it is a `storage.blob` every App reaches. A component whose Worker half reads or writes the
+bytes its objects index needs that: tool-space-files' upload and download routes, through `space.files`
+in the Worker's App.
+
 ## What it guarantees
 
 Everything the `storage.blob` contract promises (`createBlobConformance` passes):
