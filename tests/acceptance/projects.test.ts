@@ -23,7 +23,8 @@
  * shown in the chat's notices, found by `project_search` (federated over the three stores) and read by
  * `project_read`; History merges the three logs; a member restores a removed note and a document's
  * version exactly; a non-member gets `404` everywhere with nothing read; a removed member's writes
- * stop; outside a project the plain memory and files tools are offered, the project's are not.
+ * stop; the project's quiet chats are summarized into its memory and found by `project_search`; outside
+ * a project the plain memory and files tools are offered, the project's are not.
  *
  * A repository test: it imports the components' files from `registry/`, as their own `app.test.ts`
  * files do; no component's files import another's (SPEC P4).
@@ -366,6 +367,29 @@ test("a project end to end: made on the page, its chat's agent sees it and adds 
     ...before,
     items: [expect.objectContaining({ log: "project", action: "removed", item: expect.objectContaining({ kind: "member" }) }), ...before.items],
   });
+
+  // A chat of the project gone quiet is summarized into the project's memory (memory-summaries), and found with the rest.
+  const planning = await w.start("ana", "The Valencia launch plan: radio first", project.id);
+  expect(planning.answer).toBe("faux: The Valencia launch plan: radio first");
+  await w.clock.advance(31 * 60_000);
+  let summaries: ChatMemoryItem[] = [];
+  for (let i = 0; i < 200 && summaries.length === 0; i++) {
+    await w.clock.advance(0);
+    await Bun.sleep(5);
+    summaries = (await w.ok<ChatMemory>("ana", "GET", `${P}/memory`)).summaries;
+  }
+  // Both chats of the project (Ben's, Ana's), each by memory-summaries, in the project's space.
+  for (let i = 0; i < 200 && summaries.length < 2; i++) {
+    await w.clock.advance(0);
+    await Bun.sleep(5);
+    summaries = (await w.ok<ChatMemory>("ana", "GET", `${P}/memory`)).summaries;
+  }
+  expect(summaries.map((each) => each.by)).toEqual([
+    { kind: "component", name: "memory-summaries" },
+    { kind: "component", name: "memory-summaries" },
+  ]);
+  const later = (await w.say("ana", planning.chat, call("project_search", { query: "radio" }))).replace(/^project_search: /, "");
+  expect(later).toMatch(/^- \[summary\] .*radio/m);
 
   // Outside a project: memory's and files' own tools, no project_ tool and no <project> section.
   const plain = await w.start("ana", "echo-tools");
