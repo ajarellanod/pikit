@@ -158,7 +158,9 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   nested calls (`executeTool`) and `tool_search` do not find them either (pi-durable's `modelTools`
   would have left them callable by other tools, and a `tool_search` load would have undone a
   `remove`). A name two extensions provide follows the one whose tool wins it (the later). **When it
-  is asked again**: at each admission, and only then (duplicates included, their answer unused); a
+  is asked again**: at each admission, and only then (duplicates included, their answer unused), and
+  for a delegated child once its conversation is made, before its task reaches it (a child is admitted
+  through its task, not `dispatch`: unasked it would be offered none; `delegation.ts`' `offers`); a
   restart, a reopened Harness and a state update apply the answer kept, so an extension's change of
   mind (a space adopted as a project) applies from the conversation's next message. **Failures** (a
   throw, a rejection, an answer that is not a list of names, no answer within `offerTimeoutMs`,

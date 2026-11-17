@@ -75,7 +75,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { type AppContext, type ContextKey, createContextKey } from "@pikit/core";
 import { type AgentDefinition, type AgentRequest, type ConversationOrigin, type ConversationRef, isAgentUnavailable, type MessagePart, type Sender } from "@pikit/contracts";
-import { ConversationDoc, copyOrigin } from "./agent.ts";
+import { ConversationDoc, copyOrigin, type Offers } from "./agent.ts";
 import { isSettledInput, runParts, type SettledInput } from "./result.ts";
 import { INPUT_KIND } from "./submissions.ts";
 
@@ -248,8 +248,14 @@ type ReporterState = { phase: "deliver" } | { phase: "report"; outcome: Delegate
 export interface DelegationOptions {
   /** The definition of an agent by name, or `undefined`. */
   agent(name: string): AgentDefinition | undefined;
-  /** In `tx`, make the new conversation `id` run as `agent`, recorded as `ref` (the runtime's `AgentConfigs.apply`). */
-  apply(tx: Tx, id: ConversationId, ref: ConversationRef, agent: AgentDefinition): Promise<void>;
+  /** In `tx`, make the new conversation `id` run as `agent`, recorded as `ref` (the runtime's `AgentConfigs.apply`), with the tools `offered` when given. */
+  apply(tx: Tx, id: ConversationId, ref: ConversationRef, agent: AgentDefinition, offered?: Offers): Promise<void>;
+  /**
+   * What the extensions of `agent` that declare `offerTools` offer the child `id` (as an admission
+   * asks them: outside a commit), or `undefined` when none declares a choice. A child is admitted
+   * through its task, not the runtime's `dispatch`, so the delegation asks before its first input.
+   */
+  offers(id: ConversationId, ref: ConversationRef, agent: AgentDefinition): Promise<Offers | undefined>;
   /** The runtime's `dispatch`: how a result reaches the parent, logged and announced. */
   dispatch(request: AgentRequest, ctx: AppContext): Promise<unknown>;
   /** The runtime's context, for the reporter's dispatch. */
@@ -361,6 +367,18 @@ async function originFrom(tx: Tx, parent: ConversationId): Promise<ConversationO
   };
 }
 
+/** The ref a child conversation is made with (its origin and space are its record's). */
+const childRef = (task: DelegatedTask, id: ConversationId): ConversationRef => ({ key: task.key, agent: task.agent, conversationId: String(id), channel: task.channel });
+
+/**
+ * The tools the child `id` is offered, asked of the extensions that declare `offerTools` and recorded
+ * before its first input (its first admission's answer: closed until asked). Asked again on a rerun.
+ */
+async function offerChild(api: { commit<T>(work: (tx: Tx) => Promise<T>, context: ChordContext): Promise<T> }, options: Pick<DelegationOptions, "apply" | "offers">, id: ConversationId, task: DelegatedTask, agent: AgentDefinition, context: ChordContext): Promise<void> {
+  const offered = await options.offers(id, childRef(task, id), agent);
+  if (offered !== undefined) await api.commit((tx) => options.apply(tx, id, childRef(task, id), agent, offered), context);
+}
+
 /** In `tx`: a new conversation for a task, owned by `owner`, recorded with `origin`, and run as `agent` (`options.apply`). */
 async function createChild(
   tx: Tx,
@@ -373,7 +391,7 @@ async function createChild(
   const created = await tx.createConversation({ ownership: { kind: "task", taskId: owner } });
   // Before `apply`, which gives the ref as recorded: the origin is the delegation's to write, never a ref's.
   (await tx.doc(ConversationDoc, created.id)).origin = origin;
-  await options.apply(tx, created.id, { key: task.key, agent: task.agent, conversationId: String(created.id), channel: task.channel }, agent);
+  await options.apply(tx, created.id, childRef(task, created.id), agent);
   return created.id;
 }
 
@@ -551,6 +569,7 @@ export function createDelegation(options: DelegationOptions) {
         if (existing !== undefined) return existing.id;
         return createChild(tx, options, api.taskId, await originFrom(tx, api.conversationId), task, agent);
       }, context);
+      await offerChild(api, options, child, task, agent, context);
       // A UI watching the parent finds the child under the call.
       await api.details({ conversationId: child } as JsonValue, context);
       const handle = await api.conversation(child, context);
@@ -586,6 +605,7 @@ export function createDelegation(options: DelegationOptions) {
         return child;
       }, context);
       await api.details({ conversationId: child } as JsonValue, context);
+      await offerChild(api, options, child, task, agent, context);
       // Admitted before the id is returned, so no steer reaches the child before its task.
       const handle = await api.conversation(child, context);
       if (handle !== undefined) await api.commit((tx) => admitTo(tx, api.conversationId, id, handle, inputOf(task.task, `delegate:${id}`, sender)), context);

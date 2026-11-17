@@ -15,9 +15,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDefinition, type AgentRuntime, type AgentTool, type CommandLookup, CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest, runAgentCommand } from "@pikit/contracts";
+import { type AgentDefinition, type AgentRuntime, type AgentTool, type CommandLookup, CONVERSATION, type ConversationRef, defineAgent, RUN_REQUESTS, type RunRequest, runAgentCommand, spaceOf } from "@pikit/contracts";
 import { fauxAssistantMessage, fauxProvider, type FauxResponseFactory } from "@pikit/pi-adapter/providers/faux";
 import { holdTool, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
+import { defineExtension, offerTools } from "@pikit/pi-adapter/extensions";
 import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
@@ -379,4 +380,77 @@ test("/tasks and /cancel (runtime-pi's commands, typed in a chat): a conversatio
   await s.resultWhere((r) => r.conversation.key === "test:3" && r.requestId.startsWith("delegate-result:"));
   expect(await s.command("cancel", third, done)).toEqual({ kind: "ran", text: `The task "${done}" had already ended (completed): nothing to stop.` });
   expect(s.results().filter((r) => r.requestId.startsWith("delegate-result:"))).toHaveLength(2);
+});
+
+test("a delegated child is offered what an extension's offerTools chooses for it (its origin's space), before its first input: waited for or not", async () => {
+  const dir = directory();
+  const ran: string[] = [];
+  const asked: string[] = [];
+  const tool = (name: string) =>
+    defineTool({ name, description: `Records ${name}`, parameters: Type.Object({}) as never, execute: async () => (ran.push(name), { output: [{ type: "text", text: `${name} ran` }] }) });
+  // As memory-recall in a project's space: one family there, another elsewhere.
+  const family = offerTools(defineExtension({ name: "family", tools: [tool("project_note"), tool("plain_note")] }), async (conversation) => {
+    asked.push(spaceOf(conversation));
+    return spaceOf(conversation) === "space:p" ? ["project_note"] : ["plain_note"];
+  });
+  const results: Result[] = [];
+  let reached: { runtime: AgentRuntime; create: () => Promise<string> } | undefined;
+  const list = [
+    defineAgent({ name: "assistant", model: "faux/scripted", tools: ["delegate"] }),
+    defineAgent({ name: "helper", model: "faux/scripted", extensions: ["family"] }),
+  ];
+  const app = await defineApp({
+    components: [
+      sqliteStorage(join(dir, "pikit.db")),
+      defineComponent({
+        name: "agents-test",
+        setup: (pikit) => {
+          for (const agent of list) pikit.provideKeyed("agent.definition", agent.name, agent);
+          pikit.provideKeyed("agent.extension", "family", family);
+          pikit.provideKeyed("model.provider", "faux", unframed(scriptedProvider()));
+        },
+      }),
+      toolDelegate,
+      runtimePi,
+      defineComponent({
+        name: "observer",
+        setup(pikit) {
+          const handle = pikit.use("agent.runtime");
+          const made = pikit.use("agent.conversations");
+          pikit.on("agent.settled", (result) => void results.push(result));
+          pikit.on("agent.failed", (result) => void results.push(result));
+          return { start: (ctx) => void (reached = { runtime: handle.get(), create: () => made.get().create(ctx) }) };
+        },
+      }),
+    ],
+    config: { "tool-delegate": { agents: [{ name: "helper", description: "Helps." }] } },
+    logger: silentLogger,
+  }).create();
+  await app.start();
+  cleanup.push(() => app.stop());
+  const until = async (match: (result: Result) => boolean): Promise<Result> => {
+    for (let i = 0; i < 2000; i++) {
+      const found = results.find(match);
+      if (found !== undefined) return found;
+      await Bun.sleep(5);
+    }
+    throw new Error(`timed out: ${JSON.stringify(results.map((r) => [r.conversation.key, r.kind]))}`);
+  };
+  const ask = async (key: string, space: string, prompt: string) => {
+    const live = reached as NonNullable<typeof reached>;
+    const conversation: ConversationRef = { key, agent: "assistant", conversationId: await live.create(), channel: "test", space };
+    await live.runtime.dispatch({ requestId: `${key}:1`, conversation, prompt, sender: { channel: "test", id: "alice" } }, app.context());
+    return until((r) => r.requestId === `${key}:1`);
+  };
+
+  // Waited for, in a project's space: the child (in its origin's space) is offered project_note, which runs.
+  await ask("test:p1", "space:p", 'call: delegate {"agent":"helper","task":"call: project_note {}"}');
+  expect([ran, asked]).toEqual([["project_note"], ["space:p"]]);
+  // Elsewhere the other family: project_note is not offered, and never runs.
+  await ask("test:q1", "space:q", 'call: delegate {"agent":"helper","task":"call: project_note {}"}');
+  expect([ran, asked]).toEqual([["project_note"], ["space:p", "space:q"]]);
+  // Not waited for: the same, asked before the child's task reaches it.
+  await ask("test:p2", "space:p", 'call: delegate {"agent":"helper","task":"call: project_note {}","wait":false}');
+  for (let i = 0; i < 2000 && ran.length < 2; i++) await Bun.sleep(5);
+  expect([ran, asked]).toEqual([["project_note", "project_note"], ["space:p", "space:q", "space:p"]]);
 });

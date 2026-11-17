@@ -421,7 +421,11 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   // so a restart finds the background ones it must resume.
   const { delegation, tasksOf, extension: delegationExtension } = createDelegation({
     agent: (name) => options.agent(name),
-    apply: async (tx, id, ref, agent) => void (await config.apply(tx, id, ref, agent, effectiveState(agent, {}), logger)),
+    apply: async (tx, id, ref, agent, offered) => {
+      const stored = copyJson(await tx.doc(AgentStateDoc, id)) as { [key: string]: JsonValue };
+      await config.apply(tx, id, ref, agent, effectiveState(agent, stored), logger, offered);
+    },
+    offers: async (id, ref, agent) => offersOf(await harnessOf(events), id, ref, agent, events),
     dispatch: (request, ctx) => runtime.dispatch(request, ctx),
     events,
   });

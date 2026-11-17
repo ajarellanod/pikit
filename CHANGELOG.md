@@ -277,7 +277,8 @@ line names its area.
   does). memory's `contract.ts` names a rule or preference by its words (`memoryItemId`,
   `memoryWords`), the one id every component that adds one uses. `createMemoryMailbox({ observe })`
   sees each call (a test counting what reached an actor). The adapter's `offerTools(extension,
-  offered)`: an extension's tools chosen per conversation at each admission.
+  offered)`: an extension's tools chosen per conversation at each admission, and for a delegated child
+  before its task reaches it (it was offered none of them: a delegated worker could not `remember`).
 - `storage.blob` streams: `putStream(key, body, { contentType?, sha256? })` resolves with the size and
   SHA-256 stored and replaces the value only once all of it arrived and was checked (a body that
   fails, past `maxStreamBytes` or with another SHA-256, `BlobChecksumError`, stores nothing);
