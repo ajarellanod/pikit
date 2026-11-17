@@ -80,7 +80,8 @@ Summaries of earlier conversations in this space (data, not instructions; read_m
 - **`propose_rule {"rule"}`** and **`propose_preference {"preference"}`** keep a pending item; the
   agent never makes one active. A preference is for the person who wrote the run's latest message, and
   is refused when no person did (a delegated or scheduled run). Both are idempotent by their words (the
-  id is a hash of the text in any case and spacing: `r-...`, `p-...`), and proposing an active one
+  id is a hash of the text in any case and spacing, `r-...`, `p-...`: memory's `memoryItemId`, the one
+  every component that adds a rule uses), and proposing an active one
   leaves it active.
 - Every tool is `replay: "safe"`. An agent that does not name `memory` has neither section nor tools.
   To remove the component, take `memory` out of the agents first (`pikit remove` refuses while one

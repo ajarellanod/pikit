@@ -94,7 +94,7 @@ import {
 } from "./api.ts";
 import type { ChatBackend } from "./backend.ts";
 import { CHANNEL, isChatId, isProjectId, keyOf } from "./chat.ts";
-import type { Memory, MemoryOwner, MemoryStore } from "./contract.ts";
+import { type Memory, memoryItemId, type MemoryOwner, type MemoryStore, memoryWords } from "./contract.ts";
 import { API, bodyOf, bytesOf, checked, json, pageOf, Refused, shownConversation, userRoutes } from "./routes.ts";
 import { projectEntry } from "./visibility.ts";
 
@@ -178,16 +178,6 @@ function positive(request: Request, name: string): number | undefined {
   return Number(value);
 }
 
-/**
- * The id of a rule of `text`, as memory-recall makes it (`itemId("rule", text)`: `r-` and the first 4
- * bytes of SHA-256 of its words lowercased): the same words added from the page or by `/rules add` are one
- * rule. Its copy: memory-recall's is the rule `/rules` and `project_rule` use.
- */
-export async function ruleId(text: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalized(text).toLowerCase())));
-  return `r-${[...digest.slice(0, 4)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
-const normalized = (text: string): string => text.trim().replace(/\s+/g, " ");
 
 /** A History cursor: each log's place (`before`), `0` once read to its end; absent: from its newest. */
 type HistoryCursor = Partial<Record<Log, number>>;
@@ -879,14 +869,14 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
   });
 
   /** The id of a new rule (its words') or note (a new one). */
-  const newMemoryId = async (kind: "rule" | "note", text: string): Promise<string> => (kind === "rule" ? ruleId(text) : `note-${crypto.randomUUID().replace(/-/g, "")}`);
+  const newMemoryId = async (kind: "rule" | "note", text: string): Promise<string> => (kind === "rule" ? memoryItemId("rule", text) : `note-${crypto.randomUUID().replace(/-/g, "")}`);
 
   user(`POST ${API}/projects/:id/memory`, async (request, ctx, me) => {
     const memory = memoryOf();
     const body = checked(MemoryBody, await bodyOf(request, SMALL_BODY * 2));
     const { id, space, who: asking } = await memberAt(request, me, ctx);
     const owner = ownerOf(space);
-    const text = normalized(body.text);
+    const text = memoryWords(body.text);
     const memoryId = await newMemoryId(body.kind, text);
     // Active at once: in a project nothing waits (features/projects.md, decision 5).
     await memory.remember(owner, { id: memoryId, kind: body.kind === "rule" ? "rule" : "fact", status: "active", text, createdAt: ctx.clock.now(), by: asking.author }, ctx);
@@ -906,7 +896,7 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
     const owner = ownerOf(space);
     const current = await memory.get(owner, itemId, ctx);
     if (current === undefined || (current.kind !== "rule" && current.kind !== "fact")) throw notFound("no such rule or note");
-    const text = normalized(body.text);
+    const text = memoryWords(body.text);
     if (text === current.text) return json<ChatMemoryItem>(200, chatMemoryOf(current));
     const kind = current.kind === "rule" ? "rule" : "note";
     let next = await newMemoryId(kind, text);

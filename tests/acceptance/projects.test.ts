@@ -295,6 +295,10 @@ test("a project end to end: made on the page, its chat's agent sees it and adds 
     ["project", "member", "added"],
     ["project", "project", "added"],
   ]);
+  // The same words added on the page are the agent's rule, kept once (memory's memoryItemId): nothing new in History.
+  const same = await w.ok<ChatMemoryItem>("ana", "POST", `${P}/memory`, { kind: "rule", text: "  quote prices for  Valencia in EUR " }, 201);
+  expect(same).toMatchObject({ id: refOf("rule").slice("rule:".length), text: "Quote prices for Valencia in EUR", by: { kind: "agent" } });
+  expect((await w.ok<ChatPage<ChatChange>>("ana", "GET", `${P}/history?limit=50`)).items).toEqual(history.items);
   const overview = await w.ok<ChatProjectOverview>("ben", "GET", P);
   expect(overview).toMatchObject({ coreBudget: 4_000, documents: 1, links: 1, files: { names: 1 }, memory: { rules: 1, notes: 1, summaries: 0 } });
 

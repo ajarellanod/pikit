@@ -54,7 +54,7 @@ import {
 } from "@pikit/contracts";
 import { defineExtension, defineTool, type Extension, offerTools, section } from "@pikit/pi-adapter/extensions";
 import Type, { type Static } from "typebox";
-import type { Memory, MemoryKind, MemoryOwner, MemoryStore } from "./contract.ts";
+import { type Memory, memoryItemId, type MemoryKind, type MemoryOwner, type MemoryStore, memoryWords } from "./contract.ts";
 
 /** The name agents give it, its key under `agent.extension`, and its section's key. */
 export const MEMORY = "memory";
@@ -125,14 +125,6 @@ export function memoryText(view: MemoryView): string | undefined {
   return parts.length === 0 ? undefined : parts.join("\n");
 }
 
-/** A rule's or preference's text as kept: trimmed, its spaces folded. */
-export const normalized = (text: string) => text.trim().replace(/\s+/g, " ");
-
-/** The id of a rule (`r-`) or preference (`p-`) of this text: the same for the same words in any case, so adding it twice keeps one. */
-export async function itemId(kind: "rule" | "preference", text: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalized(text).toLowerCase())));
-  return `${kind === "rule" ? "r" : "p"}-${[...digest.slice(0, 4)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
 
 /** The people among `senders` (no machine's channel), once each, in order. */
 export function peopleOf(senders: readonly (Sender | undefined)[], machineChannels: readonly string[]): Sender[] {
@@ -323,8 +315,8 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     async execute(args, _api, context) {
       await outsideProjects("propose_rule", context);
       const { owner, ctx } = scopeOf(context);
-      const id = await itemId("rule", args.rule);
-      await memory().remember(owner, { id, kind: "rule", status: "pending", text: normalized(args.rule), createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
+      const id = await memoryItemId("rule", args.rule);
+      await memory().remember(owner, { id, kind: "rule", status: "pending", text: memoryWords(args.rule), createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
       const kept = await memory().get(owner, id, ctx);
       if (kept?.status === "active") return text(`That is a rule already (id ${id}).`);
       return text(`Proposed (id ${id}): it waits for a person to approve it with /rules approve ${id}, or reject it with /rules reject ${id}.`);
@@ -344,8 +336,8 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
       const person = (await people(context)).at(-1);
       if (person === undefined) throw new Error("no person sent this run's messages (a delegated or scheduled run): a preference is proposed only to the person who wrote");
       const owner = personOwner(person);
-      const id = await itemId("preference", args.preference);
-      await memory().remember(owner, { id, kind: "preference", status: "pending", text: normalized(args.preference), createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
+      const id = await memoryItemId("preference", args.preference);
+      await memory().remember(owner, { id, kind: "preference", status: "pending", text: memoryWords(args.preference), createdAt: ctx.clock.now(), by: await agentAuthor(context) }, ctx);
       const kept = await memory().get(owner, id, ctx);
       if (kept?.status === "active") return text(`That is a preference of ${personName(person)} already (id ${id}).`);
       return text(`Proposed for ${personName(person)} (id ${id}): it waits for them to approve it with /prefs approve ${id}, or reject it with /prefs reject ${id}.`);
@@ -379,8 +371,8 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
     async execute(args, _api, context) {
       const { owner, ctx } = await projectScope("project_rule", context);
       const by = await agentAuthor(context);
-      const id = await itemId("rule", args.rule);
-      const words = normalized(args.rule);
+      const id = await memoryItemId("rule", args.rule);
+      const words = memoryWords(args.rule);
       const before = await memory().get(owner, id, ctx);
       if (before?.status === "active" && JSON.stringify(before.by) !== JSON.stringify(by)) return text(`That is a rule of the project already (rule:${id}).`);
       await memory().remember(owner, { id, kind: "rule", status: "active", text: words, createdAt: ctx.clock.now(), by }, ctx);
@@ -468,8 +460,8 @@ export function createMemoryCommand(managed: Managed, memory: () => MemoryStore,
         case "add": {
           if (rest === "") throw new Error(`Write the ${kind}: /${command} add <${kind}>`);
           if (rest.length > ITEM_MAX) throw new Error(`A ${kind} is at most ${ITEM_MAX} characters`);
-          const itemIdOf = await itemId(kind, rest);
-          await store.remember(owner, { id: itemIdOf, kind, status: "active", text: normalized(rest), createdAt: ctx.clock.now(), by }, ctx);
+          const itemIdOf = await memoryItemId(kind, rest);
+          await store.remember(owner, { id: itemIdOf, kind, status: "active", text: memoryWords(rest), createdAt: ctx.clock.now(), by }, ctx);
           // Proposed before with the same words: added now, so approved.
           await store.approve(owner, itemIdOf, kind, by, ctx);
           return { text: `Added (id ${itemIdOf}).` };

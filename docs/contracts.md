@@ -1278,7 +1278,9 @@ Per owner: a space's memory is shared by every agent working there, an agent kep
 across its spaces, a person has their preferences. A space or an agent keeps facts, summaries and
 rules; a person keeps preferences; a rule or preference is `active` or `pending` (an agent's proposal
 waiting for a person), the caller's choice: memory-recall keeps nothing pending in a project's space.
-`remember` idempotent by id (a proposal never demotes an active rule); a text with a known
+`remember` idempotent by id (a proposal never demotes an active rule); a rule's or preference's id is
+its words' (`memoryItemId` in `contract.ts`, used by every component that adds one: memory-recall's
+tools and `/rules`, channel-web's Memory tab), so the same words are one rule wherever they are added; a text with a known
 credential's shape (`credentialSettingProblem`), an empty one or one over 4000 characters refused,
 keeping nothing and never echoed; search over facts and summaries never a syntax error, whatever the
 query; committed before each call resolves. Provider: memory-sql (`storage.sql` of one actor per
@@ -1291,7 +1293,8 @@ active rules, the run's people's preferences, facts and summaries; `remember`, `
 `project_note` and `project_rule`, active at once, through `offerTools`, and no section; the commands
 `/rules`, a project's members' in its space, and `/prefs`), memory-summaries (a structured summary of
 each quiet conversation into its owner, from the answers feed, by `{ kind: "component" }`; both
-targets), projects-context and channel-web (planned: `project_search`, the Memory and History tabs),
+targets), projects-context (`project_search`, `project_read`), channel-web (a project's Memory and History tabs)
+and projects-sql (`purge` of a removed project's space),
 each with an identical copy of `contract.ts` (memory-sql's `contract-copies.test.ts`). Suite:
 `createMemoryConformance` (with `changeLogCases` over rules), on memory-sql over mailbox-local's double,
 through its Worker half, and over storage-do and actors-do in the workerd lane (from an object's App

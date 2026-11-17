@@ -11,12 +11,11 @@ import { type AppContext, BACKGROUND_CONTEXT, type Context, defineApp, defineCom
 import { createManualClock } from "@pikit/core/testing";
 import { CONVERSATION, type ConversationRef, type Principal, type Principals, type ProjectStore, RUN_REQUESTS, type Sender, samePrincipal, spaceOf } from "@pikit/contracts";
 import type {} from "@pikit/pi-adapter";
-import type { Memory, MemoryOwner, MemoryStore, NewMemory } from "./contract.ts";
+import { type Memory, memoryItemId as itemId, type MemoryOwner, type MemoryStore, type NewMemory } from "./contract.ts";
 import memoryRecall, {
   createMemoryRecall,
   createProjectsView,
   IN_PROJECT,
-  itemId,
   MEMORY,
   memoryText,
   OUTSIDE_PROJECT,

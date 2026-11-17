@@ -211,8 +211,8 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
 - **Collaborative, as the store says**: any member changes the name and description, instructions
   (over a version: another member's newer one is `409`, never overwritten), documents (core or
   reference; from text, an uploaded file, or a saved file, its source kept), files, the rules and notes
-  of the project's space (active at once: nothing waits in a project; a rule's id is its words', as
-  memory-recall makes it, so the page's and `/rules`' are one rule), links, adds people by email (a
+  of the project's space (active at once: nothing waits in a project; a rule's id is its words',
+  memory's `memoryItemId`, so the page's, `/rules`' and `project_rule`'s are one rule), links, adds people by email (a
   user of this chat, verified when the App sends email, or a person `principals.find` knows; never an
   address from outside) and restores. The owner alone sets the project's agents (only among those
   users may pick: a project never opens an agent the operator did not offer), archives, removes,

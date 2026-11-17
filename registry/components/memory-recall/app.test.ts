@@ -33,7 +33,8 @@ import mailboxLocal from "../mailbox-local/files/src/pikit/mailbox-local/index.t
 import memorySql from "../memory-sql/files/src/pikit/memory-sql/index.ts";
 import providerFaux from "../provider-faux/files/src/pikit/provider-faux/index.ts";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
-import memoryRecall, { itemId } from "./files/src/pikit/memory-recall/index.ts";
+import { memoryItemId as itemId } from "./files/src/pikit/memory-recall/contract.ts";
+import memoryRecall from "./files/src/pikit/memory-recall/index.ts";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 /** Request ids, unique across the Apps of a test (a restart keeps a conversation's earlier requests). */

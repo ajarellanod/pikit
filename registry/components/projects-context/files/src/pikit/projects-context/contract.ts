@@ -31,8 +31,8 @@
  *   absent on rows kept before authors were recorded) and `updatedAt`.
  * - **A change log per owner** (`Change`, `../change.ts` of `@pikit/contracts`; item kinds `rule`,
  *   `note` (a fact), `summary`, `preference`; id the memory's id, title its first words): every
- *   `remember` that keeps something new, `approve` that activates, `forget` that removes, `replace`,
- *   `restore` and purge-by-retention, in the same transaction as the change; a repeat that changes
+ *   `remember` that keeps something new, `approve` that activates, `forget` that removes, `replace`
+ *   and `restore`, in the same transaction as the change; a repeat that changes
  *   nothing appends nothing. `changeLogCases` holds for it. `restore(n)` brings back the state before
  *   `n` (a forgotten memory back under its id, with its words, status and original author; a replaced
  *   one's old words back and the new removed), as a `restored` entry by the restorer. `redact(n)` is an
@@ -40,6 +40,9 @@
  *   log for good (a removed project's space).
  * - **Policy-free**: whether a rule is kept `active` or `pending` is the caller's (memory-recall's)
  *   choice: in a project's space every rule is active at once, elsewhere an agent's waits.
+ * - **A rule or preference is named by its words** (`memoryItemId`, over `memoryWords`): the same words,
+ *   in any case and spacing, are one rule wherever they are added (memory-recall's tools and `/rules`, a
+ *   project's page), so adding them again keeps one. Every user names them so; the store does not check.
  *
  * Rejections carry a `code` (memory-sql's are `ActorCallError`s): `invalid` (malformed, a credential's
  * shape, an author that `parseAuthor` refuses), `forbidden` (a redaction by anyone but an operator),
@@ -101,6 +104,15 @@ export const MEMORY_LIST_MAX = 200;
 export const MEMORY_SEARCH_DEFAULT: MemoryFilter = { kinds: ["fact", "summary"] };
 /** The change log's item kind of each memory kind. */
 export const MEMORY_CHANGE_KIND: Readonly<Record<MemoryKind, string>> = { fact: "note", summary: "summary", rule: "rule", preference: "preference" };
+
+/** A rule's or preference's words as kept: trimmed, its spaces folded. */
+export const memoryWords = (text: string): string => text.trim().replace(/\s+/g, " ");
+
+/** The id of a rule (`r-`) or preference (`p-`) of `text`: the first 4 bytes of SHA-256 of its words (`memoryWords`) lowercased, in hex. */
+export async function memoryItemId(kind: "rule" | "preference", text: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(memoryWords(text).toLowerCase())));
+  return `${kind === "rule" ? "r" : "p"}-${[...digest.slice(0, 4)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
 
 export interface MemoryStore {
   /**

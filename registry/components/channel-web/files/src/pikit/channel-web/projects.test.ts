@@ -35,7 +35,8 @@ import type {
 import { memberKey } from "./api.ts";
 import { keyOf } from "./chat.ts";
 import { createChannelWeb, NAME } from "./index.ts";
-import { encodeHistoryCursor, mergeHistory, parseHistoryCursor, ruleId } from "./project-routes.ts";
+import { memoryItemId } from "./contract.ts";
+import { encodeHistoryCursor, mergeHistory, parseHistoryCursor } from "./project-routes.ts";
 import { type ProjectDoubles, projectDoubles, projectsComponent } from "./projects.test-support.ts";
 import { adminAuth, answerOf, FakeAccounts, kvOf, OPERATOR, Runtime, router, type Served, secretsOf, serve } from "./runtime.test-support.ts";
 
@@ -431,8 +432,8 @@ test("MEMORY: any member adds rules (active at once, the rule id memory-recall g
   await c.doubles.memory.remember(owner, { id: "summary:c1", kind: "summary", status: "active", text: "We planned Q1", createdAt: 2, by: { kind: "component", name: "memory-summaries" } });
 
   const rule = await ok<ChatMemoryItem>(c, "ben", "POST", `/projects/${work.id}/memory`, { kind: "rule", text: "  Target  CPA 18 EUR " });
-  expect(rule).toMatchObject({ id: await ruleId("target cpa 18 eur"), kind: "rule", status: "active", text: "Target CPA 18 EUR", by: { kind: "person", principal: { channel: "web", id: "ben", name: "ben" } } });
-  // memory-recall's itemId("rule", "Target CPA 18 EUR"), pinned: the same words are one rule from the page and from /rules.
+  expect(rule).toMatchObject({ id: await memoryItemId("rule", "target cpa 18 eur"), kind: "rule", status: "active", text: "Target CPA 18 EUR", by: { kind: "person", principal: { channel: "web", id: "ben", name: "ben" } } });
+  // memory's memoryItemId("rule", "Target CPA 18 EUR"), pinned: the same words are one rule from the page and from /rules.
   expect(rule.id).toBe("r-56edef9e");
   const note = await ok<ChatMemoryItem>(c, "ana", "POST", `/projects/${work.id}/memory`, { kind: "note", text: "Juan prefers calls" });
   expect(note).toMatchObject({ kind: "note", status: "active" });
@@ -445,7 +446,7 @@ test("MEMORY: any member adds rules (active at once, the rule id memory-recall g
   ]);
 
   const edited = await ok<ChatMemoryItem>(c, "ana", "PATCH", `/projects/${work.id}/memory/${rule.id}`, { text: "Target CPA 20 EUR" }, 200);
-  expect(edited).toMatchObject({ id: await ruleId("Target CPA 20 EUR"), text: "Target CPA 20 EUR", kind: "rule", status: "active" });
+  expect(edited).toMatchObject({ id: await memoryItemId("rule", "Target CPA 20 EUR"), text: "Target CPA 20 EUR", kind: "rule", status: "active" });
   expect((await call(c, "ana", "PATCH", `/projects/${work.id}/memory/summary:c1`, { text: "x" })).status).toBe(404);
   expect((await ok<ChatMemoryItem>(c, "ana", "POST", `/projects/${work.id}/memory/r-old/approve`)).status).toBe("active");
   expect((await call(c, "ana", "DELETE", `/projects/${work.id}/memory/${note.id}`)).status).toBe(204);
