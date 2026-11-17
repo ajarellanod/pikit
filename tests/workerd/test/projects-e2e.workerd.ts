@@ -221,7 +221,7 @@ it("a project end to end on Cloudflare: made on the page, its chat's agent sees 
   expect(await say(ben, chat, call("write", { path: "venue.md", content: "The venue in Valencia seats 300 people." }))).toMatch(/^write: /);
   expect(await added(call("project_file_save", { path: "venue.md", description: "Venue notes" }))).toBe("Added to the project: venue.md");
   expect(await added(call("project_link", { url: "https://drive.google.com/valencia", title: "Valencia folder" }))).toBe("Added to the project: Valencia folder");
-  expect(await say(ben, chat, "echo-system project")).toMatch(/- Quote prices for Valencia in EUR \(rule:r-[0-9a-f]{8}; added by agent assistant in a web chat, answering web:[^,]+, \d{4}-\d\d-\d\d\)/);
+  expect(await say(ben, chat, "echo-system project")).toMatch(/- Quote prices for Valencia in EUR \(rule:r-[0-9a-f]{8}; added by agent assistant in a web chat, answering Ben, \d{4}-\d\d-\d\d\)/);
 
   // One search across the three stores' objects finds each kind; each hit's ref reads.
   const found = (await say(ben, chat, call("project_search", { query: "Valencia" }))).replace(/^project_search: /, "");

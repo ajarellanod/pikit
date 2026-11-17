@@ -251,9 +251,9 @@ test("a project end to end: made on the page, its chat's agent sees it and adds 
 
   // The next request's section carries the rule with its source.
   const after = await w.say("ben", chat, "echo-system project");
-  expect(after).toMatch(/- Quote prices for Valencia in EUR \(rule:r-[0-9a-f]{8}; added by agent assistant in a web chat, answering web:ben, \d{4}-\d\d-\d\d\)/);
+  expect(after).toMatch(/- Quote prices for Valencia in EUR \(rule:r-[0-9a-f]{8}; added by agent assistant in a web chat, answering ben, \d{4}-\d\d-\d\d\)/);
   expect(after).toContain("- Juan visits Valencia on Tuesdays (note:");
-  expect(after).toContain("- venue.md (file:venue.md; 39 B, version 1, by agent assistant in a web chat, answering web:ben, ");
+  expect(after).toContain("- venue.md (file:venue.md; 39 B, version 1, by agent assistant in a web chat, answering ben, ");
   expect(after).toContain("- Valencia folder: https://drive.google.com/valencia (link:");
 
   // One search over the three stores finds each kind; each hit's ref reads.

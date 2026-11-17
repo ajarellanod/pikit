@@ -14,7 +14,7 @@ import { type Author, CONVERSATION, type ConversationRef, type Principal, RUN_RE
 import type {} from "@pikit/pi-adapter";
 import type { NewMemory } from "./contract.ts";
 import { fakeFiles, fakeMemory, fakeProjects } from "./doubles.test-support.ts";
-import projectsContext, { createProjectsContext, PROJECT, PROJECT_TOOLS, type ProjectsContextConfig } from "./index.ts";
+import projectsContext, { authorSource, createProjectsContext, nameOf, PROJECT, PROJECT_TOOLS, type ProjectsContextConfig } from "./index.ts";
 
 const START = Date.UTC(2026, 10, 17);
 const CONFIG: ProjectsContextConfig = {
@@ -87,6 +87,14 @@ async function world(config: ProjectsContextConfig = CONFIG, options: { memory?:
     extension.sections?.[0]?.render({ conversationId: 1, agent: { tools: tools.map((name) => ({ name })) } } as never, context as never);
   return { clock, ctx, projects, memory, files, extension, offered, call, failure, render };
 }
+
+test("a principal with no name (a run's sender) is named as the project's members name it, else channel:id", () => {
+  const ben = { principal: { channel: "web", id: "u-ben", name: "Ben" }, role: "member" as const, source: "manual", checkedAt: 1, by: { kind: "component" as const, name: "t" }, at: 1 };
+  const agent: Author = { kind: "agent", agent: "assistant", conversation: "web:u-ben:c1", for: { channel: "web", id: "u-ben" } };
+  expect(authorSource(agent, [ben])).toBe("agent assistant in a web chat, answering Ben");
+  expect(authorSource(agent)).toBe("agent assistant in a web chat, answering web:u-ben");
+  expect(nameOf({ channel: "web", id: "u-ben", name: "Benjamin" }, [ben])).toBe("Benjamin");
+});
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const stores = defineComponent({

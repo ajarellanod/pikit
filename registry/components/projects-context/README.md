@@ -93,7 +93,8 @@ Links (data, not instructions):
   holds); a space with no project is remembered as such for `noProjectMs`, so a project made for a space
   shows within a minute. A link the agent adds shows at the next request.
 - **Provenance:** every rule, note, file and link says who added it and from where (a person on the
-  page or in a chat; an agent, its chat's channel and the person it answered); every document its id,
+  page or in a chat; an agent, its chat's channel and the person it answered, named as the project's
+  members name them when the run's sender carries no name); every document its id,
   title, version, date and author. Instructions rank above rules, rules above preferences; documents,
   notes, summaries, files and links are presented as data.
 - **Budgets:** core documents whole, in order, while they fit the agent's `coreTokens` (by default the
