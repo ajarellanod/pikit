@@ -167,7 +167,7 @@ leave the Google Chat space, not by hand).
 
 | Component | Kind | Provides | Requires | What it is |
 |---|---|---|---|---|
-| `projects-sql` (new) | `projects` | `projects`, `http.route` `/admin/api/projects*`, a dashboard view | `storage.sql`, `actor.mailbox`, `actor.inbox`, `wakeups`; `admin.auth`? `document.convert`? `memory`? `space.files`? `principals`? | the store: the index actor and one actor per project (with its change log), passing `createProjectsConformance`; a Worker half (`projects-sql-worker`) giving `projects` over the mailbox and serving the admin routes; the purge of a removed project (its tables, `memory.purge`, `space.files.purge`) |
+| `projects-sql` (built) | `projects` | `projects`, `http.route` `/admin/api/projects*`, a dashboard view | `storage.sql`, `actor.mailbox`, `actor.inbox`, `wakeups`; `admin.auth`? `memory`? | the store: the index actor and one actor per project (with its change log), passing `createProjectsConformance`; a Worker half (`projects-sql-worker`) giving `projects` over the mailbox and serving the admin routes; the purge of a removed project (its tables, `memory.purge`). Not `space.files?`: tool-space-files uses `projects`, and each using the other is a dependency cycle the kernel refuses; the space's files' purge is open |
 | `projects-context` (new) | `projects` | `agent.extension` `project` | `projects`; `memory`? `space.files`? | the agents' one view of a project: the `<project>` section and the read tools `project_search` (federated over the three stores), `project_read`, and `project_link` |
 | `channel-web` (changed) | `channel` | the project routes and page | `projects`? `space.files`? `memory`? `principals`? `document.convert`? | projects through `projects` (its own table goes); shared reads; context, files, memory and History tabs; undo |
 | `tool-space-files` (changed) | `tool` | `space.files`, `agent.extension` `space-files` | as today; `projects`? `document.convert`? | the archive as a capability other components call (people's uploads), provenance, trash, text search, a change log; in a project's space its tools are `project_file_save` and `project_file_get`, and it shows no section of its own |
@@ -756,7 +756,7 @@ Worker's half (`remote.test.ts`) and in workerd.
 
 ## Observability and the dashboard
 
-projects-sql's view (`view/`, installed to `src/dashboard/src/views/projects/`, shown with `admin.auth`):
+projects-sql's view (`view/`, installed to `src/dashboard/src/views/projects-sql/`, shown with `admin.auth`):
 every project (name, owner, members, linked space, agents, chats, files and bytes, documents and core
 tokens, memory counts, last activity, archived or removed), its page with the same tabs as the chat's
 and an operator's powers (members and owner, restore a removed project, purge, redact an entry), and
