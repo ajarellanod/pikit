@@ -55,7 +55,8 @@ Config (`pikit.config.ts`, all optional):
 | `maxSpaceBytes` | 1 GiB | the most bytes a space keeps: every version, and trashed files until they are purged (a restored version shares its bytes and counts once) |
 | `maxFiles` | 500 | the most files a space keeps: each version counts as one, and trashed ones until purged |
 | `listed` | 20 | how many files the section lists, the newest; the rest are counted |
-| `freshMs` | 5000 | how long it remembers that a space has a project (a minute when it has none) |
+| `freshMs` | 5000 | how long it remembers that a space has a project |
+| `noProjectMs` | 60000 | how long it remembers that a space has none (memory-recall and projects-context take the same two settings: give the three the same values, so they switch families together) |
 | `machineChannels` | `["delegate", "scheduler"]` | senders that are not people: never the person a save is "for" |
 
 ## `space.files`

@@ -488,7 +488,7 @@ tool-space-files offers `project_file_save` and `project_file_get` and renders n
 one, they offer and render what they do today (`remember`, `forget`, `recall`, `read_memory`,
 `propose_rule`, `propose_preference`; `files_save`, `files_list`, `files_get`, `files_delete`) and
 projects-context renders nothing and offers no tool. Each extension knows whether the space has a
-project from `projects.get(space, { kind: "component", name })`, remembered for `freshMs` (a minute for
+project from `projects.get(space, { kind: "component", name })`, remembered for `freshMs` (`noProjectMs`, a minute by default, for
 "none"). How a tool is not offered is the adapter's (`@pikit/pi-adapter`, changed): `offerTools(extension,
 offered)`, an async choice of the extension's tools by name for a conversation, made by runtime-pi
 when it admits a message (before the admission's commit: a mailbox call is no statement), kept in the

@@ -11,7 +11,7 @@
  *   model never names a project or a space.
  * - **A stable section**, refreshed at most once every `freshMs`: the project's `context` (answered
  *   `unchanged` while its version holds), the space's memory (`{ type: "space", space }`: active rules,
- *   notes, summaries) and its files' list; a space with no project is remembered as such for `noneMs`.
+ *   notes, summaries) and its files' list; a space with no project is remembered as such for `noProjectMs`.
  *   Its text is built from stored data in a fixed order (the header with the tools the request offers,
  *   the instructions, the rules with their source, the run's people's preferences, the core documents
  *   whole within the agent's `coreTokens`, the other documents listed, the recent notes and summaries,
@@ -71,7 +71,7 @@ const Config = Type.Object({
   /** How long a project's view is used before it is asked again (its context answers `unchanged` while the project does not change). */
   freshMs: Type.Integer({ minimum: 0, maximum: 3_600_000, default: 5_000 }),
   /** How long a space with no project is remembered as such. */
-  noneMs: Type.Integer({ minimum: 0, maximum: 86_400_000, default: 60_000 }),
+  noProjectMs: Type.Integer({ minimum: 0, maximum: 86_400_000, default: 60_000 }),
   /** The project's page, `{id}` replaced by the project's id (`https://agents.example.com/chat/#/projects/{id}`); absent, the section names none. */
   pageUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 500, pattern: "^https?://" })),
   members: budget(CONTEXT_MEMBERS, 30, "Members the section names; the rest counted."),
@@ -364,11 +364,11 @@ export function createProjectsContext(config: ProjectsContextConfig, deps: Proje
   const spaces = bounded<SpaceView | undefined>();
   const preferences = bounded<readonly Memory[]>();
 
-  /** The space's view, asked again past `freshMs` (`noneMs` for a space with no project). */
+  /** The space's view, asked again past `freshMs` (`noProjectMs` for a space with no project). */
   async function viewOf(space: string, caller: Caller, ctx: AppContext): Promise<SpaceView | undefined> {
     const now = ctx.clock.now();
     const kept = spaces.get(space);
-    if (kept !== undefined && now - kept.at < (kept.value === undefined ? config.noneMs : config.freshMs)) return kept.value;
+    if (kept !== undefined && now - kept.at < (kept.value === undefined ? config.noProjectMs : config.freshMs)) return kept.value;
     const previous = kept?.value;
     const answer = await deps.projects().context(space, previous?.context.project.version, caller, ctx);
     if (answer === undefined || (answer === "unchanged" && previous === undefined)) {

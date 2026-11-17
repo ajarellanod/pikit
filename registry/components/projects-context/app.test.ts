@@ -39,7 +39,7 @@ const PROJECT_SPACE = "googlechat:spaces/AAA";
 const PLAIN_SPACE = "googlechat:spaces/BBB";
 const ana: Author = { kind: "person", principal: { channel: "web", id: "ana", name: "Ana Garcia" } };
 const juan: Sender = { channel: "googlechat", id: "users/42" };
-const config = { freshMs: 0, noneMs: 0, pageUrl: "https://agents.example.com/chat/#/projects/{id}", agents: { scout: { coreTokens: 2 } } };
+const config = { freshMs: 0, noProjectMs: 0, pageUrl: "https://agents.example.com/chat/#/projects/{id}", agents: { scout: { coreTokens: 2 } } };
 
 /** The doubles, seeded: a project for PROJECT_SPACE with instructions, two documents, a link, rules, a note, a summary, a preference and two files; PLAIN_SPACE has memory and files but no project. */
 async function seeded() {

@@ -141,8 +141,8 @@ async function world() {
     "storage-blob-fs": { root: join(dir, "blobs") },
     "memory-summaries": { model: "faux/echo", agents: ["assistant"], idleMinutes: 30 },
     "memory-recall": { freshMs: 0, noProjectMs: 0 },
-    "tool-space-files": { freshMs: 0 },
-    "projects-context": { freshMs: 0, noneMs: 0, pageUrl: PAGE },
+    "tool-space-files": { freshMs: 0, noProjectMs: 0 },
+    "projects-context": { freshMs: 0, noProjectMs: 0, pageUrl: PAGE },
     "projects-sql": { coreTokens: 4_000 },
   };
   const app = await defineApp({ components, config, clock, logger: silentLogger }).create();

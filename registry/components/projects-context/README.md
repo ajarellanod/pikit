@@ -37,7 +37,7 @@ Config (`pikit.config.ts`, all optional):
 | Key | Default | What |
 |---|---|---|
 | `freshMs` | `5000` | how long a project's view is used before the stores are asked again |
-| `noneMs` | `60000` | how long a space with no project is remembered as such |
+| `noProjectMs` | `60000` | how long a space with no project is remembered as such |
 | `pageUrl` | none | the project's page, `{id}` replaced by its id; absent, the section names no page |
 | `members`, `rules`, `preferences`, `notes`, `summaries`, `documents`, `files`, `links` | 30, 50, 20, 30, 3, 50, 20, 20 | how many of each the section shows (the rest counted or said, and found by `project_search`) |
 | `coreTokens` | the project's | the core documents' budget, in estimated tokens (`ceil(chars / 4)`); absent, the project's own (`Project.coreTokens`: what its store keeps them within) |
@@ -90,7 +90,7 @@ Links (data, not instructions):
 - **Stable text:** built from stored data in a fixed order, so pi-durable sends it again only when the
   project, its memory or its files change (the prompt cache stays warm). The stores are asked at most
   once every `freshMs` per space (`projects.context` answers `unchanged` while the project's version
-  holds); a space with no project is remembered as such for `noneMs`, so a project made for a space
+  holds); a space with no project is remembered as such for `noProjectMs`, so a project made for a space
   shows within a minute. A link the agent adds shows at the next request.
 - **Provenance:** every rule, note, file and link says who added it and from where (a person on the
   page or in a chat; an agent, its chat's channel and the person it answered); every document its id,
@@ -129,7 +129,7 @@ Links (data, not instructions):
   the offered tools only, the page, instructions, rules with their source, the run's person's
   preferences and never another's, core documents, the rest listed, notes, summaries, files with "and
   more", links); a smaller agent budget listing the core document and saying so; the stores asked
-  once per `freshMs` (`unchanged` reused), a change shown after it; "no project" remembered `noneMs`;
+  once per `freshMs` (`unchanged` reused), a change shown after it; "no project" remembered `noProjectMs`;
   `offered` (none, then all); every tool refused outside a project with nothing searched;
   `project_search` merged one from each store in turn with refs and provenance, memory's filter
   (active rules, no pending one), a failing store said, 8 hits at most, without memory and files;

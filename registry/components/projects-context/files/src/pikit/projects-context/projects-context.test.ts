@@ -19,7 +19,7 @@ import projectsContext, { createProjectsContext, PROJECT, PROJECT_TOOLS, type Pr
 const START = Date.UTC(2026, 10, 17);
 const CONFIG: ProjectsContextConfig = {
   freshMs: 5_000,
-  noneMs: 60_000,
+  noProjectMs: 60_000,
   members: 2,
   rules: 50,
   preferences: 20,
@@ -223,7 +223,7 @@ test("the section asks the stores at most once every freshMs, the project answer
   expect(await render()).toContain("- Pitch deck: https://example.com/deck (link:l-2;");
 });
 
-test("a space with no project: no section, and remembered as such for noneMs", async () => {
+test("a space with no project: no section, and remembered as such for noProjectMs", async () => {
   const { clock, projects, render, offered, ctx } = await world();
   const other = "googlechat:spaces/BBB";
 

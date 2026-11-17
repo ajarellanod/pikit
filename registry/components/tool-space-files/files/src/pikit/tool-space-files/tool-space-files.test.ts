@@ -57,7 +57,7 @@ afterEach(async () => {
 });
 
 const MIB = 1024 * 1024;
-const DEFAULTS: SpaceFilesConfig = { maxFileBytes: 25 * MIB, maxSpaceBytes: 1024 * MIB, maxFiles: 500, listed: 20, freshMs: 5_000, machineChannels: ["delegate", "scheduler"] };
+const DEFAULTS: SpaceFilesConfig = { maxFileBytes: 25 * MIB, maxSpaceBytes: 1024 * MIB, maxFiles: 500, listed: 20, freshMs: 5_000, noProjectMs: 60_000, machineChannels: ["delegate", "scheduler"] };
 /** A credential's shape the kit's detector knows. */
 const SECRET = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123";
 /** Bytes that are no UTF-8 text: every byte value, twice. */
@@ -457,7 +457,7 @@ test("without projects every space is outside a project: the files_ family only"
   expect(await failure(chat.run("project_file_save", { path: "a.txt", description: "A" }))).toBe(POINTER.project_file_save as string);
 });
 
-test("projectCheck asks projects.get as the component, remembers a project for freshMs and none for a minute", async () => {
+test("projectCheck asks projects.get as the component, remembers a project for freshMs and none for noProjectMs (a minute by default)", async () => {
   const projects = projectsDouble();
   const clock = createManualClock();
   const ctx = { clock } as unknown as AppContext;

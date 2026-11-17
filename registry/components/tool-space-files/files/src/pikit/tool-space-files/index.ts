@@ -9,7 +9,7 @@
  *   family (`files_save`, `files_list`, `files_get`, `files_delete`, which trashes) and a stable
  *   section, `space-files`, listing the newest files as data. Its text changes only when the files do.
  * - **In a project's space** (`projects.get(space)` answers one, asked as the component and remembered
- *   for `freshMs`, a minute for "none"): `project_file_save` and `project_file_get` (the same
+ *   for `freshMs`, "none" for `noProjectMs`): `project_file_save` and `project_file_get` (the same
  *   parameters; a save's result ends with "Added to the project: <name>") and no section (the
  *   `<project>` section of projects-context lists the files).
  * - **One family per conversation**: the extension's `offerTools` offers the model only its space's
@@ -70,8 +70,10 @@ const Config = Type.Object({
   maxFiles: Type.Integer({ minimum: 1, maximum: 100_000, default: 500 }),
   /** How many files the section lists, the newest; the rest are counted, and `files_list` lists them. */
   listed: Type.Integer({ minimum: 1, maximum: 200, default: 20 }),
-  /** How long whether a space has a project is remembered, in ms (a minute when it has none). */
+  /** How long a space's project is remembered, in ms (as memory-recall's and projects-context's `freshMs`). */
   freshMs: Type.Integer({ minimum: 0, default: 5_000 }),
+  /** How long a space with no project is remembered as such, in ms (as memory-recall's and projects-context's `noProjectMs`). */
+  noProjectMs: Type.Integer({ minimum: 0, maximum: 3_600_000, default: NO_PROJECT_MS }),
   /** Senders that are not people (a delegating agent, the scheduler): never the person a save is for. */
   machineChannels: Type.Array(Type.String({ minLength: 1 }), { default: ["delegate", "scheduler"] }),
 });
@@ -104,9 +106,9 @@ export const POINTER: Record<string, string> = {
 
 /**
  * Whether a space has a project, from `projects.get` asked as this component, remembered for `freshMs`
- * (a minute for "none"). Without `projects`, no space has one.
+ * ("none" for `noProjectMs`). Without `projects`, no space has one.
  */
-export function projectCheck(freshMs: number, projects: () => ProjectStore | undefined): (space: string, ctx: AppContext) => Promise<boolean> {
+export function projectCheck(freshMs: number, projects: () => ProjectStore | undefined, noProjectMs = NO_PROJECT_MS): (space: string, ctx: AppContext) => Promise<boolean> {
   const known = new Map<string, { project: boolean; until: number }>();
   return async (space, ctx) => {
     const store = projects();
@@ -116,7 +118,7 @@ export function projectCheck(freshMs: number, projects: () => ProjectStore | und
     if (hit !== undefined && hit.until > now) return hit.project;
     const project = (await store.get(space, { kind: "component", name: "tool-space-files" }, ctx)) !== undefined;
     if (known.size >= 1000) known.clear();
-    known.set(space, { project, until: now + (project ? freshMs : Math.max(freshMs, NO_PROJECT_MS)) });
+    known.set(space, { project, until: now + (project ? freshMs : noProjectMs) });
     return project;
   };
 }
@@ -421,7 +423,7 @@ export default defineComponent({
       convert: () => convert.get(),
     });
     pikit.provide("space.files", files);
-    const inProject = projectCheck(config.freshMs, () => projects.get());
+    const inProject = projectCheck(config.freshMs, () => projects.get(), config.noProjectMs);
     pikit.provideKeyed(
       "agent.extension",
       SPACE_FILES,
