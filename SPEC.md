@@ -530,7 +530,11 @@ changes only through the path below (`features/kit-follow-ups.md`, "No code hot 
 extensions) is what its agent's definition (`defineAgent`, through `prepare(state)`) gives: the
 runtime rebuilds it at each admission, in the commit of each state update, and before a reopened
 Harness resumes, so a `configure()` made on the conversation directly is undone at the next of these.
-A live change goes through the state or data the definition reads. *Why:* one source for what a
+A live change goes through the state or data the definition reads. The one input besides the state:
+an extension's choice of its tools per conversation (`offerTools`, `@pikit/pi-adapter`), asked at
+each admission before its commit and kept with the conversation, so the rebuilds between two
+admissions (a state update, a restart) give the same tools; a tool not offered is neither sent to
+the model nor run when called by name. *Why:* one source for what a
 conversation runs, so a restart, a reopened Harness and an evicted object build the same agent.
 Writing only when the definition itself changed (so a direct `configure()` lasts) is a later change,
 made if users need it.

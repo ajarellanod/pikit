@@ -26,9 +26,15 @@
  *   state update, and before a reopened Harness resumes a conversation's work. So the agent pi-durable
  *   reads at each request is always `prepare` of the state as it is then: a state update made by a tool
  *   applies from the run's next model request (the old runtime waited for the next run).
+ * - **Offered tools** (`offerTools`): an extension may choose, per conversation, which of its tools
+ *   the conversation's agent has. The runtime asks it when a message is admitted, before the
+ *   admission's commit (`evaluateOffers`), keeps the answer in the conversation's `ConversationDoc`
+ *   (`offered`), and `apply` leaves the names not offered out of `pi.agent`'s tools: not sent to the
+ *   model, and a call to one by name settles `tool_unavailable` without running. Every other `apply`
+ *   (a state update, a reopened Harness) uses the answer kept, so a restart offers the same.
  */
 
-import type { Context as ChordContext, JsonValue } from "@earendil-works/chord";
+import { type Context as ChordContext, copyJson, type JsonValue } from "@earendil-works/chord";
 import { Type } from "typebox";
 import {
   type AgentChange,
@@ -50,7 +56,7 @@ import {
   type ToolRegistration,
   type Tx,
 } from "@earendil-works/pi-durable";
-import type { Logger } from "@pikit/core";
+import type { AppContext, Logger } from "@pikit/core";
 import { type AgentDefinition, type AgentSkill, type ConversationOrigin, type ConversationRef, SKILL_TOOL, skillsProblem, type TurnConfig } from "@pikit/contracts";
 
 /** A tool the durable runtime runs: pi-durable's (`defineTool`). */
@@ -74,16 +80,75 @@ type JsonObject = { [key: string]: JsonValue };
  * with its conversation, and a run sees its channel, space and origin whatever ref reached it. `origin` is written
  * only by the delegation, when it creates the conversation (`delegation.ts`), never from a ref.
  */
-export const ConversationDoc = defineDoc<{ key: string; agent: string; channel?: string; space?: string; origin?: ConversationOrigin }>({
+export const ConversationDoc = defineDoc<{ key: string; agent: string; channel?: string; space?: string; origin?: ConversationOrigin; offered?: Offers }>({
   kind: "pikit.conversation",
   version: 1,
   scope: "conversation",
   history: "latest",
   fork: "initial",
   initial: () => ({ key: "", agent: "" }),
-  // Written when a message is admitted, rarely changed after: its deltas stay few.
-  checkpointWhen: () => false,
+  // Written when a message is admitted, rarely changed after (an offer changes when a space does): a
+  // periodic base bounds the replay on load all the same.
+  checkpointWhen: (_value, _ops, { deltasSinceBase }) => deltasSinceBase >= 64,
 });
+
+/**
+ * Which of its tools an extension offers a conversation: the names, or `undefined` for all of them.
+ * Asked when a message is admitted to the conversation (`conversation` as recorded: its channel and
+ * space), before the admission's commit, so it may call other actors. A name that is not one of the
+ * extension's tools is ignored.
+ */
+export type ToolOffer = (conversation: ConversationRef, ctx: AppContext) => Promise<readonly string[] | undefined>;
+
+/**
+ * Per extension that declares `offerTools`, the names it offered at the conversation's last admission,
+ * sorted (`null`: all its tools). An extension with no entry was never asked: it offers none.
+ */
+export type Offers = { [extension: string]: string[] | null };
+
+/** How long an extension's `offerTools` may take before the admission goes on without its answer. */
+export const OFFER_TIMEOUT_MS = 5_000;
+
+const OFFER: unique symbol = Symbol.for("pikit.offerTools");
+
+/**
+ * `extension` choosing, per conversation, which of its tools the model is offered (README.md, "Offered
+ * tools"). A copy of `extension` carrying `offered`; the extension is otherwise unchanged. The answer is
+ * asked at each admission and kept with the conversation; a tool not offered is not sent to the model,
+ * nor run when the model calls it by name (`tool_unavailable`). When `offered` throws, rejects, answers
+ * something other than names or takes over `OFFER_TIMEOUT_MS`, the conversation keeps its last answer,
+ * and with none the extension offers no tool: whoever declares a choice is never widened by a failure.
+ */
+export function offerTools<E extends Extension>(extension: E, offered: ToolOffer): E {
+  if (typeof offered !== "function") throw new TypeError(`offerTools("${extension.name}"): offered must be a function`);
+  return Object.assign({ ...extension }, { [OFFER]: offered });
+}
+
+/** The `offerTools` choice of `extension`, if it declares one. */
+export function offerOf(extension: Extension | undefined): ToolOffer | undefined {
+  const offer = (extension as { [OFFER]?: unknown } | undefined)?.[OFFER];
+  return typeof offer === "function" ? (offer as ToolOffer) : undefined;
+}
+
+/** `answer` as kept: sorted names without repeats, or `null` for all; `undefined` when it is no answer. */
+function offerAnswer(answer: unknown): string[] | null | undefined {
+  if (answer === undefined) return null;
+  if (!Array.isArray(answer) || !answer.every((name) => typeof name === "string")) return undefined;
+  return [...new Set(answer as string[])].sort();
+}
+
+/** Whether two offers are the same (absent: none). */
+export function sameOffers(a: Offers | undefined, b: Offers | undefined): boolean {
+  const canonical = (offers: Offers | undefined) => JSON.stringify(Object.entries(offers ?? {}).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)));
+  return canonical(a) === canonical(b);
+}
+
+/** Whether the tool `name`, which `owner` provides (`undefined`: the agent's own or the runtime's), is offered under `offers`. */
+function isOffered(owner: DurableExtension | undefined, name: string, offers: Offers): boolean {
+  if (owner === undefined || offerOf(owner) === undefined) return true;
+  const offered = offers[owner.name];
+  return offered === null || (offered !== undefined && offered.includes(name));
+}
 
 /** `agent.state`: the updates of the conversation's state (only those), merged over the agent's initial state when read. */
 export const AgentStateDoc = defineDoc<JsonObject>({
@@ -242,6 +307,8 @@ export class AgentConfigs {
     agent: AgentDefinition,
     state: Readonly<Record<string, unknown>>,
     logger: Logger,
+    /** The offers an admission just asked for (`evaluateOffers`), recorded; absent, the recorded ones apply. */
+    offered?: Offers,
   ): Promise<ConversationRef> {
     const recorded = await tx.doc(ConversationDoc, conversationId);
     if (recorded.key !== ref.key) recorded.key = ref.key;
@@ -254,13 +321,18 @@ export class AgentConfigs {
     }
     // Its origin is the delegation's to write, before this; a ref's is ignored.
     const conversation = asRecorded(ref, recorded);
+    if (offered !== undefined && !sameOffers(recorded.offered, offered)) recorded.offered = structuredClone(offered);
+    const offers: Offers = offered ?? (recorded.offered === undefined ? {} : (copyJson(recorded.offered as unknown as JsonValue) as Offers));
 
     const turn = this.turn(agent, conversation, state, logger);
     const own = this.install(agent.name, turn.tools);
     const selected = [...(turn.skills.length === 0 ? [] : [this.installSkills(agent.name, turn.skills)]), ...turn.extensions.map((extension) => this.installExtension(extension))];
     // Offered by name: the agent's tools, then each extension's; a later one of the same name wins.
     const tools = [...own, ...selected.flatMap((extension) => extension.tools ?? [])];
-    const names = [...new Set(tools.map((tool) => tool.name))];
+    // Per name, the provided extension whose tool wins it; the agent's own and the skills' are the runtime's.
+    const owners = new Map<string, DurableExtension | undefined>(tools.map((tool) => [tool.name, undefined]));
+    for (const extension of turn.extensions) for (const tool of extension.tools ?? []) owners.set(tool.name, extension);
+    const names = [...new Set(tools.map((tool) => tool.name))].filter((name) => isOffered(owners.get(name), name, offers));
     const extensions = [extensionName(agent.name), ...selected.map((extension) => extension.name)];
     const current = await tx.doc(AgentDoc, conversationId);
     const same =
@@ -279,6 +351,59 @@ export class AgentConfigs {
     };
     await configure(tx, conversationId, change);
     return conversation;
+  }
+
+  /**
+   * What the extensions of `conversation`'s turn that declare `offerTools` offer it now, asked at once
+   * (`timeoutMs` each), for an admission to record (`apply`'s `offered`). One that fails keeps its
+   * answer in `previous`, else offers none (logged). `undefined` when the turn cannot be resolved (the
+   * admission's `apply` says why) or no extension of it declares a choice.
+   */
+  async evaluateOffers(
+    agent: AgentDefinition,
+    conversation: ConversationRef,
+    state: Readonly<Record<string, unknown>>,
+    previous: Offers | undefined,
+    ctx: AppContext,
+    timeoutMs = OFFER_TIMEOUT_MS,
+  ): Promise<Offers | undefined> {
+    let turn: Turn;
+    try {
+      turn = this.turn(agent, conversation, state, ctx.logger);
+    } catch {
+      return undefined;
+    }
+    const declaring = turn.extensions.flatMap((extension) => {
+      const offer = offerOf(extension);
+      return offer === undefined ? [] : [{ name: extension.name, offer }];
+    });
+    if (declaring.length === 0) return undefined;
+    const answers = await Promise.all(
+      declaring.map(async ({ name, offer }): Promise<[string, string[] | null]> => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const answer = offerAnswer(
+            await Promise.race([
+              Promise.resolve().then(() => offer(conversation, ctx)),
+              new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`no answer within ${timeoutMs} ms`)), timeoutMs))),
+            ]),
+          );
+          if (answer === undefined) throw new Error("it answered something other than an array of tool names or undefined");
+          return [name, answer];
+        } catch (error) {
+          const kept = previous?.[name];
+          ctx.logger.error(`the extension's offerTools failed; the conversation ${kept === undefined ? "is offered none of its tools" : "keeps the tools offered last"}`, {
+            conversation: conversation.key,
+            extension: name,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return [name, kept === undefined ? [] : kept === null ? null : [...kept]];
+        } finally {
+          clearTimeout(timer);
+        }
+      }),
+    );
+    return Object.fromEntries(answers);
   }
 
   /**

@@ -353,6 +353,22 @@ hooks too); one of the same name as an agent's tool replaces it. Its state is a 
 (`defineDoc`, committed with the transcript, surviving restarts) or the app's `storage.sql`. Names
 starting with `pikit.` are the runtime's own.
 
+**Which tools a conversation is offered.** An extension may choose, per conversation, which of its
+tools the agent has (memory-recall's and tool-space-files' `project_*` tools in a project's space,
+their own elsewhere):
+
+```ts
+pikit.provideKeyed("agent.extension", "memory", offerTools(defineExtension({ name: "memory", tools }), async (conversation, ctx) =>
+  (await inProject(spaceOf(conversation), ctx)) ? ["project_note", "project_rule"] : ["remember", "recall"]));
+```
+
+The runtime asks at each admission, before the admission's commit (so it may call a store), and keeps
+the answer with the conversation: a restart or a state update offers the same until the next message.
+A tool not offered is never sent to the model, and a call to it by name is refused (`tool_unavailable`)
+without running. A failing choice (a throw, a wrong answer, 5 s without one) keeps the conversation's
+last answer, or offers none of that extension's tools when it has none; the message is answered all
+the same. `@pikit/pi-adapter`'s README, "Offered tools", has the details.
+
 **Who a run answers.** Each message's `sender` (the channel's user, the dashboard's operator, a
 delegating agent) is kept with it and given to the run that takes it: `await
 context.value(RUN_REQUESTS)?.list(context)` lists the run's requests, each with its sender, in a tool,
@@ -426,7 +442,11 @@ only the skills it names, a live agent's override (its skills off), a directory 
 
 `extensions.test.ts` takes an agent extension through a real App: an async section reading a
 document its tool wrote, a `beforeTool` hook that blocks, a `beforeRequest` hook, per-agent selection,
-the start failures, and the extension's state across a restart.
+the start failures, and the extension's state across a restart. `offer-tools.test.ts` takes
+`offerTools` through one: per conversation by space, a tool not offered refused by name without
+running, asked again at each admission, kept across a restart (a resumed run offered the same
+without asking), a failing choice closed then keeping its last answer, and nothing asked when no
+extension declares one.
 
 `component.json` is generated from `setup` by the CLI (`pikit registry validate`) and is not written
 by hand; the test "what setup declares" pins it.
