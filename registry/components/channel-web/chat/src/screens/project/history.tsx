@@ -24,6 +24,17 @@ import { ChangeRow, useAction } from "./parts";
 const PAGE = 30;
 type Who = "all" | "people" | "agents";
 const KINDS = ["all", "instructions", "document", "rule", "note", "file", "link", "member", "project"] as const;
+const KIND_NAMES: Record<(typeof KINDS)[number], string> = {
+  all: "Everything",
+  instructions: "Instructions",
+  document: "Documents",
+  rule: "Rules",
+  note: "Notes",
+  file: "Files",
+  link: "Links",
+  member: "Members",
+  project: "The project itself",
+};
 
 export function HistoryTab({ overview, changed }: TabProps) {
   const { me } = useSession();
@@ -79,7 +90,7 @@ export function HistoryTab({ overview, changed }: TabProps) {
           <select className="control h-8 w-auto py-0 text-[13px]" value={kind} onChange={(event) => setKind(event.target.value as (typeof KINDS)[number])} aria-label="What">
             {KINDS.map((each) => (
               <option key={each} value={each}>
-                {each === "all" ? "Everything" : `${each.charAt(0).toUpperCase()}${each.slice(1)}s`}
+                {KIND_NAMES[each]}
               </option>
             ))}
           </select>

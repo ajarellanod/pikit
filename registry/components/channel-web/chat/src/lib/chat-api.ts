@@ -308,6 +308,8 @@ export interface ChatChange {
   /** Whether its earlier state can still come back (`false` past a year, or redacted). */
   restorable: boolean;
   redacted?: { at: number; by: ChatAuthor };
+  /** A chat's notices only (`ChatNotices`): its earlier state was brought back since, by whom and when (an Undo), and not put back again. */
+  undone?: { at: number; by: ChatAuthor };
 }
 
 /** A project's page: the record, what it holds, and its latest changes. */

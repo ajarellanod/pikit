@@ -67,7 +67,6 @@ function Instructions({ overview, changed }: TabProps) {
     if (read.data === undefined) return;
     setText(read.data.instructions?.text ?? "");
     setBase(read.data.instructions?.version ?? 0);
-    setConflict(false);
   }, [read.data]);
 
   const dirty = text !== (current?.text ?? "");
@@ -78,6 +77,7 @@ function Instructions({ overview, changed }: TabProps) {
         setText(saved.text);
         setBase(saved.version);
         setConflict(false);
+        read.reload();
         versions.reload();
         changed();
       } catch (error) {

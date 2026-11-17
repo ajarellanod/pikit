@@ -2,7 +2,8 @@
  * What was added to a chat's project from it (`GET .../conversations/:id/notices`: the project's logs'
  * entries whose author worked in this chat), under the answer that made it: "trader added to the
  * project: rule “Target CPA 18 EUR” · Undo". From the logs, so it shows whatever the assistant said;
- * Undo brings back what was there before (the store's restore, itself in History).
+ * Undo brings back what was there before (the store's restore, itself in History); once undone, it says
+ * by whom.
  */
 
 import { Folder, Undo } from "iconoir-react";
@@ -23,8 +24,9 @@ export function ProjectNoticeRow({ change, me, projectHref, onUndo }: { change: 
       </a>
       <p className="min-w-0 flex-1 chat-text-13 leading-5 text-ink-2 [overflow-wrap:anywhere]">
         <span className="text-ink">{authorName(change.by, me)}</span> {verb}: {kind} “{change.item.title}”
+        {change.undone !== undefined && <span className="text-ink-3"> · undone by {authorName(change.undone.by, me)}</span>}
       </p>
-      {onUndo !== undefined && change.restorable && change.action !== "restored" && (
+      {onUndo !== undefined && change.restorable && change.action !== "restored" && change.undone === undefined && (
         <button
           type="button"
           disabled={busy}

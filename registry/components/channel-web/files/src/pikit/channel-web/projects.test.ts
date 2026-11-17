@@ -649,6 +649,14 @@ test("NOTICES: a chat's are the logs' entries whose author worked in it (an agen
     ["project", "link", "The sheet"],
   ]);
   expect((await ok<ChatNotices>(c, "ana", "GET", `/conversations/${there.id}/notices`)).items.map((each) => each.item.title)).toEqual(["Elsewhere"]);
+  // Undone from the page: the notice says so (and by whom), and undoing the undo puts it back.
+  const note = notices.items.find((each) => each.item.kind === "note") as ChatChange;
+  const undo = await ok<ChatChange>(c, "ana", "POST", `/projects/${work.id}/history/memory/${note.n}/restore`);
+  const after = await ok<ChatNotices>(c, "ana", "GET", `/conversations/${here.id}/notices`);
+  expect(after.items.find((each) => each.n === note.n && each.log === "memory")?.undone).toEqual({ at: undo.at, by: { kind: "person", principal: { channel: "web", id: "ana", name: "ana" } } });
+  expect(after.items.filter((each) => each.undone !== undefined).length).toBe(1);
+  await ok(c, "ana", "POST", `/projects/${work.id}/history/memory/${undo.n}/restore`);
+  expect((await ok<ChatNotices>(c, "ana", "GET", `/conversations/${here.id}/notices`)).items.filter((each) => each.undone !== undefined)).toEqual([]);
   // Another user's chat id is no chat of theirs.
   expect((await call(c, "ben", "GET", `/conversations/${here.id}/notices`)).status).toBe(404);
   // Its author no longer a member (the owner handed it over, then left): none.

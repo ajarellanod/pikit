@@ -342,6 +342,9 @@ describe("errors", () => {
     expect(denied).toBeInstanceOf(ChatFailure);
     expect({ status: denied.status, code: denied.code, message: denied.message }).toEqual({ status: 403, code: "denied", message: "Only some users may ask this." });
     expect(failureOf(404, { error: "not_found" }).message).toContain("not here");
+    expect(failureOf(404, { error: "not_found", message: "no such conversation" }).message).toContain("not here");
+    expect(failureOf(404, { error: "not_found", message: "no one with that email uses this chat" }).message).toBe("No one with that email uses this chat");
+    expect(failureOf(409, { error: "conflict", message: "the instructions changed meanwhile" }).message).toBe("The instructions changed meanwhile");
     expect(failureOf(401, { code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" })).toMatchObject({ status: 401, code: "INVALID_EMAIL_OR_PASSWORD", message: "That email and password do not match an account." });
     expect(failureOf(403, { code: "SIGN_UP_NOT_ALLOWED", message: "x" }).message).toContain("by invitation");
     expect(failureOf(429, { message: "Too many requests." }).message).toContain("Too many tries");

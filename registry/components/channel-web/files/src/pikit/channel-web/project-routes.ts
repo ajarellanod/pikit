@@ -244,6 +244,30 @@ export function mergeHistory(pages: ReadonlyMap<Log, { page: ChangePage; place: 
   return { items, ...(more && { next }) };
 }
 
+/**
+ * Of `entries` (one log's, newest first), the changes whose earlier state is back now, each with the
+ * restore that brought it: a `restored` entry whose own change was not restored since (an Undo undone
+ * puts it back).
+ */
+export function undoneIn(entries: readonly Change[]): Map<number, Change> {
+  const byNumber = new Map(entries.map((entry) => [entry.n, entry]));
+  const restoredBy = new Map<number, Change>();
+  // Newest first: the first restore met of each change is its latest.
+  for (const entry of entries) if (entry.action === "restored" && entry.restores !== undefined && !restoredBy.has(entry.restores)) restoredBy.set(entry.restores, entry);
+  const undone = new Map<number, Change>();
+  const isUndone = (n: number, depth = 0): boolean => {
+    const restore = restoredBy.get(n);
+    if (restore === undefined || depth > 50) return false;
+    // A restore that was itself undone leaves the change in place.
+    return !isUndone(restore.n, depth + 1);
+  };
+  for (const n of byNumber.keys()) {
+    const restore = restoredBy.get(n);
+    if (restore !== undefined && isUndone(n)) undone.set(n, restore);
+  }
+  return undone;
+}
+
 /** An entry as the page shows it, with its log. */
 const changeOf = (log: Log, change: Change): ChatChange => ({ log, ...change, by: change.by as ChatAuthor, ...(change.redacted !== undefined && { redacted: { at: change.redacted.at, by: change.redacted.by as ChatAuthor } }) });
 
@@ -1009,13 +1033,19 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
     const asking = await who(me, ctx);
     if ((await projects.roleOf(space, asking.principals, ctx)) === undefined) return json<ChatNotices>(200, { project, items: [] });
     const fromHere = (change: Change): boolean => (change.by.kind === "agent" || change.by.kind === "person") && change.by.conversation === key;
+    const undone = new Map<Log, Map<number, Change>>();
     const read = await Promise.all(
       logs().map(async (log) => {
         const page = await readLog(log, space, asking, { limit: NOTICES_READ }, ctx);
+        undone.set(log, undoneIn(page.items));
         return [log, { page: { items: page.items.filter(fromHere) }, place: undefined }] as const;
       }),
     );
-    return json<ChatNotices>(200, { project, items: mergeHistory(new Map(read), NOTICES_MAX).items });
+    const items = mergeHistory(new Map(read), NOTICES_MAX).items.map((item) => {
+      const by = undone.get(item.log)?.get(item.n);
+      return by === undefined ? item : { ...item, undone: { at: by.at, by: by.by as ChatAuthor } };
+    });
+    return json<ChatNotices>(200, { project, items });
   });
 
   return {

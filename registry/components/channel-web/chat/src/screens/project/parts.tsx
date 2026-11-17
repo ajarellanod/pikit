@@ -12,7 +12,7 @@ import { Field } from "@/components/bui/Field";
 import type { ChatAuthor, ChatChange } from "@/lib/chat-api";
 import { asError } from "@/lib/errors";
 import { formatAgo } from "@/lib/format";
-import { authorName, authorSource, changeSentence, chatOfKey, initialsOf } from "@/lib/project";
+import { authorName, authorSource, changeSentence, chatOfKey, initialsOf, principalName } from "@/lib/project";
 
 /** A person's (or an agent's) initials in a circle. */
 export function Avatar({ name, agent = false, size = 24 }: { name: string; agent?: boolean; size?: number }) {
@@ -27,13 +27,13 @@ export function Avatar({ name, agent = false, size = 24 }: { name: string; agent
   );
 }
 
-/** Who made something and from where, and when: `ana · in a chat, answering ben · 3 minutes ago`. */
-export function AuthorLine({ by, at, me }: { by: ChatAuthor | undefined; at?: number; me: string }) {
+/** Who made something and from where, and when: `ana · in a chat, answering ben · 3 minutes ago` (without the name when the line around says it). */
+export function AuthorLine({ by, at, me, named = true }: { by: ChatAuthor | undefined; at?: number; me: string; named?: boolean }) {
   const source = authorSource(by, me);
   const chat = by !== undefined && (by.kind === "agent" || by.kind === "person") ? chatOfKey(by.conversation) : undefined;
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[12px] text-ink-3">
-      <span className="text-ink-2">{authorName(by, me)}</span>
+      {named && <span className="text-ink-2">{authorName(by, me)}</span>}
       {source !== undefined &&
         (chat !== undefined && chat.userId === me ? (
           <a href={`#/c/${chat.chatId}`} className="underline decoration-line-strong underline-offset-2 hover:text-ink">
@@ -54,13 +54,13 @@ export function AuthorLine({ by, at, me }: { by: ChatAuthor | undefined; at?: nu
 /** One change of the History: who, what, from where, when, and Undo while it can be undone. */
 export function ChangeRow({ change, me, onUndo }: { change: ChatChange; me: string; onUndo?: (change: ChatChange) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
-  const name = authorName(change.by, me);
+  const name = change.by.kind === "person" ? principalName(change.by.principal) : authorName(change.by, me);
   return (
     <li className="flex items-start gap-3 py-2.5">
       <Avatar name={name} agent={change.by.kind === "agent"} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-[13px] text-ink [overflow-wrap:anywhere]">{changeSentence(change, me)}</span>
-        <AuthorLine by={change.by} at={change.at} me={me} />
+        <AuthorLine by={change.by} at={change.at} me={me} named={false} />
       </div>
       {onUndo !== undefined && change.restorable && (
         <Button
