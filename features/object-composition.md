@@ -199,8 +199,8 @@ export function actorComposition(description: AppDescription, owners: readonly s
   only on the capabilities its components use; never on another component's listener or pipeline
   stage running in its object.* Every kit owner keeps it today (checked by reading each, below); the
   one known exception is a project's (neural-agents' `channel-google-chat:access`, a dry run of the
-  routers): `ActorKind` gets a `pipelines` field, whose stages join the closure, when that actor comes
-  to the kit, not before (contract rule 1).
+  routers): it moves into the kit's channel-google-chat (decided, below), and `ActorKind` gets a
+  `pipelines` field, whose stages join the closure, in that task, not before (contract rule 1).
 - **Settings declarations** were a hidden coupling of the same sort: settings-store's object
   validates against its own App's declarations (decision 6 removes it).
 
@@ -394,7 +394,7 @@ the bigger phases are built.
      already logged before this change) and, after, their `components`, `composeMs` and `startMs`.
   It prints a table, base against head, and writes it as JSON (`.bench/`, gitignored). The modelled
   figure (each object start +400 ms, LATENCY's model) is computed from the counts, not injected.
-- **Production** (the operator's to allow): the same log line from a deploy of neural-agents, with an
+- **Production** (allowed: decided, below, made by the integrator): the same log line from a deploy of neural-agents, with an
   `isolate` field (the first object of its isolate, or not) to tell script start from App start.
 
 Expected, to be confirmed by the bench (neural-agents' numbers from LATENCY.md):
@@ -412,7 +412,7 @@ Expected, to be confirmed by the bench (neural-agents' numbers from LATENCY.md):
 
 If production shows the isolate's script start dominates, composition saves only the cascades and
 starts' calls (the middle rows); the lever is then the bundle that owner objects load, which is
-another note (open questions).
+another note (decided, below: after the bench's numbers).
 
 ## Migration
 
@@ -503,27 +503,31 @@ only the `component.json` of components whose setup changed.
 |---|---|---|
 | T15 the proof | every kit kind's equivalence in workerd, zero start calls; the bench, base against head; the numbers; this note to `completed/` | `tests/workerd/test/object-composition.workerd.ts`, `tests/workerd/README.md`, `docs/benchmarks/object-start.md`, `features/object-composition.md` (moved), `features/README.md`, `CHANGELOG.md` |
 
-A check between phases 1 and 2: T2's baseline and T1's log line on the bench (and, if allowed, in
-production) say how much of a cold object is its App's start. If it is little, phases 2 and 3 still
-remove the cascades, and the open question on the bundle comes first.
+A check between phases 1 and 2: T2's baseline and T1's log line on the bench (and in production, from
+the integrator's brief instrumented deploy of neural-agents) say how much of a cold object is its App's start. If it is little, phases 2 and 3 still
+remove the cascades, and the question of the owners' smaller Worker comes first.
 
 ## Pi first
 
 Nothing in Pi: one Pi process knows nothing of Durable Objects or of other actors' keys. pi-durable's
 storage and runtime open only in objects whose kind uses `agent.runtime`, that is in conversations'.
 
-## Open questions
+## Decided (the operator, 2026-11-19)
 
-- **Production timing.** May an instrumented build (the log line's `isolate`, `composeMs`, `startMs`)
-  be deployed to neural-agents, or a staging Worker of it, to split script start from App start?
-  Local workerd cannot show isolate placement.
-- **The settings catalog.** Decision 6 adds a second settings object whose first open after idleness
-  costs a whole start (the Settings dialog, as today). The alternative is to keep the settings object
-  whole and win nothing on the path that reads it before every Google Chat hand-off.
-- **Routing's dry run.** neural-agents' `channel-google-chat:access` actor (a dry run of the routers
-  before "Thinking…") needs the routers' pipeline stages, which a kind does not follow. Should that
-  actor move into the kit's channel-google-chat, with `ActorKind.pipelines`, or stay the project's
-  (its object whole)?
-- **If script start dominates**: a second, smaller Worker script for the owners (their own class and
-  bundle) would be the next lever. It costs a binding, a migration and a second deploy unit; worth a
-  note of its own only if the numbers say so.
+The open questions of the first draft, answered:
+
+- **Production timing: yes.** An instrumented build (the log line's `isolate`, `composeMs`,
+  `startMs`) may be deployed briefly to neural-agents to split the isolate's script start from the
+  App's start (local workerd cannot show isolate placement). The integrator makes that deploy, not a
+  build task.
+- **The settings catalog: accepted.** Decision 6 stands: a second settings object
+  (`settings-store:catalog`) whose first open after idleness costs a whole start (the Settings
+  dialog, as today), so that the path every Google Chat hand-off reads no longer does.
+- **Routing's dry run moves into the kit.** neural-agents' `channel-google-chat:access` actor (a dry
+  run of the routers before "Thinking…") moves into the kit's channel-google-chat, and
+  `ActorKind.pipelines` (whose stages join the closure) is added with it, in that later task, not
+  before (contract rule 1).
+- **A separate smaller Worker for the owners: decided after the bench's numbers.** If script start
+  dominates, a second Worker script for the owners (their own class and bundle, at the cost of a
+  binding, a migration and a second deploy unit) gets a note of its own; not before the numbers say
+  so.
