@@ -102,7 +102,8 @@ What to take, and the pitfalls each one shows:
    checked recently. A Google Chat member of a client's space adopted as a project is a member like any
    other: they change the project from the space (`/rules`, through the agents) as people on the page.
 4. **Everything in a project is shared by its members.** Its chats are listed and readable by every
-   member (written only by their author), its memory and files are everyone's. A chat that must stay
+   member (written only by their author; listed by the [conversation directory](completed/conversation-directory.md),
+   which projects-sql's `conversation.audience` stage tells who the members are), its memory and files are everyone's. A chat that must stay
    private is made outside the project. The page says so before the first member is added.
 5. **Collaborative: everyone adds, nothing waits** (operator's decision). Any member writes the
    instructions, documents, rules, notes, links and files, active at once. Agents keep notes

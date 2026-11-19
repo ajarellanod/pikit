@@ -3,11 +3,18 @@
 **Public appeal:** - (one list of conversations whose title, order and "delete" mean the same thing in
 the dashboard, the web chat and any other view)
 
-**Specified:** no. Design of 2026-11-19, from the operator's direction after neural-agents showed the
-same conversations listed by three indexes. It changes one sentence of SPEC §5 (below, "Where it bends").
+**Specified:** yes: SPEC §5's list of conversations is `conversations.directory`'s. Design of
+2026-11-19, from the operator's direction after neural-agents showed the same conversations listed by
+three indexes.
+
+**Status:** built, on both targets (phases 0 to 3 below): the contracts `conversations.directory` and
+`conversation.audience` with their suites, `owner` and `sender`, the provider
+`conversations-directory` (installed by the dashboard's defaults), projects-sql's stage, Google Chat's
+first title, and admin-api and channel-web as its views. Their old indexes and titlers are removed.
+"Where it is" and "Open" are at the end; "Where it stands" is how things were before it.
 
 **Needed by:** nothing required. It replaces admin-api's conversation index (SPEC §5's list,
-[cloudflare-conversation-index](cloudflare-conversation-index.md)) and channel-web's users' index, and
+[cloudflare-conversation-index](../cloudflare-conversation-index.md)) and channel-web's users' index, and
 gives a project's own index of another channel's conversations (neural-agents' `rooms:index`) a smaller
 job: saying who belongs to a space.
 
@@ -41,8 +48,8 @@ ms) are two of the twelve awaits before an answer (agents' `channel-google-chat/
 - **One update per message**, written locally in the conversation's own App and sent to the directory
   off the message's path.
 
-## Where it stands
-- **admin-api's index** (`conversation-index.ts`, `titles.ts`; [cloudflare-conversation-index](cloudflare-conversation-index.md)):
+## Where it stands (before the directory)
+- **admin-api's index** (`conversation-index.ts`, `titles.ts`; [cloudflare-conversation-index](../cloudflare-conversation-index.md)):
   rows of (key, conversation, agent, newest activity, title lowercased) written from the runtime's events
   (`agent.dispatched` awaited in the caller, `agent.started`, `agent.settled`, `agent.failed`,
   `conversation.reset`) and a backfill from `agent.observe` at each App's start; titles in each
@@ -307,8 +314,8 @@ neural-agents' merged list cost now.
 - channel-web: `titles.ts`, the index half of `store.ts` (`seen`, `list`, `listProject`,
   `projectConversation`, `projectChats`, `forget`, `channel_web_conversations`), `channel-web.seen`, the
   `/name` hand-off; `ChatConversation` fields read from the entry.
-- [cloudflare-conversation-index](cloudflare-conversation-index.md): superseded (its open question on
-  pending work stays, moved to [kit follow-ups](kit-follow-ups.md)).
+- [cloudflare-conversation-index](../cloudflare-conversation-index.md): superseded (its open question on
+  pending work stays, moved to [kit follow-ups](../kit-follow-ups.md)).
 
 ## Conformance
 `createConversationDirectoryConformance(fixture)` (`@pikit/contracts/testing`): the fixture records
@@ -412,3 +419,35 @@ owner or visibility.
 6. **The model titles every conversation**, Google Chat threads included: one title everywhere.
 7. **No import of existing data**: neural-agents' renames, archives, deletes and read marks are lost; the
    directory rebuilds itself from the runtime and titles anew.
+
+## Where it is
+- **Contracts**: `packages/contracts/src/conversation-directory.ts` and `conversation-audience.ts`, their
+  suites in `packages/contracts/src/testing/` (`createConversationDirectoryConformance`, 20 cases over
+  `createMemoryDirectory` and 12 broken doubles; `createConversationAudienceConformance`, 6 cases).
+  `ConversationPlace.owner` (conversations-kv, conversations-file) and `agent.dispatched`'s `sender`
+  (pi-adapter).
+- **Provider**: `registry/components/conversations-directory` (its README): the suite on a server, on
+  the one-key layout in-process, and in the workerd lane (`tests/workerd/test/conversations-directory.workerd.ts`,
+  with one `seen` per flush and none on a message's path). As built: `is_current` for `current`,
+  `title_at` (the newer of two equal-source titles wins), `_activity` with `id` and `shown`; grants in
+  two steps (an act on a conversation of another space answers `{ needs: space }`, the client checks that
+  space fresh and asks again: one's own costs one call). The dashboard's defaults
+  (`registry/dashboard/dashboard.json`) install it before admin-api, in both Apps on Cloudflare.
+- **Stages and channels**: projects-sql's `audience.ts` (a project's own space only, never an adopted
+  one); channel-google-chat's `title(first)` (optional, once per conversation).
+- **Views**: admin-api (ids `<key>~<runtime id>` on both targets; Hide for me, Archive and Delete for
+  everyone; a dashboard chat's title is the operator's words, never a model's: the titler skips runs
+  only operators started) and channel-web (every chat route through `access`; its own lists, a
+  project's chats and counts; Delete for everyone resets the key). Tests: their bun tests over the
+  contracts' double, and the real provider in `tests/acceptance/projects.test.ts`,
+  `samples/http/test/admin.test.ts` and the workerd files `admin-api`, `channel-web`, `projects-e2e`.
+
+## Open
+- projects-sql's list grants page by `updated_at`: a project changed mid-paging can be missed (fail
+  closed: hidden, never shown; the fresh check is exact). The admin route's adopted `space` still
+  exists, ignored by the stage.
+- channel-web: a chat whose only message was a command is not listed until a message reaches it;
+  an image-only chat shows "New conversation" until the model titles it; lists and `busy` lag by the
+  recorder's flush on Cloudflare; after an operator's reset the web chat is gone for its user.
+- Downstream (neural-agents): `pikit upgrade` of its edited admin-api and channel-web, and its rooms
+  index as a `conversation.audience` stage (no import: decision 7).

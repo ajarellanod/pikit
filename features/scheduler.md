@@ -70,7 +70,7 @@ neither list nor cancel it, and on an evicted host it wakes only with pi-durable
   (tool-schedule's key is the object's own: its ticks are local calls); the routines are one actor's,
   `scheduler-routines:routines`. scheduler-admit sends each tick to its key's object
   (`actor.mailbox`), which admits it. No index: `list` sees an actor's own jobs, and nothing lists
-  every scheduled prompt (a view of them would add an index, as admin-api's conversation index).
+  every scheduled prompt (a view of them would add an index, as conversations-directory is for conversations).
 - **A refused routine fails the deploy.** The Worker half asks the routines' actor to sync at each start
   of the Worker's App, which a deploy's `/health` starts: `invalid` fails the start, and the deploy
   rolls back, as a refused routine stops a server's start.

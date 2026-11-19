@@ -345,7 +345,7 @@ here changed. memory-sql's README and memory-recall's say how, and what proves i
   SPEC §5): list a space's memory and rules, approve and forget. On Cloudflare routes run in the
   Worker's App, which has no `storage.sql`: memory-sql's Worker half (`memory-sql-worker`, built for
   [projects](projects.md)) provides `memory` there through `actor.mailbox` only. Listing every space needs an
-  index of owners (as the [conversation index](cloudflare-conversation-index.md) does for
+  index of owners (as the [conversation directory](completed/conversation-directory.md) does for
   conversations).
 - **Facts without being asked**: a hook. `hook(GenerationTask, { onYield })` can nudge the model
   ("if you learned something lasting, call remember") with `{ continue: ... }`, which costs a model

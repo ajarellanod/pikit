@@ -68,8 +68,9 @@ Changes to existing components:
   (`runtime-pi/.../index.ts`, `perObject`). Read `actor.inbox`'s `scope` instead, as admin-api does.
 - **channel-telegram-webhook**'s Worker half reads `WORKERS_HOST` (env, version): make it
   host-neutral or give it a Rivet half.
-- **admin-api** uses `actor.mailbox` and `scope` only (its index actor `admin-api:index`): expected to
-  work unchanged; verify.
+- **conversations-directory** uses `actor.mailbox`, `scope` and `wakeups` only (its index actor
+  `conversations-directory:index`, each conversation's outbox flushed by a wakeup), and admin-api
+  `actor.mailbox` and `scope`: expected to work unchanged; verify.
 - **outbound-durable, conversations-kv, storage-kv-sql** run on `storage.sql`: expected unchanged.
 - **proposals-github / repo-github-app**: no Cloudflare import, but the deploy after an approval is
   Workers Builds today; with Rivet, CI runs `deployment-rivet`'s deploy script with the same rollout.

@@ -179,7 +179,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   owner: the only object that ever sees the new key is the one the channel key named. But that object
   is `idFromName` of the channel's key, not of the conversation's, so whatever reaches the
   conversation by its own key through `actor.mailbox` (a scheduler fanning out to Durable Objects,
-  [scheduler](scheduler.md); an admin action on a key the [conversation index](cloudflare-conversation-index.md)
+  [scheduler](scheduler.md); an admin action on a key the [conversation directory](completed/conversation-directory.md)
   lists) gets `idFromName` of that key (`actors-do/index.ts:361`): another, empty object,
   against C2's "the actor owning `key`" (`SPEC.md:185-191`). A stage that maps two channel keys to one
   key (two chats, or two channels, into one conversation) would create that conversation in two

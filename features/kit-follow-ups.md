@@ -70,9 +70,20 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   2. Landed too: pikit's UI pieces and views as shadcn items (`@pikit`), components with a view
      through `pikit add`, the view reference of the `pikit` skill, and the Health (`health-registry`) and Delivery views.
   3. Landed too: Cloudflare, a conversation's object read, acted on and followed (polled) from the
-     Worker by `actor.mailbox.call`, and [the index](cloudflare-conversation-index.md), an actor, to
-     list them all; the dashboard's files bundled as a module on every host.
+     Worker by `actor.mailbox.call`, and an index actor to list them all (now the
+     [conversation directory](completed/conversation-directory.md)'s); the dashboard's files bundled as
+     a module on every host.
   4. The agent changing its own UI, through SPEC §6's gate.
+
+## Pending work across Durable Objects
+- **Why:** resuming at start relies on `agent.submissions.pending()` across conversations
+  (`packages/contracts/src/submissions.ts`), which a store inside each Durable Object cannot answer
+  (from the superseded [cloudflare-conversation-index](cloudflare-conversation-index.md)).
+- **What:** an evicted object resumes on its next request or alarm (SPEC §4). Can every object with
+  unanswered work set an alarm for itself (runtime-pi asks for a wakeup at start and when idle with
+  pending work), so that no index is needed for resuming? A conversation that gets neither is what an
+  index of pending work would find.
+- **Size:** small to check; an index only if a gap shows.
 
 ## Building on the bases must be the easy path
 - **Why:** pikit gives the bases and the user builds their assistant on them (SPEC P1, MANIFESTO

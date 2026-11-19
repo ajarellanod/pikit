@@ -15,6 +15,11 @@ The mechanism (T1: `actor.kind`, `actorComposition`, the host) and the started p
 their branches (`agent/comp-t1-mechanism`, `agent/comp-t6-cli-apps`, `agent/comp-t8-celld`, `agent/comp-t9-doctor`,
 `agent/comp-t10-declarations`), unmerged: resume them only if production shows the App's start is the cost.
 
+**Since:** admin-api's index, which the tables below name (`admin-api:index`, its awaited backfill `seen`
+and titles), is replaced by the [conversation directory](completed/conversation-directory.md): its actor
+`conversations-directory:index` is told from each conversation's outbox by a wakeup, never on a
+message's path, and its start's backfill calls nothing when nothing is new.
+
 **Needed by:** nothing required. SPEC §4's budget "cold start ≤ 1 s" is per object; a message that
 crosses ten cold objects in series is ten of them, which no budget covers today.
 
