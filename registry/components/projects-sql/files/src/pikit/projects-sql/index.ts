@@ -19,6 +19,8 @@
  *   purges the space's memory (`memory.purge`, when memory-sql is installed) and deletes every row of
  *   the project. Each step is idempotent: a run cut short runs again. At start it asks `wakeups` again
  *   for the next purge its own rows hold (K6); a start makes no call to another actor.
+ * - **Who belongs to a space** (`audience.ts`): its stage of `conversation.audience` grants a project's
+ *   members its own space (`project:<id>`, `owner` for the owner), never an adopted one; both halves.
  * - **The dashboard**: `routes.ts`, behind `admin.auth`, and the view in `view/`.
  *
  * Config: `coreTokens` (the core documents' budget, estimated tokens) and `staleAfterMs` (how long a
@@ -28,14 +30,16 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import { ActorCallError, type ActorCallHandler, ChangeInputError, CORE_TOKENS_DEFAULT, type JsonValue, ProjectError, STALE_AFTER_MS_DEFAULT } from "@pikit/contracts";
+import { ActorCallError, type ActorCallHandler, audienceStage, ChangeInputError, CORE_TOKENS_DEFAULT, type JsonValue, ProjectError, STALE_AFTER_MS_DEFAULT } from "@pikit/contracts";
 import Type, { type Static } from "typebox";
+import { AUDIENCE_SOURCE, projectsAudience } from "./audience.ts";
 import { type DirectoryEnv, create, INDEX_KEY, indexed, list, locate, unindexed } from "./directory.ts";
 import { answerProject, type ProjectActorEnv, projectIdOf, projectKey, purgeDue } from "./project.ts";
 import { provideRoutes } from "./routes.ts";
 import { CALL, projectsOver } from "./store.ts";
 import { createTables } from "./tables.ts";
 
+export { AUDIENCE_SOURCE, projectsAudience } from "./audience.ts";
 export { INDEX_KEY } from "./directory.ts";
 export { type IndexEntry, projectKey, searchAttempts } from "./project.ts";
 export { CALL, projectsOver } from "./store.ts";
@@ -79,6 +83,7 @@ export default defineComponent({
 
     const store = projectsOver(() => mailbox.get());
     pikit.provide("projects", store);
+    pikit.pipeline("conversation.audience", audienceStage(AUDIENCE_SOURCE, projectsAudience(() => store)), { id: "projects-sql" });
     provideRoutes(pikit, () => store);
 
     /** Asks for the purge at the earliest tombstone this App's rows hold, if any. */
