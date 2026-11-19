@@ -42,6 +42,8 @@
 
 - Never use `git stash` in a worktree to compare against a clean tree: the stash list is shared by every worktree of the repository, and a `git stash` with nothing to stash followed by `git stash pop` pops another agent's stash (it happened once; it was put back with `git stash store`). Compare with `git worktree add` of the commit, or `git show <rev>:<path>`.
 
+- `bun run registry generate` writes `registry/registry.json` but not the shadcn items in `registry/ui/r/`: after a merge or a component's `description` change also run `bun scripts/ui-registry.ts generate` (`scripts/dashboard.test.ts` checks it). `docs/contracts.md`'s overview table is pinned to every manifest's capabilities by `packages/cli/src/registry/capabilities.test.ts`: a new component's requires change its rows.
+
 # Contract rules
 
 When adding or changing a contract in `@pikit/contracts`, a Pi-typed contract in `@pikit/pi-adapter`,
