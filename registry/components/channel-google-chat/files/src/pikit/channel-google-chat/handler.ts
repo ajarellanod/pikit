@@ -33,6 +33,13 @@
  *     workspace (attachments.ts `writeFiles`). A write that fails rejects: Google sends it again.
  *   - Outcomes: `admitted` and `duplicate` returned; `halted`, `denied` and `no_route` told briefly
  *     in the thread (logged), `done`.
+ *   - The conversation's first title, with `conversations.directory` installed (`EventDeps.directory`):
+ *     after an `admitted` or `duplicate` message of a conversation not titled yet (`titledKey` in
+ *     `storage.kv`), its text as its person wrote it (`textOf`: no sender's name, quote or files),
+ *     `cleanTitle`'d, is given as `title(first)`, then the conversation is marked. A text with no words
+ *     gives nothing (a later message titles it); a command never does. A failure is logged, not marked
+ *     (the next message, or Google repeating this one, tries again), and never rejects the event. The
+ *     directory's titler later replaces it with the model's (`first` < `model`): one title everywhere.
  * - **An add** (`addedToSpacePayload`): a welcome in an allowed space, the stranger text (route.ts
  *   `strangerText`: its id for the operator) in another, which the route already told (a guard); `done`.
  * - **A removal** (`removedFromSpacePayload`): logged; `done` (answers still owed there fail
@@ -49,7 +56,7 @@
  */
 
 import type { AppContext } from "@pikit/core";
-import { admitInbound, answerKey, type CommandOutcome, commandOf, type InboundMessage, type InboundOutcome } from "@pikit/contracts";
+import { admitInbound, answerKey, type CommandOutcome, cleanTitle, commandOf, type EntryRef, type InboundMessage, type InboundOutcome } from "@pikit/contracts";
 import { type ReadAttachments, readAttachments, writeFiles } from "./attachments.ts";
 import { type AddOnEvent, type ChatMessage, type ChatSpace, type ChatUser, eventKind, spaceOf } from "./event.ts";
 import { type PieceIds, pieceIds } from "./ids.ts";
@@ -65,6 +72,9 @@ export const DOWNLOAD_DEADLINE_MS = 20_000;
 
 /** Where what `/new` (or a command typed in the chat) said for a message is kept: it runs once, whatever Google repeats. */
 export const commandSeenKey = (message: string): string => `command:${message}`;
+
+/** Where a conversation is marked once its first title was given to `conversations.directory`: titled once. */
+export const titledKey = (ref: EntryRef): string => `titled:${JSON.stringify([ref.key, ref.conversationId])}`;
 
 /** What the handler says itself. */
 export const REPLIES = {
@@ -163,6 +173,22 @@ export function createEventHandler(deps: EventDeps): EventHandler {
     }
   };
 
+  /** The conversation's first title (`title(first)`), once: see the header. */
+  const offerTitle = async (ref: EntryRef, text: string, ctx: AppContext): Promise<void> => {
+    const directory = deps.directory;
+    if (directory === undefined) return;
+    const title = cleanTitle(text);
+    if (title === undefined) return;
+    try {
+      const mark = titledKey(ref);
+      if ((await store.get<boolean>(mark)) !== undefined) return;
+      await directory.title(ref, { text: title, source: "first" }, ctx);
+      await store.set(mark, true);
+    } catch (error) {
+      ctx.logger.warn("channel-google-chat: the conversation's first title could not be given to the directory; the next message tries again", { conversation: ref.key, error: errorText(error) });
+    }
+  };
+
   const onMessage = async (key: string, event: AddOnEvent, ctx: AppContext): Promise<HandledEvent> => {
     const message = event.chat.messagePayload?.message;
     const space = spaceOf(event);
@@ -242,6 +268,7 @@ export function createEventHandler(deps: EventDeps): EventHandler {
     switch (outcome.kind) {
       case "admitted":
       case "duplicate":
+        await offerTitle({ key: outcome.conversation.key, conversationId: outcome.conversation.conversationId }, body, ctx);
         return outcome.kind;
       case "command": {
         const told = commandReply(outcome.name, outcome.outcome);

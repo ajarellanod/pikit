@@ -29,6 +29,7 @@
       "workspace",
       "execution",
       "actor.inbox",
+      "conversations.directory",
       "agent.command"
     ]
   },
@@ -58,6 +59,7 @@
         "execution",
         "actor.inbox",
         "actor.mailbox",
+        "conversations.directory",
         "agent.command"
       ]
     },
