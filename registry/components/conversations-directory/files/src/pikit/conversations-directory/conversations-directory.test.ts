@@ -28,7 +28,7 @@ import type {
 } from "@pikit/contracts";
 import { createConversationDirectoryConformance, createMemoryMailbox, createMemoryWakeups, type ConversationDirectorySubject } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import conversationsDirectory, { FLUSH, INDEX_KEY, OUTBOX, SEEN, TITLE } from "./index.ts";
+import conversationsDirectory, { FLUSH, INDEX_KEY, OUTBOX, SEEN } from "./index.ts";
 
 type Layout = "all" | "one";
 
@@ -272,3 +272,129 @@ for (const layout of ["all", "one"] as const) {
     test(`conversations-directory (${layout === "all" ? "a server" : "one key's actor"}) ${c.group}: ${c.name}`, () => c.run(), 30_000);
   }
 }
+
+const ANA = { channel: "web", id: "u-ana" };
+const OPERATOR = { kind: "operator", id: "op-1" } as const;
+
+/** A message to `key` (Ana's web chat), its run started and ended, emitted as the runtime does. */
+async function talk(opened: Opened, w: World, key: string, requestId: string, options: { text?: string; operator?: boolean } = {}) {
+  const ref = await opened.registry.resolve(key, "assistant", { channel: "web", owner: ANA }, opened.ctx);
+  const known = w.conversations.get(ref.conversationId);
+  if (known !== undefined) known.lastActivity = opened.ctx.clock.now();
+  const sender = options.operator === true ? { channel: "dashboard", id: "op-1" } : ANA;
+  await opened.ctx.emit("agent.dispatched", { conversation: ref, admission: { kind: "started", requestId }, sender });
+  await opened.ctx.emit("agent.started", { conversation: ref, requestId, resumed: false });
+  const messages = [{ role: "user", content: [{ type: "text", text: options.text ?? "hello" }] }] as never[];
+  await opened.ctx.emit("agent.settled", { conversation: ref, requestId, requestIds: [requestId], kind: "completed", messages });
+  return ref;
+}
+
+async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, what: string): Promise<T> {
+  for (let tries = 0; tries < 2_000; tries++) {
+    const value = await read();
+    if (done(value)) return value;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+test("one key's actor: a message's events cost no seen on their path; the flush sends them as one seen, one merged update", async () => {
+  const w = world();
+  const wakeups = manualWakeups();
+  const opened = await openApp(w, "one", createManualClock(), [], { wakeups: wakeups.component });
+  try {
+    const ref = await talk(opened, w, "web:u-ana:1", "r-1");
+    expect(w.seen).toEqual([]);
+    expect([...wakeups.asked]).toEqual([FLUSH]);
+    expect(await opened.sql.query(`SELECT key, conversation FROM ${OUTBOX}`)).toEqual([{ key: ref.key, conversation: ref.conversationId }]);
+    expect((await opened.directory.list(OPERATOR, {}, opened.ctx)).items).toEqual([]);
+
+    await wakeups.fire(FLUSH);
+    expect(w.seen.length).toBe(1);
+    const [update] = (w.seen[0] as { updates: { busy: boolean; activity: { id: string; by: string }[]; place: { owner: unknown } }[] }).updates;
+    expect(update?.busy).toBe(false);
+    expect(update?.activity.map((each) => [each.id, each.by])).toEqual([
+      ["m:r-1", "web:u-ana"],
+      ["r:r-1", "agent"],
+    ]);
+    expect(update?.place.owner).toEqual(ANA);
+    expect(await opened.sql.query(`SELECT key FROM ${OUTBOX}`)).toEqual([]);
+    const [entry] = (await opened.directory.list({ kind: "people", principals: [ANA] }, {}, opened.ctx)).items;
+    expect(entry).toMatchObject({ key: ref.key, conversationId: ref.conversationId, owner: ANA, busy: false, state: "listed", role: "owner" });
+
+    // A flush with nothing in the outbox sends nothing.
+    await wakeups.fire(FLUSH);
+    expect(w.seen.length).toBe(1);
+  } finally {
+    await opened.app.stop();
+  }
+});
+
+test("one key's actor: it refuses to start without wakeups (it could never tell the directory)", async () => {
+  const w = world();
+  const app = await defineApp({ components: [w.storage, runtimeDouble(w), actorsAs(createMemoryMailbox(), "one", w), conversationsDirectory], logger: silentLogger }).create();
+  await expect(app.start()).rejects.toThrow("conversations-directory");
+});
+
+test("the titler: once, after the first completed run a person started, from the first title's text; never for an operator's run, nor over a rename", async () => {
+  const w = world();
+  const prompts: string[] = [];
+  const model = defineComponent({
+    name: "model-double",
+    setup(pikit) {
+      pikit.provide("model.complete", {
+        async complete(request) {
+          prompts.push(`${request.model} ${request.prompt}`);
+          return 'Title: "Lisbon trip."';
+        },
+      } satisfies ModelComplete);
+      pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "faux/agent", prompt: "" } as never);
+    },
+  });
+  const opened = await openApp(w, "all", createManualClock(), [model]);
+  try {
+    // An operator's own run: no title.
+    const quiet = await talk(opened, w, "web:u-ana:quiet", "dashboard:op-1:1", { operator: true });
+    // A person's: the first title's text, given by the channel, is what the model titles.
+    const ref = await opened.registry.resolve("web:u-ana:1", "assistant", { channel: "web", owner: ANA }, opened.ctx);
+    await opened.directory.title(ref, { text: "plan the trip to Lisbon", source: "first" }, opened.ctx);
+    await talk(opened, w, "web:u-ana:1", "r-1", { text: "[the channel's prefix] plan the trip" });
+    const titled = await until(() => opened.directory.access(OPERATOR, ref, opened.ctx), (entry) => entry?.titleSource === "model", "the model's title");
+    expect(titled?.title).toBe("Lisbon trip");
+    expect(prompts).toEqual(["faux/agent plan the trip to Lisbon"]);
+    await talk(opened, w, "web:u-ana:1", "r-2");
+    // Renamed before its first run: no model call.
+    const renamed = await opened.registry.resolve("web:u-ana:2", "assistant", { channel: "web", owner: ANA }, opened.ctx);
+    await opened.ctx.emit("agent.dispatched", { conversation: renamed, admission: { kind: "started", requestId: "r-3" }, sender: ANA });
+    await opened.directory.rename(OPERATOR, renamed, "Mine", opened.ctx);
+    await talk(opened, w, "web:u-ana:2", "r-4");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(prompts).toEqual(["faux/agent plan the trip to Lisbon"]);
+    expect((await opened.directory.access(OPERATOR, quiet, opened.ctx))?.title).toBeUndefined();
+    expect((await opened.directory.access(OPERATOR, renamed, opened.ctx))?.title).toBe("Mine");
+  } finally {
+    await opened.app.stop();
+  }
+});
+
+test("the start's backfill: a conversation the runtime holds and no event told is listed with its place; nothing new costs no seen", async () => {
+  for (const layout of ["all", "one"] as const) {
+    const w = world();
+    w.pointers.set("web:u-ana:old", { conversationId: "c-old", agent: "assistant", place: { channel: "web", owner: ANA, space: "project:p1" } });
+    w.conversations.set("c-old", { conversationId: "c-old", key: "web:u-ana:old", agent: "assistant", busy: false, lastActivity: 1_600_000_000_000, usage: {} as never });
+    const clock = createManualClock();
+    const first = await openApp(w, layout, clock);
+    try {
+      const [entry] = (await until(() => first.directory.list({ kind: "people", principals: [ANA] }, {}, first.ctx), (page) => page.items.length === 1, "the backfilled conversation")).items;
+      expect(entry).toMatchObject({ key: "web:u-ana:old", conversationId: "c-old", channel: "web", space: "project:p1", owner: ANA, current: true, lastActivity: 1_600_000_000_000, role: "owner" });
+      expect(entry?.mine?.unread).toBe(0);
+    } finally {
+      await first.app.stop();
+    }
+    const sent = w.seen.length;
+    const second = await openApp(w, layout, clock);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await second.app.stop();
+    expect({ layout, seen: w.seen.length }).toEqual({ layout, seen: sent });
+  }
+});
