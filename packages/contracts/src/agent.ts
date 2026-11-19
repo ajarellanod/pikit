@@ -19,6 +19,7 @@
  */
 
 import type { AppContext } from "@pikit/core";
+import type { Principal } from "./change.ts";
 import { isJsonObject } from "./json.ts";
 import type { MessagePart } from "./parts.ts";
 import { type AgentSkill, isSkillName, skillProblem } from "./skill.ts";
@@ -86,6 +87,18 @@ export interface ConversationRef {
    * Absent: the channel gives none (its conversations are their own spaces), or a ref made by hand.
    */
   space?: string;
+  /**
+   * The person whose conversation it is, when its channel says (channel-web's user, `{ channel: "web",
+   * id }`; the operator who started a dashboard conversation, `{ channel: "dashboard", id }`): its
+   * channel and id. The channel gives it (`AdmitOptions.owner`) and `conversations.registry` records it
+   * with the key's first resolve, as the space, kept for good through resets and restarts, and gives it
+   * with its refs (`resolve`, `get`, a reset's). Only the registry's refs carry it: the runtime records
+   * none and reads none, so its refs (events, a run's `CONVERSATION`, settlements) never have one. Code
+   * that needs it (a directory that lists a person's conversations) reads it from
+   * `conversations.registry.get(key)`. Not an access boundary by itself: who may write in a conversation
+   * stays the channel's and the router's. Absent: the channel gives none.
+   */
+  owner?: Principal;
   /**
    * Where a delegated conversation comes from: the conversation a person or a channel opened, from
    * which its tree of delegations descends (a task delegated from a delegated task has the origin of
@@ -453,8 +466,15 @@ export interface AgentConversations {
 
 declare module "@pikit/core" {
   interface AppEvents {
-    /** Every admission, duplicates included. Emitted by the runtime in the caller's context. */
-    "agent.dispatched": { conversation: ConversationRef; admission: Admission };
+    /**
+     * Every admission, duplicates included. Emitted by the runtime in the caller's context. `sender` is
+     * the dispatched request's (`AgentRequest.sender`) as given to this `dispatch`, a duplicate's too:
+     * a channel's message has its user (`admitInbound`), an operator's follow-up the dashboard's
+     * (`{ channel: "dashboard", id }`, its request id `DASHBOARD_REQUEST_PREFIX`'s); absent when the
+     * request had none. For who did what (activity by whom), never for authorization: the producer
+     * authenticated it.
+     */
+    "agent.dispatched": { conversation: ConversationRef; admission: Admission; sender?: Sender };
     /** A run started, or a new worker resumed one. */
     "agent.started": { conversation: ConversationRef; requestId: string; resumed: boolean };
     /**
