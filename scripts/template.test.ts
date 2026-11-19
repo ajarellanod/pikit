@@ -412,7 +412,7 @@ test.skipIf(!E2E)(
       expect((await fetch(`${base}/admin/api/app`)).status).toBe(401);
       const app = await fetch(`${base}/admin/api/app`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
       expect(app.status).toBe(200);
-      // The owner's chat reaches the conversation index in the background (a message to its object).
+      // The owner's chat reaches the conversation directory in the background (its object's flush to the directory's).
       let listed = "";
       for (let i = 0; i < 20 && !listed.includes(`telegram:${OWNER.id}`); i++) {
         if (i > 0) await Bun.sleep(500);

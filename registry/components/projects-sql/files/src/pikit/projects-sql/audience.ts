@@ -1,6 +1,6 @@
 /**
  * projects-sql's stage of `conversation.audience` (`@pikit/contracts`' conversation-audience.ts,
- * features/conversation-directory.md): a project's members belong to its space, `owner` for its owner.
+ * features/completed/conversation-directory.md): a project's members belong to its space, `owner` for its owner.
  * Both halves register it (`audienceStage(AUDIENCE_SOURCE, …)`, id `projects-sql`), over the App's
  * own `projects` client.
  *

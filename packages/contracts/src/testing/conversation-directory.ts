@@ -1,7 +1,7 @@
 /**
  * `conversations.directory` conformance (`../conversation-directory.ts`): what every provider guarantees
  * to its views (admin-api, channel-web), with the note's adversarial cases
- * (features/conversation-directory.md, "Authorization"). Runner-independent:
+ * (features/completed/conversation-directory.md, "Authorization"). Runner-independent:
  *
  *   for (const c of createConversationDirectoryConformance((options) => myFixture(options)))
  *     test(`${c.group}: ${c.name}`, () => c.run());

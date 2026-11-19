@@ -1,6 +1,6 @@
 /**
  * conversations-directory: `conversations.directory` (`@pikit/contracts`' conversation-directory.ts),
- * one directory of the conversations every view lists (features/conversation-directory.md).
+ * one directory of the conversations every view lists (features/completed/conversation-directory.md).
  *
  * - **The directory** (`directory.ts`): one row per conversation (its key, runtime conversation,
  *   channel, agent, space, owner, one title, created and last active, busy, its state for everyone),

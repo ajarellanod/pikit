@@ -14,7 +14,7 @@
  * | `watch`         | `Conversation.watch` (the view, spec §9.3): `pi.live` projected as `ObservedLive` and diffed, the window's new entries, `pi.usage` changing; a slow consumer gets the values folded |
  *
  * Neutral: on a server it sees every conversation of the storage; in a Cloudflare Durable Object, the
- * object's own (features/cloudflare-conversation-index.md).
+ * object's own (features/completed/conversation-directory.md).
  */
 
 import type { Context as ChordContext, WatchEnd } from "@earendil-works/chord";

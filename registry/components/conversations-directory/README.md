@@ -1,7 +1,7 @@
 # conversations-directory
 
 One directory of the conversations every view lists
-([features/conversation-directory.md](https://github.com/ajarellanod/pikit/blob/main/features/conversation-directory.md)):
+([features/completed/conversation-directory.md](https://github.com/ajarellanod/pikit/blob/main/features/completed/conversation-directory.md)):
 it provides `conversations.directory` (`ConversationDirectory`, `@pikit/contracts`'
 `conversation-directory.ts`). Per conversation (a key and its runtime conversation): its channel,
 agent, space and owner, **one title** whoever looks, when it was made and last active, whether a run

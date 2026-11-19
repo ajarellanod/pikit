@@ -57,7 +57,7 @@ database: the lock is in the process (several processes on one database would ne
   by its alarm (actors-do's `wakeups`). tool-schedule's jobs are the conversation's object's (the key
   is the object's own); scheduler-routines' are its actor's (`scheduler-routines:routines`).
   scheduler-admit sends each tick to its key's object. Nothing lists jobs across actors: a view of every
-  scheduled prompt would need an index (as admin-api's conversation index), built when one asks for it.
+  scheduled prompt would need an index (as conversations-directory is for conversations), built when one asks for it.
 
 ## Removing it
 

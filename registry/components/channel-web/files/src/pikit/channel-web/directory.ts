@@ -1,5 +1,5 @@
 /**
- * channel-web as a view of `conversations.directory` (features/conversation-directory.md, "admin-api and
+ * channel-web as a view of `conversations.directory` (features/completed/conversation-directory.md, "admin-api and
  * channel-web as views"): which conversations a user sees and what they may do to them is the
  * directory's, read with a people `Viewer` built here from the session, in one place (`viewerOf`).
  *

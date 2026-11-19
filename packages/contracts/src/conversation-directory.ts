@@ -1,6 +1,6 @@
 /**
  * `conversations.directory`: which conversations exist and how they are listed, the same for every view
- * (features/conversation-directory.md). One entry per conversation (a key and its runtime conversation)
+ * (features/completed/conversation-directory.md). One entry per conversation (a key and its runtime conversation)
  * with its channel, agent, space, owner, one title whoever looks, when it was made and last active,
  * whether a run goes, and its state for everyone (`listed`, `archived`, `deleted`); per viewer, their own
  * state (hidden for me, read up to, their own name for it). Views (admin-api's list, channel-web's chats)
@@ -74,7 +74,7 @@
  *
  * Errors: `DirectoryError` (`code`: `not_found`, `forbidden`, `invalid`, `invalid_cursor`, `limit`).
  *
- * Provider: conversations-directory (features/conversation-directory.md, phase 1). Users: admin-api,
+ * Provider: conversations-directory (features/completed/conversation-directory.md). Users: admin-api,
  * channel-web, channel-google-chat (its first message's title). One provider: `experimental`.
  */
 

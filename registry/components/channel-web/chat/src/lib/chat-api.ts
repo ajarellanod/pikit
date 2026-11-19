@@ -11,7 +11,7 @@
  * A conversation is named by its chat id (`ChatConversation.id`, a UUID the server made): the
  * conversation key is `web:<user id>:<chat id>`, built from the session's user (or, with `?user=`,
  * another member's chat of a project the user sees). Which conversations a user sees, and what they may
- * do to them, is `conversations.directory`'s (features/conversation-directory.md): their own, and a
+ * do to them, is `conversations.directory`'s (features/completed/conversation-directory.md): their own, and a
  * project's chats while they are a member. A chat they may not see is `404`, as one that never existed.
  * Its title is one in every view (the chat's, the dashboard's): its first message, then a model's, then
  * a rename. "Hide for me" hides it for this user only (until new activity); "Archive for everyone" and

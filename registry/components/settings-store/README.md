@@ -82,7 +82,7 @@ every key's actor (`"all"`, a server; or no `actor.inbox`) or one key's (`"one"`
 - **Server:** a table of the App's `storage.sql`, `settings_store`: one row per component (its value as
   set, as JSON; who and when; a version). Every `get` is one query.
 - **Cloudflare:** the values are one object's, `settings-store:settings` (`SETTINGS_KEY`), of the
-  conversations' class and never a conversation, as admin-api's index is. The Worker's half
+  conversations' class and never a conversation, as conversations-directory's index is. The Worker's half
   (`export const worker`, `settings-store-worker`) serves the routes as calls to it; it validates
   against its App's declarations (every object runs the same App), stores and logs. The Worker's half
   also provides `settings` to the Worker's App, read as an object reads it, for a component whose

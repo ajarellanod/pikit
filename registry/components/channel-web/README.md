@@ -5,7 +5,7 @@ own: they sign in with an email and a password, a link by email, Google, GitHub 
 platform, see and continue only their own conversations, watch the answer as it is written, attach
 images and files and stop a run. Which conversations they see, by which title and in what order, is
 `conversations.directory`'s: the chat is one view of it, the dashboard another, so a title, an archive
-and a delete are the same in both ([features/conversation-directory.md](https://github.com/ajarellanod/pikit/blob/main/features/conversation-directory.md)). A conversation reads as the dashboard's (the same JSON: a transcript of
+and a delete are the same in both ([features/completed/conversation-directory.md](https://github.com/ajarellanod/pikit/blob/main/features/completed/conversation-directory.md)). A conversation reads as the dashboard's (the same JSON: a transcript of
 pi-ai messages and `agent.observe`'s live state), cut to what the operator lets users see (thinking,
 tools, the Context panel); the operator may let them pick an assistant, and they search their
 conversations by title. With a project store (`projects`) they work in projects shared with other

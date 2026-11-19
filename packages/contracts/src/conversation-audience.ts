@@ -1,6 +1,6 @@
 /**
  * `conversation.audience`: who belongs to which space, for `conversations.directory`'s people viewers
- * (features/conversation-directory.md). A **pipeline**, not a capability: each membership provider adds
+ * (features/completed/conversation-directory.md). A **pipeline**, not a capability: each membership provider adds
  * a stage that appends the grants it knows of for a person, as each channel's stage of
  * `conversation.describe` describes only its own keys:
  *

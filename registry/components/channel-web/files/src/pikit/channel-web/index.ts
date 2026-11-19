@@ -22,7 +22,7 @@
  *   event brought (K3).
  * - **Live view** (`live.ts`): a projection of `agent.observe`'s `watch`, the dashboard's event shapes,
  *   only the user's runs.
- * - **A view of `conversations.directory`** (`directory.ts`, features/conversation-directory.md): which
+ * - **A view of `conversations.directory`** (`directory.ts`, features/completed/conversation-directory.md): which
  *   conversations a user sees (their own, a project's chats while a member), in what order, by which
  *   title (one everywhere: the first message's, a model's, a rename), and what they may do to them
  *   ("Hide for me", "Archive / Delete for everyone") are the directory's, asked by every route with the

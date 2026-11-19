@@ -34,7 +34,7 @@
  *
  * Where it runs: in the App that runs the runtime. On a server that is the one App and every
  * conversation; on Cloudflare it is each conversation's Durable Object, which sees only its own
- * conversations (features/cloudflare-conversation-index.md).
+ * conversations (features/completed/conversation-directory.md).
  */
 
 import type { AppContext } from "@pikit/core";

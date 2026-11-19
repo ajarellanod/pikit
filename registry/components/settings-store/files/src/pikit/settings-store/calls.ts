@@ -1,6 +1,6 @@
 /**
  * On Cloudflare the values are one object's, the settings object (`SETTINGS_KEY`, an object of the
- * conversations' class that is never a conversation, as admin-api's index is), reached by
+ * conversations' class that is never a conversation, as conversations-directory's index is), reached by
  * `actor.mailbox.call` and answered with `actor.inbox.answer`:
  *
  * | Type | Message | Answer |

@@ -179,7 +179,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    // Provider: conversations-directory (features/conversation-directory.md). Never offered until it exists.
+    // Provider: conversations-directory (features/completed/conversation-directory.md), installed by the dashboard's defaults.
     summary:
       "Which conversations exist and how every view lists them: one title, last activity and state for everyone (archived, deleted), each viewer's own (hidden for me, read, a name of their own); filtered by who looks, with conversation.audience saying who belongs to which space.",
   },
