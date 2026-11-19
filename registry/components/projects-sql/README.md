@@ -8,17 +8,19 @@ its members (one owner) and the agents working there: its name and description, 
 instructions and documents with every version, its links, and the append-only change log of all of
 them, with exact restore by any member. Operators see and operate every project in the dashboard.
 
-- **Provides:** `projects`, `http.route` (`/admin/api/projects*`).
+- **Provides:** `projects`, `http.route` (`/admin/api/projects*`), and a stage of the
+  `conversation.audience` pipeline (who belongs to a project's space, for conversations-directory).
 - **Requires:** `storage.sql`, `actor.mailbox`, `actor.inbox`, `wakeups` (on a server:
   storage-sqlite, mailbox-local and wakeups-timers; on Cloudflare: storage-do and actors-do).
 - **Optional:** `memory` (memory-sql: a removed project's space memory is purged with it),
   `admin.auth` (without it nobody is an operator: every admin route is `401`).
 - **Targets:** `server` and `durable`: it imports nothing platform-specific. On `durable` the Worker's
   App runs the Worker half (`projects-sql-worker`, `component.json`'s `apps.worker`): `projects` over
-  the mailbox, and the admin routes.
+  the mailbox, its `conversation.audience` stage, and the admin routes.
 - **Installs to:** `src/pikit/projects-sql/` (`index.ts`, `project.ts` the project's actor,
-  `directory.ts` the directory's, `store.ts` the client, `routes.ts`, `tables.ts`, `worker.ts`,
-  `contract.ts` memory-sql's contract, `projects-sql.test.ts`), and with a dashboard its view to
+  `directory.ts` the directory's, `store.ts` the client, `audience.ts` its `conversation.audience`
+  stage, `routes.ts`, `tables.ts`, `worker.ts`, `contract.ts` memory-sql's contract,
+  `projects-sql.test.ts`, `audience.test.ts`), and with a dashboard its view to
   `src/dashboard/src/views/projects-sql/`.
 
 It gives agents nothing by itself: projects-context gives them the `<project>` section and the
@@ -51,6 +53,26 @@ export const config = {
   Cloudflare the Durable Object of each key. Refusals cross as the store's codes and are thrown again
   as `ProjectError`. Nothing is held in memory between calls but `locate`'s answers (a project's
   space never changes). A start makes no call to another actor.
+
+## Who belongs to a project's space (`conversation.audience`)
+
+Both halves add `audienceStage("projects", …)` (`audience.ts`, stage id `projects-sql`): for one
+person's principals it grants each project's space they are a current member of, `owner` for its
+owner, `member` otherwise. The directory (conversations-directory) reads it through `audienceGrants`
+to show a project's members its chats.
+
+- **Only a project's own space**, `project:<id>`. A space a project adopted (the admin route's
+  `space`, a Google Chat space) is never granted through the project: a Google Chat conversation is
+  seen through its platform's membership only (the operator's decision of 2026-11-19).
+- **A list** (no space given): the people `list` of those principals, active and archived projects,
+  every page; never a removed project, nor a sourced member past `staleAfterMs`. It may lag a moment
+  behind a project, as the directory does (a missing grant hides; it never lets in). It stops one
+  past `AUDIENCE_MAX`, so the directory refuses it (`limit`) rather than cutting it.
+- **The fresh check** (one space given, before opening or acting on a conversation): `roleOf` on the
+  project's actor, now, once `locate` confirms the space is its project's own; any other space is
+  answered with nothing, without a call. A removed member or project is granted nothing at once.
+- **Fail closed**: a store or actor that fails makes the stage grant nothing (logged); the stage never
+  touches another stage's grants.
 
 ## What it guarantees, and where
 
@@ -111,6 +133,11 @@ dashboard's primitives.
   before the body is read, an adopted space made with the operator as its log's author, `409`
   `space_taken` with the project's id again and once removed, a new space without one, `400` for each
   bad body and the store's refusals).
+- `audience.test.ts` (13 tests): `createConversationAudienceConformance` (6 cases) over the default
+  export's App and over the Worker half calling a backend App of the default export through a bridged
+  mailbox (failing: the database down; the backend unreachable); and that an adopted space is never
+  granted while an archived project's still is. Checked against broken stages: adopted spaces
+  granted, archived projects left out, the fresh check granting without a role.
 - The workerd lane (`tests/workerd/test/projects.workerd.ts`, 29 tests): the same suite with the
   directory and each project in its own Durable Object, and from the Worker's App the routes, the
   rows in each object, and the purge at the project object's alarm.
