@@ -303,8 +303,11 @@ export function createConversationDirectoryConformance(fixture: ConversationDire
       const luis = await talk(c.subject, "web:u-luis:1", LUIS, webPlace(LUIS));
       expect(await c.directory.access(people(STRANGER), { key: ana.key }, c.ctx), undefined, "a stranger's access to Ana's chat by key");
       expect(await c.directory.access(people(LUIS), ana, c.ctx), undefined, "Luis's access to Ana's chat by its ref");
-      expect(await c.directory.access(people(LUIS), { key: luis.key, conversationId: ana.conversationId }, c.ctx), undefined, "Luis's key with Ana's conversation id");
-      expect(await c.directory.access(OPERATOR, { key: "googlechat:spaces/A:t1", conversationId: ana.conversationId }, c.ctx), undefined, "another key with Ana's conversation id");
+      // An id this key does not have (on Cloudflare each object numbers its own conversations, "1", "2"…, so another
+      // key's id may well be this key's own): never Luis's own, never anyone's on a key with no conversation at all.
+      const notLuis = `${ana.conversationId}-not-${luis.conversationId}`;
+      expect(await c.directory.access(people(LUIS), { key: luis.key, conversationId: notLuis }, c.ctx), undefined, "Luis's key with an id it does not have");
+      expect(await c.directory.access(OPERATOR, { key: "googlechat:spaces/A:t1", conversationId: ana.conversationId }, c.ctx), undefined, "a key with no conversation, with Ana's conversation id");
       for (const act of [
         () => c.directory.rename(people(LUIS), ana, "Mine now", c.ctx),
         () => c.directory.setState(people(LUIS), ana, "deleted", c.ctx),
