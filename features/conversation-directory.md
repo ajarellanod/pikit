@@ -368,21 +368,24 @@ integrator's, regenerated after each phase's merge.
 Nothing in Pi: a Pi session knows nothing of the others, and pi-durable's conversations have no title,
 owner or visibility.
 
-## Open questions
-1. **A project's members and an adopted space's threads.** With projects-sql's stage, every member of a
-   project sees every conversation of its space: for a Google Chat space adopted as a project, also a
-   manual member who is not in the Google space. Accept, or grant only a project's web chats (the stage
-   naming channels)?
-2. **Archive and delete are shared now.** The dashboard's Archive and Delete hide from operators only
-   today; here they become "for everyone" (a user's list too), with "Hide for me" for the old meaning.
-   Keep the dashboard's buttons as "for everyone"?
-3. **Delete for everyone and a platform that goes on.** A deleted Google Chat thread or Telegram chat keeps
-   going on its platform with the agent's context. Leave it so (deleted only in the views), or also reset
-   its key, so the next message starts a new conversation?
-4. **A project's owner on another member's chat**: rename only, or also archive and delete for everyone
-   (the design's default)?
-5. **Hide for me**: for good until undone (the design), or until new activity, as archive?
-6. **Titles of Google Chat threads** by a model too (one call per thread; today rooms shows the first
-   message): yes?
-7. **neural-agents' production data**: run the one-off import (renames, states, read marks), or accept
-   re-titled conversations and lost states?
+## Questions, decided (the operator, 2026-11-19)
+1. **A project's members and an adopted space's threads.** There are no adopted projects: a project is
+   made from scratch, so its space (`project:<id>`) holds only its own chats, and its members see them
+   (projects-sql's stage grants a project's space, nothing else). A Google Chat conversation is seen only
+   through Google Chat membership (its space's stage of `conversation.audience`, downstream's rooms),
+   never through a project. Nothing here is designed around adopting an existing space.
+2. **Archive and delete are shared.** The dashboard's Archive and Delete become "Archive for everyone" and
+   "Delete for everyone"; today's meaning (hidden from this list only) is "Hide for me".
+3. **Delete for everyone resets the key.** Deleting a key's current conversation for everyone also points
+   the key to a new conversation (`conversations.registry.reset`), so the platform's next message (a
+   Google Chat thread, a Telegram chat) starts a new conversation instead of going on with the deleted
+   one's context. The deleted one is no longer its key's current, so people never see it again; only an
+   operator (or trusted code) lists it, and may set it back.
+4. **A project's owner on another member's chat**: rename and archive for everyone, never delete. Delete
+   for everyone is the conversation's author's (its owner) or an operator's (and trusted code's).
+5. **Hide for me ends with new activity**: the conversation comes back to that viewer's list with the
+   first activity after it was hidden that the viewer may see (as an archived one comes back with
+   activity people may see).
+6. **The model titles every conversation**, Google Chat threads included: one title everywhere.
+7. **No import of existing data**: neural-agents' renames, archives, deletes and read marks are lost; the
+   directory rebuilds itself from the runtime and titles anew.
