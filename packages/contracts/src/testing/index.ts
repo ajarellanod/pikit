@@ -35,6 +35,8 @@ export { BLOB_CASES, BLOB_CONFORMANCE_STREAM_BYTES, createBlobConformance, creat
 
 export type { MailboxFixture } from "./mailbox.ts";
 export { createMailboxConformance, createMemoryMailbox } from "./mailbox.ts";
+export type { ActorKindFixture, ActorKindObject, ActorKindStep } from "./actor-kind.ts";
+export { createActorKindConformance, withoutActorKinds } from "./actor-kind.ts";
 export type { WakeupsConformanceOptions, WakeupsFixture } from "./wakeups.ts";
 export { createMemoryWakeups, createWakeupsConformance } from "./wakeups.ts";
 

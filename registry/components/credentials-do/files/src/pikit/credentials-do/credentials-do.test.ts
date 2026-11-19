@@ -8,8 +8,23 @@
  */
 
 import { afterEach, beforeAll, afterAll, expect, test } from "bun:test";
-import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
-import { ActorCallError, type ActorCallHandler, type ActorMailbox, type AdminAuth, answerCall, callResult, type HttpRoute, type JsonValue } from "@pikit/contracts";
+import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type KeyedHandle, type Logger, silentLogger } from "@pikit/core";
+import {
+  ActorCallError,
+  type ActorCallHandler,
+  type ActorKind,
+  type ActorMailbox,
+  type AdminAuth,
+  actorComposition,
+  actorKindDeclarations,
+  actorKindOf,
+  actorKindOptions,
+  answerCall,
+  callResult,
+  type HttpRoute,
+  type JsonValue,
+} from "@pikit/contracts";
+import { createActorKindConformance, withoutActorKinds } from "@pikit/contracts/testing";
 import { createManualClock, type ManualClock } from "@pikit/core/testing";
 import { type Credential, type CredentialStore, modelsFrom } from "@pikit/pi-adapter";
 import { anthropicProvider } from "@pikit/pi-adapter/providers/anthropic";
@@ -203,7 +218,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   const objectApp = await defineApp({ components: [sqliteStorage(), objects.platform("x"), credentialsDo], logger: silentLogger, target: "durable" }).create();
   expect(objectApp.describe().components.find((each) => each.name === "credentials-do")).toEqual({
     name: "credentials-do",
-    provides: ["model.credentials"],
+    provides: ["actor.kind", "model.credentials"],
     requires: ["storage.sql", "actor.inbox", "actor.mailbox"],
     optional: [],
   });
@@ -599,3 +614,104 @@ test("a bad upload is refused 400, saying what is wrong and never echoing it", a
   expect(await ownerCall(d, CALL.list, null)).toEqual({ credentials: [] });
   noSecretIn(JSON.stringify(d.logged));
 });
+
+// ---- Its actor kind (SPEC C9): the owner object runs credentials-do and what it uses ----
+
+/**
+ * A conversation's App as far as the owner goes: the storage, the platform (inbox, mailbox, and a
+ * `wakeups` as actors-do gives), credentials-do, and a runtime that reads a credential as it starts
+ * (as runtime-pi's start checked each agent's provider).
+ */
+function conversationApp(objects: Objects, storage: ComponentDefinition) {
+  const wakeups = defineComponent({ name: "wakeups-test", setup: (pikit) => pikit.provide("wakeups", { handle: () => {}, at: async () => {}, cancel: async () => {} }) });
+  const runtime = defineComponent({
+    name: "runtime-test",
+    setup(pikit) {
+      const credentials = pikit.use("model.credentials");
+      return { start: async () => void (await credentials.get().read("anthropic")) };
+    },
+  });
+  return [storage, objects.platform(CREDENTIALS_KEY), wakeups, credentialsDo, runtime];
+}
+
+test("its declaration: the owner's key, exactly; its kind's App is credentials-do, the storage and the platform, and its start calls no other object", async () => {
+  const objects = new Objects();
+  const components = conversationApp(objects, sqliteStorage());
+  let kinds: KeyedHandle<ActorKind> | undefined;
+  const reader = defineComponent({ name: "reader-test", setup: (pikit) => void (kinds = pikit.useKeyed("actor.kind")) });
+  const whole = await defineApp({ components: [...components, reader], target: "durable", logger: silentLogger }).create();
+  const declarations = actorKindDeclarations(whole.describe(), kinds as KeyedHandle<ActorKind>);
+  expect(declarations).toEqual([{ component: "credentials-do", provider: "credentials-do", keys: [CREDENTIALS_KEY] }]);
+  const kind = actorKindOf(declarations, CREDENTIALS_KEY);
+  expect(kind).toEqual({ pattern: "credentials-do", exact: true, owners: ["credentials-do"] });
+  // A conversation's key is not its kind's.
+  expect(actorKindOf(declarations, "telegram:42")).toBeUndefined();
+  const names = actorComposition(whole.describe(), kind?.owners ?? []);
+  expect([...names].sort()).toEqual(["credentials-do", "platform-test", "storage-test", "wakeups-test"]);
+
+  const app = await defineApp({ ...actorKindOptions({ components, config: {} }, names), target: "durable", logger: silentLogger }).create();
+  await app.start();
+  apps.push(app);
+  expect(objects.calls).toEqual([]);
+});
+
+// The owner object answers as it does running the whole App: an upload, the list, a read, a delete.
+for (const c of createActorKindConformance(() => ({
+  key: CREDENTIALS_KEY,
+  steps: [
+    { call: CALL.put, message: { providerId: "anthropic", credential: { type: "api_key", key: "sk-ant-api-uploaded-key" } } },
+    { call: CALL.list, message: null },
+    { call: CALL.read, message: { providerId: "anthropic" } },
+    { call: CALL.read, message: { providerId: "openai" } },
+    { call: CALL.delete, message: { providerId: "openai" } },
+    { call: "credentials-do.unknown", message: null },
+  ],
+  async open(which) {
+    const objects = new Objects();
+    const storage = sqliteStorage();
+    const components = conversationApp(objects, storage);
+    // The owner's start reads nothing: in the whole App the runtime's start does (its read reaches the owner once it answers).
+    let list = withoutActorKinds(components);
+    if (which === "kind") {
+      let kinds: KeyedHandle<ActorKind> | undefined;
+      const reader = defineComponent({ name: "reader-test", setup: (pikit) => void (kinds = pikit.useKeyed("actor.kind")) });
+      const description = (await defineApp({ components: [...components, reader], target: "durable", logger: silentLogger }).create()).describe();
+      const kind = actorKindOf(actorKindDeclarations(description, kinds as KeyedHandle<ActorKind>), CREDENTIALS_KEY);
+      list = actorKindOptions({ components, config: {} }, actorComposition(description, kind?.owners ?? [])).components;
+    }
+    const clock = createManualClock(1_000_000);
+    const app = await defineApp({ components: list, target: "durable", logger: silentLogger, clock }).create();
+    await app.start();
+    const startCalls = objects.calls.map((call) => call.split(" ")[0] as string);
+    return {
+      send: async () => {
+        throw new Error("credentials-do takes no messages");
+      },
+      call: async (type, message) => {
+        try {
+          return { ok: true, answer: await objects.mailbox.call(CREDENTIALS_KEY, type, message, app.context()) };
+        } catch (error) {
+          return { ok: false, code: error instanceof ActorCallError ? error.code : "failed", message: String(error) };
+        }
+      },
+      rows: async () => {
+        let rows: JsonValue = null;
+        const reading = defineComponent({
+          name: "rows-test",
+          setup(pikit) {
+            const sql = pikit.use("storage.sql");
+            return { start: async () => void (rows = (await sql.get().query("SELECT provider_id, type, credential FROM credentials_do ORDER BY provider_id")) as JsonValue) };
+          },
+        });
+        const reader = await defineApp({ components: [storage, reading], target: "durable", logger: silentLogger }).create();
+        await reader.start();
+        await reader.stop();
+        return rows;
+      },
+      startCalls: () => startCalls,
+      close: () => app.stop(),
+    };
+  },
+}))) {
+  test(`credentials-do ${c.group}: ${c.name}`, () => c.run());
+}

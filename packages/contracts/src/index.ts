@@ -8,7 +8,8 @@
 // (the `conversation.describe` pipeline: `describeStage`, `describeConversation`, `cleanParty`), the conversation directory's protocol (its
 // viewers, order, cursor, titles: `parseViewer`, `directoryCursor`, `cleanTitle`) with the `conversation.audience` pipeline that says who
 // belongs to which space (`audienceStage`, `audienceGrants`), and the envelopes of an actor's call and stream
-// (`answerCall`, `callResult`, `answerStream`, `streamResult`), who changed what in a store's log (`Author`, `Change`, `parseAuthor`:
+// (`answerCall`, `callResult`, `answerStream`, `streamResult`), which App an actor kind's object runs (`actorKindOf`, `actorComposition`:
+// actor-kind.ts, SPEC C9), who changed what in a store's log (`Author`, `Change`, `parseAuthor`:
 // change.ts) and the projects' contracts (`projects`, `space.files`, `principals`, `document.convert`, the agents' federated search's
 // `ProjectSearchHit`), so that no provider has its own. No policy: what a protocol waits, retries and says
 // is its caller's, passed in. Each contract has a stability level (SPEC K8); the capabilities'
@@ -200,6 +201,8 @@ export type {
   ActorStreamOutcome,
 } from "./actor.ts";
 export { ActorCallError, answerCall, answerStream, callResult, streamResult } from "./actor.ts";
+export type { ActorKind, ActorKindDeclaration, ActorKindMatch, ActorKindReader } from "./actor-kind.ts";
+export { actorComposition, actorKindDeclarations, actorKindOf, actorKindOptions, actorKindProblems, actorKinds } from "./actor-kind.ts";
 export type { WakeupHandler, Wakeups } from "./wakeups.ts";
 export type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "./submissions.ts";
 export type {

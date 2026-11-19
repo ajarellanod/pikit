@@ -174,6 +174,11 @@ export const worker = defineApp({ components: [...], config: workerConfig }); //
   "default"` puts the same component in both (`actors-do`, `secrets-workers`,
   `admin-auth-token`). `pikit add` and `pikit remove` edit both Apps.
 - The halves talk only through `actor.mailbox` (Worker → object) and `actor.inbox` (object).
+- An object whose key a component declared as its **actor kind** (`actor.kind`: credentials-do's
+  `credentials-do`) runs only that component and what it uses, transitively, through the capability
+  graph: a subset of the default export, computed by `actorComposition` (SPEC C9). Every other object
+  (a conversation's) runs the whole default export. A kind's handlers rely only on the capabilities
+  its components use, never on another component's listener or pipeline stage.
 
 On a server, a project has one App, and only default exports are listed.
 
