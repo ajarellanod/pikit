@@ -1,26 +1,17 @@
 /**
- * The Worker's backend, on Cloudflare: each conversation lives in the Durable Object of its key, which
- * the Worker reaches only by `actor.mailbox.call` (JSON in, JSON out, no stream). Every route is a call
- * to that object (`calls.ts`), whose answers name its conversations by its own ids: here they are
- * qualified, `<key>~<id>` (`backend.ts`).
+ * The Worker's host, on Cloudflare: each conversation lives in the Durable Object of its key, which
+ * the Worker reaches only by `actor.mailbox.call` (JSON in, JSON out, no stream). Every read and action
+ * on a conversation is one call to that object (`calls.ts`), which answers with its own ids; the list,
+ * the titles and the states are the directory's, which the Worker asks itself (`backend.ts`).
  *
- * - **The list** asks the index (`INDEX_KEY`, `conversation-index.ts`) for a page of conversations,
- *   the most recently active first, then each one's object for it. A page is at most
- *   `CONVERSATIONS_PER_PAGE` whatever `limit` asks (each is a subrequest; Workers count them). An
- *   object that does not answer, or no longer has the conversation, is left out of the page, and logged.
- *   A search (`q`) is the index's too: each object tells it its conversations' titles
- *   (`admin-api.seen`), which live in the object.
- * - **Archived and deleted** are the index object's (one call there); **a title** is the conversation's
- *   object's (a rename is one call there, as `/name` is).
- * - **A new conversation** of the dashboard's own is its key's object's (`dashboard:<uuid>`): one call.
  * - **Live events are streamed**: `live` opens the object's `admin-api.live` stream (one RPC,
  *   `actor.mailbox.stream`), which yields its conversation's events as they happen, as on a server:
  *   the answer as it is written. The object stays in memory while the stream is open, which is while
  *   the dashboard follows the conversation (its tab active, `live.ts`); a stream cut by an eviction or
  *   a deploy ends, and the dashboard reconnects.
- * - **The composition**, **the agents** and **the slash commands** are an object's App's (the index
- *   object's: every object runs the same App), where the agents run. A command runs in its
- *   conversation's object, as the other actions do.
+ * - **The composition**, **the agents** and **the slash commands** are an object's App's (`APP_KEY`'s:
+ *   every object runs the same App), where the agents run. A command runs in its conversation's object,
+ *   as the other actions do.
  * - **A message's images** are at most `MAX_DURABLE_IMAGE_BYTES` in all (`413 too_large`), checked
  *   before the call: the object stores the message in one Durable Object row (2 MB at most).
  */
@@ -42,22 +33,18 @@ import {
   type ApiUsage,
   attachmentsProblem,
 } from "./api.ts";
-import { type AdminBackend, type Message, NOT_FOUND, qualify, refusal, unqualify } from "./backend.ts";
 import { CALL, LIVE } from "./calls.ts";
-import { INDEX_KEY, type IndexPage } from "./conversation-index.ts";
+import { type ConversationHost, type Message, refusal } from "./host.ts";
 
-/** Conversations read in one page of the list: one call each, besides the index's. */
+/** Conversations read in one page of the list: one call each, besides the directory's. */
 export const CONVERSATIONS_PER_PAGE = 20;
-export function createRemoteBackend(mailbox: () => ActorMailbox): AdminBackend {
+
+/** The object the Worker asks for the App's composition, agents and commands: any runs the same App; this one holds no conversation. */
+export const APP_KEY = "admin-api:app";
+
+export function createRemoteHost(mailbox: () => ActorMailbox): ConversationHost {
   const call = async <T>(key: string, type: string, message: JsonValue, ctx: AppContext): Promise<T> => (await mailbox().call(key, type, message, ctx)) as T;
 
-  /** The key and the object's id `id` names: a malformed one is not found. */
-  const target = (id: string): { key: string; local: string } => {
-    const found = unqualify(id);
-    if (found === undefined) throw refusal("not_found", NOT_FOUND);
-    return found;
-  };
-  const qualified = (key: string, conversation: ApiConversation): ApiConversation => ({ ...conversation, conversationId: qualify(key, conversation.conversationId) });
   /** `message` as a call carries it, its images within what an object stores. */
   const sendable = (message: Message): JsonValue => {
     const wrong = attachmentsProblem(message.attachments ?? [], "durable");
@@ -66,97 +53,32 @@ export function createRemoteBackend(mailbox: () => ActorMailbox): AdminBackend {
   };
 
   return {
-    app: (ctx) => call<ApiApp>(INDEX_KEY, CALL.app, null, ctx),
+    app: (ctx) => call<ApiApp>(APP_KEY, CALL.app, null, ctx),
 
-    agents: (ctx) => call<ApiAgents>(INDEX_KEY, CALL.agents, null, ctx),
+    agents: (ctx) => call<ApiAgents>(APP_KEY, CALL.agents, null, ctx),
 
-    async conversations(page, ctx, { archived = false, q } = {}) {
-      const limit = Math.min(page.limit ?? CONVERSATIONS_PER_PAGE, CONVERSATIONS_PER_PAGE);
-      const listed = await call<IndexPage>(
-        INDEX_KEY,
-        CALL.list,
-        { limit, ...(archived && { archived }), ...(q !== undefined && { q }), ...(page.cursor !== undefined && { cursor: page.cursor }) },
-        ctx,
-      );
-      const found = await Promise.all(
-        listed.items.map(async ({ key, conversationId }) => {
-          try {
-            return qualified(key, await call<ApiConversation>(key, CALL.conversation, { conversationId }, ctx));
-          } catch (error) {
-            ctx.logger.warn("admin-api: a conversation's object did not answer; it is left out of the list", {
-              conversation: key,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            return undefined;
-          }
-        }),
-      );
-      return { items: found.filter((each) => each !== undefined), ...(listed.next !== undefined && { next: listed.next }) };
+    commands: (ctx) => call<ApiCommands>(APP_KEY, CALL.commands, null, ctx),
+
+    conversation: ({ key, conversationId }, ctx) => call<ApiConversation>(key, CALL.conversation, { conversationId }, ctx),
+
+    transcript: ({ key, conversationId }, page, ctx) => call<ApiPage<ApiTranscriptEntry>>(key, CALL.transcript, { conversationId, ...page }, ctx),
+
+    // Refused before the stream starts: an unknown conversation is a 404, not an empty stream.
+    live: async ({ key, conversationId }, ctx) => (await mailbox().stream(key, LIVE, { conversationId }, ctx)) as AsyncIterable<ApiEvent>,
+
+    usage: ({ key, conversationId }, ctx) => call<ApiUsage>(key, CALL.usage, { conversationId }, ctx),
+
+    send: ({ key, conversationId }, message, ctx) => call<ApiSendResponse>(key, CALL.message, { conversationId, ...(sendable(message) as object) } as JsonValue, ctx),
+
+    abort: async ({ key, conversationId }, ctx) => void (await call<JsonValue>(key, CALL.abort, { conversationId }, ctx)),
+
+    reset: ({ key, conversationId }, ctx) => call<ApiResetResponse>(key, CALL.reset, { conversationId }, ctx),
+
+    async command({ key, conversationId }, name, args, ctx) {
+      const answer = await call<ApiCommandResponse>(key, CALL.command, { conversationId, name, args }, ctx);
+      return typeof answer.text === "string" ? { text: answer.text } : {};
     },
 
-    async start(message, ctx) {
-      const { key, agent, ...rest } = message;
-      const started = await call<ApiStartResponse>(key, CALL.start, { agent, ...(sendable(rest) as object) } as JsonValue, ctx);
-      return { ...started, conversationId: qualify(key, started.conversationId) };
-    },
-
-    async hide(id, how, ctx) {
-      // The index object keeps what is put away: the conversation's own object is not asked.
-      const { key, local } = target(id);
-      await call<JsonValue>(INDEX_KEY, CALL.hide, { key, conversationId: local, ...(how !== undefined && { how }) }, ctx);
-    },
-
-    async rename(id, title, ctx) {
-      // The title is kept where the conversation is: its object's.
-      const { key, local } = target(id);
-      return qualified(key, await call<ApiConversation>(key, CALL.rename, { conversationId: local, title }, ctx));
-    },
-
-    async conversation(id, ctx) {
-      const { key, local } = target(id);
-      return qualified(key, await call<ApiConversation>(key, CALL.conversation, { conversationId: local }, ctx));
-    },
-
-    async transcript(id, page, ctx) {
-      const { key, local } = target(id);
-      return call<ApiPage<ApiTranscriptEntry>>(key, CALL.transcript, { conversationId: local, ...page }, ctx);
-    },
-
-    async live(id, ctx) {
-      const { key, local } = target(id);
-      // Refused before the stream starts: an unknown conversation is a 404, not an empty stream.
-      return (await mailbox().stream(key, LIVE, { conversationId: local }, ctx)) as AsyncIterable<ApiEvent>;
-    },
-
-    async usage(id, ctx) {
-      const { key, local } = target(id);
-      return call<ApiUsage>(key, CALL.usage, { conversationId: local }, ctx);
-    },
-
-    async send(id, message, ctx) {
-      const { key, local } = target(id);
-      const sent = await call<ApiSendResponse>(key, CALL.message, { conversationId: local, ...(sendable(message) as object) } as JsonValue, ctx);
-      return { key, requestId: sent.requestId, admission: sent.admission };
-    },
-
-    async abort(id, ctx) {
-      const { key, local } = target(id);
-      await call<JsonValue>(key, CALL.abort, { conversationId: local }, ctx);
-      return { key, conversationId: id };
-    },
-
-    async reset(id, ctx) {
-      const { key, local } = target(id);
-      const reset = await call<ApiResetResponse>(key, CALL.reset, { conversationId: local }, ctx);
-      return { key: reset.key, previousConversationId: qualify(key, reset.previousConversationId), conversationId: qualify(key, reset.conversationId) };
-    },
-
-    commands: (ctx) => call<ApiCommands>(INDEX_KEY, CALL.commands, null, ctx),
-
-    async command(id, name, args, ctx) {
-      const { key, local } = target(id);
-      const answer = await call<ApiCommandResponse>(key, CALL.command, { conversationId: local, name, args }, ctx);
-      return { key, ...(typeof answer.text === "string" && { text: answer.text }) };
-    },
+    start: ({ key, agent, ...rest }, ctx) => call<ApiStartResponse>(key, CALL.start, { agent, ...(sendable(rest) as object) } as JsonValue, ctx),
   };
 }

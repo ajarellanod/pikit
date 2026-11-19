@@ -11,20 +11,22 @@
  *   `dashboard:`, and a new conversation is the dashboard's own, `dashboard:<uuid>`.
  * - A backend's refusal (`ActorCallError`) is its status: `not_found`, `unknown_command` `404`;
  *   `no_agent`, `not_current` `409`; `invalid_cursor`, `invalid_request`, `unknown_agent` `400`;
- *   `too_large` `413`; `command_failed` `422`. Any other code (an object that could not be reached, a
- *   call that failed) is `503 unavailable`, logged.
+ *   `forbidden` `403`; `too_large` `413`; `command_failed` `422`. Any other code (an object that could
+ *   not be reached, a call that failed) is `503 unavailable`, logged.
  * - A slash command (`agent.command`) runs in a conversation as the other actions do (an operator, the
  *   key's current conversation), logged with its name, never its arguments.
- * - A rename is the operator's title (`/name`'s), on any conversation (current or not, archived), logged
- *   without the title.
+ * - The list, a rename and the states are the directory's, as the operator sees it (`backend.ts`): a
+ *   rename is the title for everyone (`/name`'s), on any conversation the directory holds (current or
+ *   not, archived), logged without the title; "Hide for me", "Archive for everyone", "Delete for
+ *   everyone" and back are logged with the operator and the conversation.
  * - A message's images are checked here (`attachmentsProblem`: their number and types `400`, their size
  *   `413`), and a body larger than the most a message can be is `413` before it is read.
  * - Each action is logged with the operator's id and the conversation's key, never the message's text.
  * - Live events are server-sent events over a plain streaming response, a comment every
  *   `heartbeatMs`; the stream ends when the client goes away, the backend's events end, or the server
  *   stops. A browser's `EventSource` cannot send the token: the dashboard reads it with `fetch`.
- * - Delivery's pieces and receipts name the conversation each answers (`conversationId`), read from
- *   its answer key (`conversationOfAnswer`), so the dashboard opens it.
+ * - Delivery's pieces and receipts name the conversation each answers (`conversationId`, `<key>~<id>`),
+ *   read from its answer key (`conversationOfAnswer`) and its conversation key, so the dashboard opens it.
  */
 
 import type { AppContext, Handle, Pikit } from "@pikit/core";
@@ -53,11 +55,12 @@ import {
   type ApiPendingPiece,
   type ApiReceipt,
   type ApiReceiptsPage,
-  type ApiHideResponse,
+  type ApiListState,
   type ApiResetResponse,
   type ApiSendResponse,
   type ApiSession,
   type ApiStartResponse,
+  type ApiStateResponse,
   type ApiTranscriptEntry,
   attachmentsProblem,
   DASHBOARD_KEY_PREFIX,
@@ -67,7 +70,7 @@ import {
   SEARCH_MAX,
 } from "./api.ts";
 import { type Assets, BASE } from "./assets.ts";
-import type { AdminBackend } from "./backend.ts";
+import { type AdminBackend, qualify } from "./backend.ts";
 
 /** A request id: what `ApiSendRequest.requestId` may be, the dashboard's (`dashboard:…`). */
 const REQUEST_ID = `^${DASHBOARD_REQUEST_PREFIX}[A-Za-z0-9._~:-]{1,118}$`;
@@ -92,6 +95,9 @@ const StartBody = Type.Object({ agent: Type.String({ minLength: 1, maxLength: 20
 const CommandBody = Type.Object({ args: Type.Optional(Type.String({ maxLength: MAX_COMMAND_ARGS })) }, { additionalProperties: false });
 const RenameBody = Type.Object({ title: Type.String({ maxLength: MAX_COMMAND_ARGS }) }, { additionalProperties: false });
 
+/** The buckets a list may ask for (`?state=`). */
+const LIST_STATES: readonly ApiListState[] = ["listed", "hidden", "archived", "deleted"];
+
 /** The status of each refusal a backend throws; any other is `503`. */
 const STATUS: Record<string, number> = {
   not_found: 404,
@@ -101,6 +107,7 @@ const STATUS: Record<string, number> = {
   invalid_cursor: 400,
   invalid_request: 400,
   unknown_agent: 400,
+  forbidden: 403,
   too_large: 413,
   command_failed: 422,
 };
@@ -201,10 +208,10 @@ const facts = (message: { attachments?: unknown[]; webSearch?: boolean }) => ({
 const requestIdOf = (given: string | undefined): string => given ?? `${DASHBOARD_REQUEST_PREFIX}${crypto.randomUUID()}`;
 
 /**
- * The conversation a run's answer key (`answerKey`: `${conversationId}:${requestId}`) is for, as this
- * API names it; `undefined` for a key of another shape. The runtime's ids hold no `:` (pi-durable mints
- * them), and the queue is read only where the API's ids are the runtime's: on a server (on Cloudflare
- * each conversation's queue is in its own object, which this API does not list).
+ * The runtime's conversation a run's answer key (`answerKey`: `${conversationId}:${requestId}`) is for;
+ * `undefined` for a key of another shape. The runtime's ids hold no `:` (pi-durable mints them), and the
+ * queue is read only on a server (on Cloudflare each conversation's queue is in its own object, which
+ * this API does not list). The API names it with the piece's conversation key (`qualify`).
  */
 export function conversationOfAnswer(key: string): string | undefined {
   const colon = key.indexOf(":");
@@ -325,18 +332,18 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
 
   api("GET /admin/api/agents", async (_request, ctx) => json<ApiAgents>(200, await backend().agents(ctx)));
 
-  api("GET /admin/api/conversations", async (request, ctx) => {
+  api("GET /admin/api/conversations", async (request, ctx, operator) => {
     const page = pageOf(request);
     if ("problem" in page) return failure(400, "invalid_request", page.problem);
     const params = new URL(request.url).searchParams;
-    const archived = params.get("archived");
-    if (archived !== null && archived !== "1" && archived !== "0") return failure(400, "invalid_request", "archived is 1 or 0");
+    const state = params.get("state") ?? "listed";
+    if (!LIST_STATES.includes(state as ApiListState)) return failure(400, "invalid_request", `state is ${LIST_STATES.join(", ")}`);
     const q = params.get("q")?.trim() ?? "";
     if (q.length > SEARCH_MAX) return failure(400, "invalid_request", `q is at most ${SEARCH_MAX} characters`);
-    return json<ApiPage<ApiConversation>>(200, await backend().conversations(page, ctx, { archived: archived === "1", ...(q !== "" && { q }) }));
+    return json<ApiPage<ApiConversation>>(200, await backend().conversations(page, operator.id, ctx, { state: state as ApiListState, ...(q !== "" && { q }) }));
   });
 
-  api("GET /admin/api/conversations/:id", async (request, ctx) => json<ApiConversation>(200, await backend().conversation(conversationIdOf(request), ctx)));
+  api("GET /admin/api/conversations/:id", async (request, ctx, operator) => json<ApiConversation>(200, await backend().conversation(conversationIdOf(request), operator.id, ctx)));
 
   api("GET /admin/api/conversations/:id/transcript", async (request, ctx) => {
     const page = pageOf(request);
@@ -378,13 +385,20 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     return json<ApiResetResponse>(200, reset);
   });
 
-  // The list only: what the operator puts away, and puts back. Any conversation, current or not.
-  for (const [action, how] of [["archive", "archived"], ["unarchive", undefined], ["delete", "deleted"]] as const) {
+  // For everyone (the directory's state, every view honours it) and for me (this operator's list only). Any conversation, current or not.
+  const actions: [string, (id: string, operator: string, ctx: AppContext) => Promise<ApiStateResponse>][] = [
+    ["hide", (id, operator, ctx) => backend().hide(id, true, operator, ctx)],
+    ["unhide", (id, operator, ctx) => backend().hide(id, false, operator, ctx)],
+    ["archive", (id, operator, ctx) => backend().setState(id, "archived", operator, ctx)],
+    ["delete", (id, operator, ctx) => backend().setState(id, "deleted", operator, ctx)],
+    ["restore", (id, operator, ctx) => backend().setState(id, "listed", operator, ctx)],
+  ];
+  for (const [action, act] of actions) {
     api(`POST /admin/api/conversations/:id/${action}`, async (request, ctx, operator) => {
       const id = conversationIdOf(request);
-      await backend().hide(id, how, ctx);
+      const done = await act(id, operator.id, ctx);
       ctx.logger.info(`admin-api: an operator's ${action}`, { operator: operator.id, conversation: id });
-      return json<ApiHideResponse>(200, { conversationId: id });
+      return json<ApiStateResponse>(200, done);
     });
   }
 
@@ -392,8 +406,8 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     const read = await readSmall(request, RenameBody, `a title is at most ${MAX_COMMAND_ARGS} characters`);
     if (read instanceof Response) return read;
     const id = conversationIdOf(request);
-    const renamed = await backend().rename(id, read.body.title, ctx);
-    ctx.logger.info("admin-api: an operator renamed a conversation", { operator: operator.id, conversation: renamed.key ?? id });
+    const renamed = await backend().rename(id, read.body.title, operator.id, ctx);
+    ctx.logger.info("admin-api: an operator renamed a conversation", { operator: operator.id, conversation: renamed.key });
     return json<ApiConversation>(200, renamed);
   });
 
@@ -419,9 +433,9 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   };
 
   /** A piece or a receipt with the conversation its answer is for, when its key names one. */
-  const withConversation = <T extends { idempotencyKey: string }>(item: T): T & { conversationId?: string } => {
+  const withConversation = <T extends { idempotencyKey: string; conversationKey: string }>(item: T): T & { conversationId?: string } => {
     const conversationId = conversationOfAnswer(item.idempotencyKey);
-    return conversationId === undefined ? item : { ...item, conversationId };
+    return conversationId === undefined ? item : { ...item, conversationId: qualify(item.conversationKey, conversationId) };
   };
 
   api("GET /admin/api/delivery/pending", async (request) => {

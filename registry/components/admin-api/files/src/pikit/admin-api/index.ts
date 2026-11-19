@@ -9,94 +9,68 @@
  *   values that look like secrets redacted), the agents from `agent.definition` (name, model, the
  *   names of their tools) and the live ones from `agent.directory` when installed (agents-live, made
  *   in the dashboard), the runtime from `agent.observe`. Nothing it reads changes anything.
+ * - **The list of conversations is a view of the directory** (`conversations.directory`), as an
+ *   operator sees it (`{ kind: "operator", id }`): every conversation, the most recently active first,
+ *   one title whoever looks; each one's conversation is then read where it is, for what the directory
+ *   does not hold (busy, usage, who it is with). admin-api keeps no index and titles nothing: the
+ *   directory's provider records the runtime's events and has a model title each conversation.
+ * - **For everyone, and for me** (the directory's, honoured by every view): a rename (`rename`, `/name`);
+ *   "Archive for everyone" (back with new activity people see) and "Delete for everyone" (for good;
+ *   the key's next message starts a new conversation), and back; "Hide for me", this operator's own
+ *   list only, until new activity. Nothing of the runtime's is deleted.
  * - **The dashboard is a channel of its own.** It reads every conversation; it writes only into its
- *   own (`dashboard:<uuid>`, with an agent of the App) and, into another channel's, as a follow-up
- *   (never a steer) whose request id starts with `dashboard:`: a run only such messages started is
- *   never delivered to that channel (`startAnswerDelivery`), and the agent reads that the message is
- *   the operator's (`operatorPrompt`). Abort and reset stay on every conversation.
+ *   own (`dashboard:<uuid>`, with an agent of the App, owned by its operator, whose first message is
+ *   its first title) and, into another channel's, as a follow-up (never a steer) whose request id
+ *   starts with `dashboard:`: a run only such messages started is never delivered to that channel
+ *   (`startAnswerDelivery`), and the agent reads that the message is the operator's
+ *   (`operatorPrompt`). Abort and reset stay on every conversation.
  * - **Every action goes through the contract that owns it:** a message through `agent.runtime`'s
  *   `dispatch`, a new conversation through `conversations.registry`'s `resolve`, an abort through
- *   `agent.runtime`'s `abort`, a reset through `conversations.registry`'s `reset`. Each is logged with
- *   the operator's id and the conversation, never the message's text.
- * - **The list is newest activity first**, paged, from the conversation index (`conversation-index.ts`)
- *   that this component keeps from the runtime's events (a message dispatched, a run started, settled
- *   or failed, a reset) and, when the App starts, from what `agent.observe` holds.
+ *   `agent.runtime`'s `abort`, a reset through `conversations.registry`'s `reset`, a title or a state
+ *   through `conversations.directory`. Each is logged with the operator's id and the conversation,
+ *   never the message's text.
  * - **Delivery, when an `outbound.queue` is installed:** the pieces not delivered yet (`pending`) and
  *   those that settled (`receipts`, read after a cursor), as the queue keeps them, each with the
  *   conversation it answers; never their text.
  * - **Slash commands** are the App's `agent.command`s, listed and run in a conversation (as an action:
  *   its key's current one) by `runAgentCommand`. admin-api registers two of Pi's built-ins, through the
  *   same capability: `/new` (Pi's "Start a new session": the key's reset, `conversations.registry`'s
- *   `reset`) and `/name <title>` (the conversation's title). runtime-pi registers `/compact`; a
- *   component of yours registers its own.
- * - **Titles**: after a conversation's first run settles, a model (`model.complete`, runtime-pi's;
- *   `titleModel`, else the agent's) titles it from its first message, in the background, once (tried
- *   once more after a later run if that failed): `titles.ts`. A reset's new conversation gets its own.
- *   `/name` replaces the current one's. They are kept with the index (`conversation-index.ts`) and
- *   listed with each conversation; one with no title yet is listed by its first message, from the moment
- *   it is dispatched (`agent.dispatched`: a conversation whose runs all fail is never listed by its id).
- *   A conversation named before its first run settles (`/name`: a channel that titles its own runs it)
- *   costs no model call. Each change
- *   of the title a conversation is listed by is told to the index (`seen` with its `title`, as at
- *   start), which searches it (`?q=`): on Cloudflare the titles are the objects', not the index's.
+ *   `reset`) and `/name <title>` (the conversation's title for everyone: the directory's `rename`, as
+ *   trusted code). runtime-pi registers `/compact`; a component of yours registers its own.
  * - **Who each conversation is with** (`ApiConversation.party`, `party.ts`): its channel's stage of
  *   the `conversation.describe` pipeline (read and cleaned by `describeConversation`), else what its
- *   key says; the dashboard's own are the operator's. A pipeline, so admin-api depends on no channel. Asked where the conversation is: on Cloudflare in its
- *   object, where the channel's object half is.
+ *   key says; the dashboard's own are the operator's. A pipeline, so admin-api depends on no channel.
+ *   Asked where the conversation is: on Cloudflare in its object, where the channel's object half is.
  * - **Only a conversation's current one is talked to.** A message, an abort or a reset to a
  *   conversation a reset left behind is `409 not_current`. A reset's new conversation is its key's
  *   current one, with the key's agent, before any message reaches it: it is talked to at once.
  *
  * Targets: `server` and `durable`. It never reads the target: in `start`, `actor.inbox`'s `scope` says
- * where the index is (`placements`): every key's actor (`"all"`, or no `actor.inbox`) or one key's
- * (`"one"`).
- * - **On a server** (`"all"`) this export is the whole API, over the App's own contracts (`createLocalBackend`):
- *   every conversation, live events from `agent.observe`'s `watch`; the index is a table of the App's
- *   `storage.sql`, filled at start in the background from every conversation the runtime holds.
- * - **On Cloudflare** (`"one"`) it goes in each conversation's Durable Object (the default App), and the routes
- *   are the Worker's half's (`worker.ts`, `export const worker`). Here it answers the Worker's calls
- *   about this object's conversations (`calls.ts`), and tells the index (the object `admin-api:index`)
- *   of their activity: when a message is dispatched, a resumed run starts, a run settles or fails, a
- *   reset, and when the object's App starts (its conversations, from `agent.observe`). Its routes are
- *   registered in the object's App too, where no server serves them. The index object runs this same
- *   App and answers the Worker's list: nothing here makes a conversation for it.
+ * where the routes are served from.
+ * - **On a server** (`"all"`, or no `actor.inbox`) this export is the whole API, over the App's own
+ *   contracts and its directory (`createAdminBackend` over `createLocalHost`): live events from
+ *   `agent.observe`'s `watch`.
+ * - **On Cloudflare** (`"one"`) it goes in each conversation's Durable Object (the default App), and the
+ *   routes are the Worker's half's (`worker.ts`, `export const worker`), which asks the directory itself.
+ *   Here it answers the Worker's calls about this object's conversations (`calls.ts`). Its routes are
+ *   registered in the object's App too, where no server serves them.
  */
 
-import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import { type ActorInbox, type ActorMailbox, type AgentCommand, type AgentObserver, type ConversationRef, isCommandName } from "@pikit/contracts";
-import { type ApiAgent, cleanTitle } from "./api.ts";
+import { defineComponent } from "@pikit/core";
+import { type AgentCommand, cleanTitle, DIRECTORY_PAGE_MAX, DirectoryError, isCommandName } from "@pikit/contracts";
+import type { ApiAgent } from "./api.ts";
 import { createAssets } from "./assets.ts";
-import { agentOf, createLocalBackend, listedTitle, summariesOf } from "./backend.ts";
-import { answerCalls, SEEN } from "./calls.ts";
+import { createAdminBackend } from "./backend.ts";
+import { answerCalls } from "./calls.ts";
 import { Config } from "./config.ts";
-import { createConversationIndex, INDEX_KEY, type IndexedConversation } from "./conversation-index.ts";
 import { DASHBOARD_FILES } from "./dashboard-files.ts";
+import { agentOf, createLocalHost, summariesOf } from "./host.ts";
 import { provideRoutes } from "./routes.ts";
-import { createTitler, firstTextOf } from "./titles.ts";
 
 export { worker, WORKER_NAME } from "./worker.ts";
 
-/** Conversations read from `agent.observe` per page when the App starts, and sent to the index at once. */
-const BACKFILL_PAGE = 100;
-/**
- * The transcript entries read when a message is dispatched to a conversation its first message does not
- * name yet: a new one fits. A longer one (made before admin-api) is named at start (`untitled`).
- */
-const FIRST_PAGE = 20;
-
-/** A conversation's first messages, oldest first: its transcript's last page (newest first), read through at most 50 pages. */
-async function firstMessages(observer: AgentObserver, conversationId: string, ctx: AppContext): Promise<readonly unknown[]> {
-  let cursor: string | undefined;
-  let last: readonly { messages: readonly unknown[] }[] = [];
-  for (let pages = 0; pages < 50; pages++) {
-    const page = await observer.transcript(conversationId, { limit: BACKFILL_PAGE, ...(cursor !== undefined && { cursor }) }, ctx);
-    if (page === undefined) return [];
-    last = page.items;
-    cursor = page.next;
-    if (cursor === undefined) break;
-  }
-  return [...last].reverse().flatMap((entry) => entry.messages);
-}
+/** Who `/name` renames as: trusted code (the command runs for an operator, or a channel that titles its own). */
+const NAME_VIEWER = { kind: "component", name: "admin-api" } as const;
 
 export default defineComponent({
   name: "admin-api",
@@ -106,34 +80,29 @@ export default defineComponent({
     const observe = pikit.use("agent.observe");
     const runtime = pikit.use("agent.runtime");
     const registry = pikit.use("conversations.registry");
-    // The conversation index: the App's own table on a server; on Cloudflare the index object's.
-    const sql = pikit.use("storage.sql");
+    // The list, titles and states: one directory for every view.
+    const conversations = pikit.use("conversations.directory");
     // Delivery: shown when an outbound queue is installed.
     const queue = pikit.useOptional("outbound.queue");
-    // Whose actor this App is (`scope`); where it is one key's: the Worker's calls, and the index's messages.
+    // Whose actor this App is (`scope`); where it is one key's, the Worker's calls.
     const inbox = pikit.useOptional("actor.inbox");
-    const mailbox = pikit.useOptional("actor.mailbox");
     // The agents, for `GET /admin/api/agents` and a web search asked of one.
     const definitions = pikit.useKeyed("agent.definition");
     // The live agents, made in the dashboard (agents-live), listed after the code's.
-    const directory = pikit.useOptional("agent.directory");
+    const liveAgents = pikit.useOptional("agent.directory");
     // The tools and skills agents may have, each with its one line: what the Agent sections show.
     const tools = pikit.useKeyed("agent.tool");
     const skills = pikit.useKeyed("agent.skill");
     // The slash commands the dashboard lists and runs: its own two below, runtime-pi's, yours.
     const commands = pikit.useKeyed("agent.command");
-    // Titles: a model's text, through the runtime's models.
-    const completion = pikit.useOptional("model.complete");
     const assets = createAssets(DASHBOARD_FILES);
-    const index = createConversationIndex(() => sql.get());
-    const contracts = {
+    const host = createLocalHost({
       observe: () => observe.get(),
       runtime: () => runtime.get(),
       registry: () => registry.get(),
-      index: () => index,
-      agents: async (ctx: AppContext) => [
+      agents: async (ctx) => [
         ...definitions.keys().sort().map((name) => agentOf(name, definitions.get(name))),
-        ...((await directory.get()?.list(ctx)) ?? []).map((agent): ApiAgent => ({
+        ...((await liveAgents.get()?.list(ctx)) ?? []).map((agent): ApiAgent => ({
           name: agent.name,
           live: true,
           ...(agent.description !== undefined && agent.description !== "" && { description: agent.description }),
@@ -149,15 +118,8 @@ export default defineComponent({
           { tools: tools.keys().map((name) => [name, tools.get(name)] as const), skills: skills.keys().map((name) => [name, skills.get(name)] as const) },
           definitions.keys().map((name) => definitions.get(name)),
         ),
-    };
-    /** Tells the index the title `conversation` is listed by now, which it searches: `at` 0 changes no time. */
-    const retitled = async ({ key, conversationId, agent }: ConversationRef, ctx: AppContext): Promise<void> => {
-      const title = await listedTitle(index, conversationId);
-      if (title !== undefined) await seen([{ key, conversationId, agent, at: 0, title }], ctx);
-    };
-    const local = { ...contracts, retitled: (conversation: ConversationRef, ctx: AppContext) => retitled(conversation, ctx) };
-    // A server's: a conversation no message reached yet is its key's by the index's row (a reset's new one).
-    const backend = createLocalBackend({ ...local, keyOf: (conversationId) => index.keyOf(conversationId) });
+    });
+    const backend = createAdminBackend({ host: () => host, directory: () => conversations.get(), pageMax: DIRECTORY_PAGE_MAX });
 
     provideRoutes(pikit, {
       auth,
@@ -183,167 +145,29 @@ export default defineComponent({
       audience: "operator",
       argumentHint: "<title>",
       async run(conversation, args, ctx) {
-        const title = cleanTitle(args);
-        if (title === undefined) throw new Error("Write the title after the command: /name <title>");
-        await index.name(conversation.conversationId, title);
-        await retitled(conversation, ctx);
-        return { text: `Titled \u201c${title}\u201d.` };
+        if (cleanTitle(args) === undefined) throw new Error("Write the title after the command: /name <title>");
+        try {
+          const { title } = await conversations.get().rename(NAME_VIEWER, { key: conversation.key, conversationId: conversation.conversationId }, args, ctx);
+          return { text: `Titled “${title ?? args.trim()}”.` };
+        } catch (error) {
+          if (error instanceof DirectoryError && error.code === "not_found") throw new Error("The conversation directory does not hold this conversation yet: it does once a message reaches it");
+          throw error;
+        }
       },
     };
     pikit.provideKeyed("agent.command", "new", newConversation);
     pikit.provideKeyed("agent.command", "name", nameCommand);
 
-    const titler = createTitler({
-      index: () => index,
-      complete: () => completion.get(),
-      modelFor: (agent) => config.titleModel ?? definitions.get(agent)?.model,
-      retitled,
-    });
-
-    /**
-     * Where the index is, chosen in start by `actor.inbox`'s `scope` (`placements` below): the App's
-     * own when it is every key's actor, the index object's when it is one key's.
-     */
-    interface Placement {
-      /** Records activity in the index. */
-      tell(entries: IndexedConversation[], ctx: AppContext): Promise<void>;
-      /** Whether a run's start is told: where telling is a message, a run not resumed was told when dispatched. */
-      tellsStarted(resumed: boolean): boolean;
-      start(ctx: AppContext): Promise<void>;
-    }
-    let placement: Placement | undefined;
-
-    /** Records activity in the index. Missed, the next activity or the App's next start records it again. */
-    const seen = async (entries: IndexedConversation[], ctx: AppContext): Promise<void> => {
-      if (entries.length === 0 || placement === undefined) return;
-      try {
-        await placement.tell(entries, ctx);
-      } catch (error) {
-        ctx.logger.warn("admin-api: the conversation index did not take this conversation's activity; its next activity tells it again", {
-          conversation: entries[0]?.key,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    };
-    const active = (conversation: ConversationRef, ctx: AppContext, title?: string) =>
-      seen([{ key: conversation.key, conversationId: conversation.conversationId, agent: conversation.agent, at: ctx.clock.now(), ...(title !== undefined && { title }) }], ctx);
-
-    /**
-     * Names `conversation` by its first message, once it is in the transcript (a message dispatched):
-     * the title it is listed by now when this named it, else `undefined` (it was named, or is not new).
-     * Never throws: a miss leaves it to its first run's title, or to the next start's.
-     */
-    const named = async ({ key, conversationId }: ConversationRef, ctx: AppContext): Promise<string | undefined> => {
-      try {
-        const now = await index.title(conversationId);
-        if (now.title !== undefined || now.firstMessage !== undefined) return undefined;
-        const page = await observe.get().transcript(conversationId, { limit: FIRST_PAGE }, ctx);
-        if (page === undefined || page.next !== undefined) return undefined;
-        const text = firstTextOf([...page.items].reverse().flatMap((entry) => entry.messages));
-        if (text === undefined || !(await index.firstMessage(conversationId, text))) return undefined;
-        return await listedTitle(index, conversationId);
-      } catch (error) {
-        ctx.logger.warn("admin-api: a conversation was not named by its first message; its first run's title names it", {
-          conversation: key,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return undefined;
-      }
-    };
-
-    // In the caller's context, once the message is durable: the most reliable moment. A new conversation
-    // is named by its first message now, before any run (one that fails included) settles.
-    pikit.on("agent.dispatched", async ({ conversation, admission }, ctx) => {
-      if (admission.kind === "duplicate") return;
-      await active(conversation, ctx, await named(conversation, ctx));
-    });
-    // On Cloudflare a run that is not resumed was dispatched in this object just before: one message fewer.
-    pikit.on("agent.started", ({ conversation, resumed }, ctx) => (placement?.tellsStarted(resumed) === true ? active(conversation, ctx) : undefined));
-    pikit.on("agent.settled", (result, ctx) => {
-      // In the background: no event or request waits for a title.
-      titler.settled(result, ctx.derive(() => background));
-      return active(result.conversation, ctx);
-    });
-    pikit.on("agent.failed", (result, ctx) => active(result.conversation, ctx));
-    pikit.on("conversation.reset", ({ conversation }, ctx) => active(conversation, ctx));
-
-    /**
-     * Every conversation `observer` holds with a key, a page at a time, into the index: what events may
-     * have missed. Then the conversations with no title yet are titled (`untitled`).
-     */
-    const backfill = async (observer: AgentObserver, ctx: AppContext): Promise<number> => {
-      let cursor: string | undefined;
-      const all: { key: string; agent: string; conversationId: string; at: number }[] = [];
-      do {
-        if (ctx.abortSignal?.aborted === true) break;
-        const page = await observer.conversations({ limit: BACKFILL_PAGE, ...(cursor !== undefined && { cursor }) }, ctx);
-        const entries = page.items.flatMap(({ key, agent, conversationId, lastActivity }) =>
-          key === undefined || agent === undefined ? [] : [{ key, agent, conversationId, at: lastActivity ?? 0 }],
-        );
-        // With each one's title: the index searches it (on Cloudflare it has the objects' only so).
-        const titled = await Promise.all(entries.map(async (entry) => ({ ...entry, ...(await listedTitle(index, entry.conversationId).then((title) => title !== undefined && { title })) })));
-        await seen(titled, ctx);
-        all.push(...entries);
-        cursor = page.next;
-      } while (cursor !== undefined);
-      await titler.untitled(all, (conversationId) => firstMessages(observer, conversationId, ctx), ctx).catch((error: unknown) =>
-        ctx.logger.warn("admin-api: the conversations with no title were not titled", { error: error instanceof Error ? error.message : String(error) }),
-      );
-      return all.length;
-    };
-
-    let stopping: AbortController | undefined;
-    let filling: Promise<void> | undefined;
-    /** What outlives the events: titles, the index's filling. Cancelled at stop. */
-    let background = BACKGROUND_CONTEXT;
-
-    const placements = {
-      /** Every key's actor (a server): the index is a table of this App, which serves the routes. */
-      all: (): Placement => ({
-        tell: (entries) => index.seen(entries),
-        tellsStarted: () => true,
-        async start(ctx) {
-          if (assets.built()) ctx.logger.info("admin-api: the dashboard is served at /admin/", { files: assets.size() });
-          else ctx.logger.info("admin-api: no dashboard is built; the API alone is served at /admin/api/");
-          // In the background: a server with thousands of conversations starts at once.
-          filling = backfill(observe.get(), ctx.derive(() => background)).then(
-            (count) => ctx.logger.info("admin-api: the conversation index has every conversation of the runtime", { conversations: count }),
-            (error: unknown) => ctx.logger.warn("admin-api: the conversation index was not filled from the runtime; events keep it", { error: error instanceof Error ? error.message : String(error) }),
-          );
-        },
-      }),
-      /** One key's actor (a Durable Object): the index is the index object's; this App answers the Worker's calls. */
-      one: (calls: ActorInbox, send: ActorMailbox): Placement => ({
-        tell: (entries, ctx) => send.send(INDEX_KEY, SEEN, { entries: entries.map((entry) => ({ ...entry })) }, ctx),
-        tellsStarted: (resumed) => resumed,
-        async start(ctx) {
-          // An object's conversations are all of its key.
-          answerCalls(calls, (key) => createLocalBackend({ ...local, keyOf: async () => key }), index);
-          // This object's conversations (a few): the index learns of them even if their events were missed.
-          await backfill(observe.get(), ctx).catch((error: unknown) =>
-            ctx.logger.warn("admin-api: this object's conversations were not told to the index", { error: error instanceof Error ? error.message : String(error) }),
-          );
-        },
-      }),
-    };
-
     return {
-      async start(ctx) {
-        stopping = new AbortController();
-        background = withAbortSignal(stopping.signal, BACKGROUND_CONTEXT);
+      start(ctx) {
         const calls = inbox.get();
-        if (calls === undefined || calls.scope === "all") {
-          placement = placements.all();
-        } else {
-          const send = mailbox.get();
-          if (send === undefined) throw new Error("admin-api: in an App that is one key's actor it tells the conversation index, which needs actor.mailbox");
-          placement = placements.one(calls, send);
+        // One key's actor (a Durable Object): the Worker serves the routes, this App answers its calls.
+        if (calls !== undefined && calls.scope === "one") {
+          answerCalls(calls, host);
+          return;
         }
-        await placement.start(ctx);
-      },
-      async stop() {
-        stopping?.abort();
-        await Promise.all([filling, titler.idle()]);
+        if (assets.built()) ctx.logger.info("admin-api: the dashboard is served at /admin/", { files: assets.size() });
+        else ctx.logger.info("admin-api: no dashboard is built; the API alone is served at /admin/api/");
       },
     };
   },
