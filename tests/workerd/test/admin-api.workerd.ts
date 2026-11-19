@@ -3,10 +3,10 @@
  * `PlatformConversation`, `src/platform.ts`): each conversation's object runs its App (storage-do,
  * actors-do, runtime-pi with the scripted model, conversations-kv, a channel's object half,
  * and admin-api's default export), and the Worker's App serves admin-api's Worker half through
- * deployment-cloudflare's own server. The conversation directory is admin-api's test double
- * (`directory.test-support.ts`: the contracts' `createMemoryDirectory`, recorded from each object's
- * runtime events), one for the Worker and every object (they share the tests' isolate); the integrator
- * puts conversations-directory in its place. Messages reach two chats; then the Worker lists them from
+ * deployment-cloudflare's own server. The conversation directory is conversations-directory: its
+ * default export in every object (each conversation's recorder and outbox, flushed by the object's
+ * alarm; the directory in the object `conversations-directory:index`, emptied before each test), its
+ * Worker half in the Worker's App. Messages reach two chats; then the Worker lists them from
  * the directory, reads one and its transcript, follows it live (the object's stream: its state whole,
  * then the ops that change it and the entries a run adds), resets one and is refused an action on the
  * one left behind, while the new one takes a message at once; the operator starts a conversation of the
@@ -21,11 +21,13 @@ import { BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponen
 import type { ActorMailbox, AdminAuth } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
-import { afterEach, expect, it, vi } from "vitest";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MAX_DURABLE_IMAGE_BYTES, OPERATOR_NOTE, type ApiTranscriptEntry } from "../../../registry/components/admin-api/files/src/pikit/admin-api/api.ts";
 import { INITIAL, type LiveEvent, reduce } from "../../../registry/dashboard/files/src/lib/transcript.ts";
 import adminApi, { worker as adminApiWorker } from "../../../registry/components/admin-api/files/src/pikit/admin-api/index.ts";
-import { Directory } from "../../../registry/components/admin-api/files/src/pikit/admin-api/directory.test-support.ts";
+import conversationsDirectory, { INDEX_KEY, worker as conversationsDirectoryWorker } from "../../../registry/components/conversations-directory/files/src/pikit/conversations-directory/index.ts";
 import { APP_KEY } from "../../../registry/components/admin-api/files/src/pikit/admin-api/remote.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerServer } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
@@ -36,16 +38,17 @@ import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/
 import { composeObjects, PLATFORM_BINDING } from "../src/platform.ts";
 import { resetObjects, workerEnv } from "./host.ts";
 
-afterEach(() => resetObjects());
+/** Empties the directory's object (the operator lists every entry: none of another test's), then resets every instance. */
+async function emptied(): Promise<void> {
+  await runInDurableObject(env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.idFromName(INDEX_KEY)), async (_instance, state) => {
+    await state.storage.deleteAlarm();
+    await state.storage.deleteAll();
+  });
+  await resetObjects();
+}
 
-/** The mailbox the directory's delete for everyone resets a key through, in its object (`test.reset`): the running test's Worker's. */
-let resetMailbox: (() => ActorMailbox) | undefined;
-/** The conversation directory of this file's tests: a new one each test (`fresh`). */
-let directory: Directory;
-const fresh = (): Directory => {
-  directory = new Directory(async (key, ctx) => void (await resetMailbox?.().call(key, "test.reset", null, ctx)));
-  return directory;
-};
+beforeEach(() => emptied());
+afterEach(() => emptied());
 
 const AUTH = { authorization: "Bearer workerd-operator" };
 const auth = defineComponent({
@@ -79,11 +82,6 @@ function channelActor(answers: string[]) {
             const conversation = await registry.get().resolve(key, "scripted", { channel: "test" }, ctx);
             await runtime.get().dispatch({ requestId: id, conversation, prompt: text }, ctx);
           });
-          // The directory's delete for everyone: the key reset where its conversation is.
-          inbox.get().answer("test.reset", async (key, _message, ctx) => {
-            await registry.get().reset(key, undefined, ctx);
-            return null;
-          });
         },
       };
     },
@@ -102,13 +100,12 @@ async function workerApp() {
     },
   });
   const app = await defineApp({
-    components: [actorsDo, auth, directory.component(), adminApiWorker, channel, server.component],
+    components: [actorsDo, auth, conversationsDirectoryWorker, adminApiWorker, channel, server.component],
     config: { "actors-do": { binding: PLATFORM_BINDING } },
     target: "durable",
     logger: silentLogger,
   }).create();
   await app.start(withContextValue(WORKERS_HOST, { env: workerEnv }, BACKGROUND_CONTEXT));
-  resetMailbox = () => mailbox as ActorMailbox;
   return {
     app,
     mailbox: () => mailbox as ActorMailbox,
@@ -123,7 +120,7 @@ const id = (value: string) => encodeURIComponent(value);
 
 it("the Worker lists the objects' conversations from the directory, reads and follows one, resets one, and refuses the one left behind", async () => {
   const answers: string[] = [];
-  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, fresh().component(), adminApi, channelActor(answers)]);
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, conversationsDirectory, adminApi, channelActor(answers)]);
   const worker = await workerApp();
   const [a, b] = [`test:${crypto.randomUUID()}`, `test:${crypto.randomUUID()}`];
   try {
@@ -216,7 +213,7 @@ it("the Worker lists the objects' conversations from the directory, reads and fo
     expect(refused.status).toBe(409);
     expect(await refused.json()).toMatchObject({ error: "not_current" });
     const after = (await (await worker.fetch("/admin/api/conversations")).json()) as Listed;
-    // The one behind points to its key's current one, which the directory lists once it has activity.
+    // The one behind points to its key's current one, which the directory lists once it has activity (after its flush).
     expect(after.items.filter((each) => each.conversationId.startsWith(`${a}~`)).map(({ conversationId, key, current, currentId }) => ({ conversationId, key, current, currentId }))).toEqual([
       { conversationId: `${a}~1`, key: a, current: false, currentId: reset.conversationId },
     ]);
@@ -226,16 +223,20 @@ it("the Worker lists the objects' conversations from the directory, reads and fo
     const continued = await worker.fetch(`/admin/api/conversations/${id(reset.conversationId)}/messages`, { method: "POST", body: JSON.stringify({ text: "after the reset" }) });
     expect(continued.status).toBe(202);
     await vi.waitFor(() => expect(answers.some((each) => each.startsWith(`${a}: answer: `) && each.endsWith("after the reset"))).toBe(true), { timeout: 10_000 });
-    const listedAfter = (await (await worker.fetch("/admin/api/conversations?limit=1")).json()) as Listed;
-    expect(listedAfter.items.map((each) => each.conversationId)).toEqual([reset.conversationId]);
+    await vi.waitFor(async () => {
+      const listedAfter = (await (await worker.fetch("/admin/api/conversations?limit=1")).json()) as Listed;
+      expect(listedAfter.items.map((each) => each.conversationId)).toEqual([reset.conversationId]);
+    }, { timeout: 10_000 });
 
-    // A conversation of the dashboard's own: its key's object, listed first once its message is dispatched; the agent answers there.
+    // A conversation of the dashboard's own: its key's object, listed first once its dispatch is flushed to the directory; the agent answers there.
     const started = (await (
       await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "scripted", text: "status?" }) })
     ).json()) as { key: string; conversationId: string; admission: string };
     expect(started).toMatchObject({ key: expect.stringMatching(/^dashboard:/), conversationId: expect.stringMatching(/^dashboard:.+~1$/), admission: "started" });
-    const newest = (await (await worker.fetch("/admin/api/conversations?limit=1")).json()) as Listed;
-    expect(newest.items.map(({ conversationId, title }) => ({ conversationId, title }))).toEqual([{ conversationId: started.conversationId, title: "Status?" }]);
+    await vi.waitFor(async () => {
+      const newest = (await (await worker.fetch("/admin/api/conversations?limit=1")).json()) as Listed;
+      expect(newest.items.map(({ conversationId, title }) => ({ conversationId, title }))).toEqual([{ conversationId: started.conversationId, title: "Status?" }]);
+    }, { timeout: 10_000 });
     await vi.waitFor(() => expect(answers).toContain(`${started.key}: answer: ${OPERATOR_NOTE}.]\nstatus?`), { timeout: 10_000 });
     const unknown = await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "nobody", text: "hi" }) });
     expect(unknown.status).toBe(400);
@@ -252,7 +253,7 @@ it("the Worker lists the objects' conversations from the directory, reads and fo
 
 it("an operator's images, 1 MB in all, are stored in the object, reach the agent and come back in the transcript; the agents are the objects' App's", async () => {
   const answers: string[] = [];
-  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, fresh().component(), adminApi, channelActor(answers)]);
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, conversationsDirectory, adminApi, channelActor(answers)]);
   const worker = await workerApp();
   try {
     const agents = (await (await worker.fetch("/admin/api/agents")).json()) as { items: { name: string; tools: string[] }[] };
@@ -288,7 +289,7 @@ it("an operator's images, 1 MB in all, are stored in the object, reach the agent
 
 it("slash commands in real objects: listed from an object's App, run in the conversation's object; the first message titles a dashboard chat, /name renames it, a delete for everyone resets its key there", async () => {
   const answers: string[] = [];
-  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, fresh().component(), adminApi, channelActor(answers)]);
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, conversationsDirectory, adminApi, channelActor(answers)]);
   const worker = await workerApp();
   try {
     const commands = (await (await worker.fetch("/admin/api/commands")).json()) as { items: { name: string }[] };
@@ -299,7 +300,7 @@ it("slash commands in real objects: listed from an object's App, run in the conv
     ).json()) as { key: string; conversationId: string };
     await vi.waitFor(() => expect(answers).toContain(`${started.key}: answer: ${OPERATOR_NOTE}.]\nPlan a weekend in Porto`), { timeout: 10_000 });
     // Its first title: the operator's words (the directory's).
-    expect(await (await worker.fetch(`/admin/api/conversations/${id(started.conversationId)}`)).json()).toMatchObject({ title: "Plan a weekend in Porto", state: "listed", hidden: false });
+    await vi.waitFor(async () => expect(await (await worker.fetch(`/admin/api/conversations/${id(started.conversationId)}`)).json()).toMatchObject({ title: "Plan a weekend in Porto", state: "listed", hidden: false }), { timeout: 10_000 });
 
     const path = (name: string) => `/admin/api/conversations/${id(started.conversationId)}/commands/${name}`;
     const compacted = await worker.fetch(path("compact"), { method: "POST" });
@@ -337,7 +338,7 @@ it("a conversation the dashboard starts is in its operator's space in its object
       pikit.on("agent.dispatched", ({ conversation }) => void seen.push(`${conversation.key} ${conversation.space ?? "none"}`));
     },
   });
-  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, fresh().component(), adminApi, channelActor(answers), places]);
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model(), runtimePi, conversationsKv, auth, conversationsDirectory, adminApi, channelActor(answers), places]);
   const worker = await workerApp();
   try {
     const start = async (text: string) =>
@@ -353,7 +354,7 @@ it("a conversation the dashboard starts is in its operator's space in its object
 
 it("a conversation whose runs fail is listed from its dispatch (the directory's activity), readable, and found by its key", async () => {
   const answers: string[] = [];
-  composeObjects([storageDo, storageKvSql, actorsDo, ...model("Provider is not configured: anthropic"), runtimePi, conversationsKv, auth, fresh().component(), adminApi, channelActor(answers)]);
+  composeObjects([storageDo, storageKvSql, actorsDo, ...model("Provider is not configured: anthropic"), runtimePi, conversationsKv, auth, conversationsDirectory, adminApi, channelActor(answers)]);
   const worker = await workerApp();
   const key = `test:${crypto.randomUUID()}`;
   try {
