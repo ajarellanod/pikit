@@ -22,8 +22,8 @@ export interface ShellState {
   commands?: ApiCommand[];
   /** Opens a new chat (New chat, its draft empty), with `agent` chosen when given. */
   newChat(agent?: string): void;
-  /** A conversation's menu (Rename, Archive or Restore when `archived`, Delete), as its sidebar row has it. */
-  conversationActions(conversation: ApiConversation, archived: boolean): ActionsMenuItem[];
+  /** A conversation's menu (Rename, Hide for me, Archive for everyone, Delete for everyone, or what puts it back), as its sidebar row has it. */
+  conversationActions(conversation: ApiConversation): ActionsMenuItem[];
   /** The views the App's composition allows, in sidebar order. */
   views: View[];
   /** The signed-in operator's id, when this browser signed in (`ApiSession.operator`). */

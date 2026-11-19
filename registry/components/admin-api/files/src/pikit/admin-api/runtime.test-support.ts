@@ -1,6 +1,7 @@
 /**
  * Test support for admin-api's tests: the runtime's contracts as doubles a test sets (conversations,
- * transcripts, live events, the keys' pointers), recording what admin-api asked of them.
+ * transcripts, live events, the keys' pointers), recording what admin-api asked of them. The
+ * conversation directory is `directory.test-support.ts`'s.
  */
 
 import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger, type Target, withAbortSignal } from "@pikit/core";
@@ -22,6 +23,8 @@ import {
   type TranscriptEntry,
   type Usage,
 } from "@pikit/contracts";
+
+export { Directory } from "./directory.test-support.ts";
 
 /** The operator's header, and an `admin.auth` that knows only it (the operator `ops`), with browser sessions (`SESSION`). */
 export const AUTH = { authorization: "Bearer operator-token" };
@@ -161,7 +164,7 @@ export class Runtime {
       const busy = this.conversations.get(request.conversation.conversationId)?.busy === true;
       const admission = { kind: duplicate ? "duplicate" : busy ? "queued" : "started", requestId: request.requestId } as const;
       // As a runtime does, in the caller's context once the message is durable.
-      await ctx.emit("agent.dispatched", { conversation: request.conversation, admission });
+      await ctx.emit("agent.dispatched", { conversation: request.conversation, admission, ...(request.sender !== undefined && { sender: request.sender }) });
       return admission;
     },
     abort: async (conversation) => void this.aborted.push(conversation),

@@ -12,13 +12,17 @@
  * conversation, whose answers it keeps: the request ids of its messages start with `dashboard:`, and a
  * run only they started is never delivered to the conversation's chat.
  *
+ * **The list is the conversation directory's** (`conversations.directory`), as an operator sees it: every
+ * conversation, one title whoever looks, archived and deleted for everyone (every view honours them), and
+ * this operator's own "hidden". A conversation is named `<key>~<its runtime id>` (`ApiConversation.conversationId`).
+ *
  * | Route | Answer |
  * |---|---|
  * | `GET /admin/api/app` | `ApiApp`: the composition (`APP_DESCRIPTION`, no secrets) |
  * | `GET /admin/api/agents` | `ApiAgents`: the App's agents (the code's, then the live ones), their model and tools, and which is the steward; every tool and skill an agent may have, each with its one line |
  * | `POST /admin/api/session` | the credential once → `200 ApiSession` and a session cookie (a browser's) |
  * | `DELETE /admin/api/session` | `204`: the session cookie cleared |
- * | `GET /admin/api/conversations?limit&cursor&archived&q` | `ApiPage<ApiConversation>`, the most recently active first: those listed, or with `archived=1` those archived; with `q` (at most `SEARCH_MAX` characters), only those whose title or key holds it, any case |
+ * | `GET /admin/api/conversations?limit&cursor&state&q` | `ApiPage<ApiConversation>`, the most recently active first, of one `ApiListState` (`state`, default `listed`); with `q` (at most `SEARCH_MAX` characters), only those whose title or key holds it, any case |
  * | `POST /admin/api/conversations` | `ApiStartRequest` → `201 ApiStartResponse`: a conversation of the dashboard's own |
  * | `GET /admin/api/conversations/:id` | `ApiConversation` |
  * | `GET /admin/api/conversations/:id/transcript?limit&cursor` | `ApiPage<ApiTranscriptEntry>`, newest first |
@@ -26,8 +30,9 @@
  * | `POST /admin/api/conversations/:id/messages` | `ApiSendRequest` → `202 ApiSendResponse` |
  * | `POST /admin/api/conversations/:id/abort` | `200 ApiAbortResponse` |
  * | `POST /admin/api/conversations/:id/reset` | `200 ApiResetResponse` |
- * | `POST /admin/api/conversations/:id/archive`, `…/unarchive`, `…/delete` | `200 ApiHideResponse`: the list only (a deleted one is never listed again, nothing of the runtime's is deleted; new activity lists either again) |
- * | `POST /admin/api/conversations/:id/rename` | `ApiRenameRequest` → `200 ApiConversation`: the operator's title (`cleanTitle`), as `/name` sets it, on any conversation, current or not |
+ * | `POST /admin/api/conversations/:id/hide`, `…/unhide` | `200 ApiStateResponse`: "Hide for me": from this operator's list only, until new activity |
+ * | `POST /admin/api/conversations/:id/archive`, `…/delete`, `…/restore` | `200 ApiStateResponse`: "Archive for everyone" (back with new activity people see), "Delete for everyone" (for good; its key starts a new conversation), and back to listed; every view honours them, nothing of the runtime's is deleted |
+ * | `POST /admin/api/conversations/:id/rename` | `ApiRenameRequest` → `200 ApiConversation`: its title for everyone, as `/name` sets it, on any conversation the directory holds, current or not |
  * | `GET /admin/api/commands` | `ApiCommands`: the slash commands the App registered (`agent.command`) |
  * | `POST /admin/api/conversations/:id/commands/:name` | `ApiCommandRequest` → `200 ApiCommandResponse`: the command run in the conversation |
  * | `GET /admin/api/delivery/pending?limit&cursor` | `ApiPage<ApiPendingPiece>`, oldest stored first (with `outbound.queue`) |
@@ -67,7 +72,7 @@ export function operatorPrompt(key: string, text: string, options: { webSearch?:
   return `${note}\n${text}`;
 }
 
-/** The longest title a conversation has (`cleanTitle`). */
+/** The longest title a conversation has (`cleanTitle`; the directory's `TITLE_MAX`). */
 export const TITLE_MAX = 60;
 
 /** The longest search of the conversations (`q`). */
@@ -79,8 +84,8 @@ const TITLE_LABEL = /^(?:title|name|subject|topic|t\u00edtulo|titulo|titre|titel
 const TITLE_WRAP = /^[\s"'`*_#>\u2018\u2019\u201c\u201d\u00ab\u00bb\u300c\u300d-]+|[\s"'`*_\u2018\u2019\u201c\u201d\u00ab\u00bb\u300c\u300d]+$/g;
 
 /**
- * A presentable title from `text` (a model's answer, or what an operator wrote with `/name`), or
- * `undefined` when nothing is left: its first line that has words, without a label ("Title:"),
+ * A presentable title from `text` (the dashboard names a chat by its first message so until the
+ * directory has a title), or `undefined` when nothing is left: its first line that has words, without a label ("Title:"),
  * quotes or markdown around it, its spaces collapsed, no `.`, `,`, `;` or `:` at its end, its first
  * letter a capital, at most `TITLE_MAX` characters (cut at a word, with an ellipsis).
  */
@@ -170,35 +175,40 @@ export interface ApiParty {
   link?: { label: string; path: string };
 }
 
+/** Which of the list's buckets (`GET /admin/api/conversations?state=`): each conversation is in one for an operator. */
+export type ApiListState = "listed" | "hidden" | "archived" | "deleted";
+
+/** A conversation's state for everyone (the directory's): every view honours it. */
+export type ApiEntryState = "listed" | "archived" | "deleted";
+
 /** One conversation of the runtime. */
 export interface ApiConversation {
   /**
-   * What `:id` is in the routes, opaque (encode it in a path): the runtime's id on a server,
-   * `<key>~<the object's id>` on Cloudflare, where each conversation's object numbers its own.
+   * What `:id` is in the routes, opaque (encode it in a path): `<key>~<the runtime's id>` (on Cloudflare
+   * each conversation's object numbers its own), split on the last `~`.
    */
   conversationId: string;
-  /**
-   * Its conversation key (`telegram:12345`) and agent, once a message reached it or a reset pointed
-   * its key to it (a reset's new conversation is its key's current one, talked to at once).
-   */
-  key?: string;
-  agent?: string;
+  /** Its conversation key (`telegram:12345`) and agent (a reset's new conversation has its key's, talked to at once). */
+  key: string;
+  agent: string;
   /** Whether a run is going now. */
   busy: boolean;
-  /** Epoch ms of its newest message. */
+  /** Epoch ms of its newest activity (the directory's, as operators see it; else the runtime's newest message). */
   lastActivity?: number;
   usage: ApiUsage;
+  /** Whether its key points to it now. `false` for a conversation a reset left behind: it can be read, not talked to. */
+  current: boolean;
+  /** When it is not current: the id of its key's current conversation (where `/new` went). */
+  currentId?: string;
   /**
-   * Whether its key points to it now. `false` for a conversation a reset left behind: it can be read,
-   * not talked to. Absent when it has no key: no message reached it and no reset pointed a key to it.
-   */
-  current?: boolean;
-  /**
-   * Its title (`cleanTitle`): the one a model gave it after its first run, or the operator's (`/name`).
-   * Until it has one, its first message (cleaned the same way) once a model was asked to title it. A
-   * reset's new conversation has its own. Absent until then.
+   * Its title, one for every view (the directory's): its first message as a channel gave it, then a
+   * model's, or a rename (`rename`, `/name`) by an operator or its owner. Absent until there is one.
    */
   title?: string;
+  /** Its state for everyone (absent while the directory does not hold it: no activity yet). */
+  state?: ApiEntryState;
+  /** Hidden for this operator ("Hide for me"), until new activity. */
+  hidden?: boolean;
   /** Who it is with (`ApiParty`): present whenever it has a key. */
   party?: ApiParty;
 }
@@ -429,15 +439,19 @@ export interface ApiAbortResponse {
   conversationId: string;
 }
 
-/** A conversation's new title, the operator's: cleaned (`cleanTitle`), it replaces any, and no model replaces it. */
+/** A conversation's new title for everyone, the operator's: cleaned (`cleanTitle`), it replaces any, and no model replaces it. */
 export interface ApiRenameRequest {
   /** Something to title it with once cleaned; at most `MAX_COMMAND_ARGS` characters before. */
   title: string;
 }
 
-/** What archive, unarchive and delete did: the conversation, put away or back in the list. */
-export interface ApiHideResponse {
+/** What hide, unhide, archive, delete and restore did: the conversation's state now. */
+export interface ApiStateResponse {
   conversationId: string;
+  /** For everyone. */
+  state: ApiEntryState;
+  /** For this operator. */
+  hidden: boolean;
 }
 
 export interface ApiResetResponse {
@@ -510,7 +524,7 @@ export interface ApiApp {
 export interface ApiError {
   /**
    * `unauthorized`, `not_found`, `not_installed`, `invalid_request`, `invalid_cursor`, `no_agent`,
-   * `not_current`, `unknown_agent`, `too_large` (413: an image, or a body, larger than the API takes),
+   * `not_current`, `unknown_agent`, `forbidden` (403: the directory refused it), `too_large` (413: an image, or a body, larger than the API takes),
    * `unknown_command` (404: no command of that name), `command_failed` (422: the command could not do
    * it, its message says why);
    * `unavailable` (503) when, on Cloudflare, a conversation's object did not answer.

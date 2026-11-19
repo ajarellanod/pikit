@@ -3,7 +3,7 @@
   "name": "admin-api",
   "version": "0.0.1",
   "title": "Admin API: what the dashboard reads and does (/admin/api/*), and its built files (/admin/)",
-  "description": "The operator's HTTP API: the composition, conversations, transcripts, live events, messages, abort and reset; serves the dashboard's built files. On Cloudflare the Worker serves it, reaching each conversation's Durable Object and listing them from an index.",
+  "description": "The operator's HTTP API: the composition, conversations (a view of conversations.directory: one title, archive and delete for everyone, hide for me), transcripts, live events, messages, abort and reset; serves the dashboard's built files. On Cloudflare the Worker serves it, asking the directory and reaching each conversation's Durable Object.",
   "targets": [
     "server",
     "durable"
@@ -16,7 +16,7 @@
       "agent.observe",
       "agent.runtime",
       "conversations.registry",
-      "storage.sql",
+      "conversations.directory",
       "actor.mailbox"
     ]
   },
@@ -28,8 +28,7 @@
       "agent.directory",
       "agent.tool",
       "agent.skill",
-      "agent.command",
-      "model.complete"
+      "agent.command"
     ]
   },
   "provides": [
@@ -50,18 +49,16 @@
         "agent.observe",
         "agent.runtime",
         "conversations.registry",
-        "storage.sql"
+        "conversations.directory"
       ],
       "optional": [
         "outbound.queue",
         "actor.inbox",
-        "actor.mailbox",
         "agent.definition",
         "agent.directory",
         "agent.tool",
         "agent.skill",
-        "agent.command",
-        "model.complete"
+        "agent.command"
       ]
     },
     "worker": {
@@ -70,7 +67,8 @@
       ],
       "requires": [
         "admin.auth",
-        "actor.mailbox"
+        "actor.mailbox",
+        "conversations.directory"
       ],
       "optional": []
     }

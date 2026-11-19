@@ -11,7 +11,7 @@
     },
     "admin-api": {
       "version": "0.0.1",
-      "description": "The operator's HTTP API: the composition, conversations, transcripts, live events, messages, abort and reset; serves the dashboard's built files. On Cloudflare the Worker serves it, reaching each conversation's Durable Object and listing them from an index.",
+      "description": "The operator's HTTP API: the composition, conversations (a view of conversations.directory: one title, archive and delete for everyone, hide for me), transcripts, live events, messages, abort and reset; serves the dashboard's built files. On Cloudflare the Worker serves it, asking the directory and reaching each conversation's Durable Object.",
       "targets": [
         "server",
         "durable"

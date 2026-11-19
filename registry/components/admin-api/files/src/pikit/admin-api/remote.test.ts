@@ -1,9 +1,10 @@
 /**
  * admin-api on Cloudflare, with a fake platform: every key is an "object", an App of its own running
- * admin-api's default export on the `durable` target (its runtime a double, its `storage.sql` SQLite),
- * reached through an `actor.mailbox` that calls its `actor.inbox` handlers with JSON copies, as
- * actors-do's RPC does. The Worker's half serves the routes over them; the index is the
- * object `admin-api:index`. The workerd lane runs the same on real Durable Objects.
+ * admin-api's default export on the `durable` target (its runtime a double), reached through an
+ * `actor.mailbox` that calls its `actor.inbox` handlers with JSON copies, as actors-do's RPC does. The
+ * Worker's half serves the routes over them and the conversation directory, one the Worker and every
+ * object share (the contracts' `createMemoryDirectory`, recorded from each object's runtime events, as
+ * conversations-directory does). The workerd lane runs the same on real Durable Objects.
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -21,14 +22,12 @@ import {
   type JsonValue,
   streamResult,
 } from "@pikit/contracts";
-import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import { type ApiConversation, MAX_DURABLE_IMAGE_BYTES, OPERATOR_NOTE } from "./api.ts";
 import { qualify, unqualify } from "./backend.ts";
-import { INDEX_KEY } from "./conversation-index.ts";
 import adminApi, { worker } from "./index.ts";
-import { CONVERSATIONS_PER_PAGE } from "./remote.ts";
+import { APP_KEY, CONVERSATIONS_PER_PAGE } from "./remote.ts";
 import { ANSWER_CHARS } from "./calls.ts";
-import { agents, AUTH, auth, imageOf, PIXEL, Runtime, type Served, serve, sse } from "./runtime.test-support.ts";
+import { agents, AUTH, auth, Directory, imageOf, PIXEL, Runtime, type Served, serve, sse } from "./runtime.test-support.ts";
 
 const copy = (value: JsonValue): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
 
@@ -51,12 +50,13 @@ class Platform {
   readonly unreachable = new Set<string>();
   /** What the objects' Apps warned about. */
   readonly warnings: string[] = [];
-  /** What a key's runtime holds before its object starts. */
-  readonly before = new Map<string, (runtime: Runtime) => void>();
-  /** Each key's `storage.sql`: an object started again keeps it, as a Durable Object's storage outlives it. */
-  readonly storage = new Map<string, ComponentDefinition>();
   /** More components in every object's App (a channel's object half). */
   readonly extra: ComponentDefinition[] = [];
+  /** The conversation directory: the Worker's and every object's; a delete for everyone resets the key in its object. */
+  readonly directory = new Directory(async (key) => {
+    const object = await this.object(key);
+    await object.runtime.registry.reset(key, undefined, object.ctx);
+  });
 
   readonly mailbox: ActorMailbox = {
     send: async (key, type, message) => {
@@ -86,15 +86,14 @@ class Platform {
   object(key: string): Promise<FakeObject> {
     let found = this.objects.get(key);
     if (found === undefined) {
-      found = this.start(key);
+      found = this.start();
       this.objects.set(key, found);
     }
     return found;
   }
 
-  private async start(key: string): Promise<FakeObject> {
+  private async start(): Promise<FakeObject> {
     const runtime = new Runtime(String);
-    this.before.get(key)?.(runtime);
     const answers = new Map<string, ActorCallHandler>();
     const handlers = new Map<string, ActorInboxHandler>();
     const streams = new Map<string, ActorStreamHandler>();
@@ -111,23 +110,14 @@ class Platform {
       },
     });
     const logger = { ...silentLogger, warn: (message: string) => void this.warnings.push(message) };
-    const storage = this.storage.get(key) ?? sqliteStorage();
-    this.storage.set(key, storage);
-    const app = await defineApp({ components: [auth, agents, runtime.component(), platform, storage, adminApi, ...this.extra], target: "durable", logger }).create();
+    const app = await defineApp({ components: [auth, agents, runtime.component(), platform, this.directory.component(), adminApi, ...this.extra], target: "durable", logger }).create();
     await app.start();
     return { app, runtime, answers, handlers, streams, ctx: app.context() };
   }
 
-  /** What `key`'s object tells the index of its conversation `conversationId` active at `at` (the tests below send it from the events). */
-  async active(key: string, at: number, conversationId = "1"): Promise<void> {
-    await this.mailbox.send(INDEX_KEY, "admin-api.seen", { entries: [{ key, conversationId, agent: "assistant", at }] }, (await this.object(key)).ctx);
-  }
-
-  /** The index's first page, as the Worker reads it. */
-  async listed(): Promise<string[]> {
-    const index = await this.object(INDEX_KEY);
-    const page = callResult(await answerCall(index.answers.get("admin-api.list") as ActorCallHandler, INDEX_KEY, { limit: 50 }, index.ctx)) as { items: { key: string; conversationId: string }[] };
-    return page.items.map((each) => qualify(each.key, each.conversationId));
+  /** What the directory records of `key`'s conversation `conversationId` active at `at` (as its object's events would). */
+  active(key: string, at: number, conversationId = "1"): void {
+    this.directory.dispatched({ key, conversationId, agent: "assistant" }, `m-${at}`, { at });
   }
 
   async stop(): Promise<void> {
@@ -147,7 +137,7 @@ async function cloud(): Promise<{ platform: Platform; worker: Served }> {
   const platform = new Platform();
   platforms.push(platform);
   const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", platform.mailbox) });
-  const served = await serve([auth, mailbox, worker], {}, "durable");
+  const served = await serve([auth, mailbox, platform.directory.component(), worker], {}, "durable");
   workers.push(served);
   return { platform, worker: served };
 }
@@ -170,32 +160,32 @@ test("ids: <key>~<the object's id>, split on the last ~; anything else names no 
   expect(qualify("telegram:1", "2")).toBe("telegram:1~2");
   expect(unqualify("telegram:1~2")).toEqual({ key: "telegram:1", local: "2" });
   expect(unqualify("http:a~b~12")).toEqual({ key: "http:a~b", local: "12" });
-  for (const id of ["", "telegram:1", "~2", "telegram:1~", "telegram:1~x", "telegram:1~2a"]) expect({ id, found: unqualify(id) }).toEqual({ id, found: undefined });
+  for (const id of ["", "telegram:1", "~2", "telegram:1~"]) expect({ id, found: unqualify(id) }).toEqual({ id, found: undefined });
 });
 
-test("the Worker's list: conversations from the index, newest activity first, each read from its object with a qualified id", async () => {
+test("the Worker's list: the directory's, newest activity first, each read from its object with a qualified id", async () => {
   const { platform, worker: w } = await cloud();
   await chat(platform, "telegram:1", true);
   await chat(platform, "telegram:2");
-  await platform.active("telegram:1", 100, "1");
-  await platform.active("telegram:1", 150, "2");
-  await platform.active("telegram:2", 200);
+  platform.active("telegram:1", 100, "1");
+  platform.active("telegram:1", 150, "2");
+  platform.active("telegram:2", 200);
   platform.calls.length = 0;
 
   const response = await w.fetch("/admin/api/conversations", { headers: AUTH });
   const body = (await response.json()) as { items: ApiConversation[]; next?: string };
 
   expect(response.status).toBe(200);
-  expect(body.items.map(({ conversationId, current }) => ({ conversationId, current }))).toEqual([
-    { conversationId: "telegram:2~1", current: true },
-    { conversationId: "telegram:1~2", current: true },
-    { conversationId: "telegram:1~1", current: false },
+  expect(body.items.map(({ conversationId, current, currentId, lastActivity, state }) => ({ conversationId, current, currentId, lastActivity, state }))).toEqual([
+    { conversationId: "telegram:2~1", current: true, currentId: undefined, lastActivity: 200, state: "listed" },
+    { conversationId: "telegram:1~2", current: true, currentId: undefined, lastActivity: 150, state: "listed" },
+    { conversationId: "telegram:1~1", current: false, currentId: "telegram:1~2", lastActivity: 100, state: "listed" },
   ]);
   expect(body.next).toBeUndefined();
-  // One call to the index, one per conversation to its key's object.
-  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.list`, "telegram:2 admin-api.conversation", "telegram:1 admin-api.conversation", "telegram:1 admin-api.conversation"]);
-  // The index's object is not a conversation, and was given none.
-  const none = await platform.mailbox.call(INDEX_KEY, "admin-api.conversation", { conversationId: "1" }, w.app.context()).catch((error: unknown) => error);
+  // The directory's page (its Worker half), then one call per conversation to its key's object.
+  expect(platform.calls).toEqual(["telegram:2 admin-api.conversation", "telegram:1 admin-api.conversation", "telegram:1 admin-api.conversation"]);
+  // The object the Worker asks for the App is not a conversation, and was given none.
+  const none = await platform.mailbox.call(APP_KEY, "admin-api.conversation", { conversationId: "1" }, w.app.context()).catch((error: unknown) => error);
   expect((none as ActorCallError).code).toBe("not_found");
 });
 
@@ -213,8 +203,8 @@ test("who each conversation is with is its object's: the channel's stage there (
   );
   await chat(platform, "telegram:1");
   await chat(platform, "http:b");
-  await platform.active("telegram:1", 100);
-  await platform.active("http:b", 200);
+  platform.active("telegram:1", 100);
+  platform.active("http:b", 200);
   platform.calls.length = 0;
 
   const body = (await (await w.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: ApiConversation[] };
@@ -226,7 +216,7 @@ test("who each conversation is with is its object's: the channel's stage there (
       party: { channel: { kind: "telegram", label: "Telegram" }, name: "@ana", detail: "Direct message", ids: [{ label: "Chat id", value: "1" }, { label: "Key", value: "telegram:1" }, { label: "Conversation", value: "1" }] },
     },
   ]);
-  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.list`, "http:b admin-api.conversation", "telegram:1 admin-api.conversation"]);
+  expect(platform.calls).toEqual(["http:b admin-api.conversation", "telegram:1 admin-api.conversation"]);
   expect(((await (await w.fetch("/admin/api/conversations/telegram%3A1~1", { headers: AUTH })).json()) as ApiConversation).party?.name).toBe("@ana");
 });
 
@@ -235,13 +225,13 @@ test("the Worker's list pages, at most CONVERSATIONS_PER_PAGE whatever limit ask
   const count = CONVERSATIONS_PER_PAGE + 3;
   for (let i = 0; i < count; i++) {
     await chat(platform, `telegram:${i}`);
-    await platform.active(`telegram:${i}`, 1_000 + i);
+    platform.active(`telegram:${i}`, 1_000 + i);
   }
   platform.unreachable.add(`telegram:${count - 1}`);
   platform.calls.length = 0;
 
   const first = (await (await w.fetch("/admin/api/conversations?limit=100", { headers: AUTH })).json()) as { items: ApiConversation[]; next?: string };
-  expect(platform.calls.length).toBe(1 + CONVERSATIONS_PER_PAGE);
+  expect(platform.calls.length).toBe(CONVERSATIONS_PER_PAGE);
   expect(first.items.length).toBe(CONVERSATIONS_PER_PAGE - 1);
   expect(first.items[0]?.conversationId).toBe(`telegram:${count - 2}~1`);
   expect(w.logged.some((each) => each.message.includes("left out of the list") && each.fields?.conversation === `telegram:${count - 1}`)).toBe(true);
@@ -255,34 +245,6 @@ test("the Worker's list pages, at most CONVERSATIONS_PER_PAGE whatever limit ask
   expect(await forged.json()).toMatchObject({ error: "invalid_cursor" });
 });
 
-test("the index learns of an object's conversations when its App starts, and of a message once it is dispatched; told twice, it keeps one row", async () => {
-  const platform = new Platform();
-  platforms.push(platform);
-  // Conversations its object held before admin-api was installed, or whose events were missed.
-  platform.before.set("email:ana@empresa.com", (runtime) => {
-    runtime.add({ conversationId: "1", key: "email:ana@empresa.com", agent: "assistant", lastActivity: 50 }, false);
-    runtime.add({ conversationId: "2", key: "email:ana@empresa.com", agent: "assistant", lastActivity: 70 });
-  });
-  const { app, runtime } = await platform.object("email:ana@empresa.com");
-  expect(await platform.listed()).toEqual(["email:ana@empresa.com~2", "email:ana@empresa.com~1"]);
-
-  await platform.object("telegram:9");
-  const conversation = { key: "telegram:9", agent: "assistant", conversationId: "1" };
-  (await platform.object("telegram:9")).runtime.add(conversation);
-  await (await platform.object("telegram:9")).runtime.runtime.dispatch({ requestId: "m1", conversation, prompt: "hi" }, (await platform.object("telegram:9")).ctx);
-  expect((await platform.listed())[0]).toBe("telegram:9~1");
-
-  // The same again, and the object starting again: one row each, the newest time kept.
-  await app.stop();
-  platform.objects.delete("email:ana@empresa.com");
-  platform.before.set("email:ana@empresa.com", (again) => {
-    for (const each of runtime.conversations.values()) again.add(each, false);
-  });
-  await platform.object("email:ana@empresa.com");
-  await (await platform.object("telegram:9")).runtime.runtime.dispatch({ requestId: "m1", conversation, prompt: "hi" }, (await platform.object("telegram:9")).ctx);
-  expect(await platform.listed()).toEqual(["telegram:9~1", "email:ana@empresa.com~2", "email:ana@empresa.com~1"]);
-});
-
 test("one conversation and its transcript from its object; an unknown or malformed id is 404; an object that cannot be reached is 503", async () => {
   const { platform, worker: w } = await cloud();
   const runtime = await chat(platform, "telegram:1");
@@ -294,7 +256,7 @@ test("one conversation and its transcript from its object; an unknown or malform
   expect(await transcript.json()).toEqual({ items: [{ id: "e1", kind: "message", messages: [{ role: "user", content: "hi" }] }] });
   expect(runtime.pages).toContainEqual({ limit: 5 });
 
-  for (const id of ["telegram:1~9", "telegram:1", "telegram:1~x", "%E0"]) {
+  for (const id of ["telegram:1~9", "telegram:1", "telegram:1~x", "telegram:2~1", "%E0"]) {
     for (const path of ["", "/transcript", "/events"]) {
       const response = await w.fetch(`/admin/api/conversations/${id.startsWith("%") ? id : encodeURIComponent(id)}${path}`, { headers: AUTH });
       expect({ id, path, status: response.status }).toEqual({ id, path, status: 404 });
@@ -361,10 +323,10 @@ test("an object's message call with an operator that is not a non-empty string i
   expect(runtime.dispatched).toEqual([]);
 });
 
-test("a conversation of the dashboard's own on the Worker: one call to the object of its new key (in its operator's space, the operator its sender), listed first at once", async () => {
+test("a conversation of the dashboard's own on the Worker: one call to the object of its new key (in its operator's space and owned by them, the operator its sender), listed first at once, titled by its first message", async () => {
   const { platform, worker: w } = await cloud();
   await chat(platform, "telegram:1");
-  await platform.active("telegram:1", 100);
+  platform.active("telegram:1", 100);
   platform.calls.length = 0;
 
   const response = await w.fetch("/admin/api/conversations", post({ agent: "assistant", text: "what changed today?" }));
@@ -379,23 +341,25 @@ test("a conversation of the dashboard's own on the Worker: one call to the objec
     {
       requestId: body.requestId,
       // In the operator's space, and from the operator: both cross the call to the object.
-      conversation: { key: body.key, agent: "assistant", channel: "dashboard", space: "dashboard:operator:ops", conversationId: "100" },
+      conversation: { key: body.key, agent: "assistant", channel: "dashboard", space: "dashboard:operator:ops", owner: { channel: "dashboard", id: "ops" }, conversationId: "100" },
       prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`,
       whenBusy: "followUp",
       sender: { channel: "dashboard", id: "ops" },
     },
   ]);
-  // Told to the index when the message was dispatched, before any run.
-  expect((await platform.listed())[0]).toBe(body.conversationId);
+  // Recorded when the message was dispatched, before any run; its first title the operator's words.
   const page = (await (await w.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: ApiConversation[] };
-  expect(page.items.map((each) => each.conversationId)).toEqual([body.conversationId, "telegram:1~1"]);
+  expect(page.items.map(({ conversationId, title }) => ({ conversationId, title }))).toEqual([
+    { conversationId: body.conversationId, title: "What changed today?" },
+    { conversationId: "telegram:1~1", title: undefined },
+  ]);
 
   const unknown = await w.fetch("/admin/api/conversations", post({ agent: "nobody", text: "hi" }));
   expect(unknown.status).toBe(400);
   expect(await unknown.json()).toMatchObject({ error: "unknown_agent" });
 });
 
-test("the agents on the Worker are the index object's App's, one call", async () => {
+test("the agents on the Worker are an object's App's (APP_KEY's), one call", async () => {
   const { platform, worker: w } = await cloud();
 
   const response = await w.fetch("/admin/api/agents", { headers: AUTH });
@@ -408,7 +372,7 @@ test("the agents on the Worker are the index object's App's, one call", async ()
     tools: [{ name: "lookup", summary: "" }],
     skills: [],
   });
-  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.agents`]);
+  expect(platform.calls).toEqual([`${APP_KEY} admin-api.agents`]);
 });
 
 test("images and a web search cross the call to the object; images over 1 MB in all are 413 before any call; a web search the agent cannot do is the object's 400", async () => {
@@ -490,7 +454,7 @@ test("live events on the Worker: an unknown conversation is a 404 before any str
   expect((await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/events`, { headers: AUTH })).status).toBe(503);
 });
 
-test("the composition is an object's App (the index's); delivery is not listed on the Worker", async () => {
+test("the composition is an object's App (APP_KEY's); delivery is not listed on the Worker", async () => {
   const { worker: w } = await cloud();
 
   const app = (await (await w.fetch("/admin/api/app", { headers: AUTH })).json()) as { target: string; components: { name: string }[] };
@@ -517,51 +481,33 @@ test("every Worker route answers 401 without an operator, and calls no object", 
   expect(platform.objects.size).toBe(0);
 });
 
-test("in an App that is one key's actor the default export tells the index through actor.mailbox; without it its start says so", async () => {
+test("in an App that is one key's actor the default export answers the Worker's calls (no actor.mailbox needed) and serves nothing itself", async () => {
   const runtime = new Runtime();
-  const inbox = defineComponent({ name: "inbox-test", setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {}, answerStream: () => {} }) });
-  const app = await defineApp({ components: [auth, runtime.component(), inbox, sqliteStorage(), adminApi], logger: silentLogger }).create();
-
-  const failed = (await app.start().catch((error: unknown) => error)) as Error;
-  expect(String(failed.cause)).toContain("admin-api: in an App that is one key's actor it tells the conversation index, which needs actor.mailbox");
+  const answers: string[] = [];
+  const inbox = defineComponent({
+    name: "inbox-test",
+    setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: (type) => void answers.push(type), answerStream: (type) => void answers.push(type) }),
+  });
+  const app = await defineApp({ components: [auth, runtime.component(), inbox, new Directory(async () => {}).component(), adminApi], logger: silentLogger }).create();
+  await app.start();
+  expect(answers.sort()).toEqual(["admin-api.abort", "admin-api.agents", "admin-api.app", "admin-api.command", "admin-api.commands", "admin-api.conversation", "admin-api.live", "admin-api.message", "admin-api.reset", "admin-api.start", "admin-api.transcript", "admin-api.usage"]);
+  await app.stop();
 });
 
-test("a run that settles, fails or is resumed in an object tells the index (a run not resumed was told when its message was dispatched); a failed send is logged, not the run's", async () => {
-  const platform = new Platform();
-  platforms.push(platform);
-  const { app } = await platform.object("telegram:7");
-  const ctx = app.context();
-  const conversation = { key: "telegram:7", agent: "assistant", conversationId: "1" };
-
-  await ctx.emit("agent.settled", { conversation, requestId: "r1", requestIds: ["r1"], kind: "completed", messages: [] });
-  expect(await platform.listed()).toEqual(["telegram:7~1"]);
-  await ctx.emit("agent.started", { conversation: { ...conversation, conversationId: "2" }, requestId: "r2", resumed: false });
-  expect(await platform.listed()).toEqual(["telegram:7~1"]);
-  await Bun.sleep(2);
-  await ctx.emit("agent.started", { conversation: { ...conversation, conversationId: "2" }, requestId: "r2", resumed: true });
-  expect(await platform.listed()).toEqual(["telegram:7~2", "telegram:7~1"]);
-
-  // The index does not take it: the event's other listeners and the run go on.
-  const index = await platform.object(INDEX_KEY);
-  index.handlers.delete("admin-api.seen");
-  await ctx.emit("agent.failed", { conversation, requestId: "r3", requestIds: ["r3"], kind: "failed", messages: [], error: { code: "x", message: "x" } });
-  expect(platform.warnings).toEqual(["admin-api: the conversation index did not take this conversation's activity; its next activity tells it again"]);
-});
-
-test("slash commands on the Worker: listed from the index object's App, run in the conversation's object (refusals cross the call); a title is the object's, in the list too", async () => {
+test("slash commands on the Worker: listed from an object's App, run in the conversation's object (refusals cross the call); /name is the directory's title, in the list too", async () => {
   const { platform, worker: w } = await cloud();
   const runtime = await chat(platform, "telegram:1");
-  await platform.active("telegram:1", 100);
+  platform.active("telegram:1", 100);
   platform.calls.length = 0;
 
   const listedCommands = (await (await w.fetch("/admin/api/commands", { headers: AUTH })).json()) as { items: { name: string }[] };
   expect(listedCommands.items.map((each) => each.name)).toEqual(["name", "new"]);
-  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.commands`]);
+  expect(platform.calls).toEqual([`${APP_KEY} admin-api.commands`]);
 
   const path = (name: string) => `/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/commands/${name}`;
   platform.calls.length = 0;
   const named = await w.fetch(path("name"), post({ args: "Weekend plans" }));
-  expect(await named.json()).toEqual({ text: "Titled \u201cWeekend plans\u201d." });
+  expect(await named.json()).toEqual({ text: "Titled “Weekend plans”." });
   expect(platform.calls).toEqual(["telegram:1 admin-api.command"]);
   const page = (await (await w.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: ApiConversation[] };
   expect(page.items).toMatchObject([{ conversationId: "telegram:1~1", title: "Weekend plans" }]);
@@ -576,17 +522,17 @@ test("slash commands on the Worker: listed from the index object's App, run in t
   expect(runtime.pointers.get("telegram:1")?.conversationId).toBe("100");
   const behind = await w.fetch(path("name"), post({ args: "Too late" }));
   expect({ status: behind.status, body: await behind.json() }).toMatchObject({ status: 409, body: { error: "not_current" } });
-  // The reset's new conversation is untitled until its own first run; the one behind keeps its title.
+  // The reset's new conversation has no title yet; the one behind keeps its own, and points to it.
   const reset = (await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~100")}`, { headers: AUTH })).json()) as ApiConversation;
   expect(reset).toMatchObject({ current: true });
   expect(reset.title).toBeUndefined();
-  expect(await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}`, { headers: AUTH })).json()).toMatchObject({ current: false, title: "Weekend plans" });
+  expect(await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}`, { headers: AUTH })).json()).toMatchObject({ current: false, currentId: "telegram:1~100", title: "Weekend plans" });
 });
 
-test("rename on the Worker: one call to the conversation's object, which keeps the title (cleaned there); the list shows it; refusals cross the call", async () => {
+test("rename on the Worker: the directory's (the Worker's half), then the conversation read from its object; the list shows it; refusals", async () => {
   const { platform, worker: w } = await cloud();
   await chat(platform, "telegram:1", true);
-  await platform.active("telegram:1", 100, "1");
+  platform.active("telegram:1", 100, "1");
   const path = (id: string) => `/admin/api/conversations/${encodeURIComponent(id)}/rename`;
   platform.calls.length = 0;
 
@@ -594,7 +540,7 @@ test("rename on the Worker: one call to the conversation's object, which keeps t
   const renamed = await w.fetch(path("telegram:1~1"), post({ title: "  weekend plans.  " }));
   expect(renamed.status).toBe(200);
   expect(await renamed.json()).toMatchObject({ conversationId: "telegram:1~1", current: false, title: "Weekend plans" });
-  expect(platform.calls).toEqual(["telegram:1 admin-api.rename"]);
+  expect(platform.calls).toEqual(["telegram:1 admin-api.conversation"]);
   expect(w.logged.find((each) => each.message.includes("renamed"))?.fields).toEqual({ operator: "ops", conversation: "telegram:1" });
   const page = (await (await w.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: ApiConversation[] };
   expect(page.items).toMatchObject([{ conversationId: "telegram:1~1", title: "Weekend plans" }]);
@@ -605,32 +551,38 @@ test("rename on the Worker: one call to the conversation's object, which keeps t
   expect((await w.fetch(path("telegram:1"), post({ title: "x" }))).status).toBe(404);
 });
 
-test("archive and delete on the Worker: one call to the index object, which lists them apart (archived) or never (deleted)", async () => {
+test("hide, archive and delete on the Worker: the directory's, no object asked; a delete for everyone resets the key in its object", async () => {
   const { platform, worker: w } = await cloud();
   await chat(platform, "telegram:1", true);
-  await chat(platform, "telegram:2");
-  await platform.active("telegram:1", 100, "1");
-  await platform.active("telegram:2", 200);
-  const ids = async (archived = false) =>
-    ((await (await w.fetch(`/admin/api/conversations${archived ? "?archived=1" : ""}`, { headers: AUTH })).json()) as { items: ApiConversation[] }).items.map((each) => each.conversationId);
+  const runtime = await chat(platform, "telegram:2");
+  await chat(platform, "telegram:3");
+  platform.active("telegram:1", 100, "1");
+  platform.active("telegram:2", 200);
+  platform.active("telegram:3", 300);
+  const ids = async (state = "listed") =>
+    ((await (await w.fetch(`/admin/api/conversations?state=${state}`, { headers: AUTH })).json()) as { items: ApiConversation[] }).items.map((each) => each.conversationId);
+  const act = (id: string, action: string) => w.fetch(`/admin/api/conversations/${encodeURIComponent(id)}/${action}`, { method: "POST", headers: { ...AUTH, "x-pikit-admin": "1" } });
   platform.calls.length = 0;
 
-  const archived = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/archive`, { method: "POST", headers: { ...AUTH, "x-pikit-admin": "1" } });
-  expect(archived.status).toBe(200);
-  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.hide`]);
-  await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:2~1")}/delete`, { method: "POST", headers: { ...AUTH, "x-pikit-admin": "1" } });
+  expect(await (await act("telegram:1~1", "archive")).json()).toEqual({ conversationId: "telegram:1~1", state: "archived", hidden: false });
+  expect(await (await act("telegram:3~1", "hide")).json()).toEqual({ conversationId: "telegram:3~1", state: "listed", hidden: true });
+  expect(platform.calls).toEqual([]);
+  expect(await (await act("telegram:2~1", "delete")).json()).toEqual({ conversationId: "telegram:2~1", state: "deleted", hidden: false });
+  // Reset where the conversation is: its key's next message starts a new one.
+  expect(runtime.pointers.get("telegram:2")?.conversationId).toBe("100");
 
   expect(await ids()).toEqual([]);
-  expect(await ids(true)).toEqual(["telegram:1~1"]);
-  const unknown = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:9~1")}/archive`, { method: "POST", headers: { ...AUTH, "x-pikit-admin": "1" } });
-  expect(unknown.status).toBe(404);
+  expect(await ids("archived")).toEqual(["telegram:1~1"]);
+  expect(await ids("hidden")).toEqual(["telegram:3~1"]);
+  expect(await ids("deleted")).toEqual(["telegram:2~1"]);
+  expect((await act("telegram:9~1", "archive")).status).toBe(404);
 });
 
-test("search on the Worker (?q=): the index object's, over the titles each object tells it (a rename, /name, its backfill at start) and the keys; only what it finds is read", async () => {
+test("search on the Worker (?q=): the directory's, over the titles (a rename, /name, a channel's first message) and the keys; only what it finds is read", async () => {
   const { platform, worker: w } = await cloud();
-  for (const [n, at] of [[1, 100], [2, 200], [3, 300]] as const) {
+  for (const [n, when] of [[1, 100], [2, 200], [3, 300]] as const) {
     await chat(platform, `telegram:${n}`);
-    await platform.active(`telegram:${n}`, at);
+    platform.active(`telegram:${n}`, when);
   }
   const ids = async (query: string) =>
     ((await (await w.fetch(`/admin/api/conversations${query}`, { headers: AUTH })).json()) as { items: ApiConversation[] }).items.map((each) => each.conversationId);
@@ -639,30 +591,12 @@ test("search on the Worker (?q=): the index object's, over the titles each objec
   await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:2~1")}/commands/name`, post({ args: "Ñandú notes" }));
   platform.calls.length = 0;
   expect(await ids("?q=WEEKEND")).toEqual(["telegram:1~1"]);
-  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.list`, "telegram:1 admin-api.conversation"]);
+  expect(platform.calls).toEqual(["telegram:1 admin-api.conversation"]);
   expect(await ids(`?q=${encodeURIComponent("ñandú")}`)).toEqual(["telegram:2~1"]);
   expect(await ids("?q=telegram:3")).toEqual(["telegram:3~1"]);
   expect(await ids("?q=nothing")).toEqual([]);
-  // Activity without a title keeps the one told.
-  await platform.active("telegram:1", 400);
+  // Activity keeps the title.
+  platform.active("telegram:1", 400);
   expect(await ids("?q=weekend")).toEqual(["telegram:1~1"]);
-
-  // An index that lost its rows learns the titles again from each object's start (its backfill).
-  for (const key of [INDEX_KEY, "telegram:1"]) {
-    await (await platform.object(key)).app.stop();
-    platform.objects.delete(key);
-  }
-  platform.storage.delete(INDEX_KEY);
-  platform.before.set("telegram:1", (runtime) => runtime.add({ conversationId: "1", key: "telegram:1", agent: "assistant", lastActivity: 10 }));
-  await platform.object("telegram:1");
-  expect(await ids("?q=weekend")).toEqual(["telegram:1~1"]);
-
-  // What the index takes: a title is a string of at most TITLE_MAX characters; q at most SEARCH_MAX.
-  const ctx = w.app.context();
-  for (const title of [5, "x".repeat(61)]) {
-    const refused = await platform.mailbox.send(INDEX_KEY, "admin-api.seen", { entries: [{ key: "telegram:9", conversationId: "1", agent: "assistant", at: 1, title }] }, ctx).catch((error: unknown) => error);
-    expect((refused as ActorCallError).code).toBe("invalid_request");
-  }
-  const long = await platform.mailbox.call(INDEX_KEY, "admin-api.list", { limit: 1, q: "x".repeat(201) }, ctx).catch((error: unknown) => error);
-  expect((long as ActorCallError).code).toBe("invalid_request");
+  expect((await w.fetch(`/admin/api/conversations?q=${"x".repeat(201)}`, { headers: AUTH })).status).toBe(400);
 });

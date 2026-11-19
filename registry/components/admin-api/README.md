@@ -7,17 +7,17 @@ installed; it also stands on its own, for a script or an agent that reads the se
 - **Provides:** `http.route`: the routes below, and `GET /admin/*` for the dashboard's files; and two
   slash commands, `agent.command` `new` and `name` ("Slash commands" below).
 - **Requires:** `admin.auth` (who is an operator; `admin-auth-token`), `agent.observe` (runtime-pi),
-  `agent.runtime`, `conversations.registry`, `storage.sql` (the conversation index); optionally
+  `agent.runtime`, `conversations.registry`, `conversations.directory` (the list, titles and states:
+  conversations-directory); optionally
   `agent.definition` (the agents it lists), `agent.directory` (the live ones, agents-live's: listed
   after them), `agent.tool` and `agent.skill` (the tools and skills agents may have, each with its one
   line), `agent.command` (the commands it lists and runs: its own,
-  runtime-pi's `/compact`, yours) and `model.complete` (runtime-pi's: the model that titles
-  conversations; without it, none is titled). A server (such as `server-bun`) serves the routes. On Cloudflare, also `actor.inbox` and `actor.mailbox`
-  (actors-do).
+  runtime-pi's `/compact`, yours). A server (such as `server-bun`) serves the routes. On Cloudflare, also
+  `actor.inbox` in the objects and `actor.mailbox` in the Worker (actors-do).
 - **Targets:** `server` and `durable` (Cloudflare): below, how it works on each. It never reads the
   target: in its start, `actor.inbox`'s `scope` says whether the App is every key's actor (`"all"`, a
-  server; or no `actor.inbox`: the index is its own) or one key's (`"one"`, a Durable Object: the
-  index is the index object's).
+  server; or no `actor.inbox`: it serves the routes) or one key's (`"one"`, a Durable Object: it
+  answers the Worker's calls).
 - **Installs to:** `src/pikit/admin-api/`. `dashboard-files.ts` there is the dashboard's build's, never
   yours (`generated`).
 - **npm dependencies:** `typebox`.
@@ -36,7 +36,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | `GET /admin/api/agents` | `{ items: [{ name, live?, description?, model, tools, steward }] }`: the App's agents (`agent.definition`), then the live ones (`agent.directory`, `live: true`, never the steward), the names of the tools each is defined with, and whether it is the steward; `tools` and `skills`, `[{ name, summary }]`: every tool an agent may have (`agent.tool`, then the tool objects a definition holds) and every skill (`agent.skill`, then a definition's own), `summary` one line for an operator (a tool's own `summary`, else its description's first sentence, at most 90 characters) |
 | `POST /admin/api/session` | the credential once → `200 { operator }` and a session cookie |
 | `DELETE /admin/api/session` | `204`, the session cookie cleared |
-| `GET /admin/api/conversations?limit&cursor&archived&q` | a page of conversations, the most recently active first: key, agent, busy, last activity, cost, and `current` (whether its key points to it now); `archived=1` those archived instead; `q` (at most 200 characters) only those whose title or key holds it, any case |
+| `GET /admin/api/conversations?limit&cursor&state&q` | a page of the directory's conversations, the most recently active first: key, agent, busy, last activity, cost, `current` (whether its key points to it now; else `currentId`, the one it does), `title`, `state` (for everyone) and `hidden` (for this operator); `state` is the bucket listed: `listed` (default), `hidden`, `archived` or `deleted`; `q` (at most 200 characters) only those whose title or key holds it, any case |
 | `POST /admin/api/conversations` | `{ agent, text, attachments?, webSearch?, requestId? }`: a conversation of the dashboard's own → `201 { conversationId, key, requestId, admission }` |
 | `GET /admin/api/conversations/:id` | one conversation |
 | `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first, a page at a time |
@@ -44,28 +44,32 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | `POST /admin/api/conversations/:id/messages` | `{ text, attachments?, webSearch?, requestId? }`: the operator's follow-up → `202 { requestId, admission }` |
 | `POST /admin/api/conversations/:id/abort` | stops its run → `200` |
 | `POST /admin/api/conversations/:id/reset` | points its key to a new, empty conversation; the old one is kept → `200 { key, previousConversationId, conversationId }` |
-| `POST /admin/api/conversations/:id/rename` | `{ title }`: the operator's title, cleaned (`cleanTitle`), as `/name` sets it, on any conversation (current or not) → `200`, the conversation titled; nothing left once cleaned `400` |
+| `POST /admin/api/conversations/:id/rename` | `{ title }`: its title for everyone, cleaned (`cleanTitle`), as `/name` sets it, on any conversation the directory holds (current or not) → `200`, the conversation titled; nothing left once cleaned `400` |
+| `POST /admin/api/conversations/:id/hide`, `…/unhide` | "Hide for me": out of this operator's list (listed under `state=hidden`) until new activity, or back → `200 { conversationId, state, hidden }` |
+| `POST /admin/api/conversations/:id/archive`, `…/delete`, `…/restore` | "Archive for everyone" (back with new activity its people see, never an operator's), "Delete for everyone" (for good; a key's current one is reset first, so its next message starts a new conversation), and back to listed → `200 { conversationId, state, hidden }`; every view of the directory honours them, nothing of the runtime's is deleted |
 | `GET /admin/api/commands` | `{ items: [{ name, description, argumentHint?, audience, agents? }] }`: the App's slash commands (`agent.command`), by name |
 | `POST /admin/api/conversations/:id/commands/:name` | `{ args? }`: the command run in the conversation → `200 { text? }`, a note for the operator |
 | `GET /admin/api/delivery/pending?limit&cursor` | what is not delivered yet (with an `outbound.queue`, on a server), each piece with the conversation it answers (`conversationId`, from its answer key) |
 | `GET /admin/api/delivery/receipts?after&limit` | what settled (with an `outbound.queue`, on a server), each with its `conversationId` likewise |
 
-- `limit` is 1 to 500 (50 when absent); `cursor` is the `next` of the previous page. Either one wrong
-  is `400`.
-- An id is opaque: put it in a path encoded (`encodeURIComponent`). An id with `:`, `@`, `.`, `~` or
-  an encoded `/` (`email:ana@empresa.com~1`) is one segment like any other.
+- `limit` is 1 to 500 (50 when absent; a list page holds at most the directory's 100, 20 on
+  Cloudflare); `cursor` is the `next` of the previous page. Either one wrong is `400`.
+- An id is `<conversation key>~<the runtime's id>` (`telegram:12345~1`), split on the last `~`, on
+  every host: the directory's ref, and on Cloudflare the object it is in. It is opaque: put it in a path
+  encoded (`encodeURIComponent`); one with `:`, `@`, `.`, `~` or an encoded `/` is one segment like any
+  other. An id that is not one, or whose key is not its conversation's, is `404`.
 - A message, an abort or a reset reaches only a conversation's current one: to one a reset left
-  behind it is `409 not_current`, to one with no key (no message reached it, no reset pointed a key to
-  it) `409 no_agent`.
+  behind it is `409 not_current`; one whose agent is gone is `409 no_agent`.
   A reset's new conversation is its key's current one, with the key's agent (`conversations.registry`'s
-  `get`), before any message reaches it: it is listed with its key and takes a message at once.
+  `get`), before any message reaches it: it is read with its key and takes a message at once (the
+  directory lists it once it has activity).
 - A message's `attachments` are images, `{ kind: "image", mimeType, data }` (base64, no `data:`
   prefix): png, jpeg, webp or gif, at most 4, each at most 5 MB (`attachmentsProblem` in `api.ts`; a
   wrong type or count is `400`, a larger one `413 too_large`, as is a body larger than a message can
   be). On Cloudflare they are at most 1 MB in all: the object stores the message in one Durable Object
   row (2 MB). The agent gets them with the text (`AgentRequest.images`), and the transcript keeps them.
   With attachments, `text` may be empty.
-- A conversation is listed and read with its key's `title` when it has one ("Titles" below).
+- A conversation is listed and read with its directory `title` when it has one ("Titles" below).
 - `webSearch: true` asks the agent, in the message's first line, to search the web for it with the
   `websearch` tool (`WEB_SEARCH_TOOL`; tool-websearch-brave provides it): only of an agent defined
   with that tool, another is `400 invalid_request`.
@@ -87,9 +91,11 @@ curl -N -H "Authorization: Bearer $PIKIT_ADMIN_TOKEN" http://localhost:3000/admi
 
 - **Its own conversations.** `POST /admin/api/conversations` makes a key `dashboard:<uuid>` and
   resolves it with one of the App's agents (`GET /admin/api/agents`: the code's or a live one; another
-  is `400 unknown_agent`), the channel `dashboard` (`ConversationRef.channel`) and its operator's space
+  is `400 unknown_agent`), the channel `dashboard` (`ConversationRef.channel`), its operator's space
   (`dashboard:operator:<id>`, `operatorSpace`: what the App keeps per space, memory and saved files, is
-  shared by every conversation that operator starts), then dispatches the first message. Its answers appear only in the dashboard:
+  shared by every conversation that operator starts) and its operator as owner (`{ channel:
+  "dashboard", id }`, the directory's), then dispatches the first message, which is its first title
+  (`title`, source `first`: the operator's words, without the note the agent reads). Its answers appear only in the dashboard:
   no channel delivers a `dashboard:` key, and none makes one, so no other channel can continue it.
 - **Another channel's conversation.** The operator's message is a follow-up, never a steer (with a run
   going, it waits for it), and its request id starts with `dashboard:` (`DASHBOARD_REQUEST_PREFIX`; a
@@ -114,8 +120,8 @@ it shows what `GET /admin/api/commands` lists, and nothing else.
 
 - **Who registers them.** admin-api registers two of Pi's built-ins that pikit does for real: `/new`
   (Pi's "Start a new session": the key's reset, `conversations.registry`'s `reset`; the dashboard
-  follows the key to its new conversation) and `/name <title>` (the conversation's title, replacing a
-  model's). runtime-pi registers `/compact` (pi-durable's manual compaction). A component of yours
+  follows the key to its new conversation, `currentId`) and `/name <title>` (the conversation's title
+  for everyone: the directory's `rename`, as trusted code). runtime-pi registers `/compact` (pi-durable's manual compaction). A component of yours
   registers its own the same way:
   `pikit.provideKeyed("agent.command", "deploy", { description, argumentHint, run })`.
 - **Where one runs**: in the App that holds the conversation (on Cloudflare its object, by the call
@@ -135,32 +141,13 @@ it shows what `GET /admin/api/commands` lists, and nothing else.
 
 ### Titles
 
-A conversation gets a title once, from a model, after its first run settles: admin-api asks
-`model.complete` (runtime-pi's) in the background, so no request and no event waits for it, with a
-short system prompt (a title of 2 to 6 words, in the language of the message, no quotes) and the
-conversation's first message (the text written, the operator's note line taken off, at most 1,000
-characters; `maxTokens` 32, besides what a reasoning model thinks: `model.complete` leaves it room,
-and asks one whose thinking cannot be turned off for the least). The model is `titleModel` when set, else the conversation's agent's. The
-answer is cleaned (`cleanTitle` in `api.ts`: its first line, no label, quotes or markdown, at most 60
-characters, cut at a word). A failure (a model error, an answer with no title) is logged, and tried
-once more after a later run; then never (`TITLE_TRIES`). `/name` (or the dashboard's Rename,
-`POST …/rename`) replaces any title, and no model replaces the operator's. A title names one conversation: a reset (`/new`) starts one that gets its
-own from its own first message. Until a conversation has a title, its first message (cleaned the same
-way) names it, from the moment it is dispatched (`agent.dispatched`: read from the transcript's first
-page, a new conversation's; one longer than that, made before admin-api, is titled at start): a
-conversation whose runs all fail (a model whose provider has no credentials) is listed by its first
-message, never by its id, and the first run that settles still has a model title it. A conversation
-named before its first run settles (`/name`, which a channel that titles its own conversations runs:
-channel-web) costs no model call: the operator's title is never replaced. Titles are kept with the
-index (below) and come with each conversation (`title`). With a fake model (provider-faux) the title
-is its echo of the first message, cleaned.
-
-**A channel's own titles.** A channel that titles its conversations (channel-web: the first message
-at once, a model's title after its first answer, the user's rename) keeps the dashboard's the same by
-running `/name` (`agent.command` `"name"`) with each one, in the conversation's App (on Cloudflare its
-object). The dashboard then lists the channel's title, and asks no model of its own: one title, one
-model call, per conversation. An operator's `/name` or Rename there changes only the dashboard's,
-until the channel names it again.
+One title per conversation, the directory's, the same in every view (`conversations.directory`):
+a channel's first message as its person wrote it, then a model's (the directory's provider titles
+each conversation once), then a rename, which nothing replaces: the dashboard's Rename
+(`POST …/rename`) and `/name` (`agent.command` `"name"`, which a channel may run too) are the
+directory's `rename`. A conversation the dashboard starts has the operator's first message as its
+first title. A reset's new conversation has its own. admin-api titles nothing and keeps no title: a
+conversation with no title yet is shown by the dashboard's fallback (who it is with, its key).
 
 ### Who it is with
 
@@ -173,8 +160,7 @@ and a dashboard `link` when the channel has one.
   pipeline (channel-web, channel-telegram, channel-telegram-webhook, channel-google-chat,
   channel-http do), read through `describeConversation`, which cleans what it says (one line each,
   bounded, no control characters) and never throws: a describer that fails is logged, and the
-  conversation is described by its key. A pipeline, not a capability: admin-api depends on no channel
-  (channel-web depends on admin-api, for `/name`).
+  conversation is described by its key. A pipeline, not a capability: admin-api depends on no channel.
 - **Otherwise by its key:** the channel's label from its kind, the instance from the channel recorded
   with the key (`telegram:ops`), the rest of the key as its "Chat id".
 - **The dashboard's own** (`dashboard:<uuid>`): "Dashboard", the operator.
@@ -191,44 +177,30 @@ session cookie from `admin.auth`'s `sessions` (admin-auth-token: signed, HttpOnl
 also needs `x-pikit-admin`, which a page of another site cannot send. `DELETE` clears it. An
 `admin.auth` without sessions answers `404 not_installed`: send the credential with every call.
 
-## The conversation index
+## The list: a view of the directory
 
-The list is newest activity first, a page at a time, on every host: `agent.observe` lists in
-creation order, and on Cloudflare sees one object's conversations. So admin-api keeps an index,
-`admin_api_conversations` in `storage.sql`: one row per conversation (its key, its id, its agent, the
-time of its newest activity), written
+The list is the conversation directory's (`conversations.directory`, conversations-directory), as an
+operator sees it (`{ kind: "operator", id }`): every conversation with activity, the most recently
+active first (an operator's own follow-ups move it too), a page at a time by the directory's cursor,
+searched by its `q` (the title, the key; `%` and `_` literal). admin-api keeps no index and records
+nothing: the directory's provider records the runtime's events in each conversation's App, off the
+message's path. Each entry's conversation is then read where it is, for what the directory does not
+hold (busy, usage, who it is with, `current`); one the runtime no longer has, or whose object does not
+answer, is left out of the page, and logged. Any conversation can always be read by its id.
 
-- when a message is dispatched (`agent.dispatched`, in the caller's context once it is durable; a
-  duplicate is no activity), when a run settles or fails, when a reset points a key to a new
-  conversation (listed at once), and when a resumed run starts;
-- when the App starts, from every conversation `agent.observe` holds (on a server in the background,
-  a page at a time; on Cloudflare the object's own): a conversation made before admin-api was
-  installed, or whose events were missed (SPEC K3), is listed once its App starts again.
-
-A write is an upsert that keeps the newest time: told twice, or late, it changes nothing. A row whose
-conversation the runtime no longer has is left out of the page. Any conversation can always be read
-by its id.
-
-**Search** (`?q=`) is the index's too: each row also carries the title its conversation is listed by
-(a model's, the operator's, else its first message), lowercased, and `q` matches it or the key, any
-case (`%` and `_` literal). The conversation's App tells the index the title whenever it changes (its
-first message once dispatched, a model's title, `/name`, a rename) and with each
-conversation at start, so on Cloudflare, where titles are the objects', the index object searches
-them too. A conversation whose title changed while the index could not be told is found by its old
-title until its object starts again.
-
-Titles are a second table of the same storage, `admin_api_conversation_titles`: one row per
-conversation (its title, a model's or the operator's, the first message a model titles, its tries).
-On a server it is the App's `storage.sql` (its conversation ids are unique); on Cloudflare the
-conversation's own object's, by the object's own id (where its runs settle and `/name` runs, and
-whose answer the list reads), not the index object's.
+**For everyone and for me.** The states are the directory's, and every view honours them (channel-web's
+too): "Archive for everyone" (`archive`: listed apart, back with new activity its people see, never an
+operator's), "Delete for everyone" (`delete`: listed only under `state=deleted`, whatever comes; deleting
+a key's current conversation resets the key first, so the platform's next message starts a new one),
+`restore` (back to listed), and "Hide for me" (`hide`, `unhide`: this operator's list only, back with
+new activity). Nothing of the runtime's is deleted.
 
 ## On a server
 
-One App, and this component's default export is the whole API over its contracts
-(`createLocalBackend`): the list from the index (the App's own `storage.sql`), each conversation from
-the runtime, ids the runtime's, live events from `agent.observe`'s `watch`, delivery from the
-`outbound.queue` when one is installed.
+One App, and this component's default export is the whole API over its contracts and the directory
+(`createAdminBackend` over `createLocalHost`): the list from the directory, each conversation from the
+runtime, live events from `agent.observe`'s `watch`, delivery from the `outbound.queue` when one is
+installed (each piece's conversation `<its key>~<the id in its answer key>`).
 
 ## On Cloudflare
 
@@ -237,17 +209,17 @@ by `actor.mailbox.call` (JSON in, JSON out). So admin-api has two halves, which 
 `pikit ui on`) puts in the two Apps of `pikit.config.ts`; admin-auth-token goes in both.
 
 - **The Worker's half** (`worker.ts`, `export const worker`, config key `admin-api-worker`) serves the
-  routes over the remote backend (`remote.ts`): each read and action is a call to the conversation's
-  object. It needs only `admin.auth` and `actor.mailbox`.
+  routes over the directory (its Worker half: the list, titles and states, one call each to its actor)
+  and the remote host (`remote.ts`): each read and action on a conversation is a call to its object. It
+  needs `admin.auth`, `actor.mailbox` and `conversations.directory`.
 - **The object's half** (the default export, in each object's App) answers those calls about its own
-  conversations, through the same contracts as on a server (`calls.ts`), and tells the index of their
-  activity and their titles (`admin-api.seen`, a message to the index object).
+  conversations, through the same contracts as on a server (`calls.ts`). `/name` runs there, through
+  the directory.
 - **Ids** name the object: `<conversation key>~<the object's id>` (`telegram:12345~1`), split on the last
   `~`. Every object numbers its own conversations, so its own id alone names nothing.
-- **The index** is the object `admin-api:index` (an object of the same class, which runs the same App
-  and holds no conversation), its rows in that object's `storage.sql`. The list asks it for a page,
-  then each conversation's object for it: a page is at most 20 conversations whatever `limit` says
-  (each is a subrequest). An object that does not answer is left out of the page, and logged.
+- **The list** is the directory's page, then each conversation's object for it: a page is at most 20
+  conversations whatever `limit` says (each is a subrequest). An object that does not answer is left
+  out of the page, and logged.
 - **A new conversation** of the dashboard's own is one call to the object of its new key.
 - **Live events are streamed.** `…/events` opens the object's `admin-api.live` stream
   (`actor.mailbox.stream`, one RPC): its conversation's events as they happen, the answer as it is
@@ -256,8 +228,8 @@ by `actor.mailbox.call` (JSON in, JSON out). So admin-api has two halves, which 
   actors-do's `streamBeatMs` (5 s). A stream cut by an eviction or a deploy ends, and the
   dashboard connects again.
 - **The composition** (`/admin/api/app`), **the agents** (`/admin/api/agents`) and **the commands**
-  (`/admin/api/commands`) are the objects' App's, where the agents run (the index's). A command runs
-  in its conversation's object (`admin-api.command`), and a title is made and kept there.
+  (`/admin/api/commands`) are the objects' App's, where the agents run (the object `admin-api:app`'s,
+  which holds no conversation). A command runs in its conversation's object (`admin-api.command`).
 - **Sizes.** A call carries at most 32 MiB each way. A message's images are at most 1 MB in all
   (checked in the Worker and again in the object), and a transcript page with images inline is
   answered shorter (`ANSWER_CHARS` in `calls.ts`) until it fits; its `next` reads on.
@@ -268,7 +240,7 @@ by `actor.mailbox.call` (JSON in, JSON out). So admin-api has two halves, which 
   then answers `404`. Only an operator can ask.
 - **What it costs.** Every Worker request and every Durable Object call counts in the day's requests
   (the Free plan: 100,000 Worker requests and 100,000 Durable Object requests a day), shared with the
-  bot. A list page is 1 Worker request and up to 21 object requests; an open conversation about 30
+  bot. A list page is 1 Worker request and up to 21 object requests (the directory's and 20); an open conversation about 30
   object requests a minute. The dashboard asks only while its tab is visible and the operator is there
   (its README, "Requests").
 
@@ -305,7 +277,6 @@ still answers.
 ```ts
 "admin-api": {
   heartbeatMs: 15_000, // a comment on an idle event stream this often
-  titleModel: "anthropic/claude-haiku-4-5", // optional: the model that titles conversations; absent, each one's agent's
 }
 // On Cloudflare, the Worker's half takes the same under workerConfig's "admin-api-worker".
 ```
@@ -315,9 +286,12 @@ still answers.
 - Every API answer is an operator's (`admin.auth`); nothing is read, and no object called, before it
   says yes.
 - It reads contracts only (`APP_DESCRIPTION`, `agent.definition`, `agent.observe`, `conversations.registry`,
-  `agent.command`) and acts only through the contracts that own each action (`agent.runtime`'s
-  `dispatch` and `abort`, `conversations.registry`'s `resolve` and `reset`, a command's `run`,
-  `model.complete` for a title), on Cloudflare inside the conversation's own object.
+  `conversations.directory`, `agent.command`) and acts only through the contracts that own each action
+  (`agent.runtime`'s `dispatch` and `abort`, `conversations.registry`'s `resolve` and `reset`, a command's
+  `run`, the directory's `rename`, `setState`, `mine` and `title`), on Cloudflare inside the
+  conversation's own object or the directory's.
+- It lists and acts as an operator viewer of the directory (`{ kind: "operator", id }` from `admin.auth`),
+  never from a page's words; "Hide for me" is that operator's alone.
 - What the operator says never reaches another channel's chat; the agent reads that it is the
   operator's.
 - No config value that looks like a secret leaves it (`redactSecrets`), on either host.
@@ -327,34 +301,33 @@ still answers.
 
 ## Tests
 
-- `admin-api.test.ts`, with a double for every contract (`runtime.test-support.ts`), routes picked the
-  way a server picks them: what setup declares; `401` on every API route before anything is read;
-  sessions; each route's answer and its `400` / `404` / `409`; the list from the index (filled at
-  start, moved by activity, paged through thousands); the dashboard's own conversations (in their
-  operator's space) and the operator's follow-ups (marked, never steer); the agents; images (reaching the request, their number,
-  types and sizes checked: `400`, `413`) and web search (asked in the first line, only of an agent with
-  the tool); ids with `.` and `/`; redacted config; server-sent events; messages logged without their
-  text; the commands (listed, run as actions, `404` / `409` / `422`, a project's own, logged by name)
-  and admin-api's own through the `agent.command` suite; titles (made in the background after the first
-  run, once, retried once, `titleModel`, `/name` first; the first message naming it once dispatched, a
-  failing run's conversation too, a long one left to start, a named one costing no model call); search (`q`: a model's title, a rename, `/name`,
-  a first message, the key; with `archived=1`; too long `400`).
+- `admin-api.test.ts`, with a double for every contract (`runtime.test-support.ts`; the directory is
+  the contracts' `createMemoryDirectory`, recorded from the runtime's events), routes picked the way a
+  server picks them: what setup declares; `401` on every API route before anything is read; sessions;
+  each route's answer and its `400` / `404` / `409`; the list from the directory (as an operator sees
+  it, moved by activity, a reset's new one once it has activity, paged through thousands at most 100 a
+  page, a row the runtime lost left out); the dashboard's own conversations (in their operator's space,
+  owned by them, titled by their first message) and the operator's follow-ups (marked, never steer);
+  the agents; images (reaching the request, their number, types and sizes checked: `400`, `413`) and web
+  search (asked in the first line, only of an agent with the tool); ids `<key>~<id>` with `.`, `/`, `~`;
+  redacted config; server-sent events; messages logged without their text; "Hide for me" (this
+  operator's only, back with activity), "Archive for everyone" (back with a person's activity, never an
+  operator's), "Delete for everyone" (the key reset, kept deleted, restored); rename and `/name` (the
+  directory's title, `rename` source); search (the title, the key, within a state); the commands
+  (listed, run as actions, `404` / `409` / `422`, a project's own, logged by name) and admin-api's own
+  through the `agent.command` suite.
 - `remote.test.ts`: the Worker's half over a fake platform whose every key is an App running the
-  default export on `durable`: ids, the list from the index (order, pages, an object that does not
-  answer), the index told at an object's start and on dispatch (once per conversation), a dashboard
-  conversation in its own object (its operator's space and sender across the call; a malformed operator
-  refused), reads, actions and their refusals across the call, the agents, images
-  and web search across the call (over 1 MB `413` before any call), a transcript page answered shorter
-  until it fits, live events over the object's stream (each event, the watch released when the client
-  leaves, `404` and `503` before any stream), `401` before any call; commands listed from the index object and
-  run in the conversation's, the title in the list; search on the index object over the titles the
-  objects tell it (a rename, `/name`, an object's start after the index lost its rows), only the found
-  ones read.
-- `conversation-index.test.ts`: the index on SQLite (an upsert a late `seen` does not move back, one
-  row per conversation, order, pages, cursors; titles: one model's try and one more, the operator's
-  first, the first message kept when dispatched). `assets.test.ts`: the files served from the module,
+  default export on `durable`, the directory shared by the Worker and the objects: ids, the list from
+  the directory (order, pages, an object that does not answer), a dashboard conversation in its own
+  object (its operator's space, owner and sender across the call; a malformed operator refused), reads,
+  actions and their refusals across the call, the agents, images and web search across the call (over
+  1 MB `413` before any call), a transcript page answered shorter until it fits, live events over the
+  object's stream (each event, the watch released when the client leaves, `404` and `503` before any
+  stream), `401` before any call; commands listed from an object's App and run in the conversation's;
+  rename, hide, archive and delete through the directory (no object asked; a delete resets the key in
+  its object); search, only the found ones read. `assets.test.ts`: the files served from the module,
   pages for any other path, the CSP.
 - The kit's workerd lane runs both halves in real Durable Objects (`tests/workerd/test/admin-api.workerd.ts`),
-  a message with 1 MB of images stored and answered there among them, the commands and a title
-  made in a real object, and a conversation whose run fails listed and searched by its first message. The sample (`samples/http/test/admin.test.ts`) titles a chat on the real
-  runtime and runs `/compact` and `/name` there.
+  a message with 1 MB of images stored and answered there among them, the commands, `/name` and a
+  delete for everyone made there. The sample (`samples/http/test/admin.test.ts`) runs `/compact` and
+  `/name` on the real runtime.

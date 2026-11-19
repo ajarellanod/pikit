@@ -1,5 +1,6 @@
 /**
- * The conversations the sidebar and the tabs show: the most recently active (the API's index: its
+ * The conversations the sidebar and the tabs show: the most recently active (the API's list, the
+ * conversation directory's: its
  * first `PAGE`, which the sidebar lists, read again every 10 s while the dashboard is active, 30 s on
  * Cloudflare; never more: every one is on the Conversations page, `views/conversations/list.tsx`), the
  * tabs the operator opened, what the commands answered, and the messages sent from here that the
@@ -7,33 +8,28 @@
  * goes first at once (`writtenFirst`), and the list is read again once the message is in (the open
  * conversation's page calls `reload`).
  *
- * A title names one conversation (a reset's new one has its own). It is the API's
- * (`ApiConversation.title`: a model's, made after its first run, or the operator's, `/name` or `rename`; until then
- * its first message, once a model was asked to title it); until there is one, its first message when
+ * A title names one conversation (a reset's new one has its own). It is the API's, the same in every
+ * view (`ApiConversation.title`: a channel's first message, a model's, or a rename, `/name` or Rename); until there is one, its first message when
  * this page has it at hand (sent from New chat, or read in the open conversation's transcript: never
  * looked for), else for another channel's conversation who it is with (its party's name), else the id
  * in its key (`telegram:12345` is `12345`), and "New
- * chat" for one of the dashboard's own. A conversation with no key (no message reached it and no reset
- * pointed a key to it) has nothing to show or do: the list leaves it out. Tabs are kept in
- * `localStorage["pikit-tabs"]`.
+ * chat" for one of the dashboard's own. Tabs are kept in `localStorage["pikit-tabs"]`.
  *
- * The operator puts a conversation away from its row (`hide`): archived (listed apart: the
- * Conversations page's Archived; `archived` here, read when asked, says whether the conversation shown
- * is one) or deleted (never listed again). The list only: the runtime keeps it, and new activity (a
- * person writes again) lists it again by itself. Each change made here moves `changed`, which a list
- * of its own (the Conversations page) follows.
+ * The operator puts a conversation away from its row (`act`): "Hide for me" (this operator's list
+ * only), "Archive for everyone", "Delete for everyone" (every view stops listing it; its key starts a
+ * new conversation), each listed apart on the Conversations page, where "Show again" and "Restore" put
+ * it back. The runtime keeps it; new activity lists a hidden or archived one again by itself. Each
+ * change made here moves `changed`, which a list of its own (the Conversations page) follows.
  */
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { type SentMessages, useSentMessages, writtenFirst } from "@/components/pikit/conversation";
 import { every, usePolling } from "./activity.ts";
 import { cleanTitle, isDashboardKey } from "./admin-api.ts";
-import { type ApiAgent, api, type ApiApp, type ApiConversation, type ApiPage, type ApiRenameRequest, post } from "./api.ts";
+import { type ApiAgent, api, type ApiApp, type ApiConversation, type ApiPage, type ApiRenameRequest, type ApiStateResponse, post } from "./api.ts";
 
 /** The conversations read: the sidebar's (`SIDEBAR_CHATS`). */
 const PAGE = 20;
-/** The archived ones read when asked. */
-const ARCHIVED_PAGE = 50;
 const TABS = "pikit-tabs";
 /** Tabs kept. */
 const KEPT_TABS = 12;
@@ -88,6 +84,9 @@ export function defaultAgentOf(app: ApiApp | undefined): string | undefined {
   return typeof named === "string" && agents.includes(named) ? named : agents[0];
 }
 
+/** What the operator does to a conversation from its menu: for them (`hide`, `unhide`) or for everyone (`archive`, `delete`, `restore`). */
+export type ChatAction = "hide" | "unhide" | "archive" | "delete" | "restore";
+
 /** With the messages sent from here and not shown yet (`SentMessages`, the shared conversation view's). */
 export interface Chats extends SentMessages {
   /** Undefined until the first page is read. */
@@ -96,7 +95,7 @@ export interface Chats extends SentMessages {
   /** Whether there are more than `items`: the sidebar's "View all". */
   hasMore: boolean;
   reload(): void;
-  /** Moves at each conversation renamed, archived, restored or deleted here: a list of its own reads again. */
+  /** Moves at each conversation renamed, hidden, archived, deleted or restored here: a list of its own reads again. */
   changed: number;
   /** Its title: the API's, else the first message at hand, its party's name, the id in its key, or `NEW_CHAT`. */
   titleOf(conversation: ApiConversation): string;
@@ -115,12 +114,9 @@ export interface Chats extends SentMessages {
   closeTab(id: string): Tab | undefined;
   /** The conversation `from` was reset into `to`: its tab follows (to the new one's title). */
   replaced(from: string, to: string): void;
-  /** The archived ones, the most recently active first; undefined until `loadArchived` read them. */
-  archived: ApiConversation[] | undefined;
-  loadArchived(): void;
-  /** Archives, restores (`unarchive`) or deletes a conversation: from the list only. Its tab closes when it leaves the list. */
-  hide(id: string, action: "archive" | "unarchive" | "delete"): Promise<void>;
-  /** Titles a conversation with the operator's `title` (the API cleans it, as `/name` does); the lists are read again. */
+  /** Hides, archives or deletes a conversation, or puts it back. Its tab closes when it leaves the list. */
+  act(id: string, action: ChatAction): Promise<void>;
+  /** Titles a conversation for everyone with the operator's `title` (the API cleans it, as `/name` does); the lists are read again. */
   rename(id: string, title: string): Promise<void>;
 }
 
@@ -141,7 +137,6 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
   const [firsts, setFirsts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, CommandNote[]>>({});
   const [tabs, setTabs] = useState<Tab[]>(() => load<Tab[]>(TABS, []).filter((tab) => typeof tab?.id === "string"));
-  const [archived, setArchived] = useState<ApiConversation[]>();
   /** Put away by this page, with their activity then: left out of the pages read until newer activity lists one again. */
   const [gone, setGone] = useState<ReadonlyMap<string, number>>(new Map());
 
@@ -217,52 +212,44 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     setTabs((all) => all.map((tab) => (tab.id === from ? { ...tab, id: to } : tab)));
   }, []);
 
-  // One with no key has nothing to show or do: left out; so is one this page just put away. One written to since goes first.
+  // One this page just put away is left out. One written to since goes first.
   const items = useMemo(() => {
     if (read === undefined) return undefined;
-    const listed = read.page.items.filter((each) => each.key !== undefined && !gone.has(each.conversationId));
+    const listed = read.page.items.filter((each) => !gone.has(each.conversationId));
     return writtenFirst(listed, read.at, (each) => lastSentAt(each.conversationId));
   }, [read, gone, lastSentAt]);
 
-  const loadArchived = useCallback(() => {
-    api<ApiPage<ApiConversation>>(`/conversations?archived=1&limit=${ARCHIVED_PAGE}`)
-      .then((page) => setArchived(page.items.filter((each) => each.key !== undefined)))
-      .catch((thrown: unknown) => setError(thrown instanceof Error ? thrown : new Error(String(thrown))));
-  }, []);
-
-  const hide = useCallback(
-    async (id: string, action: "archive" | "unarchive" | "delete") => {
-      await post(`/conversations/${encodeURIComponent(id)}/${action}`);
-      if (action === "unarchive") setGone((all) => new Map([...all].filter(([each]) => each !== id)));
+  const act = useCallback(
+    async (id: string, action: ChatAction) => {
+      await post<ApiStateResponse>(`/conversations/${encodeURIComponent(id)}/${action}`);
+      if (action === "unhide" || action === "restore") setGone((all) => new Map([...all].filter(([each]) => each !== id)));
       else {
         const at = first?.items.find((each) => each.conversationId === id)?.lastActivity ?? 0;
         setGone((all) => new Map([...all, [id, at]]));
         setTabs((all) => all.filter((tab) => tab.id !== id));
       }
-      if (archived !== undefined) loadArchived();
       setChanged((n) => n + 1);
       reload();
     },
-    [archived, first, loadArchived, reload],
+    [first, reload],
   );
 
   const rename = useCallback(
     async (id: string, title: string) => {
       await post<ApiConversation>(`/conversations/${encodeURIComponent(id)}/rename`, { title } satisfies ApiRenameRequest);
-      if (archived !== undefined) loadArchived();
       setChanged((n) => n + 1);
       reload();
     },
-    [archived, loadArchived, reload],
+    [reload],
   );
 
-  // Active again since it was put away (a person wrote): the API lists it again, and so does this page.
+  // Active again since it was hidden or archived (a person wrote): the API lists it again, and so does this page.
   useEffect(() => {
     if (first === undefined || gone.size === 0) return;
     const back = first.items.filter((each) => (gone.get(each.conversationId) ?? Infinity) < (each.lastActivity ?? 0)).map((each) => each.conversationId);
     if (back.length > 0) setGone((all) => new Map([...all].filter(([id]) => !back.includes(id))));
   }, [first, gone]);
 
-  const value: Chats = { items, error, hasMore: first?.next !== undefined, reload, changed, titleOf, tabTitle, setFirstMessage, notesOf, addNote, ...sent, tabs, openTab, closeTab, replaced, archived, loadArchived, hide, rename };
+  const value: Chats = { items, error, hasMore: first?.next !== undefined, reload, changed, titleOf, tabTitle, setFirstMessage, notesOf, addNote, ...sent, tabs, openTab, closeTab, replaced, act, rename };
   return <ChatsContext.Provider value={value}>{children}</ChatsContext.Provider>;
 }
