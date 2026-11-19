@@ -23,6 +23,7 @@
     ]
   },
   "provides": [
+    "actor.kind",
     "model.credentials",
     "http.route"
   ],
@@ -32,6 +33,7 @@
   "halves": {
     "default": {
       "provides": [
+        "actor.kind",
         "model.credentials"
       ],
       "requires": [

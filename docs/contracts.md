@@ -41,7 +41,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.blob` | single | storage-blob-fs, storage-blob-s3 | execution-cloudflare-sandbox, tool-space-files, execution-boat?, execution-gondolin?, workspace-local? | `createBlobConformance` |
 | `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, projects-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-mcp-oauth, tool-notify, tool-space-files, provider-failover? | `createMailboxConformance` |
 | `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, projects-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-mcp-oauth, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, provider-failover?, settings-store? | `createMailboxConformance` |
-| `actor.kind` | keyed | none | none | `createActorKindConformance` (read by the deployment's host and `pikit doctor`, not by a component) |
+| `actor.kind` | keyed | credentials-do | none | `createActorKindConformance` (read by the deployment's host and `pikit doctor`, not by a component) |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, projects-sql, scheduler-sql, tool-space-files, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-cloudflare-sandbox, execution-serve, health-registry, projects-sql, repo-github-app, settings-store, tool-mcp-oauth | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, projects-sql?, repo-github-app?, settings-store?, tool-mcp-oauth? | `createAdminAuthConformance` |
@@ -737,6 +737,7 @@ A component that answers calls or messages on a kind's keys declares the same pa
 object its calls are `no_handler` (the host's message names the kind and its components). Suite:
 `createActorKindConformance` (a key's object running the whole App, `withoutActorKinds(components)`,
 and its kind's: the same outcomes, the same rows, no call to another actor from the kind's start).
+Declared by credentials-do (`credentials-do`); the other kit owners follow (features/object-composition.md).
 
 ### `wakeups` ([wakeups.ts](../packages/contracts/src/wakeups.ts), C3, C4)
 
