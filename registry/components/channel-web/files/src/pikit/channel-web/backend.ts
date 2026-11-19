@@ -321,8 +321,6 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     if (outcome.kind !== "admitted" && outcome.kind !== "duplicate") throw refused(outcome);
     const admitted = outcome.kind === "admitted";
     const conversationId = outcome.conversation.conversationId;
-    // Its first title, as the user wrote it (a retry too: the directory keeps the highest source).
-    if (first) await firstTitle({ key: ref.key, conversationId }, message.text, ctx);
     // Waiting behind a run going: out of the transcript until that run's messages are in it.
     const held = admitted && outcome.admission.kind === "queued";
     // A duplicate stores it too: a retry after a crash between the admission and this write.
@@ -331,6 +329,10 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
     if (stored && !held) {
       store.notify(ref.key, { type: "entry", entry: userEntryOf(ref.chatId, { id: message.requestId, text: message.text, imageTypes: images.map((image) => image.mimeType), ...(fileNames.length > 0 && { fileNames }), at, state: "pending" }) });
     }
+    // Its first title, as the user wrote it (a retry too: the directory keeps the highest source). After
+    // the message is stored: on Cloudflare it is a call to the directory's object, and a quick run's
+    // answer stored before the message would open its turn first.
+    if (first) await firstTitle({ key: ref.key, conversationId }, message.text, ctx);
     if (admitted) await endedEarly(ref, message.requestId, conversationId, ctx);
     // The run it waited behind ended while it was stored: nothing holds it now.
     if (held && !(await busyOf(conversationId, ctx))) await releaseHeld(ref);
