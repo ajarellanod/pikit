@@ -175,6 +175,14 @@ export const CAPABILITIES: Catalogue = {
     // Provider: convert-workers-ai (durable, Workers AI's toMarkdown). A server provider comes with a user.
     summary: "A document's text as Markdown from its bytes (PDF, Office, OpenDocument, HTML, CSV): what makes an uploaded file a project's document, or a saved file searchable.",
   },
+  "conversations.directory": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Provider: conversations-directory (features/conversation-directory.md). Never offered until it exists.
+    summary:
+      "Which conversations exist and how every view lists them: one title, last activity and state for everyone (archived, deleted), each viewer's own (hidden for me, read, a name of their own); filtered by who looks, with conversation.audience saying who belongs to which space.",
+  },
   "conversations.registry": {
     mode: "single",
     definedIn: "@pikit/contracts",

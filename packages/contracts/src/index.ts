@@ -5,7 +5,9 @@
 // message's parts fold into its text for a transport (`foldParts`, `messagePieces`), the `question` part
 // shared by who asks and who draws it (`questionPart`, `answerText`), the check of what the contracts take as a JSON object (`isJsonObject`), the grammar of `http.route`
 // keys (`parseHttpRouteKey`, `matchesHttpRoute`), who a conversation is with as an operator reads it
-// (the `conversation.describe` pipeline: `describeStage`, `describeConversation`, `cleanParty`) and the envelopes of an actor's call and stream
+// (the `conversation.describe` pipeline: `describeStage`, `describeConversation`, `cleanParty`), the conversation directory's protocol (its
+// viewers, order, cursor, titles: `parseViewer`, `directoryCursor`, `cleanTitle`) with the `conversation.audience` pipeline that says who
+// belongs to which space (`audienceStage`, `audienceGrants`), and the envelopes of an actor's call and stream
 // (`answerCall`, `callResult`, `answerStream`, `streamResult`), who changed what in a store's log (`Author`, `Change`, `parseAuthor`:
 // change.ts) and the projects' contracts (`projects`, `space.files`, `principals`, `document.convert`, the agents' federated search's
 // `ProjectSearchHit`), so that no provider has its own. No policy: what a protocol waits, retries and says
@@ -44,6 +46,56 @@ export { allowedCommands, audienceOf, COMMAND_NAME, commandIsFor, commandOf, com
 export type { CompletionRequest, ModelComplete } from "./model.ts";
 export type { ConversationDescriber, ConversationParty, DescribedConversation, PartyId } from "./conversation-describe.ts";
 export { channelKindOf, cleanParty, describeConversation, describeStage, PARTY_LIMITS } from "./conversation-describe.ts";
+export type {
+  ConversationDirectory,
+  DirectoryEntry,
+  DirectoryErrorCode,
+  DirectoryListState,
+  DirectoryPermissions,
+  DirectoryPosition,
+  DirectoryQuery,
+  DirectoryRole,
+  EntryRef,
+  EntryState,
+  TitleSource,
+  Viewer,
+  ViewerChange,
+  ViewerState,
+} from "./conversation-directory.ts";
+export {
+  AUDIENCE_MAX,
+  afterCursor,
+  cleanTitle,
+  compareDirectoryOrder,
+  DIRECTORY_COUNT_MAX,
+  DIRECTORY_PAGE_DEFAULT,
+  DIRECTORY_PAGE_MAX,
+  DIRECTORY_SEARCH_MAX,
+  DirectoryError,
+  directoryCursor,
+  isEntryState,
+  likePattern,
+  listStateOf,
+  matchesSearch,
+  NOT_PEOPLE_CHANNELS,
+  operatorPrincipal,
+  parseDirectoryCursor,
+  parseDirectoryQuery,
+  parseViewer,
+  permissionsOf,
+  stillHidden,
+  TITLE_MAX,
+  TITLE_SOURCES,
+  titleApplies,
+  UNREAD_MAX,
+  VIEWER_PRINCIPALS_MAX,
+  viewerAuthor,
+  viewerKey,
+  viewerOwns,
+  viewerPrincipals,
+} from "./conversation-directory.ts";
+export type { Audience, AudienceGrant, AudienceProvider } from "./conversation-audience.ts";
+export { audienceGrants, audienceStage } from "./conversation-audience.ts";
 
 export { AgentUnavailableError, admitInbound, isAgentUnavailable } from "./inbound.ts";
 export type { AdmitOptions, AdmitOutcome, InboundMessage, InboundOutcome, RouteDecision } from "./inbound.ts";
