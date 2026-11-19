@@ -11,7 +11,8 @@
  *   model never names a project or a space.
  * - **A stable section**, refreshed at most once every `freshMs`: the project's `context` (answered
  *   `unchanged` while its version holds), the space's memory (`{ type: "space", space }`: active rules,
- *   notes, summaries) and its files' list; a space with no project is remembered as such for `noProjectMs`.
+ *   notes, summaries: two `memory.list`, its rules and notes in one, `newestOfEach`) and its files' list;
+ *   a space with no project is remembered as such for `noProjectMs`.
  *   Its text is built from stored data in a fixed order (the header with the tools the request offers,
  *   the instructions, the rules with their source, the run's people's preferences, the core documents
  *   whole within the agent's `coreTokens`, the other documents listed, the recent notes and summaries,
@@ -54,7 +55,7 @@ import {
 } from "@pikit/contracts";
 import { defineExtension, defineTool, type Extension, offerTools, section } from "@pikit/pi-adapter/extensions";
 import Type, { type Static } from "typebox";
-import type { Memory, MemoryKind, MemoryOwner, MemoryStore } from "./contract.ts";
+import { MEMORY_LIST_MAX, type Memory, type MemoryKind, type MemoryOwner, type MemoryStore } from "./contract.ts";
 
 /** The name agents give it, its key under `agent.extension`, and its section's key. */
 export const PROJECT = "project";
@@ -300,6 +301,26 @@ export function peopleOf(senders: readonly (Principal | undefined)[], machineCha
   return [...seen.values()];
 }
 
+/**
+ * The newest `limit` active memories of each kind in `wants`, oldest first: what one `list` per kind
+ * answers, in one `list` of them all. Every `list` orders memories the same way (newest first, then
+ * cut), so the newest of a kind among the newest of all are its newest: a kind is asked again alone
+ * only when the cut left it short. Facts and summaries are always active (`contract.ts`).
+ */
+export async function newestOfEach(store: MemoryStore, owner: MemoryOwner, wants: readonly { kind: MemoryKind; limit: number }[], ctx: AppContext): Promise<Memory[][]> {
+  const asked = wants.filter((want) => want.limit > 0);
+  if (asked.length === 0) return wants.map(() => []);
+  const limit = Math.min(MEMORY_LIST_MAX, asked.reduce((sum, want) => sum + want.limit, 0));
+  const all = await store.list(owner, { kinds: asked.map((want) => want.kind), status: "active" }, limit, ctx);
+  return Promise.all(
+    wants.map(async (want) => {
+      if (want.limit <= 0) return [];
+      const of = all.filter((m) => m.kind === want.kind);
+      return all.length < limit || of.length >= want.limit ? of.slice(-want.limit) : store.list(owner, { kinds: [want.kind], status: "active" }, want.limit, ctx);
+    }),
+  );
+}
+
 /** The memory kinds a project's agents find, and the item kind each is (a fact is a note). */
 const MEMORY_ITEMS: Readonly<Partial<Record<MemoryKind, ProjectItemKind>>> = { fact: "note", rule: "rule", summary: "summary" };
 const ITEM_MEMORY: Readonly<Partial<Record<ProjectItemKind, MemoryKind>>> = { note: "fact", rule: "rule", summary: "summary" };
@@ -385,9 +406,9 @@ export function createProjectsContext(config: ProjectsContextConfig, deps: Proje
     const memory = deps.memory();
     const files = deps.files();
     const owner: MemoryOwner = { type: "space", space };
-    const [rules, notes, summaries, listed] = await Promise.all([
-      memory === undefined || config.rules === 0 ? [] : memory.list(owner, { kinds: ["rule"], status: "active" }, config.rules, ctx),
-      memory === undefined || config.notes === 0 ? [] : memory.list(owner, { kinds: ["fact"] }, config.notes, ctx),
+    // Rules and notes in one list (both short); summaries alone: long, many in an old space, few shown.
+    const [[rules = [], notes = []], summaries, listed] = await Promise.all([
+      memory === undefined ? [] : newestOfEach(memory, owner, [{ kind: "rule", limit: config.rules }, { kind: "fact", limit: config.notes }], ctx),
       memory === undefined || config.summaries === 0 ? [] : memory.list(owner, { kinds: ["summary"] }, config.summaries, ctx),
       files === undefined || config.files === 0 ? undefined : files.list(space, { limit: config.files + 1 }, ctx),
     ]);

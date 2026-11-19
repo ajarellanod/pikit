@@ -12,7 +12,8 @@
  *   senders), the newest facts and the newest summaries (title and a short excerpt; `read_memory` gives
  *   one whole), each list oldest first, so its text changes only when one of them does (the prompt cache
  *   stays warm). Facts and summaries are data, not instructions. Pending rules and preferences are never
- *   in it.
+ *   in it. Each rendering asks `memory` two lists of the owner (its rules and facts in one,
+ *   `newestOfEach`; its summaries) and one per person.
  * - **Tools**: `remember` (a fact, idempotent by `${conversationId}:${callId}`), `forget` (a fact or a
  *   summary), `recall` (full-text search, with snippets), `read_memory` (one memory whole, by id),
  *   `propose_rule` and `propose_preference` (pending until a person approves them; idempotent by their
@@ -54,7 +55,7 @@ import {
 } from "@pikit/contracts";
 import { defineExtension, defineTool, type Extension, offerTools, section } from "@pikit/pi-adapter/extensions";
 import Type, { type Static } from "typebox";
-import { type Memory, memoryItemId, type MemoryKind, type MemoryOwner, type MemoryStore, memoryWords } from "./contract.ts";
+import { MEMORY_LIST_MAX, type Memory, memoryItemId, type MemoryKind, type MemoryOwner, type MemoryStore, memoryWords } from "./contract.ts";
 
 /** The name agents give it, its key under `agent.extension`, and its section's key. */
 export const MEMORY = "memory";
@@ -125,6 +126,26 @@ export function memoryText(view: MemoryView): string | undefined {
   return parts.length === 0 ? undefined : parts.join("\n");
 }
 
+
+/**
+ * The newest `limit` active memories of each kind in `wants`, oldest first: what one `list` per kind
+ * answers, in one `list` of them all. Every `list` orders memories the same way (newest first, then
+ * cut), so the newest of a kind among the newest of all are its newest: a kind is asked again alone
+ * only when the cut left it short. Facts and summaries are always active (`contract.ts`).
+ */
+export async function newestOfEach(store: MemoryStore, owner: MemoryOwner, wants: readonly { kind: MemoryKind; limit: number }[], ctx: AppContext): Promise<Memory[][]> {
+  const asked = wants.filter((want) => want.limit > 0);
+  if (asked.length === 0) return wants.map(() => []);
+  const limit = Math.min(MEMORY_LIST_MAX, asked.reduce((sum, want) => sum + want.limit, 0));
+  const all = await store.list(owner, { kinds: asked.map((want) => want.kind), status: "active" }, limit, ctx);
+  return Promise.all(
+    wants.map(async (want) => {
+      if (want.limit <= 0) return [];
+      const of = all.filter((m) => m.kind === want.kind);
+      return all.length < limit || of.length >= want.limit ? of.slice(-want.limit) : store.list(owner, { kinds: [want.kind], status: "active" }, want.limit, ctx);
+    }),
+  );
+}
 
 /** The people among `senders` (no machine's channel), once each, in order. */
 export function peopleOf(senders: readonly (Sender | undefined)[], machineChannels: readonly string[]): Sender[] {
@@ -394,9 +415,9 @@ export function createMemoryRecall(config: MemoryRecallConfig, memory: () => Mem
         if (await inProject(context)) return undefined;
         const { owner, ctx } = scopeOf(context);
         const store = memory();
-        const [rules, facts, summaries, preferences] = await Promise.all([
-          store.list(owner, { kinds: ["rule"], status: "active" }, config.rules, ctx),
-          store.list(owner, { kinds: ["fact"] }, config.limit, ctx),
+        // Rules and facts in one list (both short); summaries alone: long, many in an old space, few shown.
+        const [[rules = [], facts = []], summaries, preferences] = await Promise.all([
+          newestOfEach(store, owner, [{ kind: "rule", limit: config.rules }, { kind: "fact", limit: config.limit }], ctx),
           config.summaries === 0 ? [] : store.list(owner, { kinds: ["summary"] }, config.summaries, ctx),
           people(context).then((persons) =>
             Promise.all(persons.map(async (person) => ({ person, items: await store.list(personOwner(person), { kinds: ["preference"], status: "active" }, config.preferences, ctx) }))),

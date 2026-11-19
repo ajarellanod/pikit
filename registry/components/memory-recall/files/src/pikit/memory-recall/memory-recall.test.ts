@@ -508,3 +508,70 @@ test("/rules in a project's space: its members only (by any of their identities)
   // Outside projects, anyone the channel lets type it, as today.
   expect(await rules.run(thread(), "add Answer in Spanish", ctx, bob)).toEqual({ text: `Added (id ${spanish}).` });
 });
+
+/** The section as one `list` per kind gave it, before rules and facts shared a list: what it must still say. */
+async function sectionAsBefore(store: MemoryStore, owner: MemoryOwner, persons: readonly Sender[], config: typeof CONFIG) {
+  const [rules, facts, summaries] = await Promise.all([
+    store.list(owner, { kinds: ["rule"], status: "active" }, config.rules, ctx),
+    store.list(owner, { kinds: ["fact"] }, config.limit, ctx),
+    config.summaries === 0 ? [] : store.list(owner, { kinds: ["summary"] }, config.summaries, ctx),
+  ]);
+  const preferences = await Promise.all(persons.map(async (person) => ({ person, items: await store.list({ type: "person", ...person }, { kinds: ["preference"], status: "active" }, config.preferences, ctx) })));
+  return memoryText({ owner, rules, preferences, facts, summaries });
+}
+
+/** `store` counting its `list` calls, by owner. */
+function counting(store: MemoryStore) {
+  const lists: string[] = [];
+  const list: MemoryStore["list"] = (owner, filter, limit, listCtx) => {
+    lists.push(keyOf(owner));
+    return store.list(owner, filter, limit, listCtx);
+  };
+  return { store: { ...store, list }, lists };
+}
+
+test("one rendering lists the owner twice (rules and facts together, summaries) and each person once, not one list per kind", async () => {
+  const { store } = fakeMemory();
+  const space: MemoryOwner = { type: "space", space: SPACE };
+  await store.remember(space, item("rule", "r-1", "Answer in Spanish"), ctx);
+  await store.remember(space, item("fact", "f", "Acme's budget is 10k"), ctx);
+  await store.remember(space, item("summary", "s", "# Kickoff\nAgreed."), ctx);
+  await store.remember({ type: "person", ...ana }, item("preference", "p-1", "Short answers"), ctx);
+  const counted = counting(store);
+  const extension = createMemoryRecall(CONFIG, () => counted.store, () => ctx);
+
+  const text = await extension.sections?.[0]?.render({ conversationId: 1 } as never, runContext(thread(), [ana]) as never);
+  expect(text).toBe(await sectionAsBefore(store, space, [ana], CONFIG));
+  // Before: rules, facts and summaries of the space, then Ana's preferences (four).
+  expect(counted.lists.sort()).toEqual([keyOf({ type: "person", ...ana }), keyOf(space), keyOf(space)].sort());
+});
+
+test("the section says what one list per kind said, whatever the mix, the cut and the limits; a kind the shared list cut short is asked alone", async () => {
+  // A small deterministic generator: the same cases every run.
+  let seed = 7;
+  const next = (n: number) => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed % n;
+  };
+  const kinds = ["rule", "rule", "fact", "fact", "summary"] as const;
+  const space: MemoryOwner = { type: "space", space: SPACE };
+  let fewer = 0;
+  for (let round = 0; round < 300; round++) {
+    const { store } = fakeMemory();
+    const size = round === 0 ? 400 : next(round < 150 ? 12 : 60);
+    for (let i = 0; i < size; i++) {
+      const kind = round === 0 ? (i < 150 ? "rule" : "fact") : kinds[next(kinds.length)] ?? "fact";
+      await store.remember(space, item(kind, `${kind}-${i}`, `${kind} number ${i}`, kind === "rule" && next(3) === 0 ? "pending" : "active", i), ctx);
+    }
+    const config = round === 0 ? { ...CONFIG, rules: 200, limit: 200 } : { ...CONFIG, rules: 1 + next(6), limit: 1 + next(6), summaries: next(3) };
+    const counted = counting(store);
+    const extension = createMemoryRecall(config, () => counted.store, () => ctx);
+    const text = await extension.sections?.[0]?.render({ conversationId: 1 } as never, runContext(thread(), []) as never);
+    expect(text).toBe(await sectionAsBefore(store, space, [], config));
+    const before = config.summaries === 0 ? 2 : 3;
+    expect(counted.lists.length).toBeLessThanOrEqual(before);
+    if (counted.lists.length < before) fewer++;
+  }
+  // Most spaces are listed in fewer calls; the rest (a kind cut short) in as many as before.
+  expect(fewer).toBeGreaterThan(150);
+});
