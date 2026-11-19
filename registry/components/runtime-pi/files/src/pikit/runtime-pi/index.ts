@@ -32,8 +32,11 @@
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
  *   read only their environment variables (`ANTHROPIC_API_KEY`), and an agent whose provider has
  *   none refuses the start. With it, a login can arrive while the app runs (credentials-do's upload
- *   on Cloudflare reaches an object running this App): such an agent is a warning at start, and its
- *   runs fail until a credential is stored.
+ *   on Cloudflare reaches an object running this App): such an agent is a warning, and its runs fail
+ *   until a credential is stored. Start then awaits no call to the store (on Cloudflare, another
+ *   object): it asks for the store's `list()` once, without waiting for it, and the agents are checked
+ *   against that list at the first admission, which fails (and the next one checks again) when the
+ *   list cannot be read, as start failed when a credential could not be read.
  * - `secrets`, if installed: where those variables are read first, before the environment (on
  *   Cloudflare, the Worker's secrets, with no `process.env`);
  * - `wakeups`, if installed: runs are driven inside wakeups, in slices (SPEC §4.1, C4), for a host
@@ -77,6 +80,7 @@ import {
   AgentUnavailableError,
   type ConversationRef,
   defineAgent,
+  type SqlDatabase,
   skillProblem,
   stewardProblem,
   type Wakeups,
@@ -86,6 +90,7 @@ import {
   createDurableRuntime,
   createModelComplete,
   createObserver,
+  type CredentialInfo,
   type DurableRuntime,
   type DurableRuntimeOptions,
   type Models,
@@ -156,6 +161,9 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
     setup(pikit, config) {
       // The App's models, from start (a conversation's title too, through model.complete).
       let models: Models | undefined;
+      // With model.credentials: the same providers without the store, for what a provider reads without
+      // it (its variables, through secrets), from start.
+      let ambient: Models | undefined;
       const sql = pikit.use("storage.sqlite");
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
@@ -273,6 +281,82 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       /** While the directory was never read, a conversation of a name the code does not have waits: its agent may be live. */
       const unread = (conversation: ConversationRef): boolean => directory.get() !== undefined && !liveRead && agents.get(conversation.agent) === undefined;
 
+      /**
+       * With `model.credentials`: the store's list (metadata, no secret), asked for once at start and
+       * never awaited there; asked again after one that failed.
+       */
+      let listing: Promise<readonly CredentialInfo[]> | undefined;
+      const listed = (): Promise<readonly CredentialInfo[]> => {
+        const store = credentials.get();
+        if (store === undefined) return Promise.resolve([]);
+        if (listing === undefined) {
+          const asked = store.list();
+          listing = asked;
+          asked.catch(() => {
+            if (listing === asked) listing = undefined;
+          });
+        }
+        return listing;
+      };
+      /**
+       * With `model.credentials`: the code's agents' credentials check, which start leaves to the first
+       * admission (start awaits no call to the store). Each agent whose provider has none is a warning,
+       * as at start without a store it is a refusal; a list that cannot be read fails the admission, and
+       * the next one checks again.
+       */
+      let agentsChecked: Promise<void> | undefined;
+      const checkAgents = (ctx: AppContext): Promise<void> => {
+        if (credentials.get() === undefined) return Promise.resolve();
+        if (agentsChecked === undefined) {
+          const checking = (async () => {
+            let stored: readonly CredentialInfo[];
+            try {
+              stored = await listed();
+            } catch (error) {
+              throw new Error(`runtime-pi: the agents' providers could not be checked: model.credentials could not list its credentials (${error instanceof Error ? error.message : String(error)})`, {
+                cause: error,
+              });
+            }
+            const made = models;
+            const without = ambient;
+            if (made === undefined || without === undefined) throw new Error("runtime-pi: agent.runtime used while the app is not running");
+            for (const name of agents.keys()) {
+              const ref = parseModelName(agents.get(name)?.model ?? "");
+              if (ref === undefined) continue;
+              if (!(await hasCredentials(made, without, stored, ref.provider, ctx))) {
+                ctx.logger.warn(`${missingCredentials(name, ref.provider)}; its runs fail until one is stored`, { agent: name, provider: ref.provider });
+              }
+            }
+          })();
+          agentsChecked = checking;
+          checking.catch(() => {
+            if (agentsChecked === checking) agentsChecked = undefined;
+          });
+        }
+        return agentsChecked;
+      };
+
+      /**
+       * How start checks a provider for the overrides' models: without a store, pi-ai's own check (no
+       * network call, nothing refreshed); with one, against its one list, whose failure counts as
+       * nothing stored, logged (the first admission lists again, and fails if it still cannot).
+       */
+      const providerCheck = async (made: Models, ctx: AppContext): Promise<(provider: string) => Promise<boolean>> => {
+        const without = ambient;
+        if (credentials.get() === undefined || without === undefined) {
+          return async (provider) => (await made.checkAuth(provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) !== undefined;
+        }
+        let stored: readonly CredentialInfo[] = [];
+        try {
+          stored = await listed();
+        } catch (error) {
+          ctx.logger.warn("runtime-pi: model.credentials could not list its credentials; only the providers configured without it offer their models to the overrides", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return (provider) => hasCredentials(made, without, stored, provider, ctx);
+      };
+
       /** The overrides read last, by agent; none until read. */
       let overrides: AgentOverrides = {};
       let declared = false;
@@ -309,6 +393,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       };
       const agentRuntime: AgentRuntime = {
         async dispatch(request, ctx) {
+          // With model.credentials, the agents' providers are checked at the first admission, not at start.
+          await checkAgents(ctx);
           // The agent this admission builds is the definition with the overrides as they are now.
           await refresh(ctx);
           runnable(request.conversation.agent);
@@ -362,11 +448,16 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
 
       return {
         async start(ctx) {
-          const made = modelsFrom(
-            providers.keys().flatMap((key) => providers.get(key) ?? []),
-            { credentials: credentials.get(), secrets: secrets.get() },
-          );
+          const installed = providers.keys().flatMap((key) => providers.get(key) ?? []);
+          const store = credentials.get();
+          const made = modelsFrom(installed, { credentials: store, secrets: secrets.get() });
           models = made;
+          // With a store, its list is asked for now and read later (the first admission, the overrides'
+          // models): never awaited one provider after another, as reading each credential would be.
+          if (store !== undefined) {
+            ambient = modelsFrom(installed, { secrets: secrets.get() });
+            void listed().catch(() => {});
+          }
           // Fail at start, not at the first message: an agent that cannot run is a broken deployment.
           if (agents.keys().length === 0) throw new Error("runtime-pi: no agent.definition is provided");
           // One steward at most (SPEC §6): the agent its operators ask to change the project.
@@ -400,29 +491,27 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             if (problem !== undefined) throw new Error(`runtime-pi: ${problem}`);
             const ref = parseModelName(model);
             if (ref === undefined) throw new Error(`runtime-pi: agent "${name}" names model "${model}", which no model.provider provides`);
+            // A store can receive a login while the app runs, through this very App on Cloudflare
+            // (credentials-do's owner object runs it): refusing the start would leave no way in. Its
+            // agents are checked at the first admission (`checkAgents`), and only warn.
+            if (store !== undefined) continue;
             // Checked without a network call or an OAuth refresh: is anything configured at all?
             if ((await made.checkAuth(ref.provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) === undefined) {
-              const missing =
-                `runtime-pi: agent "${name}" uses provider "${ref.provider}", which has no credentials: ` +
-                "log in to store one in model.credentials, or set the provider's API key in the environment";
-              // A store can receive a login while the app runs, through this very App on Cloudflare
-              // (credentials-do's owner object runs it): refusing the start would leave no way in.
-              if (credentials.get() === undefined) throw new Error(missing);
-              ctx.logger.warn(`${missing}; its runs fail until one is stored`, { agent: name, provider: ref.provider });
+              throw new Error(missingCredentials(name, ref.provider));
             }
           }
           // The overrides an operator may set: the agents', among the models this App can run (those of
           // the providers with credentials now; one logged in later shows its models after the next
           // start) and its tools. A stored override naming another is left out when read (settings).
-          const store = settings.get();
-          if (store !== undefined) {
-            const usable = await usableProviders(made, ctx);
+          const settingsStore = settings.get();
+          if (settingsStore !== undefined) {
+            const usable = await usableProviders(made, await providerCheck(made, ctx), ctx);
             const modelNames = made
               .getModels()
               .filter((model) => usable.has(model.provider))
               .map((model) => `${model.provider}/${model.id}`);
             const live = directory.get() === undefined ? undefined : { tools: tools.keys(), skills: skills.keys() };
-            store.declare("runtime-pi", overridesSchema(agents.keys().flatMap((name) => agents.get(name) ?? []), modelNames, live), {});
+            settingsStore.declare("runtime-pi", overridesSchema(agents.keys().flatMap((name) => agents.get(name) ?? []), modelNames, live), {});
             declared = true;
           }
           // A Cloudflare object is one chat: its storage holds that chat's conversations, the root first.
@@ -465,9 +554,11 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             driver = drives;
             // What a previous instance left (a run an eviction cut, a retry's backoff, a message nobody
             // answered, a run's end never logged) is driven by a wakeup, not by a promise left running:
-            // asked for at once, as the request may be gone with the object.
+            // asked for at once, as the request may be gone with the object. Where pi-durable's tables
+            // were never made (a new object, an owner's that never held a conversation), nothing is
+            // pending, and no wakeup is asked for: the first admission asks for one.
             try {
-              await drives.wake(now(), ctx);
+              if (await mayHoldWork(db)) await drives.wake(now(), ctx);
             } catch (error) {
               ctx.logger.error("runtime-pi: could not ask for a wakeup to resume what is pending; it resumes at the next one", {
                 error: error instanceof Error ? error.message : String(error),
@@ -484,6 +575,9 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           // Runs in progress stay pending in pi-durable; the next process resumes them.
           declared = false;
           overrides = {};
+          listing = undefined;
+          agentsChecked = undefined;
+          ambient = undefined;
           live = new Map();
           liveProblems = new Map();
           liveRead = false;
@@ -615,15 +709,50 @@ function createDriver(
   };
 }
 
+/** Why an agent cannot run: its provider has no credentials. */
+function missingCredentials(agent: string, provider: string): string {
+  return (
+    `runtime-pi: agent "${agent}" uses provider "${provider}", which has no credentials: ` +
+    "log in to store one in model.credentials, or set the provider's API key in the environment"
+  );
+}
+
 /**
- * The providers of `models` that have credentials now, checked as start checks the agents' (no network
- * call, no OAuth refresh): one whose check fails counts as having none.
+ * Whether `provider` has credentials, checked against `stored` (the store's list) as pi-ai checks a
+ * stored credential (an OAuth one counts for a provider with OAuth, an API key for one with keys),
+ * else as it reads one with nothing stored (`ambient`: its variables, through `secrets`). No network
+ * call, nothing refreshed, no read of the store.
  */
-async function usableProviders(models: Models, ctx: AppContext): Promise<Set<string>> {
+async function hasCredentials(models: Models, ambient: Models, stored: readonly CredentialInfo[], provider: string, ctx: AppContext): Promise<boolean> {
+  const found = models.getProvider(provider);
+  if (found === undefined) return false;
+  const credential = stored.find((each) => each.providerId === provider);
+  if (credential?.type === "oauth") return found.auth.oauth !== undefined;
+  if (credential?.type === "api_key" && found.auth.apiKey !== undefined) return true;
+  return (await ambient.checkAuth(provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) !== undefined;
+}
+
+/**
+ * Whether pi-durable may hold work in `db`: its tables exist (pi-durable makes them when it first opens).
+ * A read of the object's own storage, no call; a read that fails says yes.
+ */
+async function mayHoldWork(db: SqlDatabase): Promise<boolean> {
+  try {
+    return (await db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runtime_pi_submissions'")).length > 0;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * The providers of `models` that have credentials now, by `check` (as start checks the agents': no
+ * network call, no OAuth refresh): one whose check fails counts as having none.
+ */
+async function usableProviders(models: Models, check: (provider: string) => Promise<boolean>, ctx: AppContext): Promise<Set<string>> {
   const usable = new Set<string>();
   for (const provider of new Set(models.getModels().map((model) => model.provider))) {
     try {
-      if ((await models.checkAuth(provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) !== undefined) usable.add(provider);
+      if (await check(provider)) usable.add(provider);
     } catch (error) {
       ctx.logger.warn("runtime-pi: a provider's credentials could not be checked; its models are not offered to the overrides", {
         provider,

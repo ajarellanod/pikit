@@ -48,7 +48,11 @@ it into the app.
   last check makes no network call and refreshes nothing: it only asks whether a credential is stored
   or an environment variable set. With `model.credentials` installed it only warns: a login can be
   stored while the app runs (credentials-do's upload on Cloudflare reaches an object running this
-  App, so a refused start would leave no way in), and the agent's runs fail until one is.
+  App, so a refused start would leave no way in), and the agent's runs fail until one is. Start then
+  awaits no call to the store (on Cloudflare, another object): it asks for the store's `list()` once,
+  without waiting, and the first admission checks the agents against that list (a credential listed,
+  else the provider's variables), warning once; a list that cannot be read fails that admission, as
+  it failed the start before, and the next admission lists again.
 - **Target:** `server` and `durable`. On Cloudflare it goes in the conversation object's App, with
   `actors-do` for `wakeups` ("Cloudflare" below).
 - **Installs to:** `src/pikit/runtime-pi/`, and its Settings section to
@@ -180,7 +184,8 @@ instance; a model error's backoff waited out with the object gone.
 It registers the wakeup handler `runtime-pi.drive`, and asks for it whenever a run may be left going:
 after a `dispatch` or a `resume` that leaves a run in the conversation (before `dispatch` resolves,
 so a channel acknowledges its platform only once a wakeup will drive it), and at start when pi-durable
-has work pending. The handler:
+may have work pending: its tables exist. In a storage where they were never made (a new object, an
+owner's object that never held a conversation) start asks for nothing, so the object gets no alarm. The handler:
 1. opens pi-durable if this instance has not (a new instance after an eviction): what it finds resumes,
    and a run's end an eviction left unlogged is logged;
 2. resumes the conversations holding pending messages that this App is not driving (a message it
@@ -304,7 +309,8 @@ per family). Each change saves at once; "Use default" drops the override. It edi
   leaves out that agent's whole override, logged, and the definition answers instead of every run failing).
 - **Only usable models are offered**: a provider counts when it has credentials at start (the same check
   as an agent's provider: no network call, nothing refreshed: a stored credential or its API key in the
-  environment). A provider installed with no key offers none of its models. One logged in later (or whose
+  environment; with `model.credentials`, the store's one `list()`, awaited only here, never a read per
+  provider). A provider installed with no key offers none of its models. One logged in later (or whose
   key is set later) shows its models after the next start; the agent's own definition's model is always
   offered.
 - **Read** before every admission, every resume and `/compact`, and every run of the driving wakeup; on
@@ -421,7 +427,10 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
 - `wakeups`: a run that died mid-way completed by the next App's wakeup; a long run driven over
   several slices, each cut asking again at once; a model retry's backoff as a wakeup at its time, with
   nothing running the retry meanwhile; stop cancelling a waiting handler, which asks again;
-- the start failures above, and a stored credential reaching the provider;
+- the start failures above, and a stored credential reaching the provider; with `model.credentials`,
+  a start that awaits no call to the store (one `list()`, no read), the agents' check at the first
+  admission (a warning once; a list that fails refuses that admission, the next lists again), and no
+  drive wakeup at start where pi-durable's tables were never made;
 - an agent's named tools and skills being the installed ones (a skill loaded by name), and the start
   failures for a skill nothing provides or provided under another name;
 - an agent whose `prepare` gives it a tool once another tool moved its state on;
