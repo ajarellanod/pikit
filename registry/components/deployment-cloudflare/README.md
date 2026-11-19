@@ -7,7 +7,8 @@ objects running the project's two Apps, `wrangler.jsonc`, and the commands
 - **Provides:** nothing. It is not an app component and is not listed in `pikit.config.ts`: it runs
   the Apps rather than running inside them.
 - **Requires:** nothing. It runs whatever `pikit.config.ts` composes: its default export in each
-  Durable Object, and `export const worker` in the Worker.
+  Durable Object (an actor kind's object runs only that kind's part of it: SPEC C9), and
+  `export const worker` in the Worker.
 - **Target:** `durable`. Only `entrypoint.ts` imports `cloudflare:workers`; only what runs where
   the deploy runs imports `node:*`: `commands.ts` on your machine, and `rollout.mjs` and `deploy.mjs`,
   plain JavaScript for Node, there and in a build without pikit (Workers Builds).
@@ -123,8 +124,9 @@ export default defineApp({ components: [...], config });          // each conver
 export const worker = defineApp({ components: [...], config: workerConfig }); // the Worker
 ```
 
-**The `Conversation` Durable Object** (one per conversation, SQLite-backed) composes the default
-export on its first event, never in its constructor:
+**The `Conversation` Durable Object** (one per conversation, SQLite-backed) composes its App on its
+first event, never in its constructor: the whole default export, or, for an object whose key belongs
+to an actor kind, that kind's part of it (below, "Actor kinds"):
 - Its start runs inside `blockConcurrencyWhile`, so no request, RPC or alarm reaches the object
   before its App has started, with a 20 s deadline, and a 5 s one for the rollback of a failed start.
   Both end before Cloudflare's own 30 s limit.
@@ -163,6 +165,36 @@ export on its first event, never in its constructor:
   waits for a time (a model retry's backoff), the handler closes pi-durable inside that event, so the
   object can be evicted until the alarm at that time opens it again.
 
+**Actor kinds (SPEC C9).** Many keys are not conversations but one-purpose actors, each the owner of
+some state (`credentials-do`, `memory:space:<s>`...). A component declares the keys it owns as
+`actor.kind` (`pikit.provideKeyed("actor.kind", "credentials-do", { keys: ["credentials-do"] })`,
+or `{ prefixes: ["memory:"] }`), and an object of one of them runs only its owners and what they use,
+transitively, through the capability graph (`actorComposition`, `@pikit/contracts`): for
+`credentials-do`, credentials-do, storage-do and actors-do instead of every component. Nothing else
+changes: a conversation's key (no kind declares it) runs the whole default export, as does
+`pikit:health`.
+- **Once per isolate**, on its first object event, the whole default export is composed (setups only,
+  never started) with a reader of `actor.kind` named `deployment-cloudflare`: its `describe()` and
+  declarations are kept, the App dropped. A declaration problem (a kind under another component's
+  name, an empty one, a `pikit:` pattern) fails every object's start, loudly.
+- **An object's key**, before anything is composed: the event's own (`deliver`, `call` and `stream`
+  carry it), checked to be the object's (`ctx.id.name`, or `CONVERSATION.idFromName(key)` against its
+  id, `HostOptions.binding` for another binding): another key is refused (`invalid` for a call or a
+  stream, a rejection for a message), it never chooses an App. Else `ctx.id.name` (an alarm). Else
+  the key kept in the object's storage (`pikit:key`, written at its first keyed event only where the
+  platform gives no name). Else none: the whole App (an object made before this, woken by its alarm).
+- **`health()`** also creates (never starts) every kind's App: a version whose kind does not compose
+  fails `/health` and is rolled back (C8).
+- **A call or message a kind's object has no handler for** fails as before (`no_handler`, a
+  rejection), and says which kind the object runs and its components: a component that answers on a
+  kit kind's keys must declare the same pattern.
+- **The log line** `pikit: object started` carries `kind` (the pattern, or `null`), `components`
+  (how many), `composeMs`, `startMs` (the start's waits: workerd's clock moves only on I/O) and
+  `isolate` (`new` for the first object of its isolate, else `warm`); never the key, which may name a
+  person. `pikit: actor kinds read` says once per isolate how many kinds and how long the read took.
+- There is no switch: a project keeps a kind whole by deleting that component's
+  `provideKeyed("actor.kind", ...)` line, in its own source.
+
 **The Worker** composes `export const worker` on its first request, once per isolate, with
 `WORKERS_HOST` `{ env, origin }` on its start context (`origin`: that of the request that started it,
 `/health` included, which is where the Worker is reached; a Worker is never told its own URL
@@ -177,7 +209,8 @@ passes the `http.route` suite under Bun and in workerd).
 Without `export const worker`, the Worker serves only `/health`.
 
 **`GET /health`** is the Worker's own and public. It starts the Worker's App and the App of one
-object of its own (`idFromName("pikit:health")`, never a conversation's), then answers
+object of its own (`idFromName("pikit:health")`, never a conversation's, and the whole default
+export) and creates every actor kind's App there, then answers
 `{ "ok": true, "version": "<version id>" }` (200) or `{ "ok": false, "version": …, "error": "the
 object's App did not start" }` (503). It says which half failed, never why: the logs say why.
 
@@ -353,7 +386,13 @@ It never touches the deployed Worker: `pikit down` first if you want it gone.
 The tests are copied with the component and run in your project:
 - `host.test.ts`: the entrypoint's logic under Bun with a fake object and namespace: when the object's
   App starts, what `WORKERS_HOST` carries, alarms and deliveries, a failed start and a late one with a
-  rollback that hangs (both deadlines hold), the Worker's routes and `/health`.
+  rollback that hangs (both deadlines hold), the Worker's routes and `/health`; actor kinds: a kind's
+  key runs its closure only (its own `APP_DESCRIPTION`, no call to another actor), a conversation's
+  the whole App; the whole App composed once per isolate, not per object; the key from the event
+  (another refused, by name or by `idFromName`), `ctx.id.name`, `pikit:key`, or none; a declaration
+  problem failing every start; `health()` failing when a kind does not compose; a missing handler
+  naming the kind; the log line without the key; and the `actor.kind` suite
+  (`createActorKindConformance`) over the host.
 - `commands.test.ts`: the exact `wrangler` argv of every command, the secrets file, the wait for the
   new version, the components' hooks run before it (writing only their own files, once; a problem
   deploying nothing) and after it (with their URL, config and secrets, their problems failing `up`,
@@ -372,7 +411,9 @@ The tests are copied with the component and run in your project:
 
 In the pikit repository, the workerd lane (`tests/workerd/test/deployment-cloudflare.workerd.ts`) runs
 the entrypoint on real SQLite-backed Durable Objects: `/health`, `WORKERS_HOST`, `deliver` and the
-alarm reaching their handlers, an evicted object starting again, and a failed start resetting it. And
+alarm reaching their handlers, an evicted object starting again, and a failed start resetting it;
+an actor kind's object running its kind's App, and again from `ctx.id.name` when woken by its alarm
+after an eviction, a conversation's the whole App, a key that is not the object's refused. And
 `packages/cli/src/deploy-hooks.test.ts` runs `up` with a fake wrangler against
 `channel-telegram-webhook`'s fake Telegram: its webhook registered only once the new version answers;
 and against a fake MCP server, `tool-mcp`'s seed written before wrangler bundles, and a server that is
