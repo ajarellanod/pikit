@@ -8,6 +8,7 @@ import { afterEach, expect, test } from "bun:test";
 import { holdTool, scriptedAgent } from "@pikit/pi-adapter/testing";
 import adminApi from "../../../registry/components/admin-api/files/src/pikit/admin-api/index.ts";
 import adminAuthToken from "../../../registry/components/admin-auth-token/files/src/pikit/admin-auth-token/index.ts";
+import conversationsDirectory from "../../../registry/components/conversations-directory/files/src/pikit/conversations-directory/index.ts";
 import { ADMIN_TOKEN, createSample, type Sample, TOKEN } from "./sample.ts";
 
 const samples: Sample[] = [];
@@ -26,7 +27,7 @@ async function running() {
     await Promise.race([released, new Promise<void>((resolve) => context.abortSignal?.addEventListener("abort", () => resolve()))]);
     return "released";
   });
-  const sample = await createSample({ agents: [scriptedAgent(tool)], extra: [adminAuthToken, adminApi] });
+  const sample = await createSample({ agents: [scriptedAgent(tool)], extra: [adminAuthToken, conversationsDirectory, adminApi] });
   samples.push(sample);
   await sample.app.start();
   const base = await sample.listening;
