@@ -50,6 +50,8 @@ const Pointer = Type.Object({
   channel: Type.String({ minLength: 1 }),
   /** The space the conversation belongs to (`ConversationRef.space`), when its first resolve gave one: kept through resets. */
   space: Type.Optional(Type.String({ minLength: 1 })),
+  /** The conversation's owner (`ConversationRef.owner`), its channel and id, when its first resolve gave one: kept through resets. */
+  owner: Type.Optional(Type.Object({ channel: Type.String({ minLength: 1 }), id: Type.String({ minLength: 1 }) })),
   /** Conversations this key was in before, oldest first. Kept, never deleted. */
   previousConversationIds: Type.Array(Type.String()),
   createdAt: Type.Number(),
@@ -88,7 +90,7 @@ export default defineComponent({
       if (store === undefined) throw new Error("conversations-kv: conversations.registry used while the app is not running");
       return store;
     };
-    const ref = (key: string, pointer: Pointer): ConversationRef => ({ key, agent: pointer.agent, conversationId: pointer.conversationId, channel: pointer.channel, ...(pointer.space !== undefined && { space: pointer.space }) });
+    const ref = (key: string, pointer: Pointer): ConversationRef => ({ key, agent: pointer.agent, conversationId: pointer.conversationId, channel: pointer.channel, ...(pointer.space !== undefined && { space: pointer.space }), ...(pointer.owner !== undefined && { owner: { ...pointer.owner } }) });
 
     /** The pointer stored at `key`, `undefined` when there is none. A value that is not a pointer fails. */
     const current = async (from: KeyValueStore, key: string): Promise<Pointer | undefined> => {
@@ -105,11 +107,15 @@ export default defineComponent({
       resolve: (key, agent, place, ctx) =>
         inLine(key, async () => {
           if (place.space === "") throw new Error(`conversations-kv: resolve(${JSON.stringify(key)}): a space is non-empty text`);
+          const owner = place.owner === undefined ? undefined : { channel: place.owner.channel, id: place.owner.id };
+          if (owner !== undefined && (typeof owner.channel !== "string" || owner.channel === "" || typeof owner.id !== "string" || owner.id === "")) {
+            throw new Error(`conversations-kv: resolve(${JSON.stringify(key)}): an owner has a channel and an id, both non-empty text`);
+          }
           const from = running();
           const found = await current(from, key);
           if (found !== undefined) return ref(key, found);
           const now = ctx.clock.now();
-          const pointer: Pointer = { agent, conversationId: await newConversation(ctx), channel: place.channel, ...(place.space !== undefined && { space: place.space }), previousConversationIds: [], createdAt: now, updatedAt: now };
+          const pointer: Pointer = { agent, conversationId: await newConversation(ctx), channel: place.channel, ...(place.space !== undefined && { space: place.space }), ...(owner !== undefined && { owner }), previousConversationIds: [], createdAt: now, updatedAt: now };
           if (await from.setIfAbsent(key, pointer)) return ref(key, pointer);
           // Another process wrote first: its pointer is the conversation, and the conversation created
           // above stays unused. It may have been reset since; either way it is there, as no pointer

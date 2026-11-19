@@ -116,18 +116,21 @@ test("what setup declares: component.json's provides / requires / optional come 
   });
 });
 
-test("each pointer is a value at its key in the conversations-kv namespace, with the conversations it was in before", async () => {
+test("each pointer is a value at its key in the conversations-kv namespace, with its owner's channel and id and the conversations it was in before", async () => {
   const r = records();
   const w = await started(r);
-  const first = await w.registry.resolve("http:c1", "assistant", { channel: "http" }, w.ctx);
+  const first = await w.registry.resolve("http:c1", "assistant", { channel: "http", owner: { channel: "web", id: "ana", name: "Ana" } }, w.ctx);
   const reset = await w.registry.reset("http:c1", undefined, w.ctx);
 
-  expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({
+  const stored = await r.kv.namespace(NAMESPACE).get("http:c1");
+  expect(stored).toMatchObject({
     agent: "assistant",
     conversationId: reset?.newConversationId,
     channel: "http",
+    owner: { channel: "web", id: "ana" },
     previousConversationIds: [first.conversationId],
   });
+  expect((stored as { owner: object }).owner).toEqual({ channel: "web", id: "ana" });
   await w.app.stop();
 });
 

@@ -79,11 +79,11 @@ test("what setup declares: component.json's provides / requires / optional come 
   });
 });
 
-test("the file records each pointer and the conversations a conversation was in before", async () => {
+test("the file records each pointer, its owner's channel and id, and the conversations a conversation was in before", async () => {
   const r = records();
   const { app, registry } = await started(r);
   const ctx = app.context();
-  const first = await registry.resolve("http:c1", "assistant", { channel: "http" }, ctx);
+  const first = await registry.resolve("http:c1", "assistant", { channel: "http", owner: { channel: "web", id: "ana", name: "Ana" } }, ctx);
   const reset = await registry.reset("http:c1", undefined, ctx);
 
   const file = JSON.parse(readFileSync(r.path, "utf8"));
@@ -95,6 +95,7 @@ test("the file records each pointer and the conversations a conversation was in 
     channel: "http",
     previousConversationIds: [first.conversationId],
   });
+  expect(file.conversations["http:c1"].owner).toEqual({ channel: "web", id: "ana" });
   expect(statSync(r.path).mode & 0o777).toBe(0o600);
   await app.stop();
 });
