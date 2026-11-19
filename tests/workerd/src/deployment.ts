@@ -4,16 +4,24 @@
  * `test/deployment-cloudflare.workerd.ts` calls its Worker `fetch` and the objects' RPC and alarm.
  *
  * The object's App records, in the object's own storage, what its start context carried and what its
- * alarm and deliveries brought; a `fail-start` key in that storage makes its start fail.
+ * alarm and deliveries brought; a `fail-start` key in that storage makes its start fail. It has an
+ * actor kind (SPEC C9): `probe-owner` owns the keys `owned:`, so an object of one runs `object-probe`
+ * (the provider of the object's inbox and alarm, as actors-do is) and `probe-owner`, not
+ * `probe-conversation`. Each App answers the call `probe.app` with the components it is made of (its
+ * own `APP_DESCRIPTION`), and stores them under `app`.
  */
 
-import { defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { APP_DESCRIPTION, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import type { ActorInbox, Wakeups } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { createEntrypoint } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/entrypoint.ts";
 
 const objectProbe = defineComponent({
   name: "object-probe",
-  setup() {
+  setup(pikit) {
+    // What actors-do provides: every kind's App keeps the provider of the object's inbox and alarm.
+    pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {}, answerStream: () => {} } satisfies ActorInbox);
+    pikit.provide("wakeups", { handle: () => {}, at: async () => {}, cancel: async () => {} } satisfies Wakeups);
     return {
       async start(ctx) {
         const object = ctx.value(WORKERS_HOST)?.object;
@@ -30,8 +38,30 @@ const objectProbe = defineComponent({
         object.onDeliver(async (type, key, message) => {
           await storage.put("delivered", [type, key, message]);
         });
+        const app = (ctx.value(APP_DESCRIPTION)?.components ?? []).map((c) => c.name);
+        await storage.put("app", app);
+        object.onCall?.(async (type) =>
+          type === "probe.app" ? { ok: true, answer: app } : { ok: false, code: "no_handler", message: `object-probe: no answer for "${type}"` },
+        );
       },
     };
+  },
+});
+
+/** The owner of the keys `owned:`: its object runs it and what it uses. */
+const probeOwner = defineComponent({
+  name: "probe-owner",
+  setup(pikit) {
+    pikit.use("actor.inbox");
+    pikit.provideKeyed("actor.kind", "probe-owner", { prefixes: ["owned:"] });
+  },
+});
+
+/** A conversation's part: in the whole App only. */
+const probeConversation = defineComponent({
+  name: "probe-conversation",
+  setup(pikit) {
+    pikit.use("wakeups");
   },
 });
 
@@ -52,4 +82,4 @@ const workerProbe = defineComponent({
   },
 });
 
-export const entrypoint = createEntrypoint(defineApp({ components: [objectProbe] }), defineApp({ components: [workerProbe] }), { logger: silentLogger });
+export const entrypoint = createEntrypoint(defineApp({ components: [objectProbe, probeOwner, probeConversation] }), defineApp({ components: [workerProbe] }), { logger: silentLogger });
