@@ -34,6 +34,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `mcp.auth` | keyed | tool-mcp-oauth | tool-mcp? | none (tool-mcp-oauth's own tests; one provider) |
 | `agent.command` | keyed | admin-api, memory-recall, runtime-pi | admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web, memory-summaries, scheduler-admit | `createConversationRegistryConformance` |
+| `conversations.directory` | single | none | none | `createConversationDirectoryConformance` (passed by `createMemoryDirectory`; provider: conversations-directory, planned) |
 | `outbound.queue` | single | outbound-durable | tool-notify, admin-api?, channel-google-chat?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, approvals-sql, channel-web, credentials-do, memory-sql, memory-summaries, projects-sql, repo-github-app, scheduler-sql, settings-store, storage-kv-sql, tool-mcp-oauth, tool-space-files, provider-failover? | `createSqlDatabaseConformance` |
 | `storage.sqlite` | single | storage-do, storage-sqlite | outbound-durable, runtime-pi | `createSqliteDatabaseConformance` |
@@ -64,10 +65,12 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `principals` | single | none | channel-web?, memory-recall? | none (no kit provider: neural-agents' people directory) |
 | `document.convert` | single | convert-workers-ai | channel-web?, tool-space-files? | none (one provider: convert-workers-ai's tests against a fake binding) |
 
-Three more suites check behaviour rather than one capability: `createChannelConformance` (what every
+Four more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web),
 `createConversationDescribeConformance` (a channel's stage of the `conversation.describe` pipeline,
-below: channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web)
+below: channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, channel-web),
+`createConversationAudienceConformance` (a membership provider's stage of the `conversation.audience`
+pipeline, below: projects-sql, planned)
 and `createConvergenceConformance` (kill the process after each commit, restart, check it converges:
 outbound-durable, and answer delivery over storage-kv-sql in this repository). `@pikit/core/testing`
 has `createLifecycleConformance`, which almost every component runs.
@@ -438,6 +441,90 @@ channel-http (the client's conversation id). Runner: admin-api (`ApiConversation
 dashboard's own conversations described as the operator's, a key no stage knew described by the key).
 Suite: `createConversationDescribeConformance` (with `HOSTILE_NAME`), with negative cases: another
 channel's key, a key described by an earlier stage, a hostile name.
+
+### `conversations.directory` ([conversation-directory.ts](../packages/contracts/src/conversation-directory.ts), experimental)
+
+Which conversations exist and how every view lists them ([conversation directory](../features/conversation-directory.md)):
+one entry per conversation (a key and its runtime conversation) with its channel, agent, space, owner,
+one title whoever looks, when it was made and last active, whether a run goes, and its state for everyone;
+per viewer, their own state. Views (admin-api's list, channel-web's chats) read it through a `Viewer`
+they authenticated; nobody keeps an index of its own.
+
+```ts
+type Viewer = { kind: "operator"; id } | { kind: "people"; principals: Principal[] } | { kind: "component"; name };
+interface ConversationDirectory {
+  list(viewer, { limit?, cursor?, state?: "listed" | "archived" | "hidden" | "deleted", q?, space?, channels?, owned? }, ctx): Promise<Page<DirectoryEntry>>;
+  count(viewer, spaces, ctx): Promise<Record<string, number>>;     // what list(viewer, { space }) holds
+  access(viewer, { key, conversationId? }, ctx): Promise<DirectoryEntry | undefined>; // undefined: a 404
+  rename(viewer, ref, title, ctx); setState(viewer, ref, "listed" | "archived" | "deleted", ctx); // for everyone
+  mine(viewer, ref, { hidden?, readUpTo?, name? }, ctx);           // the viewer's own
+  title(ref, { text, source: "first" | "model" }, ctx): Promise<void>; // trusted code
+}
+// DirectoryEntry: key, conversationId, channel, agent, space?, owner?, current, createdAt, lastActivity, busy,
+//   title?, titleSource?, state, stateAt?, stateBy?, mine?: { hidden, hiddenAt?, readAt?, name?, unread }, role, may
+```
+
+- **Recorded, never added**: the provider records from the runtime's events in each conversation's App
+  (`agent.dispatched` with its sender, `agent.started`, `agent.settled`, `agent.failed`,
+  `conversation.reset`), the place read from `conversations.registry` (the owner with the key's first
+  resolve), and a backfill from `agent.observe`. Updates are field-wise idempotent (late or repeated: no
+  change); a restart loses nothing.
+- **Who sees** (`parseViewer` first, `invalid` otherwise): operators and components everything; a person
+  (1 to 20 principals, never `dashboard` or `delegate`) a conversation that is its key's current one, not
+  delegated, not deleted, with activity people see, and theirs: `owner` among their principals or a space a
+  `conversation.audience` grant names (a list within each stage's list bound, `access` and every act
+  checked fresh). What a viewer may not see is `not_found`, as what does not exist.
+- **Two orders**: an operator's request (`dashboard:`) and a run only those took are operators' activity
+  only: never people's order, unread, unarchive or unhide. Lists are newest first, then key, then
+  conversation id (`compareDirectoryOrder`, by code point), paged by a keyset cursor (`directoryCursor`,
+  `invalid_cursor` otherwise); a list holds only conversations with activity its viewer sees.
+- **One title**: `first` < `model` < `rename` (`titleApplies`), every one `cleanTitle`'d (one line, at most
+  `TITLE_MAX`, 60); a viewer's own name is theirs alone.
+- **Per viewer** (`viewerKey`; components none): hide, a name, a read mark (forward only, never past now);
+  hidden until activity the viewer sees comes after; `unread` counts others' activity after the mark
+  (an agent's answer too, one's own never), at most `UNREAD_MAX` (99).
+- **For everyone** (`may`, `permissionsOf`): operators, components and the owner rename, archive and
+  delete; the space's owner (a project's) renames and archives, never deletes; a member none
+  (`forbidden`). An archived conversation is listed again with activity people see; a deleted one stays
+  deleted. Deleting a key's current conversation resets the key first (`conversations.registry.reset`), so
+  the platform's next message starts a new conversation; operators may set it back. Each conversation
+  is in one bucket per viewer (`listStateOf`); people asking for `deleted` are `forbidden`.
+- **Bounds**: pages 1 to `DIRECTORY_PAGE_MAX` (100, default 50), `q` at most `DIRECTORY_SEARCH_MAX` (200,
+  literal text over the title, the viewer's name, operators' also the key; `likePattern` for SQL), `count`
+  of 1 to `DIRECTORY_COUNT_MAX` (100) spaces, past `AUDIENCE_MAX` (2,000) grants `limit`.
+  `DirectoryError` codes `not_found`, `forbidden`, `invalid`, `invalid_cursor`, `limit`.
+
+Provider: conversations-directory (planned, phase 1 of the note). Users: admin-api, channel-web,
+channel-google-chat (planned). Suite: `createConversationDirectoryConformance`: the fixture drives a
+conversation as the runtime would (a message with its sender and place, a run, a reset) through the
+provider's real recorder, the suite's own audience stage says who belongs where; cases for order and
+paging, the viewer filter, another's conversation by key or id, delegated and operator-only
+conversations, a removed member, who acts for everyone, titles, per-viewer state, hide and archive
+ending with activity, delete resetting the key, unread, search wildcards, filters and count, an audience
+that fails closed, late updates (`replay`) and a restart. `createMemoryDirectory` (`@pikit/contracts/testing`)
+passes it, and the suite's tests check each guarantee against a broken double.
+
+### `conversation.audience` (a pipeline, [conversation-audience.ts](../packages/contracts/src/conversation-audience.ts))
+
+Who belongs to which space, for the directory's people viewers. A pipeline, for the reason
+`conversation.describe` is one: a keyed capability would make the directory depend on every membership
+provider, and one may use the directory itself. Its value is `{ principals, space?, grants }` (`space`
+given: check that one now; absent: every space, for a list); a grant is `{ space, role: "member" | "owner",
+source }`.
+
+- **Fail closed**: a provider's stage is `audienceStage(source, provider)`: it appends only grants of its
+  own source (another source's, a malformed one, or one of another space than the one checked dropped,
+  logged), never touches an earlier stage's, and a provider that throws grants nothing. The runner reads
+  it only through `audienceGrants(ctx, principals, space?)`: a halt or a throw gives `[]`, duplicates
+  dropped, past `AUDIENCE_MAX` a `DirectoryError` `limit` (never a silent cut).
+- A project is made from scratch, never adopted (the operator's decision of 2026-11-19): its grant names
+  only its own space (`project:<id>`), so a Google Chat conversation is seen only through its platform's
+  membership, downstream's rooms stage.
+
+Stages: projects-sql (planned). Runner: conversations-directory (planned). Suite:
+`createConversationAudienceConformance`: a member's and an owner's grant for a list and fresh, a stranger
+none, a removed membership none at once, the stage's grants all its own source with an earlier stage's
+kept, a fresh check of one space naming only it, a failing provider granting nothing.
 
 ---
 

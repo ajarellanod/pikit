@@ -501,9 +501,14 @@ asks `admin.auth` (`packages/contracts/src/admin.ts`; `admin-auth-token`, a bear
 (`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves; every
 such server hands a route the client's address it saw itself (`x-pikit-client-address`: a socket's
 peer, Cloudflare's `cf-connecting-ip`), never a copy the client wrote. The
-list of conversations, on every host, comes from admin-api's conversation index, paged newest
-activity first (`agent.observe` lists in creation order, and on Cloudflare sees one object's
-conversations: `features/cloudflare-conversation-index.md`).
+list of conversations, on every host, comes from `conversations.directory`
+(`packages/contracts/src/conversation-directory.ts`, `features/conversation-directory.md`): one entry
+per conversation with one title, its activity and its state for everyone (archived, deleted), each
+viewer's own state (hidden for me, read), filtered by who looks (an operator everything; a person what
+they own and the spaces `conversation.audience` says they belong to), paged newest activity first
+(`agent.observe` lists in creation order, and on Cloudflare sees one object's conversations). Until
+its provider lands, admin-api's conversation index gives the dashboard's list
+(`features/cloudflare-conversation-index.md`).
 
 `agent.observe` is read by a reader its consumer authorized for that conversation: an operator
 (`admin.auth`), or a channel's user for their own conversation (channel-web's live view, which

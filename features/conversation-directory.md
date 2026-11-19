@@ -35,9 +35,9 @@ ms) are two of the twelve awaits before an answer (agents' `channel-google-chat/
   own, the conversations of the spaces they belong to (a project's chats, a Google Chat space they are a
   verified member of), as membership providers say.
 - **Per-viewer state** keyed by (viewer, conversation): hidden for me, read up to, my own name for it.
-- **Two actions, the same everywhere**: "Hide for me" (any viewer, only their lists) and "Archive /
-  delete for everyone" (operators, the conversation's owner, or the owner of its space), honoured by every
-  view.
+- **Two actions, the same everywhere**: "Hide for me" (any viewer, only their lists, until new activity
+  they see) and "Archive / delete for everyone" (operators and the conversation's owner archive and delete;
+  the owner of its space archives only), honoured by every view. Delete for everyone also resets the key.
 - **One update per message**, written locally in the conversation's own App and sent to the directory
   off the message's path.
 
@@ -100,10 +100,10 @@ export type DirectoryEntry = EntryRef & {
   title?: string; titleSource?: TitleSource;
   state: EntryState; stateAt?: number; stateBy?: Author;
   /** This viewer's own state (operators and people). */
-  mine?: { hidden: boolean; readAt?: number; name?: string; unread: number };  // unread capped at UNREAD_MAX
-  /** What this viewer may do: every viewer who sees it hides, names and marks it for themselves. */
-  manage: boolean;                                   // rename, archive, delete for everyone
+  mine?: { hidden: boolean; hiddenAt?: number; readAt?: number; name?: string; unread: number };  // unread capped at UNREAD_MAX
   role: "operator" | "component" | "owner" | "space-owner" | "member";
+  /** What this viewer may do for everyone (permissionsOf(role)): every viewer who sees it hides, names and marks it for themselves. */
+  may: { rename: boolean; archive: boolean; delete: boolean };  // space-owner: rename and archive, never delete
 };
 
 export type DirectoryQuery = {
@@ -119,8 +119,9 @@ export interface ConversationDirectory {
   count(viewer: Viewer, spaces: readonly string[], ctx: AppContext): Promise<Record<string, number>>;
   /** The entry when this viewer may see it now (membership checked fresh); a key alone: its current one. */
   access(viewer: Viewer, ref: { key: string; conversationId?: string }, ctx: AppContext): Promise<DirectoryEntry | undefined>;
-  rename(viewer: Viewer, ref: EntryRef, title: string, ctx: AppContext): Promise<DirectoryEntry>;   // manage; source "rename"
-  setState(viewer: Viewer, ref: EntryRef, state: EntryState, ctx: AppContext): Promise<DirectoryEntry>; // manage; for everyone
+  rename(viewer: Viewer, ref: EntryRef, title: string, ctx: AppContext): Promise<DirectoryEntry>;   // may.rename; source "rename"
+  /** For everyone: archived and back (may.archive), deleted and back (may.delete; deleting the key's current one resets the key first). */
+  setState(viewer: Viewer, ref: EntryRef, state: EntryState, ctx: AppContext): Promise<DirectoryEntry>;
   mine(viewer: Viewer, ref: EntryRef, change: { hidden?: boolean; readUpTo?: number; name?: string | null }, ctx: AppContext): Promise<DirectoryEntry>;
   /** Trusted code (a channel's first message as the person wrote it, the titler's answer): written unless a title of a higher source is there. */
   title(ref: EntryRef, title: { text: string; source: "first" | "model" }, ctx: AppContext): Promise<void>;
@@ -128,6 +129,11 @@ export interface ConversationDirectory {
 export class DirectoryError extends Error { code: "not_found" | "forbidden" | "invalid" | "invalid_cursor" | "limit" }
 export const cleanTitle: (text: string) => string | undefined;   // one line, no label or quotes, at most TITLE_MAX (60): today's two copies made one
 export const TITLE_MAX = 60, UNREAD_MAX = 99, AUDIENCE_MAX = 2_000;
+// Built in 0a, the protocol every provider shares (rule 5): parseViewer, parseDirectoryQuery, viewerKey
+// (principalKey of principals[0], an operator's of { channel: "dashboard", id }), viewerAuthor,
+// permissionsOf, titleApplies, stillHidden, listStateOf, compareDirectoryOrder (by code point, SQL's
+// BINARY), directoryCursor / parseDirectoryCursor / afterCursor, likePattern, matchesSearch;
+// DIRECTORY_PAGE_MAX 100 (default 50), DIRECTORY_SEARCH_MAX 200, DIRECTORY_COUNT_MAX 100, VIEWER_PRINCIPALS_MAX 20.
 ```
 
 What the directory does not hold: the transcript (the runtime's, or a channel's platform table:
@@ -153,8 +159,9 @@ export type Audience = {
 export interface AudienceProvider { grants(principals: readonly Principal[], space: string | undefined, ctx: AppContext): Promise<AudienceGrant[]> }
 /** A provider's stage: it only appends grants of its own `source`, a throw appends none (logged): fail closed. */
 export function audienceStage(source: string, provider: AudienceProvider): (value: Audience, ctx: AppContext) => Promise<Audience>;
-/** Runs the pipeline; never throws, but past AUDIENCE_MAX grants it rejects (`limit`): never a silent cut. */
-export function audienceOf(ctx: AppContext, principals: readonly Principal[], space?: string): Promise<AudienceGrant[]>;
+/** Runs the pipeline; a halt or a throw gives []; past AUDIENCE_MAX grants it rejects (`limit`): never a silent cut. */
+// Named audienceGrants, not audienceOf: @pikit/contracts already exports command.ts' audienceOf.
+export function audienceGrants(ctx: AppContext, principals: readonly Principal[], space?: string): Promise<AudienceGrant[]>;
 ```
 
 Stages in the kit: **projects-sql** (its members' projects' spaces; `owner` for a project's owner; the
@@ -222,7 +229,7 @@ A per-viewer `name` never changes the title, and only its viewer sees or searche
 **Lists and search.** `list` filters in the directory actor's SQL: for people `current`, not delegated
 (`origin`), `shown_activity > 0`, the state asked, and `owner IN (principals) OR space IN (grants)`; for
 operators and components every conversation. Ordered by the activity the viewer may see, then key and
-conversation id; the cursor is that sort key. The grants (`audienceOf`, run by the provider's client in the
+conversation id; the cursor is that sort key. The grants (`audienceGrants`, run by the provider's client in the
 calling App: the Worker on Cloudflare) are split in chunks of at most 90 spaces (Cloudflare's SQL takes
 100 bound parameters a query, which channel-web's `projectChats` already chunks for), one keyset query each, merged: one call, any number of spaces up to
 `AUDIENCE_MAX`. `q` is `LIKE` over the lowercased title (and the viewer's own name; for operators the
@@ -257,11 +264,12 @@ neural-agents' merged list cost now.
   bound (rooms: 30 minutes) and checked fresh by `access` and before every act (rooms: 2 minutes;
   projects: `roleOf` now).
 - **Who acts.** Any viewer who sees a conversation hides it, names it and marks it read, for themselves.
-  Rename, archive and delete for everyone: operators, components, its owner, an owner grant of its space
-  (a project's owner). Writing in a conversation is not the directory's: each view decides (channel-web: its
-  owner; a shared chat's members downstream), after `access`.
+  Rename, archive and delete for everyone: operators, components and its owner; an owner grant of its
+  space (a project's owner) renames and archives, never deletes (the operator's decision 4). Writing in a
+  conversation is not the directory's: each view decides (channel-web: its owner; a shared chat's members
+  downstream), after `access`.
 - **Trust.** The directory is trusted code's: a view authenticates its viewer and builds `Viewer` from the
-  session (as `projects`' `Caller`); the provider's client computes the grants with `audienceOf` and the
+  session (as `projects`' `Caller`); the provider's client computes the grants with `audienceGrants` and the
   actor applies them. A people viewer's principals are 1 to 20, never of the `dashboard` or `delegate`
   channel (`invalid`). A cursor is a sort key: it gives nothing a viewer may not list.
 - **Adversarial cases**, each a suite case or a view test: another user's chat by id or by key (`404`,
@@ -280,13 +288,10 @@ neural-agents' merged list cost now.
   start. What is lost in a project that had them: operators' renames and archive/delete, web users'
   renames, archives and deletes (a deleted web chat is listed again), the provisional titles. The removed
   components' tables stay in old databases, unread: nothing creates, reads or drops them.
-- **Downstream (neural-agents, which runs in production)**: a one-off project component, run once with the
-  old copies still installed, then deleted. In each object at start: `admin_api_conversation_titles` and
-  channel-web's row (with `title:<key>`: whose) -> `rename` (an operator's or a user's title), `title(model)`,
-  `title(first)`; channel-web's `hidden` -> `setState(deleted)`, `archived` -> `setState(archived)`. In the
-  index actors, through an operator route: `admin_api_hidden` -> the operator's `mine(hidden)` (it was the
-  operators' list only), `channel_web_reads` -> `mine(readUpTo, hidden)`, `neural_rooms_reads` ->
-  `mine(readUpTo)` of each person's web principal. Then the consumer drops the old tables in its own code.
+- **Downstream (neural-agents, which runs in production)**: no import (the operator's decision 7). Its
+  renames, archives, deletes, hides and read marks are lost; the directory rebuilds itself from the
+  runtime and the model titles every conversation anew. The consumer drops the old tables in its own code
+  once the new copies run.
 - **The rooms index becomes a membership provider**: its stage of `conversation.audience` (both Apps:
   its client already has the Worker half) answers a person's open rooms with a current membership,
   `googlechat:spaces/AAA`, within its windows (30 minutes listed, 2 minutes fresh, Google Groups closed).
@@ -321,6 +326,24 @@ check). The `conversations.registry` suite gains the owner's cases (recorded at 
 through resets and restarts, a later one ignored, an empty id refused). conversations-directory passes the
 directory suite on a server and in the workerd lane (the Worker's half against the actor).
 
+As built in 0a: the fixture is `(options: { components }) => Promise<ConversationDirectorySubject>`, an App
+that includes `options.components` (the suite's own `conversation.audience` stage, `audienceStage` over a
+map the case sets: list grants and fresh grants apart, a throwing, a foreign-source and a flooding mode)
+and whose clock (`ctx.clock`) the subject's `advance` moves. The subject drives a conversation as the
+runtime would: `message(key, { requestId, sender?, place: { agent, channel, space?, owner?, delegated? },
+duplicate? })` (the key's first: `conversations.registry.resolve` with the place, 0b's owner included;
+then `agent.dispatched` with its sender), `started`, `settled` (`agent.settled` / `agent.failed`),
+`reset(key)`, and optionally `replay()` (every update again, newest first) and `restart()`; each resolves
+once the directory holds it (a flush). Twenty cases, among them hide and archive ending with activity
+people see (never an operator's), delete resetting the key, the space owner's archive without delete.
+`createMemoryDirectory({ reset })` takes `seen(MemoryDirectoryUpdate)` (the shape of the provider's
+`seen`: dispatched, started, settled, reset, each with `at` and a per-conversation `seq`), and twelve
+broken doubles are each caught by their case (owner check dropped, grants ignored, titles reversed, hide
+for everyone, an operator's activity shown, a stale fresh check, no reset on delete, one's own activity
+unread, hide for good, a space owner deleting, `seq` ignored, a deleted conversation revived). The
+audience suite's fixture names its `source` and makes a `member(app, ctx, role)`, `remove`s it, and may
+`fail`.
+
 ## Plan: phases, parallel tasks, file ownership
 Each phase leaves the kit green (`bun run typecheck`, `bun test` bounded, `registry validate`, the
 workerd lane). Tasks of a phase run in their own worktrees; a task touches only what it owns. Generated
@@ -340,7 +363,7 @@ integrator's, regenerated after each phase's merge.
 
 0a and 0b, 1a to 1c, 2a and 2b run in parallel; phases in order. Downstream (neural-agents, not the kit):
 `pikit upgrade` of admin-api and channel-web (their edited copies conflict in `store.ts`, `routes.ts`,
-`backend.ts`), the one-off import, rooms as a stage.
+`backend.ts`), rooms as a stage (no import: decision 7).
 
 ## How it fits pikit, and where it bends
 - **Contracts are the only coupling**: views and providers meet in `conversations.directory`; channels and
@@ -350,7 +373,7 @@ integrator's, regenerated after each phase's merge.
 - **Bends SPEC §5**: "The list of conversations, on every host, comes from admin-api's conversation index"
   becomes "from `conversations.directory`". Proposed in §5 first (task 0a), as SPEC §7 requires.
 - **A pipeline used for authorization.** Pipelines tolerate a broken stage; here that must fail closed, so
-  `audienceStage` only appends its own grants and a throw appends none, and `audienceOf` refuses past its
+  `audienceStage` only appends its own grants and a throw appends none, and `audienceGrants` refuses past its
   bound instead of cutting.
 - **One actor takes every `seen`**, as `admin-api:index` does now: fine for teams (flushes batch a
   conversation's events), not a global query engine. Sharding it (by space) is a later change of the
