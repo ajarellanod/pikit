@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { startFakeTelegram } from "../../../registry/components/channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/fake-telegram.test-support.ts";
 import { startFakeOpenRouter } from "../../../registry/components/provider-openrouter/files/src/pikit/provider-openrouter/fake-openrouter.test-support.ts";
-import { TITLE_SYSTEM } from "../../../registry/components/admin-api/files/src/pikit/admin-api/titles.ts";
+import { TITLE_SYSTEM } from "../../../registry/components/conversations-directory/files/src/pikit/conversations-directory/titles.ts";
 import { setConfigEntry } from "./project/config-file.ts";
 
 const E2E = process.env.PIKIT_E2E === "1";
@@ -45,7 +45,7 @@ const parent = mkdtempSync(join(tmpdir(), "pikit-e2e-telegram-cloudflare-"));
 const project = join(parent, NAME);
 const telegram = startFakeTelegram();
 const openrouter = startFakeOpenRouter();
-// The default dashboard also asks for titles; these are not agent runs.
+// The default dashboard's conversations-directory also asks for titles; these are not agent runs.
 const agentRequests = () => openrouter.requests.filter((request) => !JSON.stringify(request.messages).includes(TITLE_SYSTEM));
 afterAll(async () => {
   await telegram.stop();
@@ -322,7 +322,7 @@ test.skipIf(!E2E)(
       expect(sent).toContainEqual(expect.objectContaining({ chatId: STRANGER.id, text: expect.stringContaining(`Your Telegram user id is ${STRANGER.id}`) }));
       expect(sent).toContainEqual(expect.objectContaining({ chatId: OWNER.id, text: "answer: hello" }));
 
-      // One agent answer, distinct from the dashboard's background title completion.
+      // One agent answer, distinct from the directory's background title completion.
       expect(agentRequests()).toHaveLength(1);
       expect(agentRequests()[0]).toMatchObject({ model: "z-ai/glm-5.3-flash", apiKey: MODEL_KEY });
       expect(JSON.stringify(agentRequests()[0]?.messages)).toContain("hello");

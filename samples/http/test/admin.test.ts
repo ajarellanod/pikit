@@ -138,18 +138,27 @@ test("no dashboard built: /admin/ says so, and the API answers", async () => {
   expect((await admin("/admin/api/app")).status).toBe(200);
 });
 
-test("on the real runtime: a dashboard chat is titled by its agent's model after its first answer; /new, /name and runtime-pi's /compact are listed and run in it", async () => {
-  const { admin } = await running();
+test("on the real runtime: a channel's chat is titled by its agent's model after its first answer, a dashboard chat by the operator's words (conversations-directory's); /new, /name and runtime-pi's /compact are listed and run in it", async () => {
+  const { sample, admin } = await running();
 
+  // A person's chat: the directory's titler, after its first answer. The scripted model answers `answer: <prompt>`: cleaned, that is the title.
+  await sample.post("/v1/messages", { conversationId: "c9", text: "Plan a trip to Lisbon", messageId: "m9" });
+  const chat = await until(
+    async () => ((await (await admin("/admin/api/conversations")).json()) as { items: { key?: string; title?: string }[] }).items.find((each) => each.key === "http:c9"),
+    (conversation) => conversation?.title !== undefined,
+    "the model's title",
+  );
+  expect(chat?.title).toBe("Answer: Plan a trip to Lisbon");
+
+  // The dashboard's own: titled by the operator's words, never by the model (an operator's run).
   const started = (await (await admin("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "scripted", text: "Plan a weekend in Porto" }) })).json()) as { conversationId: string };
   const id = encodeURIComponent(started.conversationId);
-  // The scripted model answers `answer: <prompt>`: cleaned, that is the title.
   const titled = await until(
     async () => (await (await admin(`/admin/api/conversations/${id}`)).json()) as { title?: string },
     (conversation) => conversation.title !== undefined,
     "the title",
   );
-  expect(titled.title).toBe("Answer: Plan a weekend in Porto");
+  expect(titled.title).toBe("Plan a weekend in Porto");
 
   const commands = (await (await admin("/admin/api/commands")).json()) as { items: { name: string }[] };
   expect(commands.items.map((each) => each.name)).toEqual(["cancel", "compact", "name", "new", "status", "stop", "tasks"]);

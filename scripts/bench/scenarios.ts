@@ -61,7 +61,7 @@ export const OWNERS: readonly { key: string; type: string; message: unknown }[] 
   { key: "settings-store:settings", type: "settings-store.read", message: { version: -1 } },
   { key: "credentials-do", type: "credentials-do.read", message: { providerId: "openrouter" } },
   { key: "provider-failover:cooldowns", type: "provider-failover.sync", message: { entries: [] } },
-  { key: "admin-api:index", type: "admin-api.list", message: { limit: 10 } },
+  { key: "conversations-directory:index", type: "conversations-directory.list", message: { viewer: { kind: "operator", id: "bench" }, query: { limit: 10 }, grants: [] } },
   { key: "projects:index", type: "projects-sql.locate", message: { id: "bench" } },
   { key: "tool-mcp-oauth", type: "tool-mcp-oauth.list", message: null },
   { key: "approvals-sql:approvals", type: "approvals-sql.list", message: {} },
