@@ -189,11 +189,11 @@ test("runtime-pi declares an override per agent, among the installed providers' 
   }
 }, 30_000);
 
-/** A `model.credentials` holding `stored`, in memory. */
-function credentialsHolding(stored: Record<string, Credential>) {
+/** A `model.credentials` holding `stored`, in memory, counting its `read`s and `list`s. */
+function credentialsHolding(stored: Record<string, Credential>, calls = { reads: 0, lists: 0 }) {
   const store: CredentialStore = {
-    read: async (id) => stored[id],
-    list: async () => Object.entries(stored).map(([providerId, credential]) => ({ providerId, type: credential.type })),
+    read: async (id) => (calls.reads++, stored[id]),
+    list: async () => (calls.lists++, Object.entries(stored).map(([providerId, credential]) => ({ providerId, type: credential.type }))),
     modify: async (id, fn) => {
       const next = await fn(stored[id]);
       if (next !== undefined) stored[id] = next;
@@ -243,6 +243,31 @@ test("only the models of providers with credentials are offered; an override nam
     expect(settings.dropped()).toContain("assistant");
   } finally {
     await second.app.stop();
+  }
+}, 30_000);
+
+test("with model.credentials, the overrides' models come from the store's one list: start reads no credential", async () => {
+  const settings = memorySettings();
+  // `alt` and `keyed` are configured only by a stored API key; for `keyed` the store holds an OAuth login instead.
+  const alt = scriptedProvider({ id: "alt", apiKey: "made-up-key" });
+  const keyed = scriptedProvider({ id: "keyed", apiKey: "another-key" });
+  const both = defineComponent({
+    name: "providers-test",
+    setup(pikit) {
+      pikit.provideKeyed("model.provider", "faux", scriptedProvider({ id: "faux" }));
+      pikit.provideKeyed("model.provider", "alt", alt);
+      pikit.provideKeyed("model.provider", "keyed", keyed);
+    },
+  });
+  const calls = { reads: 0, lists: 0 };
+  const { app } = await started([sqliteStorage(), agents(), both, credentialsHolding({ alt: { type: "api_key", key: "made-up-key" }, keyed: { type: "oauth", refresh: "r", access: "a", expires: 0 } }, calls), settings.component()]);
+  try {
+    expect(calls).toEqual({ reads: 0, lists: 1 });
+    const model = (settings.schema() as { properties: { assistant: { properties: { model: { anyOf?: { const: string }[]; const?: string } } } } }).properties.assistant.properties.model;
+    // faux needs nothing, alt's key is listed; keyed's stored login is OAuth, which it has none of.
+    expect((model.anyOf?.map((each) => each.const) ?? [model.const]).sort()).toEqual(["alt/scripted", "faux/scripted"]);
+  } finally {
+    await app.stop();
   }
 }, 30_000);
 

@@ -303,8 +303,7 @@ test("with wakeups, a long run is driven over several slices: each cut asks agai
     logger: silentLogger,
   }).create();
   await app.start();
-  // At start, a wakeup resumes what is pending: nothing here, so it ends at once.
-  await wakeups.run(app).done;
+  // At start, nothing was ever stored here (no pi-durable tables): no wakeup is asked for.
   expect(wakeups.requests.has(DRIVE)).toBe(false);
   const conversation = await seen.conversation("test:slices");
   const runtime = seen.runtime();
@@ -494,7 +493,6 @@ test("with wakeups, a storage error that closes pi-durable mid-run asks for a wa
   const app = await defineApp({ components: [flaky.component, agents, provider, wakeups.component, runtimePi, seen.component], logger: silentLogger }).create();
   await app.start();
   try {
-    await wakeups.run(app).done;
     const conversation = await seen.conversation("test:storage-error");
     await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hold" }, app.context());
     await hold.held;
@@ -529,7 +527,6 @@ test("with wakeups, a model retry's backoff is a wakeup at its time, not a timer
     logger: silentLogger,
   }).create();
   await app.start();
-  await wakeups.run(app).done;
   const conversation = await seen.conversation("test:retry");
   const runtime = seen.runtime();
 
@@ -565,9 +562,6 @@ test("with wakeups, stop cancels a handler waiting on a run and asks again for t
   const seen = observer();
   const app = await defineApp({ components: [storage, agents, provider, wakeups.component, runtimePi, seen.component], logger: silentLogger }).create();
   await app.start();
-  // At start, resuming is asked for as a wakeup.
-  expect(wakeups.requests.has(DRIVE)).toBe(true);
-  await wakeups.run(app).done;
   await seen.runtime().dispatch({ requestId: "r1", conversation: await seen.conversation("test:stop"), prompt: "hold" }, app.context());
   const run = wakeups.run(app);
   expect(await pending(run.done)).toBe(true);
@@ -624,11 +618,17 @@ const keyedProvider = defineComponent({
   setup: (pikit) => pikit.provideKeyed("model.provider", "faux", scriptedProvider({ apiKey: "made-up-key" })),
 });
 
-/** A `model.credentials` holding `stored`, kept in memory for the test. */
-function credentialsHolding(stored: Record<string, Credential>) {
+/**
+ * A `model.credentials` holding `stored`, kept in memory for the test, counting its `read`s and
+ * `list`s (each a call to another object on Cloudflare). `list`, when given, answers the lists instead.
+ */
+function credentialsHolding(stored: Record<string, Credential>, calls = { reads: 0, lists: 0 }, list?: () => Promise<{ providerId: string; type: Credential["type"] }[]>) {
   const store: CredentialStore = {
-    read: async (id) => stored[id],
-    list: async () => Object.entries(stored).map(([providerId, credential]) => ({ providerId, type: credential.type })),
+    read: async (id) => (calls.reads++, stored[id]),
+    list: async () => {
+      calls.lists++;
+      return list !== undefined ? list() : Object.entries(stored).map(([providerId, credential]) => ({ providerId, type: credential.type }));
+    },
     modify: async (id, fn) => {
       const next = await fn(stored[id]);
       if (next !== undefined) stored[id] = next;
@@ -666,7 +666,7 @@ async function talk(components: Parameters<typeof defineApp>[0]["components"]) {
   };
 }
 
-test("with model.credentials installed and nothing stored yet, it starts with a warning; a login stored while it runs lets the agent answer", async () => {
+test("with model.credentials installed and nothing stored yet, it starts, and its first admission warns; a login stored while it runs lets the agent answer", async () => {
   const { storage, agents } = testComponents();
   const stored: Record<string, Credential> = {};
   const warned: string[] = [];
@@ -676,15 +676,123 @@ test("with model.credentials installed and nothing stored yet, it starts with a 
   const settledBy = defineComponent({ name: "answers", setup: (pikit) => pikit.on("agent.settled", (result) => void answers.set(result.requestId, result.text)) });
   const app = await defineApp({ components: [storage, agents, keyedProvider, credentialsHolding(stored), runtimePi, seen.component, settledBy], logger }).create();
   await app.start();
-  expect(warned.some((line) => line.includes('provider "faux", which has no credentials'))).toBe(true);
+  const missing = (line: string) => line.includes('agent "scripted" uses provider "faux", which has no credentials') && line.endsWith("its runs fail until one is stored");
+  expect(warned.filter(missing)).toEqual([]);
 
+  // Checked against what the store listed at start, when nothing was stored.
   stored.faux = { type: "api_key", key: "made-up-key" };
   const conversation = await seen.conversation("test:late-login");
   await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context());
+  expect(warned.filter(missing)).toHaveLength(1);
   for (let i = 0; i < 200 && !answers.has("r1"); i++) await Bun.sleep(10);
   expect(answers.get("r1")).toBe("answer: hello");
+  // Once per App: the next admission does not check again.
+  await seen.runtime().dispatch({ requestId: "r2", conversation, prompt: "again" }, app.context());
+  expect(warned.filter(missing)).toHaveLength(1);
   await app.stop();
 });
+
+test("with model.credentials, start awaits no call to the store: one list() asked for and not waited for, no read; the first admission waits for it", async () => {
+  const { storage, agents } = testComponents();
+  const calls = { reads: 0, lists: 0 };
+  let answerList!: () => void;
+  const listedLater = new Promise<void>((resolve) => (answerList = resolve));
+  const credentials = credentialsHolding({ faux: { type: "api_key", key: "made-up-key" } }, calls, async () => {
+    await listedLater;
+    return [{ providerId: "faux", type: "api_key" }];
+  });
+  const warned: string[] = [];
+  const logger = { ...silentLogger, warn: (message: string) => void warned.push(message) };
+  const seen = observer();
+  const app = await defineApp({ components: [storage, agents, keyedProvider, credentials, runtimePi, seen.component], logger }).create();
+  // The list never answers until the test says so: start does not wait for it.
+  expect(await pending(app.start())).toBe(false);
+  try {
+    expect(calls).toEqual({ reads: 0, lists: 1 });
+    const conversation = await seen.conversation("test:prefetched");
+    const admitted = seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context());
+    expect(await pending(admitted)).toBe(true);
+    answerList();
+    expect(await admitted).toEqual({ kind: "started", requestId: "r1" });
+    // The list start asked for, not another; a stored key, so no warning.
+    expect(calls.lists).toBe(1);
+    expect(warned.filter((line) => line.includes("has no credentials"))).toEqual([]);
+    await until(() => seen.results.length > 0, "the answer");
+    expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r1", "completed"]]);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("with model.credentials, a list that fails fails the first admission loudly, not the start; the next admission lists again", async () => {
+  const { storage, agents } = testComponents();
+  const calls = { reads: 0, lists: 0 };
+  let down = true;
+  const credentials = credentialsHolding({ faux: { type: "api_key", key: "made-up-key" } }, calls, async () => {
+    if (down) throw new Error("credentials-do is unreachable");
+    return [{ providerId: "faux", type: "api_key" }];
+  });
+  const seen = observer();
+  const app = await defineApp({ components: [storage, agents, keyedProvider, credentials, runtimePi, seen.component], logger: silentLogger }).create();
+  await app.start();
+  try {
+    const conversation = await seen.conversation("test:list-fails");
+    const refused = await seen
+      .runtime()
+      .dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context())
+      .then(
+        () => "admitted",
+        (error: unknown) => String(error instanceof Error ? error.message : error),
+      );
+    expect(refused).toBe("runtime-pi: the agents' providers could not be checked: model.credentials could not list its credentials (credentials-do is unreachable)");
+    // Not admitted: nothing ran.
+    expect(await seen.submissions().get(conversation, "r1", app.context())).toBeUndefined();
+
+    down = false;
+    expect(await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context())).toEqual({ kind: "started", requestId: "r1" });
+    // Start's list, the first admission's (start's had failed), and this one's: a failed list is asked again.
+    expect(calls.lists).toBe(3);
+    await until(() => seen.results.length > 0, "the answer");
+    expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r1", "completed"]]);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("with wakeups, start asks for the drive only where pi-durable's tables exist: none in a new storage, at once in one that held a conversation", async () => {
+  const file = databaseFile();
+  try {
+    const { agents, provider } = testComponents();
+    const fresh = handDrivenWakeups();
+    const seen = observer();
+    const first = await defineApp({ components: [sqliteStorage(file.path), agents, provider, fresh.component, runtimePi, seen.component], logger: silentLogger }).create();
+    await first.start();
+    // Nothing was ever stored: no wakeup (on Cloudflare, no alarm reading settings at the object's start).
+    expect(fresh.requests.has(DRIVE)).toBe(false);
+    const conversation = await seen.conversation("test:tables");
+    await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hello" }, first.context());
+    expect(fresh.requests.has(DRIVE)).toBe(true);
+    await fresh.run(first).done;
+    expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r1", "completed"]]);
+    await first.stop();
+
+    // The next App over the same storage: pi-durable's tables exist, so start asks at once.
+    const next = handDrivenWakeups();
+    const again = await defineApp({ components: [sqliteStorage(file.path), agents, provider, next.component, runtimePi, observer().component], logger: silentLogger }).create();
+    const before = Date.now();
+    await again.start();
+    try {
+      expect(next.requests.get(DRIVE)).toBeGreaterThanOrEqual(before);
+      expect(next.requests.get(DRIVE)).toBeLessThanOrEqual(Date.now());
+      await next.run(again).done;
+      expect(next.requests.has(DRIVE)).toBe(false);
+    } finally {
+      await again.stop();
+    }
+  } finally {
+    file.dispose();
+  }
+}, 30_000);
 
 test("it builds the models with model.credentials: a stored key lets the agent answer", async () => {
   const { storage, agents } = testComponents();
