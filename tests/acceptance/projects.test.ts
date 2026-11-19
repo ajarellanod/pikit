@@ -14,7 +14,9 @@
  * - conversations-kv over storage-kv-sql (each chat's space recorded), wakeups on the test's clock.
  *
  * Doubles: the accounts (channel-web's, a session a cookie), `principals` (a directory linking a
- * person's identities), the router (every message to `assistant`) and the operator's `admin.auth`.
+ * person's identities), the router (every message to `assistant`), the operator's `admin.auth`, and
+ * `conversations.directory` (the contracts' double, recorded from the runtime's events, with
+ * projects-sql's real stage of `conversation.audience`), until conversations-directory is here.
  *
  * What it proves, through the page's routes and the model's own requests: a project made, a member
  * added, its instructions and a core document set; a chat started in it sees one section, `<project>`
@@ -53,6 +55,7 @@ import type {
   ChatStartResponse,
 } from "../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
 import { createChannelWeb, NAME as CHANNEL_WEB } from "../../registry/components/channel-web/files/src/pikit/channel-web/index.ts";
+import { testDirectory } from "../../registry/components/channel-web/files/src/pikit/channel-web/directory.test-support.ts";
 import { FakePrincipals } from "../../registry/components/channel-web/files/src/pikit/channel-web/projects.test-support.ts";
 import { adminAuth, FakeAccounts, router, secretsOf } from "../../registry/components/channel-web/files/src/pikit/channel-web/runtime.test-support.ts";
 import conversationsKv from "../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
@@ -112,6 +115,7 @@ async function world() {
       pikit.provide("principals", principals);
     },
   });
+  const directory = testDirectory();
   const components = [
     sqliteStorage(join(dir, "pikit.db")),
     storageKvSql,
@@ -124,6 +128,8 @@ async function world() {
     providerFaux,
     runtimePi,
     conversationsKv,
+    directory.provider(),
+    directory.recorder(),
     executionLocal,
     workspaceLocal,
     storageBlobFs,
@@ -344,12 +350,21 @@ test("a project end to end: made on the page, its chat's agent sees it and adds 
     ["POST", `${P}/history/memory/1/restore`],
     ["POST", `${P}/history/project/1/restore`],
     ["GET", `${P}/conversations`],
-    ["GET", `${P}/conversations/${chat}/transcript`],
+    ["GET", `${P}/conversations/${chat}/transcript?user=ben`],
+    ["GET", `/conversations/${chat}/transcript?user=ben`],
+    ["POST", `/conversations/${chat}/hide?user=ben`],
   ] as [string, string, unknown?][]) {
     expect({ method, path, status: (await w.call("cy", method, path, body)).status }).toEqual({ method, path, status: 404 });
   }
   expect((await w.call("cy", "POST", "/conversations", { text: "hello", project: project.id })).status).toBe(404);
   expect(await w.ok<ChatPage<ChatChange>>("ana", "GET", `${P}/history?limit=100`)).toEqual(before);
+
+  // Ana, the project's owner, lists Ben's chat (the directory, by projects-sql's grant of the project's
+  // space), reads it, and may rename and archive it for everyone, never delete it.
+  const chats = await w.ok<ChatPage<{ id: string; userId: string; mine: boolean; may: unknown }>>("ana", "GET", `${P}/conversations`);
+  expect(chats.items.find((each) => each.id === chat)).toMatchObject({ userId: "ben", mine: false, may: { rename: true, archive: true, delete: false } });
+  expect((await w.call("ana", "GET", `${P}/conversations/${chat}/transcript?user=ben`)).status).toBe(200);
+  expect((await w.call("ana", "DELETE", `/conversations/${chat}?user=ben`)).status).toBe(403);
 
   // Ana removes Ben: his writes stop at his next request, his chat with them.
   await w.ok("ana", "DELETE", `${P}/members/${encodeURIComponent("web:ben")}`, undefined, 204);
