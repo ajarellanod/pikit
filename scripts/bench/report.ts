@@ -91,7 +91,8 @@ export function table(sides: readonly SideResult[], modelMs: number): string {
     if (fields !== "") notes.push(`  1. the fresh object's start line: ${fields}`);
     side.owners.cold[0]?.forEach((step) => {
       const failed = step.ok ? "" : ` (answered ${step.code ?? "an error"})`;
-      notes.push(`  2. ${step.name}: started ${started(step) || "nothing"}${failed}`);
+      const own = logged(step.during.filter((start) => start.key === step.name));
+      notes.push(`  2. ${step.name}: started ${started(step) || "nothing"}${failed}${own === "" ? "" : `; its line: ${own}`}`);
     });
     const conversation = side.conversation.cold[0];
     if (conversation !== undefined) notes.push(`  3. cold conversation: started ${started(conversation) || "nothing"}${conversation.ok ? "" : ` (failed: ${conversation.code})`}`);

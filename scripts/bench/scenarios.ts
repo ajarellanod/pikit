@@ -68,7 +68,7 @@ export const OWNERS: readonly { key: string; type: string; message: unknown }[] 
 ];
 
 const START_LINE = /pikit: object started \{([^}]*)\}/g;
-const FIELD = /(\w+): (?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|(-?\d+(?:\.\d+)?)|(true|false))/g;
+const FIELD = /(\w+): (?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|(-?\d+(?:\.\d+)?)|(true|false|null))/g;
 
 /** The object starts in a piece of `wrangler dev`'s output. */
 export function parseStarts(output: string): ObjectStart[] {
@@ -78,7 +78,8 @@ export function parseStarts(output: string): ObjectStart[] {
     for (const field of (line[1] ?? "").matchAll(FIELD)) {
       const [, name, single, double, number, bool] = field;
       if (name === undefined) continue;
-      fields[name] = number !== undefined ? Number(number) : bool !== undefined ? bool === "true" : (single ?? double ?? "");
+      // `null` (a key of no actor kind) reads "none": a value the table can print.
+      fields[name] = number !== undefined ? Number(number) : bool === "null" ? "none" : bool !== undefined ? bool === "true" : (single ?? double ?? "");
     }
     const { object, ...rest } = fields;
     starts.push({ object: String(object ?? "?"), fields: rest });
