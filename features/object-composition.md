@@ -480,6 +480,18 @@ only the `component.json` of components whose setup changed.
 | T6 the CLI's parts | `apps` values as a name or a list; add, remove, upgrade, halves | `registry/schema/component.schema.json`, `packages/cli/src/registry/manifest.ts`, `packages/cli/src/project/apps.ts`, `packages/cli/src/project/config-file.ts`, `packages/cli/src/commands/{add,remove,upgrade}.ts` and their tests, `packages/cli/src/commands/two-apps.test.ts` |
 | T7 the smaller wins | one `memory.list` per owner per run; one project lookup per run | `registry/components/memory-recall/**`, `registry/components/projects-context/**` |
 
+**T1 as built** (what phase 2 builds on). The contract is `packages/contracts/src/actor-kind.ts`:
+`ActorKind`; `actorKindDeclarations(describe(), useKeyed("actor.kind") handle)` reads the
+declarations in start order, each with the `provider` `describe()` names (so `actorKindProblems`
+refuses one under another component's name); `actorKindOf`, `actorKinds` (every kind, one per
+pattern, for `/health` and `doctor`), `actorComposition` and `actorKindOptions(definition, names)`
+(the subset of the project's components in list order and its config reduced: what a host or the
+probe passes to `defineApp`); `createActorKindConformance` and `withoutActorKinds(components)` (the
+same project with its declarations dropped: the whole App) in `@pikit/contracts/testing`. The
+kind's App starts in the kernel's order for that subset, which may differ from the whole App's for
+a component no longer needed early. deployment-cloudflare's `host.ts` is the reference host
+(`kindsOf` per isolate and definition, `OBJECT_KEY` = `pikit:key`, `HostOptions.binding`).
+
 **Phase 2, in parallel, after T1** (and T2's baseline):
 
 | Task | What | Owns |
