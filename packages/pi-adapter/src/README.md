@@ -62,7 +62,7 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 `createDurableRuntime(options)` is `agent.runtime` (`dispatch`, `abort`, `resume`) and
 `agent.submissions` (`submissions`, "Submissions" below), plus what a host uses: `createConversation`,
 `recover`, `abandon`, `holds`, `whenIdle`, `state`, `inspect`, `close`. The contracts and events are as consumers see them: `Admission` (`started`/`queued`/
-`duplicate`), `agent.dispatched`, `agent.started` (`resumed` for a run a previous worker left open),
+`duplicate`), `agent.dispatched` (with the dispatched request's `sender`, when it has one), `agent.started` (`resumed` for a run a previous worker left open),
 `agent.settled`/`agent.failed` with `AgentResult`, and `agent.partial` while a run streams (below).
 
 - **One Harness per storage**, opened at first use over `db` (`storage.sql`, `openDurableStorage`)

@@ -1207,7 +1207,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       // The run may be going already; its end is announced only after `announced()`, so
       // `agent.dispatched`, `agent.started` and its result arrive in that order.
       try {
-        await ctx.emit("agent.dispatched", { conversation: ref, admission });
+        await ctx.emit("agent.dispatched", { conversation: ref, admission, ...(sender !== undefined && { sender }) });
         if (admission.kind === "started") await emit(runContext(ctx), "agent.started", { conversation: ref, requestId, resumed: false });
       } finally {
         announced();

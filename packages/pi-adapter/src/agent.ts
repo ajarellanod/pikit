@@ -199,13 +199,14 @@ export interface AgentConfigSource {
 /**
  * `ref` as its conversation's record (`ConversationDoc`) has it: the recorded channel and space win over a
  * ref's own (a conversation's channel and space never change), and the origin is the recorded one or none, whatever
- * the ref says (only the runtime fixes it).
+ * the ref says (only the runtime fixes it). No owner: the runtime records none (`ConversationRef.owner` is the
+ * registry's), so the refs of its events and runs never carry one, whatever a caller's ref had.
  */
 export function asRecorded(
   ref: ConversationRef,
   recorded: { channel?: string | undefined; space?: string | undefined; origin?: ConversationOrigin | undefined },
 ): ConversationRef {
-  const { origin: _given, space: _space, ...own } = ref;
+  const { origin: _given, space: _space, owner: _owner, ...own } = ref;
   const channel = recorded.channel ?? ref.channel;
   // A recorded channel means the conversation was recorded with its place: its space is the recorded one or none.
   const space = recorded.channel !== undefined ? recorded.space : ref.space;
