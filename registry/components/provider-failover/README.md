@@ -56,9 +56,10 @@ Each App keeps its own copy, so requests do not wait on the owner:
 
 - a failure (or an answer that clears one) updates the copy at once, and is reported to the owner.
   The owner answers with every cooldown it holds, which refreshes the copy;
-- the copy is read at start. An App's first requests wait for that read for up to one second. After
-  that, a request reads the copy again once it is `refreshSeconds` old (10 by default), without
-  waiting for the answer;
+- the copy is first read at the App's first model request, not at its start: a start calls no other
+  actor, and an App that never asks a model (an owner's Durable Object) never calls this one. The
+  first requests wait for that read for up to one second. After that, a request reads the copy again
+  once it is `refreshSeconds` old (10 by default), without waiting for the answer;
 - each entry carries when it was learnt, and the newest one wins, both at the owner and in each
   copy. So a report that is sent again, or arrives late, changes nothing.
 
@@ -215,7 +216,8 @@ small (and failing as an overflow when none holds it), a smaller fallback's over
 each model's own output limit and least thinking (also through `model.complete`). `shared.test.ts`
 covers the shared cooldowns: Apps over one owner through a fake mailbox (a failure seen by another
 App, read again after `refreshSeconds`, answers clearing them, expiry, health), a restart over the
-same storage, an owner that refuses or never answers, and the owner keeping the newest entry of each
+same storage, an owner that refuses or never answers, no call at start (the first request reads, once
+for the requests meanwhile, waiting a second at most), and the owner keeping the newest entry of each
 key. In the pikit repository, the workerd lane (`tests/workerd/test/provider-failover.workerd.ts`)
 composes it with runtime-pi, provider-openai and provider-anthropic in a real Durable Object:
 OpenAI's fake API refuses with a 429, the agent answers through Anthropic's, and the next message

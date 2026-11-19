@@ -10,10 +10,11 @@
  *   the key (a model or a provider), why, until when and when it was learnt. Never an error's text,
  *   nor a credential.
  * - **A local copy.** Each App reads its own copy (`createCooldowns`), so no request waits on the
- *   owner but an App's first, and that one at most `firstWaitMs` (while the start's sync is out). A
- *   failure updates the copy at once and is reported (`sync` with the entry), and the answer is every
- *   entry the owner holds, merged into the copy. The copy is read again on a request once it is
- *   `refreshMs` old.
+ *   owner but an App's first ones, and those at most `firstWaitMs` (while the first sync is out). The
+ *   first sync is made by the first request (`ready`), never by the start: an App that never asks a
+ *   model never calls the owner, and a start calls no other actor. A failure updates the copy at once
+ *   and is reported (`sync` with the entry), and the answer is every entry the owner holds, merged
+ *   into the copy. The copy is read again on a request once it is `refreshMs` old.
  * - **Idempotent, in any order.** Each entry carries when it was learnt (`at`), and the newest of a key
  *   wins (`supersedes`), at the owner as in each copy: a report sent again, or one that arrives after a newer answer,
  *   changes nothing. An entry not taken by the owner stays to send with the next sync.
@@ -107,7 +108,7 @@ export interface SharingOptions {
   now(): number;
   /** How old the copy may be before a request reads it again (in the background). */
   refreshMs: number;
-  /** How long an App's first requests wait for the start's sync. */
+  /** How long an App's first requests wait for its first sync. */
   firstWaitMs: number;
   /** The copy changed: the health report may have. */
   changed(): void;
@@ -118,9 +119,12 @@ export interface SharingOptions {
 export interface Sharing {
   /** For `createCooldowns`: what the copy learnt, reported now. */
   learnt(entries: readonly CooldownEntry[]): void;
-  /** For `failoverProvider`: the start's sync (bounded), and a refresh of a stale copy (not waited for). */
+  /**
+   * For `failoverProvider`, before each request: the first one starts the first sync and waits for it
+   * (at most `firstWaitMs`, with every request meanwhile); later, a refresh of a stale copy (not waited for).
+   */
   ready(): Promise<void>;
-  /** Reads the owner's cooldowns now, with `ctx` (the App's background context) for every call. */
+  /** Keeps `ctx` (the App's background context) for every call; calls nothing. */
   start(ctx: AppContext): void;
   stop(): void;
 }
@@ -183,18 +187,20 @@ export function shareCooldowns(options: SharingOptions): Sharing {
       void sync();
     },
     async ready() {
+      if (ctx === undefined || options.mailbox() === undefined) return;
+      if (last === undefined && first === undefined) {
+        const waited = new Promise<void>((resolve) => (firstTimer = setTimeout(resolve, options.firstWaitMs)));
+        first = Promise.race([sync(), waited]).finally(() => {
+          clearTimeout(firstTimer);
+          first = undefined;
+        });
+      }
       if (first !== undefined) await first;
-      if (ctx !== undefined && options.mailbox() !== undefined && (last === undefined || options.now() - last >= options.refreshMs)) void sync();
+      else if (last === undefined || options.now() - last >= options.refreshMs) void sync();
     },
     start(context) {
       ctx = context;
-      if (options.mailbox() === undefined) return;
-      const waited = new Promise<void>((resolve) => (firstTimer = setTimeout(resolve, options.firstWaitMs)));
-      const synced = sync();
-      first = Promise.race([synced, waited]).finally(() => {
-        clearTimeout(firstTimer);
-        first = undefined;
-      });
+      last = undefined;
     },
     stop() {
       clearTimeout(firstTimer);

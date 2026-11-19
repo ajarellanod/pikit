@@ -194,6 +194,8 @@ test("an App already running reads the others' cooldowns at its first request on
   await started(clock, [sqliteStorage(), owner.component(true)]);
   const a = await started(clock, [owner.component(false)]);
   const b = await started(clock, [owner.component(false)]);
+  // B's first request makes its first read, before A learns anything.
+  await b.ask();
   await clock.advance(1_000);
   scripts.set("openai/gpt-5.5", [RATE]);
   await a.ask();
@@ -298,12 +300,63 @@ test("with health, an App reports what the others learnt", async () => {
   await a.ask();
 
   const health = recordingHealth();
-  await started(clock, [owner.component(false), health.component]);
+  const b = await started(clock, [owner.component(false), health.component]);
+  // Nothing is read before its first request; that one reads the others' cooldowns, and never tries OpenAI.
   await settle();
+  expect(health.reports.get("provider-failover:main")).toEqual({ status: "up" });
+  expect((await b.ask()).asked).toEqual(["anthropic/claude-sonnet-4-6"]);
   expect(health.reports.get("provider-failover:main")).toEqual({
     status: "degraded",
     reason: `openai/gpt-5.5 rate, until ${new Date(clock.now() + 15 * MINUTE).toISOString()}; answering with anthropic/claude-sonnet-4-6`,
   });
+});
+
+test("a start calls no other actor: the first read is made by the first request, once for every request meanwhile", async () => {
+  const clock = createManualClock();
+  const owner = hub();
+  await started(clock, [sqliteStorage(), owner.component(true)]);
+  const a = await started(clock, [owner.component(false)]);
+  scripts.set("openai/gpt-5.5", [RATE]);
+  await a.ask();
+  scripts.delete("openai/gpt-5.5");
+
+  const calls = owner.state.calls.length;
+  const b = await started(clock, [owner.component(false)]);
+  await settle();
+  // Started, and idle: no call (an object that never asks a model never calls the owner).
+  expect(owner.state.calls.length).toBe(calls);
+
+  // Its first requests, together: one read, which both wait for, and both skip OpenAI.
+  owner.state.delayMs = 50;
+  const before = asked.length;
+  await Promise.all([b.ask(), b.ask()]);
+  expect(asked.slice(before)).toEqual(["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-6"]);
+  expect(owner.state.calls.length).toBe(calls + 1);
+  // The next request, its copy fresh: no call.
+  await b.ask();
+  expect(owner.state.calls.length).toBe(calls + 1);
+});
+
+test("an owner that never answers holds the first request a second, no more", async () => {
+  const clock = createManualClock();
+  const owner = hub();
+  await started(clock, [sqliteStorage(), owner.component(true)]);
+  owner.state.fault = "hang";
+  const b = await started(clock, [owner.component(false)]);
+  expect(owner.state.calls.length).toBe(0);
+
+  const startedAt = Date.now();
+  expect((await b.ask()).asked).toEqual(["openai/gpt-5.5"]);
+  const waited = Date.now() - startedAt;
+  expect(waited).toBeGreaterThanOrEqual(900);
+  expect(waited).toBeLessThan(2_000);
+  expect(owner.state.calls.length).toBe(1);
+
+  // The read still out, the next request does not wait for it.
+  const next = Date.now();
+  await b.ask();
+  expect(Date.now() - next).toBeLessThan(500);
+  expect(owner.state.calls.length).toBe(1);
 });
 
 test("the owner keeps the newest entry of each key: a report sent again, or one older than an answer, changes nothing; another key is refused", async () => {
