@@ -68,6 +68,11 @@ export { createAgentCommandConformance } from "./agent-command.ts";
 export type { ConversationDescribeFixture } from "./conversation-describe.ts";
 export { createConversationDescribeConformance, HOSTILE_NAME } from "./conversation-describe.ts";
 
+export type { ConversationDirectoryFixture, ConversationDirectorySubject, DirectoryMessage, DirectoryPlace, MemoryDirectory, MemoryDirectoryOptions, MemoryDirectoryUpdate } from "./conversation-directory.ts";
+export { createConversationDirectoryConformance, createMemoryDirectory } from "./conversation-directory.ts";
+export type { AudienceMember, ConversationAudienceFixture } from "./conversation-audience.ts";
+export { createConversationAudienceConformance } from "./conversation-audience.ts";
+
 export type { ModelCompleteFixture } from "./model-complete.ts";
 export { createModelCompleteConformance } from "./model-complete.ts";
 
