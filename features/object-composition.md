@@ -3,7 +3,17 @@
 **Public appeal:** — (latency: a message that wakes ten idle objects waits for ten whole-App starts)
 
 **Specified:** no. A design, 2026-11-19, from neural-agents' measured critical path
-(`agents/src/pikit/channel-google-chat/LATENCY.md` there). Nothing below is built.
+(`agents/src/pikit/channel-google-chat/LATENCY.md` there).
+
+**Where it stands (2026-11-19, the operator's decision):** the per-kind reduced App is **parked**. The bench
+(`scripts/bench-object-start.ts`, `docs/benchmarks/object-start.md`) measured a whole App's start at 16–18 ms
+locally: a cold object's cost is the number of objects on the path, not each one's App. Built and kept: the lazy
+starts that take objects off that path (runtime-pi reads no credentials and asks no drive at start; provider-failover's
+shared cooldowns read at the first model request; memory-recall and projects-context ask fewer lists per run), the
+bench, and `pikit: object started`'s `isolate` (`new`/`warm`) and `startMs` (the start's waits) to measure production.
+The mechanism (T1: `actor.kind`, `actorComposition`, the host) and the started parts of T6, T8, T9 and T10 stay on
+their branches (`agent/comp-t1-mechanism`, `agent/comp-t6-cli-apps`, `agent/comp-t8-celld`, `agent/comp-t9-doctor`,
+`agent/comp-t10-declarations`), unmerged: resume them only if production shows the App's start is the cost.
 
 **Needed by:** nothing required. SPEC §4's budget "cold start ≤ 1 s" is per object; a message that
 crosses ten cold objects in series is ten of them, which no budget covers today.

@@ -64,6 +64,14 @@ export const START_FAILURES_KEY = "pikit:start-failures";
 export const OBJECT_BINDING = "CONVERSATION";
 /** The object `GET /health` starts: one of its own, never a conversation's. */
 export const HEALTH_OBJECT = "pikit:health";
+
+/**
+ * Objects that started an App in this isolate, for `pikit: object started`'s `isolate`: the first is `new` (its
+ * isolate also paid the Worker module's start), the others `warm`. A Worker's clock moves only on I/O, so the line's
+ * `startMs` is the start's waits (storage, other objects, fetches), not its CPU: the event's `cpuTime` in
+ * `wrangler tail` gives that. Together they say whether a cold object costs its App's start or the platform's.
+ */
+let objectsStartedInIsolate = 0;
 /** The `version_metadata` binding in `wrangler.jsonc`: the version `GET /health` reports. */
 export const VERSION_BINDING = "CF_VERSION_METADATA";
 
@@ -164,9 +172,11 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
         onDeliver = undefined;
         onCall = undefined;
         onStream = undefined;
+        const begun = Date.now();
         const app = await compose(definition, [], logger, options.clock);
         await startWithin(app, withContextValue(WORKERS_HOST, host, BACKGROUND_CONTEXT), options, logger);
-        logger.info("pikit: object started", { object: host.object?.id });
+        const isolate = objectsStartedInIsolate++ === 0 ? "new" : "warm";
+        logger.info("pikit: object started", { object: host.object?.id, isolate, startMs: Date.now() - begun });
       })
       .catch((error: unknown) => {
         // Rethrown from inside blockConcurrencyWhile, the error resets the object; should the instance
