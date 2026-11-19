@@ -173,7 +173,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       busy: conversation.busy,
       active: path === pagePath(CHAT, id),
       href: `${BASE}${pagePath(CHAT, id)}`,
-      actions: chatActions.actionsOf(conversation, false),
+      actions: chatActions.actionsOf(conversation),
     });
   }
 

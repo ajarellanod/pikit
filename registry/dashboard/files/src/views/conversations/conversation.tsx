@@ -3,8 +3,8 @@
  * (`source.ts`); and what an operator does to it (SPEC §5): a message (with images, a web search), a
  * stop, a reset (`/new`). Its top bar holds an info button on who it is with (`PartyChip`: its Details,
  * the channel, the name, the ids, a link to where the channel shows them), the Context panel's button, when there is any (the images
- * sent in it, what its web searches and fetches found), and its menu (Rename, Archive or Restore,
- * Delete: the sidebar row's). Its composer shows its assistant: a conversation never changes agent, so
+ * sent in it, what its web searches and fetches found), and its menu (Rename, Hide for me, Archive for
+ * everyone, Delete for everyone, or what puts it back: the sidebar row's). Its composer shows its assistant: a conversation never changes agent, so
  * picking another starts a new chat with it. Its "/" lists the App's commands for its agent (`agents`)
  * and runs them here (`POST
  * …/commands/:name`): what one answers is a quiet note in the thread, for the operator only (no channel
@@ -28,7 +28,7 @@ import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { ConversationView, type ThreadNote } from "@/components/pikit/conversation";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { PartyChip, partyOf } from "@/components/pikit/party";
-import { api, type ApiCommandResponse, type ApiConversation, type ApiPage, post, useApi } from "@/lib/api";
+import { api, type ApiCommandResponse, type ApiConversation, post, useApi } from "@/lib/api";
 import { agentsOf, type CommandNote, useChats } from "@/lib/chats";
 import type { StuckAnswer, UndeliveredAnswer } from "@/lib/delivery";
 import { useDelivery } from "@/lib/delivery-feed";
@@ -87,6 +87,11 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const summary = useApi<ApiConversation>(`/conversations/${encodeURIComponent(id)}`);
   const { reload } = summary;
   const conversation = summary.data?.conversationId === id ? summary.data : undefined;
+  // Renamed, hidden, archived or restored from its menu: read again, so the menu says what it is now.
+  const { changed } = chats;
+  useEffect(() => {
+    if (changed > 0) reload();
+  }, [changed, reload]);
 
   const { openTab, setFirstMessage } = chats;
   useEffect(() => {
@@ -116,12 +121,9 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const runCommand = async (name: string, args: string) => {
     if (conversation === undefined) return;
     const answer = await post<ApiCommandResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/commands/${encodeURIComponent(name)}`, { args });
-    let target = conversation.conversationId;
     const now = await api<ApiConversation>(`/conversations/${encodeURIComponent(conversation.conversationId)}`).catch(() => undefined);
-    if (now?.current === false && now.key !== undefined) {
-      const page = await api<ApiPage<ApiConversation>>("/conversations?limit=50").catch(() => undefined);
-      target = page?.items.find((each) => each.key === now.key && each.current === true)?.conversationId ?? target;
-    }
+    // Its key points elsewhere now (`/new`): there.
+    const target = now?.current === false && now.currentId !== undefined ? now.currentId : conversation.conversationId;
     chats.addNote(target, name, answer.text ?? `Ran /${name}.`);
     chats.reload();
     if (target === conversation.conversationId) reload();
@@ -140,7 +142,6 @@ export function ConversationPage({ params }: { params: Record<string, string> })
       .filter((answer) => answer.conversationId === id)
       .map((answer) => ({ key: `stuck-${answer.key}`, at: answer.since, node: <DeliveryNoteRow answer={{ kind: "stuck", of: answer }} /> })),
   ].sort((a, b) => a.at - b.at);
-  const archived = chats.archived?.some((each) => each.conversationId === id) === true;
 
   return (
     <ConversationView
@@ -156,10 +157,8 @@ export function ConversationPage({ params }: { params: Record<string, string> })
             <PartyChip party={partyOf(conversation)} />
             {contextButton}
             <ActionsMenu
-              actions={conversationActions(conversation, archived)}
+              actions={conversationActions(conversation)}
               label="Conversation actions"
-              // Archived or not: the archived ones are read when the menu opens.
-              onOpenChange={(open) => open && chats.archived === undefined && chats.loadArchived()}
               className="size-7 rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink aria-expanded:bg-hover-2 aria-expanded:text-ink"
             />
           </TabActions>

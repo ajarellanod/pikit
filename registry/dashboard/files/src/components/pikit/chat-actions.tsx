@@ -1,11 +1,13 @@
 /**
  * What the operator does to a conversation from its menu (`ActionsMenu`), wherever it shows: the
- * sidebar's rows and the conversation's header (the tab bar's right end). Rename (a dialog), Archive or
- * Restore, Delete (confirmed first): the list only (`useChats().hide`, `rename`). The dashboard's own:
- * it uses the admin client.
+ * sidebar's rows and the conversation's header (the tab bar's right end), as the conversation
+ * directory says it is (`state`, `hidden`). Rename (a dialog: the title everyone sees); "Hide for me"
+ * or "Show again" (this operator's list only); "Archive for everyone" or "Restore"; "Delete for
+ * everyone" (confirmed first) or, once deleted, "Restore" (`useChats().act`, `rename`). Every view of
+ * the directory honours what is done for everyone. The dashboard's own: it uses the admin client.
  */
 
-import { Archive, EditPencil, Trash, Undo } from "iconoir-react";
+import { Archive, EditPencil, Eye, EyeClosed, Trash, Undo } from "iconoir-react";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { ActionsMenuItem } from "@/components/bui/ActionsMenu";
 import { Button } from "@/components/bui/Button";
@@ -23,11 +25,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { TITLE_MAX } from "@/lib/admin-api";
 import type { ApiConversation } from "@/lib/api";
-import { NEW_CHAT, useChats } from "@/lib/chats";
+import { type ChatAction, NEW_CHAT, useChats } from "@/lib/chats";
 
 export interface ChatActions {
-  /** The menu's items for `conversation`: Restore in place of Archive when it is `archived`. */
-  actionsOf(conversation: ApiConversation, archived: boolean): ActionsMenuItem[];
+  /** The menu's items for `conversation`, as it is now (its `state` and `hidden`). */
+  actionsOf(conversation: ApiConversation): ActionsMenuItem[];
   /** What the last action that failed said. */
   error: Error | undefined;
   /** The rename and delete dialogs: rendered once, where the shell puts them. */
@@ -35,8 +37,8 @@ export interface ChatActions {
 }
 
 /**
- * The actions, and their dialogs. `shown` is the conversation the page shows: archived or deleted, it
- * leaves (`onLeft`, the shell opens a fresh New chat).
+ * The actions, and their dialogs. `shown` is the conversation the page shows: hidden, archived or
+ * deleted, it leaves (`onLeft`, the shell opens a fresh New chat).
  */
 export function useChatActions({ shown, onLeft }: { shown: string | undefined; onLeft: () => void }): ChatActions {
   const chats = useChats();
@@ -46,24 +48,28 @@ export function useChatActions({ shown, onLeft }: { shown: string | undefined; o
   const [renaming, setRenaming] = useState<{ id: string; title: string }>();
   const [error, setError] = useState<Error>();
 
-  const put = (id: string, action: "archive" | "unarchive" | "delete") => {
+  const put = (id: string, action: ChatAction) => {
     setError(undefined);
-    const leaving = action !== "unarchive" && shown === id;
-    chats.hide(id, action).then(
+    const leaving = action !== "unhide" && action !== "restore" && shown === id;
+    chats.act(id, action).then(
       () => leaving && onLeft(),
       (thrown: unknown) => setError(thrown instanceof Error ? thrown : new Error(String(thrown))),
     );
   };
 
-  const actionsOf = (conversation: ApiConversation, archived: boolean): ActionsMenuItem[] => {
+  const actionsOf = (conversation: ApiConversation): ActionsMenuItem[] => {
     const id = conversation.conversationId;
     const title = chats.titleOf(conversation);
+    const rename: ActionsMenuItem = { key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenaming({ id, title: title === NEW_CHAT ? "" : title }) };
+    const restore: ActionsMenuItem = { key: "restore", label: "Restore", icon: <Undo />, onSelect: () => put(id, "restore") };
+    if (conversation.state === "deleted") return [rename, restore];
     return [
-      { key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenaming({ id, title: title === NEW_CHAT ? "" : title }) },
-      archived
-        ? { key: "unarchive", label: "Restore", icon: <Undo />, onSelect: () => put(id, "unarchive") }
-        : { key: "archive", label: "Archive", icon: <Archive />, onSelect: () => put(id, "archive") },
-      { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeleting({ id, title }) },
+      rename,
+      conversation.hidden === true
+        ? { key: "unhide", label: "Show again", icon: <Eye />, onSelect: () => put(id, "unhide") }
+        : { key: "hide", label: "Hide for me", icon: <EyeClosed />, onSelect: () => put(id, "hide") },
+      conversation.state === "archived" ? restore : { key: "archive", label: "Archive for everyone", icon: <Archive />, onSelect: () => put(id, "archive") },
+      { key: "delete", label: "Delete for everyone", icon: <Trash />, danger: true, onSelect: () => setDeleting({ id, title }) },
     ];
   };
 
@@ -72,9 +78,9 @@ export function useChatActions({ shown, onLeft }: { shown: string | undefined; o
       <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this chat for everyone?</AlertDialogTitle>
             <AlertDialogDescription>
-              “{deleting?.title}” leaves the list for good. If its person writes again, it comes back with the new message.
+              “{deleting?.title}” is no longer listed anywhere, for you, other operators or its person, even if they write again: their next message starts a new chat. Nothing is erased; you can restore it from Deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -86,7 +92,7 @@ export function useChatActions({ shown, onLeft }: { shown: string | undefined; o
                 setDeleting(undefined);
               }}
             >
-              Delete
+              Delete for everyone
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -128,7 +134,7 @@ function RenameDialog({ chat, onClose, rename }: { chat: { id: string; title: st
         <form onSubmit={(event) => void submit(event)} className="contents">
           <AlertDialogHeader>
             <AlertDialogTitle>Rename this chat</AlertDialogTitle>
-            <AlertDialogDescription>The title the sidebar and its tab show.</AlertDialogDescription>
+            <AlertDialogDescription>The title everyone sees: here, in its tab, and in its chat.</AlertDialogDescription>
           </AlertDialogHeader>
           <Field label="Title" required>
             {(control) => (

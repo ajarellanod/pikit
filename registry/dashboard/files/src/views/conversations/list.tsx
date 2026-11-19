@@ -2,25 +2,26 @@
  * Conversations (`/conversations/all`): every conversation, the most recently active first, a page at
  * a time ("Load more", the API's cursor), where the sidebar lists only the latest (`SIDEBAR_CHATS`,
  * its "View all" leads here). A search finds them by title or key (`?q=`, the API's: any case), as the
- * operator stops typing; "Archived" lists the archived ones instead (`?archived=1`), searched alike:
- * the only place they are. Each row shows its channel's icon, and opens its conversation, and its menu is the sidebar row's (Rename,
- * Archive or Restore, Delete: `useShell().conversationActions`); a change made anywhere here reads the
- * list again (`useChats().changed`).
+ * operator stops typing. A choice lists one bucket of the conversation directory (`?state=`): Active,
+ * Hidden by me, Archived (for everyone) or Deleted (for everyone), searched alike: the only place the
+ * last three are. Each row shows its channel's icon, and opens its conversation, and its menu is the
+ * sidebar row's (`useShell().conversationActions`: Show again and Restore put one back); a change made
+ * anywhere here reads the list again (`useChats().changed`).
  */
 
-import { Archive, ChatBubble, Plus, Search } from "iconoir-react";
-import { useEffect, useState } from "react";
+import { Archive, ChatBubble, EyeClosed, Plus, Search, Trash } from "iconoir-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/bui/Button";
 import { ConversationList } from "@/components/bui/ConversationList";
 import EmptyState from "@/components/bui/EmptyState";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import { Page } from "@/components/bui/Page";
 import SearchField from "@/components/bui/SearchField";
-import { Switch } from "@/components/bui/Switch";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { ChannelIcon, partyOf } from "@/components/pikit/party";
+import { type Choice, Segmented } from "@/components/pikit/settings-rows";
 import { SEARCH_MAX } from "@/lib/admin-api";
-import { api, type ApiConversation, type ApiPage } from "@/lib/api";
+import { api, type ApiConversation, type ApiListState, type ApiPage } from "@/lib/api";
 import { useChats } from "@/lib/chats";
 import { BASE, navigate, pagePath } from "@/lib/router";
 import { useShell } from "@/lib/shell";
@@ -30,6 +31,22 @@ export const CONVERSATIONS_PATH = "/conversations/all";
 const PAGE = 30;
 /** How long after the last key a search goes. */
 const DEBOUNCE_MS = 250;
+
+/** The buckets, in plain words. */
+const STATES: Choice<ApiListState>[] = [
+  { value: "listed", label: "Active" },
+  { value: "hidden", label: "Hidden by me" },
+  { value: "archived", label: "Archived" },
+  { value: "deleted", label: "Deleted" },
+];
+
+/** What an empty bucket says: its icon, its title, a hint. */
+const EMPTY: Record<ApiListState, { icon: ReactNode; title: string; hint: string }> = {
+  listed: { icon: <ChatBubble />, title: "No conversations yet", hint: "Start one with New chat, or wait for a channel's." },
+  hidden: { icon: <EyeClosed />, title: "Nothing hidden", hint: "A chat you hide for yourself is listed here, until someone writes in it again." },
+  archived: { icon: <Archive />, title: "No archived conversations", hint: "A chat archived for everyone is listed here, until its person writes again." },
+  deleted: { icon: <Trash />, title: "No deleted conversations", hint: "A chat deleted for everyone is listed here only; Restore brings it back." },
+};
 
 /** `value`, once it stopped changing for `ms`. */
 function useDebounced<T>(value: T, ms: number): T {
@@ -41,37 +58,37 @@ function useDebounced<T>(value: T, ms: number): T {
   return settled;
 }
 
-const pathOf = ({ q, archived, cursor }: { q: string; archived: boolean; cursor?: string }): string => {
+const pathOf = ({ q, state, cursor }: { q: string; state: ApiListState; cursor?: string }): string => {
   const params = new URLSearchParams({ limit: String(PAGE) });
-  if (archived) params.set("archived", "1");
+  if (state !== "listed") params.set("state", state);
   if (q !== "") params.set("q", q);
   if (cursor !== undefined) params.set("cursor", cursor);
   return `/conversations?${params}`;
 };
 
-/** The conversations `q` finds, archived or not: `undefined` until read; read again when `round` moves. More pages on demand. */
-function useFound(q: string, archived: boolean, round: number) {
-  const key = `${archived}:${q}`;
+/** The conversations of `state` that `q` finds: `undefined` until read; read again when `round` moves. More pages on demand. */
+function useFound(q: string, state: ApiListState, round: number) {
+  const key = `${state}:${q}`;
   const [found, setFound] = useState<{ key: string; items: ApiConversation[]; next?: string | undefined }>();
   const [error, setError] = useState<Error>();
 
   useEffect(() => {
     let live = true;
-    api<ApiPage<ApiConversation>>(pathOf({ q, archived })).then(
-      (page) => live && (setFound({ key, items: page.items.filter((each) => each.key !== undefined), next: page.next }), setError(undefined)),
+    api<ApiPage<ApiConversation>>(pathOf({ q, state })).then(
+      (page) => live && (setFound({ key, items: page.items, next: page.next }), setError(undefined)),
       (thrown: unknown) => live && setError(thrown instanceof Error ? thrown : new Error(String(thrown))),
     );
     return () => {
       live = false;
     };
-  }, [key, q, archived, round]);
+  }, [key, q, state, round]);
 
   const current = found?.key === key ? found : undefined;
   const loadMore = async () => {
     if (current?.next === undefined) return;
-    const page = await api<ApiPage<ApiConversation>>(pathOf({ q, archived, cursor: current.next }));
+    const page = await api<ApiPage<ApiConversation>>(pathOf({ q, state, cursor: current.next }));
     const ids = new Set(current.items.map((each) => each.conversationId));
-    setFound({ key, items: [...current.items, ...page.items.filter((each) => each.key !== undefined && !ids.has(each.conversationId))], next: page.next });
+    setFound({ key, items: [...current.items, ...page.items.filter((each) => !ids.has(each.conversationId))], next: page.next });
   };
   return { items: current?.items, error, hasMore: current?.next !== undefined, loadMore };
 }
@@ -80,11 +97,13 @@ export function ConversationsPage() {
   const chats = useChats();
   const { newChat, conversationActions } = useShell();
   const [query, setQuery] = useState("");
-  const [archived, setArchived] = useState(false);
+  const [state, setState] = useState<ApiListState>("listed");
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<Error>();
   const q = useDebounced(query.trim(), DEBOUNCE_MS);
-  const found = useFound(q, archived, chats.changed);
+  const found = useFound(q, state, chats.changed);
+  const empty = EMPTY[state];
+  const named = STATES.find((each) => each.value === state)?.label.toLowerCase() ?? "";
   const items = found.items;
 
   return (
@@ -100,10 +119,7 @@ export function ConversationsPage() {
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <SearchField value={query} onChange={(value) => setQuery(value.slice(0, SEARCH_MAX))} placeholder="Search by title" label="Search the conversations" className="min-w-0 flex-1" />
-          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px] text-ink-2">
-            <Switch checked={archived} onChange={setArchived} size="sm" label="Archived" />
-            <span aria-hidden>Archived</span>
-          </label>
+          <Segmented value={state} options={STATES} onChange={setState} label="Which conversations" />
         </div>
         {found.error !== undefined && <ErrorNote error={found.error} title="The conversations cannot be read" />}
         {problem !== undefined && <ErrorNote error={problem} />}
@@ -114,9 +130,9 @@ export function ConversationsPage() {
         )}
         {items !== undefined && items.length === 0 && (
           <EmptyState
-            icon={q !== "" ? <Search /> : archived ? <Archive /> : <ChatBubble />}
-            title={q !== "" ? `No ${archived ? "archived " : ""}conversation with “${q}”` : archived ? "No archived conversations" : "No conversations yet"}
-            hint={q !== "" ? "Search finds words of a title, or of a key, in any case." : archived ? "A conversation you archive is listed here." : "Start one with New chat, or wait for a channel's."}
+            icon={q !== "" ? <Search /> : empty.icon}
+            title={q !== "" ? `No ${state === "listed" ? "" : `${named} `}conversation with “${q}”` : empty.title}
+            hint={q !== "" ? "Search finds words of a title, or of a key, in any case." : empty.hint}
           />
         )}
         {items !== undefined && items.length > 0 && (
@@ -130,7 +146,7 @@ export function ConversationsPage() {
                 href: `${BASE}${pagePath("/conversations", conversation.conversationId)}`,
                 lastActivity: conversation.lastActivity,
                 busy: conversation.busy,
-                actions: conversationActions(conversation, archived),
+                actions: conversationActions(conversation),
               };
             })}
             onOpen={(id) => navigate(pagePath("/conversations", id))}
