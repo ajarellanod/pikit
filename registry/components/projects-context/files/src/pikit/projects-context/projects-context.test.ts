@@ -10,11 +10,11 @@
 import { expect, test } from "bun:test";
 import { type AppContext, BACKGROUND_CONTEXT, type Context, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import { createManualClock } from "@pikit/core/testing";
-import { type Author, CONVERSATION, type ConversationRef, type Principal, RUN_REQUESTS } from "@pikit/contracts";
+import { type Author, CONVERSATION, type ConversationRef, type Principal, type ProjectContext, RUN_REQUESTS } from "@pikit/contracts";
 import type {} from "@pikit/pi-adapter";
 import type { NewMemory } from "./contract.ts";
 import { fakeFiles, fakeMemory, fakeProjects } from "./doubles.test-support.ts";
-import projectsContext, { authorSource, createProjectsContext, nameOf, PROJECT, PROJECT_TOOLS, type ProjectsContextConfig } from "./index.ts";
+import projectsContext, { authorSource, createProjectsContext, nameOf, PROJECT, PROJECT_TOOLS, type ProjectsContextConfig, projectText } from "./index.ts";
 
 const START = Date.UTC(2026, 10, 17);
 const CONFIG: ProjectsContextConfig = {
@@ -357,4 +357,59 @@ test("the store sees the agent caller: its space is the conversation's (a delega
   expect(await render(runContext(child, [{ channel: "delegate", id: "assistant" }]))).toContain('You work in the project "AECC 2027"');
   expect(await call("project_search", { query: "brief" }, runContext(child, [{ channel: "delegate", id: "assistant" }]))).toContain("(document:d-91c2, part 1;");
   expect(projects.calls.every((each) => each.endsWith(SPACE))).toBe(true);
+});
+
+test("one run asks the project once, and memory three times (the space's rules and notes together, its summaries, the person): the admission's answer serves its section and its tools", async () => {
+  const { projects, memory, files, render, offered, call, ctx } = await world();
+
+  expect(await offered(thread(), ctx)).toEqual([...PROJECT_TOOLS]);
+  expect(await render()).toContain("- Juan prefers calls on Tuesdays (note:c1:t4;");
+  expect(await call("project_read", { item: "note:c1:t4" })).toEndWith("\nJuan prefers calls on Tuesdays");
+  expect(projects.calls.filter((each) => each.startsWith("context"))).toEqual([`context ${SPACE}`]);
+  // Before: rules, notes and summaries of the space each in its own list, then the person's (four).
+  expect(memory.calls.filter((each) => each.startsWith("list"))).toEqual([
+    `list ${JSON.stringify({ type: "space", space: SPACE })} rule,fact`,
+    `list ${JSON.stringify({ type: "space", space: SPACE })} summary`,
+    `list ${JSON.stringify({ type: "person", channel: "googlechat", id: "users/42" })} preference`,
+  ]);
+  expect(files.calls.filter((each) => each.startsWith("list"))).toHaveLength(1);
+});
+
+test("the section says what one memory list per kind said, whatever the mix, the cut and the budgets (none included)", async () => {
+  // A small deterministic generator: the same cases every run.
+  let seed = 11;
+  const next = (n: number) => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed % n;
+  };
+  const kinds = ["rule", "rule", "fact", "fact", "summary"] as const;
+  const owner = { type: "space", space: SPACE } as const;
+  const tools = [...PROJECT_TOOLS, "project_note", "project_rule", "project_file_save", "project_file_get"];
+  for (let round = 0; round < 120; round++) {
+    const config = { ...CONFIG, rules: next(5), notes: next(5), summaries: next(3) };
+    const w = await world(config);
+    for (let i = 0, size = next(round < 60 ? 10 : 40); i < size; i++) {
+      const kind = kinds[next(kinds.length)] ?? "fact";
+      await w.memory.store.remember(owner, { ...memoryItem(kind, `${kind}-${i}`, `${kind} number ${i}`, ana), status: kind === "rule" && next(3) === 0 ? "pending" : "active" }, w.ctx);
+    }
+    const shown = await w.render();
+
+    // The section as it was built: each kind listed alone.
+    const store = w.memory.store;
+    const list = (filter: Parameters<typeof store.list>[1], limit: number) => (limit === 0 ? Promise.resolve([]) : store.list(owner, filter, limit, w.ctx));
+    const context = (await w.projects.store.context(SPACE, undefined, { kind: "agent", agent: "assistant", conversation: thread().key, space: SPACE }, w.ctx)) as ProjectContext;
+    const listed = await w.files.store.list(SPACE, { limit: config.files + 1 }, w.ctx);
+    const before = projectText(
+      {
+        context,
+        rules: await list({ kinds: ["rule"], status: "active" }, config.rules),
+        notes: await list({ kinds: ["fact"] }, config.notes),
+        summaries: await list({ kinds: ["summary"] }, config.summaries),
+        files: { files: listed.files.slice(0, config.files), more: listed.files.length > config.files },
+        preferences: [{ person: { channel: juan.channel, id: juan.id }, items: await store.list({ type: "person", channel: juan.channel, id: juan.id }, { kinds: ["preference"], status: "active" }, config.preferences, w.ctx) }],
+      },
+      { tools, coreTokens: CONFIG.coreTokens ?? 0, limits: config },
+    );
+    expect(shown).toBe(before);
+  }
 });

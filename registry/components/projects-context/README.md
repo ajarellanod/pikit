@@ -91,7 +91,11 @@ Links (data, not instructions):
   project, its memory or its files change (the prompt cache stays warm). The stores are asked at most
   once every `freshMs` per space (`projects.context` answers `unchanged` while the project's version
   holds); a space with no project is remembered as such for `noProjectMs`, so a project made for a space
-  shows within a minute. A link the agent adds shows at the next request.
+  shows within a minute. A link the agent adds shows at the next request. Asking costs one
+  `projects.context`, one `space.files.list` and two `memory.list` of the space (its active rules and
+  notes in one, `newestOfEach`: a kind that list cut short is asked again alone, so the section says
+  what one list per kind said; its summaries apart, long and many in an old space), and one per person
+  answered: a run's admission asks it (`offerTools`), its section and tools reuse it.
 - **Provenance:** every rule, note, file and link says who added it and from where (a person on the
   page or in a chat; an agent, its chat's channel and the person it answered, named as the project's
   members name them when the run's sender carries no name); every document its id,
@@ -136,7 +140,10 @@ Links (data, not instructions):
   (active rules, no pending one), a failing store said, 8 hits at most, without memory and files;
   `project_read` of every kind and part, wrong kinds and missing items, malformed refs; `project_link`
   with its notice and author (the person answered), shown at the next request, kept once; a delegated
-  conversation reaching its origin's project.
+  conversation reaching its origin's project; a run's calls counted (one `context`, three `memory.list`,
+  one files list for the admission, the section and a tool); the section's text the same as with one
+  memory list per kind over 120 generated spaces and budgets (checked against a helper that never asks
+  a short kind alone, and one that lists pending rules: each fails).
 - `app.test.ts` (in the registry only: it imports runtime-pi and provider-faux): the extension in a
   real App on a SQLite file with the doubles, the model `faux/scripted`: in a project's thread the
   section (with its provenance, the person's preferences) and the offered tools; in a space with no
