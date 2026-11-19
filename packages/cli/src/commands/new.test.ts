@@ -127,7 +127,7 @@ test("the default dashboard brings admin-api, and the defaults for admin.auth an
   // agents-live's group installs settings-store: the preset's, never recorded as the dashboard's.
   const live = builtin.preset("base", ["agents-live"]);
   expect(live).toContain("settings-store");
-  expect(uiComponentsFor(builtin, live, ["server"])).toEqual(["admin-auth-token", "admin-api"]);
+  expect(uiComponentsFor(builtin, live, ["server"])).toEqual(["admin-auth-token", "conversations-directory", "admin-api"]);
 });
 
 test("a default dashboard with no template is refused before any project files are written", async () => {
@@ -156,11 +156,11 @@ test("--ui with other providers of admin.auth and settings: decided by what thei
     { name: "admin-auth-edge", provides: ["admin.auth"], apps: { worker: "worker" }, halves: { default: nothing, worker: { ...nothing, provides: ["admin.auth"] } } },
     { name: "settings-both", provides: ["settings"], apps: { worker: "default" } },
   ]);
-  expect(uiComponentsFor(registry, ["admin-auth-sso", "settings-file"], ["server"])).toEqual(["admin-api"]);
-  expect(uiComponentsFor(registry, ["admin-auth-sso"], ["server"])).toEqual(["admin-api", "settings-store"]);
-  expect(uiComponentsFor(registry, ["settings-file"], ["server"])).toEqual(["admin-auth-token", "admin-api"]);
+  expect(uiComponentsFor(registry, ["admin-auth-sso", "settings-file"], ["server"])).toEqual(["conversations-directory", "admin-api"]);
+  expect(uiComponentsFor(registry, ["admin-auth-sso"], ["server"])).toEqual(["conversations-directory", "admin-api", "settings-store"]);
+  expect(uiComponentsFor(registry, ["settings-file"], ["server"])).toEqual(["admin-auth-token", "conversations-directory", "admin-api"]);
   // On Cloudflare, each in both Apps: nothing of theirs comes.
-  expect(uiComponentsFor(registry, ["admin-auth-sso", "settings-both"], ["durable"])).toEqual(["admin-api"]);
+  expect(uiComponentsFor(registry, ["admin-auth-sso", "settings-both"], ["durable"])).toEqual(["conversations-directory", "admin-api"]);
   // In one App only: refused before anything is written; the default would be a second provider in the other.
   expect(() => uiComponentsFor(registry, ["admin-auth-edge"], ["durable"])).toThrow("the dashboard needs admin.auth in every App, and it is provided in the Worker's App (export const worker) but not in the default App");
   expect(() => uiComponentsFor(registry, ["settings-file"], ["durable"])).toThrow("the dashboard needs settings in every App, and it is provided in the default App but not in the Worker's App (export const worker)");

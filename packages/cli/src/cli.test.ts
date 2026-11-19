@@ -219,6 +219,7 @@ test("new cloudflare with explicit Telegram: a whole bot and dashboard, each hal
     "deployment-cloudflare",
     "admin-api",
     "admin-auth-token",
+    "conversations-directory",
     "settings-store",
   ].sort());
   expect(manifest.components["outbound-durable"].installedFor).toEqual(["channel-telegram-webhook"]);
@@ -227,11 +228,11 @@ test("new cloudflare with explicit Telegram: a whole bot and dashboard, each hal
   const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
   // The Worker checks and routes: secrets, the mailbox, the channel's ingress half (C1).
   expect(config).toContain(
-    "export const worker = defineApp({\n  components: [\n    secretsWorkers,\n    actorsDo,\n    channelTelegramWebhookWorker,\n    adminAuthToken,\n    adminApiWorker,\n    settingsStoreWorker,\n  ],\n  config: workerConfig,\n});",
+    "export const worker = defineApp({\n  components: [\n    secretsWorkers,\n    actorsDo,\n    channelTelegramWebhookWorker,\n    adminAuthToken,\n    conversationsDirectoryWorker,\n    adminApiWorker,\n    settingsStoreWorker,\n  ],\n  config: workerConfig,\n});",
   );
   // The object owns the conversation: everything else, and the router sends every message to the agent.
   expect(config).toContain(
-    "export default defineApp({\n  components: [\n    agents,\n    secretsWorkers,\n    actorsDo,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n    extensionPikitSelf,\n    outboundDurable,\n    channelTelegramWebhook,\n    adminAuthToken,\n    adminApi,\n    settingsStore,\n  ],",
+    "export default defineApp({\n  components: [\n    agents,\n    secretsWorkers,\n    actorsDo,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n    extensionPikitSelf,\n    outboundDurable,\n    channelTelegramWebhook,\n    adminAuthToken,\n    conversationsDirectory,\n    adminApi,\n    settingsStore,\n  ],",
   );
   expect(config).toContain('"router-basic": { defaultAgent: "steward" },');
   expect(config).not.toContain("deploymentCloudflare");
@@ -260,8 +261,8 @@ for (const [preset, target, deployment] of [
     const project = join(parent, "assistant");
     const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
     const names = Object.keys(manifest.components);
-    for (const component of [deployment, "admin-api", "admin-auth-token", "settings-store"]) expect(names).toContain(component);
-    expect(manifest.dashboard.components).toEqual(["admin-auth-token", "admin-api", "settings-store"]);
+    for (const component of [deployment, "admin-api", "admin-auth-token", "conversations-directory", "settings-store"]) expect(names).toContain(component);
+    expect(manifest.dashboard.components).toEqual(["admin-auth-token", "conversations-directory", "admin-api", "settings-store"]);
     expect(existsSync(join(project, "src", "dashboard", "package.json"))).toBe(true);
     expect(new Set(names).size).toBe(names.length);
     expect(names.filter((name) => name.startsWith("channel-"))).toEqual(target === "server" ? ["channel-http"] : []);

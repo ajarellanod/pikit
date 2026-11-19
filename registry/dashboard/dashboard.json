@@ -1,5 +1,5 @@
 {
-  "components": ["admin-auth-token", "admin-api", "settings-store"],
+  "components": ["admin-auth-token", "conversations-directory", "admin-api", "settings-store"],
   "defaultFor": {
     "admin-auth-token": "admin.auth",
     "settings-store": "settings"

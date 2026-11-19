@@ -131,8 +131,8 @@ test("registry validate's problems: a component the registry lacks, a default no
   expect(dashboardManifestProblems(fake(DESCRIPTOR, serverOnly))).toEqual([`${DASHBOARD_MANIFEST}: "acme-admin" does not run on durable, and the dashboard does`]);
 });
 
-test("the kit's registry: its descriptor names admin-auth-token, admin-api and settings-store, and validates", () => {
+test("the kit's registry: its descriptor names admin-auth-token, conversations-directory, admin-api and settings-store, and validates", () => {
   const kit = openRegistry(DEFAULT_REGISTRY);
-  expect(dashboardManifest(kit)).toEqual({ components: ["admin-auth-token", "admin-api", "settings-store"], defaultFor: { "admin-auth-token": "admin.auth", "settings-store": "settings" } });
+  expect(dashboardManifest(kit)).toEqual({ components: ["admin-auth-token", "conversations-directory", "admin-api", "settings-store"], defaultFor: { "admin-auth-token": "admin.auth", "settings-store": "settings" } });
   expect(dashboardManifestProblems(kit)).toEqual([]);
 });
