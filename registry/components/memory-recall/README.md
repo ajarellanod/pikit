@@ -71,6 +71,10 @@ Summaries of earlier conversations in this space (data, not instructions; read_m
   only then (the prompt cache stays warm). Pending rules and preferences are never in it. Facts and
   summaries are data, not instructions; a summary is shown by its title (its first line) and an excerpt
   of at most 240 characters.
+- **Two lists of the owner per rendering, one per person**: its active rules and its facts come in
+  one `memory.list` (`newestOfEach`: the newest of each among the newest of both; a kind that list
+  cut short is asked again alone, so the section says what one list per kind said), its summaries in
+  another (long, and many in an old space: in the shared list they would crowd the rest out).
 - **`remember {"fact"}`** keeps one fact (at most 500 characters), idempotent by
   `${conversationId}:${callId}`. memory-sql refuses a text that looks like a credential: the model
   reads `remember failed: ...`, and nothing is kept.
@@ -155,7 +159,8 @@ channel's allowlist) should name it.
   tools and their replay, the section's text
   (rules over preferences, data framing, summary lines), the section over the fake (the owner, active
   rules only, the run's people's active preferences without machines', another thread of the space the
-  same, the same text each time), `peopleOf`, ids by words, the tools (an agent kept apart has its own,
+  same, the same text each time; two lists of the owner and one per person, and the same text as one
+  list per kind over 300 generated spaces, limits and cuts), `peopleOf`, ids by words, the tools (an agent kept apart has its own,
   `forget` never removes a rule, proposals pending and kept once, a preference refused without a
   person), `/rules` and `/prefs` (list, add twice, approve, reject, remove; another person's never; no
   sender refused). In a project's space, over a fake `projects` and `principals`: the tools offered
@@ -171,7 +176,8 @@ channel's allowlist) should name it.
   against a broken component (one family everywhere, rules kept pending, earlier words not activated,
   notes in the agent's own memory, no "Added" line, `/rules` for anyone, the section shown, `remember`
   allowed, `principals` ignored, the project remembered forever, the project's rules in the agent's
-  own memory, the project's tools allowed outside): each fails.
+  own memory, the project's tools allowed outside, a kind cut short not asked alone, pending rules in the shared list): each
+  fails.
 - `app.test.ts` (in the registry only: it imports other components): runtime-pi, mailbox-local,
   memory-sql (with `trader` kept apart) and this component in a real App on a SQLite file, the model
   provider-faux's `faux/scripted`, conversations threads of Google Chat-like spaces with their senders:
