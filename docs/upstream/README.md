@@ -366,14 +366,14 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
 - **Problem.** `Storage.scanConversations(query, limit, cursor)` pages in id order, oldest first,
   with no other order. An operator's list (the dashboard, SPEC §5) wants the latest conversations
   first: a server with thousands of them puts those on the last page.
-- **Meanwhile.** `agent.observe` lists in creation order (its contract says so); admin-api keeps
-  an index of its own, by last activity, in `storage.sql` (`conversation-index.ts`), filled from
-  `agent.observe` at start and updated on every dispatch and run: a second record pi-durable could
-  make unnecessary.
+- **Meanwhile.** `agent.observe` lists in creation order (its contract says so); the conversation
+  directory (`conversations.directory`, conversations-directory) keeps one of its own, by last activity,
+  in `storage.sql`, filled from `agent.observe` at start and updated on every dispatch and run: for
+  the order, a second record pi-durable could make unnecessary (it also holds titles and states).
 - **Ask.** A descending scan (`order: "desc"` on `ConversationQuery`), or a scan by last activity.
 - **Outcome: partly shipped.** Not sent by pikit: pi-durable 1.1.0 added `order: "descending"` to
   conversation, entry, task and submission scans ([#10546](https://github.com/earendil-works/pi/issues/10546)).
-  That is newest first by creation; the dashboard lists by last activity, so admin-api's index stays.
+  That is newest first by creation; the dashboard lists by last activity, so the directory's index stays.
   `agent.observe` could page newest first with it, if its contract ever asks.
 
 ## 18. Idle-context timer on workerd

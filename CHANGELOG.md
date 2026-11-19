@@ -33,6 +33,32 @@ line names its area.
 
 ### Components
 
+- **One conversation directory** (features/completed/conversation-directory.md): every view lists the
+  same conversations with one title and the same "delete". The contract `conversations.directory`
+  (`@pikit/contracts`, experimental, with its suite) and the `conversation.audience` pipeline (who
+  belongs to which space, fail closed); `ConversationPlace.owner` (conversations-kv,
+  conversations-file) and `agent.dispatched`'s `sender`. **conversations-directory** (new, both
+  targets, installed by the dashboard's defaults in both Apps) records each conversation from the
+  runtime's events, on Cloudflare in its object's outbox flushed to `conversations-directory:index` off
+  the message's path (no index call while a message is handled), and titles it once by a model
+  (`titleModel`, else its agent's). projects-sql grants a project's members its space; channel-google-chat
+  gives a thread's first message as its first title. **admin-api** lists from it as an operator: Rename,
+  "Hide for me", "Archive for everyone", "Delete for everyone" (which resets the key) and Restore, a
+  `state` filter (`archived=1` is gone), ids `<key>~<id>` on servers too; its index
+  (`conversation-index.ts`, `admin-api:index`, `admin_api_*` tables), titler and `titleModel` are
+  removed. **channel-web** lists a person's chats and a project's from it (Hide for me, read marks,
+  Archive and Delete for everyone by its owner, a project's owner renames and archives); its
+  `channel_web_conversations` index, `titles.ts`, `titleModel` and the `/name` hand-off are removed.
+  Breaking, no migration: renames, archives, deletes and provisional titles of existing conversations are
+  lost (the directory rebuilds itself from the runtime at start and titles anew); the old tables are left
+  unread. `pikit upgrade` of an edited admin-api or channel-web conflicts (`store.ts`, `routes.ts`,
+  `backend.ts`).
+- Object starts off a message's path (features/object-composition.md, parked; these kept): runtime-pi's
+  start awaits no `model.credentials` call (one list prefetched, the agents checked at the first
+  admission) and asks no drive wakeup where pi-durable's tables were never made; provider-failover's
+  shared cooldowns are read at the first model request; memory-recall lists rules and facts in one
+  `memory.list`. deployment-cloudflare's `pikit: object started` line says `isolate` (`new`/`warm`) and
+  `startMs`; `scripts/bench-object-start.ts` measures a cold object's start (docs/benchmarks/object-start.md).
 - channel-web and admin-api: a personal space. A web chat made in no project is in its user's space,
   `web:<user>` (`personalSpace`), and a conversation an operator starts in the dashboard is in theirs,
   `dashboard:operator:<id>` (`operatorSpace`): memory and saved files kept there reach every later

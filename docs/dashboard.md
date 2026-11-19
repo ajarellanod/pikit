@@ -13,7 +13,7 @@ SPEC §5. Three pieces:
 
 Which components the dashboard needs is its registry's to say, in
 [registry/dashboard/dashboard.json](../registry/dashboard/dashboard.json) (its README): `components`
-(`admin-auth-token`, `admin-api`, `settings-store`, in install order) and `defaultFor` (the capability
+(`admin-auth-token`, `conversations-directory`, `admin-api`, `settings-store`, in install order) and `defaultFor` (the capability
 each default stands for: `admin.auth`, `settings`). `pikit ui on`, `pikit new --ui` and a preset
 feature with `ui: true` read it alike: a default goes in only when the project's Apps lack its
 capability, another provider in every App keeps its place, and a partial or unknown composition is
@@ -36,12 +36,15 @@ anything. Without the secret, or with one shorter than 32 characters, the App do
 [README](../registry/components/admin-api/README.md), source in
 [admin-api/files/src/pikit/admin-api](../registry/components/admin-api/files/src/pikit/admin-api):
 `routes.ts` (the routes, written once over a backend), `api.ts` (every answer's JSON type),
-`backend.ts` (the server backend), `remote.ts` and `worker.ts` (the Worker's half), `calls.ts` (the
-object's answers), `conversation-index.ts`, `titles.ts`, `assets.ts` (the files and the CSP).
+`backend.ts` (the backend over a host and the directory), `host.ts` (a conversation where it is, a
+server's), `remote.ts` and `worker.ts` (the Worker's half), `calls.ts` (the object's answers),
+`assets.ts` (the files and the CSP).
 
-It requires `admin.auth`, `agent.observe`, `agent.runtime`, `conversations.registry`, `storage.sql` and
-`actor.mailbox`; it uses `outbound.queue`, `actor.inbox`, `agent.definition`, `agent.command` and
-`model.complete` when present. Who each conversation is with (its `party`) is what the channels'
+It requires `admin.auth`, `agent.observe`, `agent.runtime`, `conversations.registry` and
+`conversations.directory` (the list, titles and states: conversations-directory); on Cloudflare its
+Worker half `admin.auth`, `actor.mailbox` and `conversations.directory`. It uses `outbound.queue`,
+`actor.inbox`, `agent.definition`, `agent.directory`, `agent.tool`, `agent.skill` and `agent.command`
+when present. Who each conversation is with (its `party`) is what the channels'
 stages of the `conversation.describe` pipeline say, else what its key says. It provides `http.route` and two `agent.command`s, `new` (reset the
 key) and `name` (set the title).
 
@@ -54,7 +57,7 @@ Every `/admin/api/*` route asks `admin.auth` first and answers `401` without an 
 | `GET /admin/api/app` | the composition (`APP_DESCRIPTION`, config redacted) |
 | `GET /admin/api/agents` | the agents: name, model, tools, whether it is the steward; then the live ones (`agent.directory`: `live: true`, `description`) |
 | `POST`, `DELETE /admin/api/session` | open or close a browser session |
-| `GET /admin/api/conversations?limit&cursor&archived&q` | conversations, most recently active first; `archived=1` the archived ones; `q` those whose title or key holds it (any case) |
+| `GET /admin/api/conversations?limit&cursor&state&q` | the directory's conversations as an operator sees them, most recently active first; `state` `listed` (default), `hidden` (by this operator), `archived` or `deleted`; `q` those whose title or key holds it (any case) |
 | `POST /admin/api/conversations` | a new conversation of the dashboard's own (`dashboard:<uuid>`) with its first message |
 | `GET /admin/api/conversations/:id` | one conversation |
 | `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first |
@@ -62,7 +65,9 @@ Every `/admin/api/*` route asks `admin.auth` first and answers `401` without an 
 | `POST /admin/api/conversations/:id/messages` | the operator's follow-up |
 | `POST /admin/api/conversations/:id/abort` | `agent.runtime.abort` |
 | `POST /admin/api/conversations/:id/reset` | `conversations.registry.reset` |
-| `POST /admin/api/conversations/:id/rename` | the operator's title (as `/name`), from the sidebar's Rename |
+| `POST /admin/api/conversations/:id/rename` | its title for everyone (the directory's `rename`, as `/name`), from the sidebar's Rename |
+| `POST /admin/api/conversations/:id/hide`, `…/unhide` | "Hide for me" (the directory's `mine`): out of this operator's list until new activity, or back |
+| `POST /admin/api/conversations/:id/archive`, `…/delete`, `…/restore` | "Archive for everyone", "Delete for everyone" (a key's current one is reset first), and back (the directory's `setState`) |
 | `GET /admin/api/commands` | the App's `agent.command`s |
 | `POST /admin/api/conversations/:id/commands/:name` | run one in the conversation |
 | `GET /admin/api/delivery/pending`, `GET /admin/api/delivery/receipts` | `outbound.queue`'s, on a server, each with the conversation it answers (`conversationId`) |
@@ -86,28 +91,27 @@ agent reads a first line saying the message is the operator's.
   (`createLocalBackend`). The live part is `agent.observe.watch`.
 - **Cloudflare.** Two halves (`"apps": { "worker": "worker" }`). The Worker's half
   (`admin-api-worker`, `worker.ts`) serves the routes over `remote.ts`: every read and action is an
-  `actor.mailbox.call` to the conversation's object (`admin-api.list`, `admin-api.conversation`,
+  `actor.mailbox.call` to the conversation's object (`admin-api.conversation`,
   `admin-api.transcript`, `admin-api.message`, `admin-api.abort`,
   `admin-api.reset`, `admin-api.command`, …). The object's half (default export) answers those calls
   through the same contracts (`calls.ts`). Ids are `<conversation key>~<object id>`. Live events are the
   object's stream (`admin-api.live`, `actor.mailbox.stream`): each event as it happens, as on a
   server; the object stays in memory while the dashboard follows it, and the dashboard reconnects when
-  the stream ends (an eviction, a deploy). A list page is at most 20
-  conversations. Delivery is not listed (`404 not_installed`).
+  the stream ends (an eviction, a deploy). A list page is the directory's (its Worker half
+  asks the object `conversations-directory:index`), then each row's object for its usage and party: at
+  most 20 conversations. Delivery is not listed (`404 not_installed`).
 
-### The conversation index
+### The conversation list and titles
 
-`agent.observe` lists in creation order and, on Cloudflare, sees one object's conversations. So
-admin-api keeps `admin_api_conversations` in `storage.sql`: one row per conversation (key, id, agent,
-newest activity), upserted on `agent.dispatched` (not duplicates), `agent.started` (on Cloudflare only
-resumed runs), `agent.settled`, `agent.failed`, `conversation.reset`, and at start from every
-conversation `agent.observe` holds. On Cloudflare the index is the object `admin-api:index`, told by
-each conversation's object with the message `admin-api.seen`. Titles are a second table,
-`admin_api_conversation_titles`: after a conversation's first run, `model.complete` writes a 2-6 word
-title in the background (`titleModel`, else the agent's model); `/name` or Rename (`POST …/rename`) replaces it.
-Each index row also carries its conversation's title, lowercased, for the list's `q`: the
-conversation's App tells it with `admin-api.seen` whenever the title changes and at start (on
-Cloudflare the titles are each object's, so the index object learns them only so).
+`agent.observe` lists in creation order and, on Cloudflare, sees one object's conversations. So the
+list is `conversations.directory`'s ([conversations-directory](../registry/components/conversations-directory/README.md),
+`features/completed/conversation-directory.md`): one entry per conversation, recorded from the runtime's events in
+the conversation's App (on Cloudflare its object's outbox, flushed off the message's path to the
+object `conversations-directory:index`), with one title for every view (a channel's first message,
+then a model's, once, after the first run a person's request started, then a rename, which nothing
+replaces), its state for everyone (archived, deleted) and each operator's own (hidden). The dashboard
+lists it as an operator (`{ kind: "operator", id }`): everything. admin-api keeps no table and titles
+nothing; the directory's `titleModel` names the model that titles (else each conversation's agent's).
 
 ## Building and embedding
 

@@ -444,7 +444,7 @@ channel's key, a key described by an earlier stage, a hostile name.
 
 ### `conversations.directory` ([conversation-directory.ts](../packages/contracts/src/conversation-directory.ts), experimental)
 
-Which conversations exist and how every view lists them ([conversation directory](../features/conversation-directory.md)):
+Which conversations exist and how every view lists them ([conversation directory](../features/completed/conversation-directory.md)):
 one entry per conversation (a key and its runtime conversation) with its channel, agent, space, owner,
 one title whoever looks, when it was made and last active, whether a run goes, and its state for everyone;
 per viewer, their own state. Views (admin-api's list, channel-web's chats) read it through a `Viewer`
@@ -494,15 +494,18 @@ interface ConversationDirectory {
   of 1 to `DIRECTORY_COUNT_MAX` (100) spaces, past `AUDIENCE_MAX` (2,000) grants `limit`.
   `DirectoryError` codes `not_found`, `forbidden`, `invalid`, `invalid_cursor`, `limit`.
 
-Provider: conversations-directory (planned, phase 1 of the note). Users: admin-api, channel-web,
-channel-google-chat (planned). Suite: `createConversationDirectoryConformance`: the fixture drives a
+Provider: conversations-directory (both targets; on Cloudflare the actor `conversations-directory:index`,
+each conversation's updates flushed from its object's outbox off the message's path), installed by the
+dashboard's defaults. Users: admin-api (the operators' list), channel-web (a person's chats, a project's),
+channel-google-chat (its first message's title). Suite: `createConversationDirectoryConformance`: the fixture drives a
 conversation as the runtime would (a message with its sender and place, a run, a reset) through the
 provider's real recorder, the suite's own audience stage says who belongs where; cases for order and
 paging, the viewer filter, another's conversation by key or id, delegated and operator-only
 conversations, a removed member, who acts for everyone, titles, per-viewer state, hide and archive
 ending with activity, delete resetting the key, unread, search wildcards, filters and count, an audience
 that fails closed, late updates (`replay`) and a restart. `createMemoryDirectory` (`@pikit/contracts/testing`)
-passes it, and the suite's tests check each guarantee against a broken double.
+passes it, and the suite's tests check each guarantee against a broken double; conversations-directory
+passes it on a server and in the workerd lane.
 
 ### `conversation.audience` (a pipeline, [conversation-audience.ts](../packages/contracts/src/conversation-audience.ts))
 
@@ -521,7 +524,8 @@ source }`.
   only its own space (`project:<id>`), so a Google Chat conversation is seen only through its platform's
   membership, downstream's rooms stage.
 
-Stages: projects-sql (planned). Runner: conversations-directory (planned). Suite:
+Stages: projects-sql (its projects' own spaces). Runner: conversations-directory (in the calling App: the
+Worker on Cloudflare). Suite:
 `createConversationAudienceConformance`: a member's and an owner's grant for a list and fresh, a stranger
 none, a removed membership none at once, the stage's grants all its own source with an earlier stage's
 kept, a fresh check of one space naming only it, a failing provider granting nothing.
@@ -779,7 +783,7 @@ interface ActorInbox {
   depend on every handler's component, a cycle through the runtime and `wakeups`.
 - `scope` is what a component whose state every key shares reads instead of the target (K1): with
   `"one"` that state is another actor's, reached through `actor.mailbox` (settings-store's settings
-  object, admin-api's index). The suite checks it against where the messages were handled.
+  object, conversations-directory's index). The suite checks it against where the messages were handled.
 - `answerCall` and `callResult` carry a call's outcome across an RPC, for providers; `answerStream`
   and `streamResult` a stream's (a byte stream of JSON frames, one per line, with beats while the
   actor waits when its provider asks for them: an RPC stream notices a caller gone only when it writes).
