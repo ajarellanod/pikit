@@ -20,8 +20,8 @@
       "agent.submissions",
       "storage.kv",
       "storage.sql",
-      "actor.mailbox",
-      "conversations.directory"
+      "conversations.directory",
+      "actor.mailbox"
     ]
   },
   "optional": {
