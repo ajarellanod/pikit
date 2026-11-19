@@ -115,6 +115,15 @@
       ],
       "path": "components/channel-web"
     },
+    "conversations-directory": {
+      "version": "0.0.1",
+      "description": "Provides conversations.directory: every conversation with its channel, space, owner, one title, activity and state for everyone, and each viewer's own (hidden, read, a name), filtered by who looks with conversation.audience. Recorded from the runtime's events in each conversation's App, off the message's path on Cloudflare (one actor, conversations-directory:index); titled once by a model.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/conversations-directory"
+    },
     "conversations-file": {
       "version": "0.0.1",
       "description": "The conversation registry in one JSON file: which Pi session each conversation is in now.",

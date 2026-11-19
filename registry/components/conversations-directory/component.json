@@ -1,0 +1,76 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "conversations-directory",
+  "version": "0.0.1",
+  "title": "Conversations directory: one list of conversations, one title, archive and delete for everyone, hide and read for me",
+  "description": "Provides conversations.directory: every conversation with its channel, space, owner, one title, activity and state for everyone, and each viewer's own (hidden, read, a name), filtered by who looks with conversation.audience. Recorded from the runtime's events in each conversation's App, off the message's path on Cloudflare (one actor, conversations-directory:index); titled once by a model.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.1",
+    "contracts": "0.0.1",
+    "capabilities": [
+      "storage.sql",
+      "conversations.registry",
+      "agent.observe",
+      "actor.mailbox"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "actor.inbox",
+      "wakeups",
+      "model.complete",
+      "agent.definition"
+    ]
+  },
+  "provides": [
+    "conversations.directory"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "conversations.directory"
+      ],
+      "requires": [
+        "storage.sql",
+        "conversations.registry",
+        "agent.observe"
+      ],
+      "optional": [
+        "actor.inbox",
+        "actor.mailbox",
+        "wakeups",
+        "model.complete",
+        "agent.definition"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "conversations.directory"
+      ],
+      "requires": [
+        "actor.mailbox"
+      ],
+      "optional": []
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.1",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@pikit/pi-adapter": "0.0.1"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
