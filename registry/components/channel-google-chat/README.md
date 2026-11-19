@@ -18,7 +18,8 @@ asked with buttons and forms.
   sent, with a receipt for each; without it, answers survive a restart too, from the runtime's
   record), `settings` (the `conversations` setting, edited
   from the dashboard), `workspace` or `execution` (where files other than images and text go),
-  `agent.command` (the App's commands, typed in the chat: Commands below), and on
+  `agent.command` (the App's commands, typed in the chat: Commands below),
+  `conversations.directory` (each conversation's first title: Titles below), and on
   Cloudflare `actor.inbox` and `actor.mailbox`. The Worker's half requires `secrets` and
   `actor.mailbox`, and uses `settings`.
 - **Targets:** `server` and `durable` (Cloudflare). One code on both: in `start`, `actor.inbox`'s
@@ -210,6 +211,14 @@ missing or unusable required one fails the start, naming it.
   `/compact`, a command that says no audience); `"all"` allows every one, a list of names those
   named, whatever their audience (an operator's, when the allowed spaces' people are the operator's
   team).
+- **Titles** (with `conversations.directory`, [conversations-directory](../conversations-directory/README.md)).
+  A conversation's first message with words, as its person wrote it (without the app's mention, the
+  sender's name, a quote or what files say), cleaned (`cleanTitle`: one line, at most 60 characters),
+  is given to the directory as its first title (`title(first)`), once per conversation: marked under
+  `titled:<[key, conversation id]>` in its `storage.kv` namespace. The directory's titler then replaces
+  it with the model's, so every view (the dashboard, the web chat's lists) shows one title. A command
+  gives none; a failure is logged and tried again with the next message. Without the directory nothing
+  changes.
 - **Space.** Every conversation of a chat, a thread's or the whole chat's, has the chat's own key as
   its space (`ConversationRef.space`: `googlechat:spaces/AAA`, given to `admitInbound`, recorded with
   the conversation's first message): what the chat's threads share (memory, instructions). In
@@ -315,7 +324,7 @@ double and on a local port, ID tokens signed with a test key pair, event builder
   signature or key, an expired token), on a server first, then over a mailbox.
 - `admission.test.ts`: keys, threads, the setting, the space, access, `/new`, commands typed in the
   chat (run once with their sender, denied, not allowed, unknown, `/new` winning), mentions, quotes,
-  attachments.
+  attachments, the first title given to the directory (`createMemoryDirectory`).
 - `transport.test.ts`: the access token, the API client, markdown to text and cards, pieces, both ids,
   the placeholder, previews and the sweep, each failure classified.
 - `questions.test.ts`: cards, dialogs, clicks and answers, a reset closing a question.

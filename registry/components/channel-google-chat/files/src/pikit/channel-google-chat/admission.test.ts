@@ -10,14 +10,14 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type AppContext, defineApp, defineComponent, halt, silentLogger } from "@pikit/core";
-import type { AgentCommand, AgentRequest, AgentRuntime, CommandLookup, ConversationRef, ConversationRegistry, KeyValueStore, Sender } from "@pikit/contracts";
+import type { AgentCommand, AgentRequest, AgentRuntime, CommandLookup, ConversationDirectory, ConversationRef, ConversationRegistry, KeyValueStore, Sender } from "@pikit/contracts";
 import { allowedCommands, answerKey } from "@pikit/contracts";
-import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
+import { createMemoryDirectory, createMemoryKeyValueStorage } from "@pikit/contracts/testing";
 import { base64Of, type ExecutionEnv, safeName, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { ATTACHMENT_LIMITS, readAttachments, writeFiles } from "./attachments.ts";
 import type { AddOnEvent, ChatAttachment, ChatMessage } from "./event.ts";
 import { addedEvent, clickEvent, type FakeGoogleChat, messageEvent, removedEvent, signAssertion, startFakeGoogleChat } from "./fake-google-chat.test-support.ts";
-import { commandReply, commandSeenKey, createEventHandler, REPLIES, replyIds, textOf } from "./handler.ts";
+import { commandReply, commandSeenKey, createEventHandler, REPLIES, replyIds, textOf, titledKey } from "./handler.ts";
 import { pieceIds } from "./ids.ts";
 import { type ConversationMode, type Credentials, instancesOf } from "./instance.ts";
 import { createAnswerTargets, createSpaceThreading, eventKey, KEY_PARAMETER } from "./key.ts";
@@ -178,7 +178,7 @@ const lookupOf = (entries: Record<string, AgentCommand>): CommandLookup => {
 };
 
 /** A handler of the default instance over the fake, with `spaces/AAA` (and `spaces/DM1`) allowed. */
-async function handlerSetup(options: { workspace?: WorkspaceProvider; execution?: ExecutionEnv; allowed?: string[]; commands?: CommandLookup } = {}) {
+async function handlerSetup(options: { workspace?: WorkspaceProvider; execution?: ExecutionEnv; allowed?: string[]; commands?: CommandLookup; directory?: ConversationDirectory } = {}) {
   const google = await fake();
   const api = await testApi(google);
   const kv = store();
@@ -196,6 +196,7 @@ async function handlerSetup(options: { workspace?: WorkspaceProvider; execution?
     workspace: options.workspace,
     execution: options.execution,
     clock: { now: () => Date.now() } as EventDeps["clock"],
+    directory: options.directory,
   };
   const handle = createEventHandler(deps);
   const keyOf = (event: AddOnEvent, mode: ConversationMode = "thread") =>
@@ -374,6 +375,75 @@ test("/new resets the conversation once per message and says so in its thread on
   expect(replies).toHaveLength(1);
   expect(replies[0]?.thread?.name).toBe("spaces/AAA/threads/T1");
   expect(s.dispatched.map((each) => each.prompt)).toEqual(["Ada Lovelace: hello"]);
+});
+
+test("the first title: a conversation's first message with words, as its person wrote it, given to the directory once; the model's replaces it; a command, a failure or no directory gives none", async () => {
+  const memory = createMemoryDirectory({ reset: async () => {} });
+  const titles: { ref: { key: string; conversationId: string }; text: string; source: string }[] = [];
+  let failing = false;
+  const directory: ConversationDirectory = {
+    ...memory.directory,
+    async title(ref, title, ctx) {
+      if (failing) throw new Error("the directory is away");
+      titles.push({ ref, ...title });
+      await memory.directory.title(ref, title, ctx);
+    },
+  };
+  const commands = recordedCommands();
+  const s = await handlerSetup({ directory, commands: commands.lookup });
+  const send = async (text: string, thread: string) => {
+    const event = messageEvent({ text, thread: `spaces/AAA/threads/${thread}` });
+    const key = (await s.keyOf(event))!;
+    return { key, event, outcome: await s.handle(key, event, silentContext) };
+  };
+
+  // Its text without the mention or the sender's name, cleaned: one line, no markdown, a capital.
+  const first = await send("**what is the plan?**\nand the rest", "T1");
+  expect(first.outcome).toBe("admitted");
+  expect(s.dispatched[0]?.prompt).toBe("Ada Lovelace: **what is the plan?**\nand the rest");
+  const ref = { key: first.key, conversationId: `${first.key}#1` };
+  expect(titles).toEqual([{ ref, text: "What is the plan?", source: "first" }]);
+  expect(await s.kv.get(titledKey(ref))).toBe(true);
+  // Once: a later message, or Google repeating the first, gives none.
+  await send("a second thought", "T1");
+  expect(await s.handle(first.key, first.event, silentContext)).toBe("duplicate");
+  expect(titles).toHaveLength(1);
+
+  // The directory shows it once it records the conversation; the titler's replaces it, and stays.
+  memory.seen({ kind: "dispatched", ref: { ...ref, agent: "support", channel: "googlechat" }, requestId: message(first.event).name!, duplicate: false, at: 1, seq: 1 });
+  const component = { kind: "component", name: "test" } as const;
+  expect(await memory.directory.access(component, ref, silentContext)).toMatchObject({ title: "What is the plan?", titleSource: "first" });
+  await memory.directory.title(ref, { text: "Plans for the week", source: "model" }, silentContext);
+  await send("and a third", "T1");
+  expect(await memory.directory.access(component, ref, silentContext)).toMatchObject({ title: "Plans for the week", titleSource: "model" });
+
+  // A reset's new conversation has its own first title.
+  await s.handle(first.key, messageEvent({ text: "/new", thread: "spaces/AAA/threads/T1" }), silentContext);
+  await send("starting over", "T1");
+  expect(titles.at(-1)).toEqual({ ref: { key: first.key, conversationId: `${first.key}#2` }, text: "Starting over", source: "first" });
+
+  // A command gives none, nor a message without words: the next message with words titles it.
+  await send("/ping now", "T2");
+  await send("👍", "T2");
+  const t2 = await send("the real question", "T2");
+  expect(titles.at(-1)).toEqual({ ref: { key: t2.key, conversationId: `${t2.key}#1` }, text: "The real question", source: "first" });
+  expect(titles).toHaveLength(3);
+
+  // A directory that fails: the message is admitted all the same, nothing marked, the next one tries again.
+  failing = true;
+  const t3 = await send("lost title", "T3");
+  expect(t3.outcome).toBe("admitted");
+  expect(await s.kv.get(titledKey({ key: t3.key, conversationId: `${t3.key}#1` }))).toBeUndefined();
+  failing = false;
+  await send("found title", "T3");
+  expect(titles.at(-1)).toEqual({ ref: { key: t3.key, conversationId: `${t3.key}#1` }, text: "Found title", source: "first" });
+
+  // Without the directory: nothing given, nothing marked.
+  const plain = await handlerSetup();
+  const alone = messageEvent({ text: "no directory here", thread: "spaces/AAA/threads/T9" });
+  const aloneKey = (await plain.keyOf(alone))!;
+  expect(await plain.handle(aloneKey, alone, silentContext)).toBe("admitted");
+  expect(await plain.kv.get(titledKey({ key: aloneKey, conversationId: `${aloneKey}#1` }))).toBeUndefined();
 });
 
 /** Commands as an App registers them; each run recorded with its conversation, arguments and sender. */

@@ -28,6 +28,7 @@
  *   has nothing to send. A wakeup at start (`channel-google-chat.sweep`) deletes a crash's leftovers.
  * - Who a conversation is with, for the dashboard (its stage of `conversation.describe`,
  *   party.ts): the space's name, or the person of a direct message, as its messages said.
+ * - Each conversation's first title, given to `conversations.directory` when it is installed (handler.ts).
  * - Commands typed in a chat (`/name args`): the App's `agent.command`s the `commands` config allows,
  *   run in the conversation with the message's sender, their outcome said in the thread (handler.ts).
  * - The `conversations` setting is declared in `start`, when `settings` is installed (its dashboard
@@ -105,6 +106,8 @@ export default defineComponent({
     const execution = pikit.useOptional("execution");
     const inbox = pikit.useOptional("actor.inbox");
     const mailbox = pikit.useOptional("actor.mailbox");
+    // Optional: the conversations' directory, given each conversation's first title (handler.ts).
+    const directory = pikit.useOptional("conversations.directory");
     // The App's commands, typed in a chat (`/name args`): those the `commands` config allows (handler.ts).
     const commands = allowedCommands(pikit.useKeyed("agent.command"), config.commands);
 
@@ -220,7 +223,7 @@ export default defineComponent({
           apps.set(instance.instance, {
             instance,
             route: routeOf(connection, { sink, mode: conversations.modeOf(instance.instance) }),
-            handle: createEventHandler({ ...deps, commands }),
+            handle: createEventHandler({ ...deps, commands, directory: directory.get() }),
             click: createClickHandler({ ...deps, questions }),
             placeholders: createPlaceholders({
               instance,

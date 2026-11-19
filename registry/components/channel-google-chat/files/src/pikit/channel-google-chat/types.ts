@@ -20,7 +20,7 @@
  */
 
 import type { AppContext, Clock } from "@pikit/core";
-import type { AgentResult, AgentRuntime, CommandLookup, ConversationRef, ConversationRegistry, KeyValueStore, QuestionAnswer, QuestionPart } from "@pikit/contracts";
+import type { AgentResult, AgentRuntime, CommandLookup, ConversationDirectory, ConversationRef, ConversationRegistry, KeyValueStore, QuestionAnswer, QuestionPart } from "@pikit/contracts";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import type { AddOnEvent, AddOnResponse, CardWithId, ChatMessage, ChatSpace } from "./event.ts";
 import type { ConversationMode, Credentials, Instance } from "./instance.ts";
@@ -195,6 +195,8 @@ export interface AdmissionDeps {
 /** What the message handler reads besides: the App's commands its users may type (`agent.command`, cut by the `commands` config). */
 export interface EventDeps extends AdmissionDeps {
   commands: CommandLookup;
+  /** `conversations.directory`, when installed: given each conversation's first title (handler.ts). */
+  directory?: ConversationDirectory | undefined;
 }
 
 // ---------------------------------------------------------------------------------------------------
