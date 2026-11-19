@@ -3,8 +3,9 @@
  * the default export on the `durable` target (its runtime a double, its `storage.sql` SQLite), reached
  * through an `actor.mailbox` that calls its `actor.inbox` handlers with JSON copies, as actors-do's
  * RPC does. The Worker's half serves the routes over them; the accounts actor (`channel-web:accounts`)
- * keeps the users' index. The workerd lane runs the same on real Durable Objects, with the real
- * accounts (`tests/workerd/test/channel-web.workerd.ts`).
+ * holds the accounts. `conversations.directory` is one double every App shares (its provider's halves
+ * share its actor), recorded from each object's runtime events. The workerd lane runs the same on real
+ * Durable Objects, with the real accounts (`tests/workerd/test/channel-web.workerd.ts`).
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -25,11 +26,12 @@ import {
 } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import { type ChatConfig, type ChatConversation, type ChatTranscriptEntry, MAX_DURABLE_IMAGE_BYTES } from "./api.ts";
-import { ACCOUNTS_KEY, CALL, SEEN } from "./calls.ts";
+import { ACCOUNTS_KEY, CALL } from "./calls.ts";
+import { type TestDirectory, testDirectory } from "./directory.test-support.ts";
 import { runEntryId } from "./entries.ts";
 import { createChannelWeb, NAME } from "./index.ts";
 import { type ProjectDoubles, projectDoubles, projectsComponent } from "./projects.test-support.ts";
-import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, liveReader, OPERATOR, PIXEL, Runtime, router, type Served, secretsOf, serve } from "./runtime.test-support.ts";
+import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, liveReader, OPERATOR, PIXEL, Runtime, router, type Served, secretsOf, serve, tickingClock } from "./runtime.test-support.ts";
 import { createChannelWebWorker } from "./worker.ts";
 
 const copy = (value: JsonValue): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
@@ -54,6 +56,10 @@ class Platform {
   runsAtOnce = false;
   /** The `/rules` command each object's App has, as it ran: in which conversation and space, for whom. */
   readonly ran: { key: string; space?: string; args: string; sender?: string }[] = [];
+  /** Every App's clock: one, so their activities are ordered. */
+  readonly clock = tickingClock();
+  /** The directory every App shares; a key is reset in its own object. */
+  readonly directory: TestDirectory = testDirectory(async (key) => (await this.object(key)).runtime.registry);
   constructor(
     readonly accounts: FakeAccounts,
     /** channel-web's config in every object's App (the default App's). */
@@ -140,10 +146,24 @@ class Platform {
       },
     });
     const app = await defineApp({
-      components: [secretsOf(), runtime.component(), kvOf(), sqliteStorage(), probe, router, agents, platform, ...this.extra, createChannelWeb({ accounts: this.accounts.wiring() })],
+      components: [
+        secretsOf(),
+        runtime.component(),
+        kvOf(),
+        sqliteStorage(),
+        probe,
+        router,
+        agents,
+        platform,
+        this.directory.provider(),
+        this.directory.recorder(),
+        ...this.extra,
+        createChannelWeb({ accounts: this.accounts.wiring() }),
+      ],
       config: { [NAME]: this.config },
       target: "durable",
       logger: silentLogger,
+      clock: this.clock,
     }).create();
     await app.start();
     return { app, runtime, answers, handlers, streams, ctx: app.context(), sql: sql as SqlDatabase };
@@ -172,7 +192,13 @@ async function cloud(config: Record<string, unknown> = {}, doubles?: ProjectDoub
   const platform = new Platform(accounts, config, doubles === undefined ? [] : [projectsComponent(doubles)]);
   platforms.push(platform);
   const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", platform.mailbox) });
-  const served = await serve([secretsOf(), mailbox, adminAuth, ...(doubles === undefined ? [] : [projectsComponent(doubles, "projects-worker-doubles")]), createChannelWebWorker(accounts.wiring())], {}, "durable");
+  const served = await serve(
+    [secretsOf(), mailbox, adminAuth, platform.directory.provider(), ...(doubles === undefined ? [] : [projectsComponent(doubles, "projects-worker-doubles")]), createChannelWebWorker(accounts.wiring())],
+    {},
+    "durable",
+    undefined,
+    platform.clock,
+  );
   workers.push(served);
   return { platform, worker: served, accounts };
 }
@@ -186,30 +212,32 @@ const API = "/chat/api";
 const transcriptOf = async (w: Served, user: string, id: string): Promise<ChatTranscriptEntry[]> =>
   ((await (await w.fetch(`${API}/conversations/${id}/transcript`, as(user))).json()) as { items: ChatTranscriptEntry[] }).items;
 
-test("a conversation on the Worker: started by one call to its key's object, listed at once from the accounts actor's index (one call), read, renamed, its transcript from its object", async () => {
+test("a conversation on the Worker: started by one call to its key's object, listed from the directory (no object called), read, renamed for everyone, its transcript from its object", async () => {
   const { platform, worker: w } = await cloud();
   const started = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "plan the trip", images: [{ mimeType: "image/png", data: PIXEL }] }))).json()) as { id: string; requestId: string; admission: string };
   const key = `web:ana:${started.id}`;
   expect(started.admission).toBe("started");
-  // The user's message counted by the accounts actor first, then the conversation's object.
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `${key} ${CALL.start}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+  // The user's message counted by the accounts actor first, then the conversation's object: no index told.
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `${key} ${CALL.start}`]);
   const { runtime } = await platform.object(key);
-  expect(runtime.dispatched).toMatchObject([{ requestId: started.requestId, conversation: { key, conversationId: "1" }, sender: { channel: "web", id: "ana" }, images: [{ mimeType: "image/png", data: PIXEL }] }]);
+  expect(runtime.dispatched).toMatchObject([{ requestId: started.requestId, conversation: { key, conversationId: "1", owner: { channel: "web", id: "ana" } }, sender: { channel: "web", id: "ana" }, images: [{ mimeType: "image/png", data: PIXEL }] }]);
 
   platform.calls.length = 0;
+  await runtime.start(key, [started.requestId]);
   const listed = (await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] };
-  expect(listed.items).toMatchObject([{ id: started.id, title: "Plan the trip", busy: true }]);
-  // The index, and the policy (kept by the Worker `CONFIG_CACHE_MS`: the next lists ask the index only).
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`, `${ACCOUNTS_KEY} ${CALL.config}`]);
+  // Its first message's title (given by its object), owner the user, a run going: the directory's.
+  expect(listed.items).toMatchObject([{ id: started.id, title: "Plan the trip", busy: true, mine: true, userId: "ana", may: { rename: true, archive: true, delete: true } }]);
+  // The policy only (kept by the Worker `CONFIG_CACHE_MS`: the next lists call nothing).
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.config}`]);
   platform.calls.length = 0;
   await w.fetch(`${API}/conversations`, as("ana"));
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`]);
+  expect(platform.calls).toEqual([]);
 
   const renamed = await w.fetch(`${API}/conversations/${started.id}`, post("ana", { title: "Trip" }, "PATCH"));
   expect(await renamed.json()).toMatchObject({ id: started.id, title: "Trip" });
   expect(((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items[0]?.title).toBe("Trip");
+  expect(platform.calls).toEqual([]);
 
-  await runtime.start(key, [started.requestId]);
   await runtime.end(key, [started.requestId], { text: "Here is a plan" });
   const entries = await eventually(async () => {
     const read = await transcriptOf(w, "ana", started.id);
@@ -225,14 +253,14 @@ test("a conversation on the Worker: started by one call to its key's object, lis
   const image = await w.fetch(url, as("ana"));
   expect([image.status, image.headers.get("content-type"), Buffer.from(await image.arrayBuffer()).toString("base64")]).toEqual([200, "image/png", PIXEL]);
   expect(platform.calls).toEqual([`${key} ${CALL.image}`]);
-  // The index was told the run ended and the answer came: busy no more.
-  await eventually(async () => (((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items[0]?.busy === false ? true : undefined), "the index's busy flag");
+  // The directory heard the run end: busy no more.
+  await eventually(async () => (((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items[0]?.busy === false ? true : undefined), "the directory's busy flag");
 
-  // Archived by one call to its object, which tells the index: listed apart; unarchived, back.
+  // Archived for everyone in the directory, no object called: listed apart; unarchived, back.
   platform.calls.length = 0;
   const archived = await w.fetch(`${API}/conversations/${started.id}/archive`, as("ana", { method: "POST" }));
   expect(await archived.json()).toMatchObject({ id: started.id, archived: true });
-  expect(platform.calls).toEqual([`${key} ${CALL.archive}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+  expect(platform.calls).toEqual([]);
   expect(await (await w.fetch(`${API}/conversations`, as("ana"))).json()).toEqual({ items: [] });
   expect(((await (await w.fetch(`${API}/conversations?archived=1`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id: started.id, archived: true }]);
   expect(await (await w.fetch(`${API}/conversations/${started.id}/unarchive`, as("ana", { method: "POST" }))).json()).toMatchObject({ id: started.id, archived: false });
@@ -242,13 +270,16 @@ test("a conversation on the Worker: started by one call to its key's object, lis
   expect((await w.fetch(`${API}/conversations/${started.id}/messages`, post("ana", { text: "more" }))).status).toBe(202);
   expect(((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id: started.id, archived: false }]);
 
+  // Deleted for everyone: its key reset in its own object, the chat gone there too.
   expect((await w.fetch(`${API}/conversations/${started.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
+  expect(runtime.resets).toEqual([key]);
   expect(await (await w.fetch(`${API}/conversations`, as("ana"))).json()).toEqual({ items: [] });
   expect((await w.fetch(`${API}/conversations/${started.id}/transcript`, as("ana"))).status).toBe(404);
+  expect((await w.fetch(`${API}/conversations/${started.id}`, as("ana"))).status).toBe(404);
 });
 
 // Found in a browser on a durable project with faux/scripted: the list said "Running" for good.
-test("a run that ends before its object's admission returns: the accounts actor's index says not busy", async () => {
+test("a run that ends before its object's admission returns: the directory says not busy", async () => {
   const { platform, worker: w } = await cloud();
   platform.runsAtOnce = true;
   const busy = async () => (((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items.map((each) => each.busy));
@@ -258,7 +289,7 @@ test("a run that ends before its object's admission returns: the accounts actor'
   expect(await busy()).toEqual([false]);
 });
 
-test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every route; A's object is never called", async () => {
+test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every route, by id or naming A (?user=); A's object is never called", async () => {
   const { platform, worker: w } = await cloud();
   const { id } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "secret" }))).json()) as { id: string };
   platform.calls.length = 0;
@@ -267,6 +298,9 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
     ["PATCH", "", { title: "mine" }],
     ["POST", "/archive"],
     ["POST", "/unarchive"],
+    ["POST", "/hide"],
+    ["POST", "/unhide"],
+    ["POST", "/read"],
     ["DELETE", ""],
     ["GET", "/transcript"],
     ["POST", "/messages", { text: "hi" }],
@@ -275,14 +309,16 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
     ["GET", "/messages/web%3Ax/images/0"],
   ];
   for (const [method, path, body] of attempts) {
-    const response = await w.fetch(`${API}/conversations/${id}${path}`, as("ben", { method, ...(body !== undefined && { body: JSON.stringify(body) }) }));
-    expect({ method, path, status: response.status }).toEqual({ method, path, status: 404 });
+    for (const user of ["", "?user=ana"]) {
+      const response = await w.fetch(`${API}/conversations/${id}${path}${user}`, as("ben", { method, ...(body !== undefined && { body: JSON.stringify(body) }) }));
+      expect({ method, path, user, status: response.status }).toEqual({ method, path, user, status: 404 });
+    }
   }
   // Only ben's own key's object, and the accounts actor for the policy and the rate.
   expect(platform.calls.filter((each) => each !== `${ACCOUNTS_KEY} ${CALL.rate}` && each !== `${ACCOUNTS_KEY} ${CALL.config}`).every((each) => each.startsWith(`web:ben:${id} `))).toBe(true);
   expect(await (await w.fetch(`${API}/conversations?q=secret`, as("ben"))).json()).toEqual({ items: [] });
   expect((await platform.object(`web:ana:${id}`)).runtime.dispatched.length).toBe(1);
-  expect(((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id, archived: false }]);
+  expect(((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id, archived: false, hidden: false, title: "Secret" }]);
   // An object answers only of itself: a call naming another conversation is refused.
   const other = await platform.mailbox.call(`web:ben:${id}`, CALL.conversation, { userId: "ana", chatId: id }, w.app.context()).catch((error: unknown) => error);
   expect((other as ActorCallError).code).toBe("invalid_request");
@@ -336,7 +372,7 @@ test("entries told live on the Worker come from the conversation's object: what 
   await events.reader.cancel();
 });
 
-test("the policy, the agents and the search on the Worker: the accounts actor's config; an agent picked reaches the conversation's object, another is 400 before any call; ?q= is the index's", async () => {
+test("the policy, the agents and the search on the Worker: the accounts actor's config; an agent picked reaches the conversation's object, another is 400 before any call; ?q= is the directory's", async () => {
   const { platform, worker: w } = await cloud({ visibility: { tools: "none" }, agents: ["helper"] });
   const config = (await (await w.fetch(`${API}/config`)).json()) as ChatConfig;
   expect([config.visibility, config.agents]).toEqual([{ thinking: false, tools: "none", context: true }, [{ name: "helper" }]]);
@@ -364,7 +400,7 @@ test("the policy, the agents and the search on the Worker: the accounts actor's 
   platform.calls.length = 0;
   const found = (await (await w.fetch(`${API}/conversations?q=PARIS`, as("ana"))).json()) as { items: ChatConversation[] };
   expect(found.items.map((each) => each.title)).toEqual(["Trip to Paris"]);
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.list}`]);
+  expect(platform.calls).toEqual([]);
 });
 
 test("SUGGESTED on the Worker: /me's suggestedAgent is the accounts actor's dry run of its App's route.resolve (the Worker's App has no router); no conversation's object is made; none when not offered", async () => {
@@ -396,7 +432,9 @@ test("on the Worker images over 1 MB in all are 413 before any call; an object t
   expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`]);
   const { id } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string };
   platform.unreachable.add(`web:ana:${id}`);
-  const down = await w.fetch(`${API}/conversations/${id}`, as("ana"));
+  // The directory still lists and describes it; what its object holds is 503.
+  expect((await w.fetch(`${API}/conversations/${id}`, as("ana"))).status).toBe(200);
+  const down = await w.fetch(`${API}/conversations/${id}/transcript`, as("ana"));
   expect({ status: down.status, body: await down.json() }).toMatchObject({ status: 503, body: { error: "unavailable" } });
 });
 
@@ -414,58 +452,45 @@ test("RATE on the Worker: a user's messages are counted by the accounts actor, e
   expect((await w.fetch(`${API}/conversations`, post("ben", { text: "mine" }))).status).toBe(201);
 });
 
-test("only the accounts actor answers the index's calls: a conversation's object refuses them (no_handler) and reads nothing", async () => {
+test("only the accounts actor answers the accounts' calls: a conversation's object refuses them (no_handler) and reads nothing; no call lists conversations", async () => {
   const { platform, worker: w } = await cloud();
   const { id } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string };
   const key = `web:ana:${id}`;
   for (const [type, message] of [
-    [CALL.list, { userId: "ana", limit: 10 }],
-    [CALL.forget, { userId: "ana" }],
     [CALL.config, {}],
     [CALL.rate, { userId: "ana" }],
     [CALL.routed, { userId: "ana" }],
-    [CALL.projectConversations, { id: "a".repeat(32), limit: 10 }],
-    [CALL.projectConversation, { id: "a".repeat(32), chatId: id }],
-    [CALL.projectChats, { ids: ["a".repeat(32)] }],
     [CALL.migrateProjects, {}],
   ] as const) {
     const refused = await platform.mailbox.call(key, type, message, w.app.context()).catch((error: unknown) => error);
     expect({ type, code: (refused as ActorCallError).code }).toEqual({ type, code: "no_handler" });
   }
-  const seen = await platform.mailbox.send(key, SEEN, { rows: [] }, w.app.context()).catch((error: unknown) => error);
-  expect((seen as ActorCallError).code).toBe("no_handler");
-  // The accounts actor answers them.
-  expect(await platform.mailbox.call(ACCOUNTS_KEY, CALL.list, { userId: "ana", limit: 10 }, w.app.context())).toMatchObject({ items: [{ id }] });
+  // The accounts actor answers them; the index's calls are gone (the directory lists).
+  expect(await platform.mailbox.call(ACCOUNTS_KEY, CALL.config, {}, w.app.context())).toMatchObject({ target: "durable" });
+  for (const type of ["channel-web.list", "channel-web.forget", "channel-web.project.conversations", "channel-web.project.chats", "channel-web.rename", "channel-web.archive", "channel-web.hide"]) {
+    const gone = await platform.mailbox.call(ACCOUNTS_KEY, type, {}, w.app.context()).catch((error: unknown) => error);
+    expect({ type, code: (gone as ActorCallError).code }).toEqual({ type, code: "no_handler" });
+  }
 });
 
-test("the index keeps each conversation's newest version: a late or repeated one changes nothing; a row whose key is not its user's is refused", async () => {
-  const { platform } = await cloud();
-  const index = await platform.object(ACCOUNTS_KEY);
-  const chatId = crypto.randomUUID();
-  const row = { key: `web:ana:${chatId}`, userId: "ana", chatId, agent: "assistant", project: "", title: "new", createdAt: 1, lastActivity: 5, hidden: false, archived: false, busy: false, version: 3 };
-  await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [row] }, index.ctx);
-  await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [{ ...row, title: "old", version: 2 }] }, index.ctx);
-  const listed = callResult(await answerCall(index.answers.get(CALL.list) as ActorCallHandler, ACCOUNTS_KEY, { userId: "ana", limit: 10 }, index.ctx)) as unknown as { items: ChatConversation[] };
-  expect(listed.items).toMatchObject([{ id: chatId, title: "new" }]);
-  const forged = await platform.mailbox.send(ACCOUNTS_KEY, SEEN, { rows: [{ ...row, userId: "ben", version: 9 }] }, index.ctx).catch((error: unknown) => error);
-  expect((forged as ActorCallError).code).toBe("invalid_request");
-});
-
-test("an operator removing a user on the Worker: their accounts, then their conversations leave the index (one call to the accounts actor)", async () => {
+test("an operator removing a user on the Worker: their accounts, then their chats deleted for everyone in the directory, each key reset in its own object", async () => {
   const { platform, worker: w, accounts } = await cloud();
-  await w.fetch(`${API}/conversations`, post("ben", { text: "hi" }));
+  const { id } = (await (await w.fetch(`${API}/conversations`, post("ben", { text: "hi" }))).json()) as { id: string };
+  const key = `web:ben:${id}`;
   platform.calls.length = 0;
   const removed = await w.fetch("/admin/api/channel-web/users/ben", { method: "DELETE", headers: OPERATOR });
   expect(removed.status).toBe(204);
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.forget}`]);
+  expect(platform.calls).toEqual([]);
+  expect((await platform.object(key)).runtime.resets).toEqual([key]);
   accounts.add("ben");
   expect(await (await w.fetch(`${API}/conversations`, as("ben"))).json()).toEqual({ items: [] });
+  expect((await w.fetch(`${API}/conversations/${id}`, as("ben"))).status).toBe(404);
 });
 
 test("in an App that is one key's actor without actor.mailbox, its start says so", async () => {
   const inbox = defineComponent({ name: "inbox-test", setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {}, answerStream: () => {} }) });
   const app = await defineApp({
-    components: [secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, inbox, createChannelWeb({ accounts: new FakeAccounts().wiring() })],
+    components: [secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, inbox, testDirectory().provider(), createChannelWeb({ accounts: new FakeAccounts().wiring() })],
     config: { [NAME]: {} },
     logger: silentLogger,
   }).create();
@@ -475,7 +500,7 @@ test("in an App that is one key's actor without actor.mailbox, its start says so
 
 test("the Worker refuses to start without CHANNEL_WEB_AUTH_SECRET", async () => {
   const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", new Platform(new FakeAccounts()).mailbox) });
-  const app = await defineApp({ components: [secretsOf({}), mailbox, createChannelWebWorker(new FakeAccounts().wiring())], logger: silentLogger, target: "durable" }).create();
+  const app = await defineApp({ components: [secretsOf({}), mailbox, testDirectory().provider(), createChannelWebWorker(new FakeAccounts().wiring())], logger: silentLogger, target: "durable" }).create();
   const failed = (await app.start().catch((error: unknown) => error)) as Error;
   expect(String(failed.cause)).toContain("CHANNEL_WEB_AUTH_SECRET");
 });
@@ -502,7 +527,7 @@ test("who a conversation is with, in its object: its user read from the accounts
     },
   });
   const app = await defineApp({
-    components: [secretsOf(), new Runtime(String).component(), kvOf(), sqliteStorage(), router, createChannelWeb({ accounts: wiring }), objectActors],
+    components: [secretsOf(), new Runtime(String).component(), kvOf(), sqliteStorage(), router, testDirectory().provider(), createChannelWeb({ accounts: wiring }), objectActors],
     target: "durable",
     logger: silentLogger,
   }).create();
@@ -521,7 +546,7 @@ test("who a conversation is with, in its object: its user read from the accounts
 
 type ProjectJson = { id: string; name: string; chats: number };
 
-test("PROJECTS on the Worker: the project store is the Worker's (its routes there); the index answers its chats in one call (the former projects carried over once first, in the accounts actor); a chat made in one reaches its object with the project's space; every member's chats from the index, another's transcript from its object; removed once empty (409 before)", async () => {
+test("PROJECTS on the Worker: the project store is the Worker's (its routes there); its chats and their counts are the directory's (no object called; the former projects carried over once first, in the accounts actor); a chat made in one reaches its object with the project's space; every member's chats listed, another's transcript from its object; the project's owner archives another's chat, never deletes it; removed once empty (409 before)", async () => {
   const doubles = projectDoubles();
   const { platform, worker: w } = await cloud({}, doubles);
   platform.calls.length = 0;
@@ -536,40 +561,48 @@ test("PROJECTS on the Worker: the project store is the Worker's (its routes ther
   const started = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "the report", project: work.id }))).json()) as { id: string; requestId: string };
   const key = `web:ana:${started.id}`;
   // Counted, then the conversation's object (the project checked in the Worker's store).
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `${key} ${CALL.start}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `${key} ${CALL.start}`]);
   const { runtime } = await platform.object(key);
   expect(runtime.pointers.get(key)?.space).toBe(`project:${work.id}`);
   expect(runtime.dispatched.at(-1)?.conversation.space).toBe(`project:${work.id}`);
   const bens = (await (await w.fetch(`${API}/conversations`, post("ben", { text: "another", project: work.id }))).json()) as { id: string; requestId: string };
   expect((await platform.object(`web:ben:${bens.id}`)).runtime.pointers.get(`web:ben:${bens.id}`)?.space).toBe(`project:${work.id}`);
-  // Posting asks the object for its project, then the store.
+  // Posting: the chat's project from the directory, then the store; one call to its object.
   platform.calls.length = 0;
   expect((await w.fetch(`${API}/conversations/${bens.id}/messages`, post("ben", { text: "more" }))).status).toBe(202);
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `web:ben:${bens.id} ${CALL.conversation}`, `web:ben:${bens.id} ${CALL.send}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `web:ben:${bens.id} ${CALL.send}`]);
 
   platform.calls.length = 0;
   expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toMatchObject({ items: [{ id: work.id, name: "Work", chats: 2 }] });
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.projectChats}`]);
-  platform.calls.length = 0;
-  const all = (await (await w.fetch(`${API}/projects/${work.id}/conversations`, as("ben"))).json()) as { items: { title: string; userId: string; mine: boolean }[] };
+  expect(platform.calls).toEqual([]);
+  const all = (await (await w.fetch(`${API}/projects/${work.id}/conversations`, as("ben"))).json()) as { items: { id: string; title: string; userId: string; mine: boolean; may: unknown }[] };
   expect(all.items.map((each) => [each.title, each.userId, each.mine]).sort()).toEqual([
     ["Another", "ben", true],
     ["The report", "ana", false],
   ]);
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.projectConversations}`, `${ACCOUNTS_KEY} ${CALL.config}`]);
+  // A member sees another's chat, and may do nothing to it for everyone.
+  expect(all.items.find((each) => !each.mine)?.may).toEqual({ rename: false, archive: false, delete: false });
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.config}`]);
   platform.calls.length = 0;
-  const read = await w.fetch(`${API}/projects/${work.id}/conversations/${started.id}/transcript`, as("ben"));
+  const read = await w.fetch(`${API}/projects/${work.id}/conversations/${started.id}/transcript?user=ana`, as("ben"));
   expect(read.status).toBe(200);
-  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.projectConversation}`, `${key} ${CALL.transcript}`]);
+  expect(platform.calls).toEqual([`${key} ${CALL.transcript}`]);
+  // Read only for ben; ana, the project's owner, archives ben's chat for everyone, never deletes it.
+  expect((await w.fetch(`${API}/conversations/${started.id}/messages?user=ana`, post("ben", { text: "mine now" }))).status).toBe(403);
+  expect((await w.fetch(`${API}/conversations/${started.id}/archive?user=ana`, as("ben", { method: "POST" }))).status).toBe(403);
+  expect(await (await w.fetch(`${API}/conversations/${bens.id}/archive?user=ben`, as("ana", { method: "POST" }))).json()).toMatchObject({ id: bens.id, archived: true, mine: false });
+  expect((await w.fetch(`${API}/conversations/${bens.id}?user=ben`, as("ana", { method: "DELETE" }))).status).toBe(403);
 
   expect((await w.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(409);
   expect((await w.fetch(`${API}/conversations/${started.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
+  // Archived chats count: still not empty until ben deletes his.
+  expect((await w.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(409);
   expect((await w.fetch(`${API}/conversations/${bens.id}`, as("ben", { method: "DELETE" }))).status).toBe(204);
   expect((await w.fetch(`${API}/projects/${work.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
   expect(await (await w.fetch(`${API}/projects`, as("ana"))).json()).toEqual({ items: [] });
 });
 
-test("PROJECT ISOLATION on the Worker: a non-member with a member's project id gets 404 on every route; no object is made; the index refuses ids that are no project's or chat's", async () => {
+test("PROJECT ISOLATION on the Worker: a non-member with a member's project id gets 404 on every route, its chats too (by id and author); no object is made", async () => {
   const doubles = projectDoubles();
   const { platform, worker: w } = await cloud({}, doubles);
   const mine = (await (await w.fetch(`${API}/projects`, post("ana", { name: "Secret" }))).json()) as ProjectJson;
@@ -583,9 +616,12 @@ test("PROJECT ISOLATION on the Worker: a non-member with a member's project id g
     ["GET", `/projects/${mine.id}/files`],
     ["GET", `/projects/${mine.id}/history`],
     ["GET", `/projects/${mine.id}/conversations`],
-    ["GET", `/projects/${mine.id}/conversations/${inside.id}/transcript`],
+    ["GET", `/projects/${mine.id}/conversations/${inside.id}/transcript?user=ana`],
     ["GET", `/conversations?project=${mine.id}`],
     ["POST", "/conversations", { text: "into yours", project: mine.id }],
+    ["GET", `/conversations/${inside.id}?user=ana`],
+    ["GET", `/conversations/${inside.id}/transcript?user=ana`],
+    ["POST", `/conversations/${inside.id}/hide?user=ana`],
   ];
   for (const [method, path, body] of attempts) {
     const response = await w.fetch(`${API}${path}`, as("ben", { method, ...(body !== undefined && { body: JSON.stringify(body) }) }));
@@ -594,15 +630,6 @@ test("PROJECT ISOLATION on the Worker: a non-member with a member's project id g
   expect([...platform.objects.keys()]).toEqual(objects);
   expect([doubles.files.calls, doubles.memory.calls]).toEqual([[], []]);
   expect(await (await w.fetch(`${API}/projects`, as("ben"))).json()).toEqual({ items: [] });
-  for (const [type, message] of [
-    [CALL.list, { userId: "ana", limit: 10, project: "x" }],
-    [CALL.projectConversations, { id: "x", limit: 10 }],
-    [CALL.projectConversation, { id: mine.id, chatId: "x" }],
-    [CALL.projectChats, { ids: ["x"] }],
-  ] as const) {
-    const forged = await platform.mailbox.call(ACCOUNTS_KEY, type, message, w.app.context()).catch((error: unknown) => error);
-    expect({ type, code: (forged as ActorCallError).code }).toEqual({ type, code: "invalid_request" });
-  }
 });
 
 test("MIGRATION on Cloudflare: the accounts actor (whose table it is) carries the former projects over to its App's project store when the Worker first asks, then the table goes; asked again, nothing more", async () => {
@@ -633,7 +660,9 @@ test("COMMANDS on the Worker: listed by the accounts actor's config; typed, it r
   const key = `web:ana:${made.id}`;
   expect(platform.ran).toEqual([{ key, space: `project:${work.id}`, args: "be brief", sender: "ana" }]);
   expect((await platform.object(key)).runtime.dispatched).toEqual([]);
-  expect(((await (await w.fetch(`${API}/conversations?project=${work.id}`, as("ana"))).json()) as { items: ChatConversation[] }).items).toMatchObject([{ id: made.id, title: "New conversation" }]);
+  // Not listed before a message reaches it (the directory lists activity); read by its id, as its object says.
+  expect(((await (await w.fetch(`${API}/conversations?project=${work.id}`, as("ana"))).json()) as { items: ChatConversation[] }).items).toEqual([]);
+  expect(await (await w.fetch(`${API}/conversations/${made.id}`, as("ana"))).json()).toMatchObject({ id: made.id, title: "New conversation", project: work.id });
   expect(await transcriptOf(w, "ana", made.id)).toEqual([]);
 
   const again = await w.fetch(`${API}/conversations/${made.id}/messages`, post("ana", { text: "/rules be brief", requestId: "web:c1" }));

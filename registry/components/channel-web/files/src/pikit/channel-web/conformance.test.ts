@@ -17,6 +17,7 @@ import { createChannelConformance, type ReceivedPiece } from "@pikit/contracts/t
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import type { ChatTranscriptEntry } from "./api.ts";
 import { chatIdFor, parseKey } from "./chat.ts";
+import { testDirectory } from "./directory.test-support.ts";
 import { createChannelWeb } from "./index.ts";
 import { FakeAccounts, secretsOf } from "./runtime.test-support.ts";
 
@@ -108,7 +109,7 @@ for (const c of createChannelConformance(({ conversations }) => {
   });
 
   return {
-    components: [secretsOf(), sqliteStorage(), observe, createChannelWeb({ accounts: accounts.wiring(), transport: wrap }), server],
+    components: [secretsOf(), sqliteStorage(), observe, testDirectory().provider(), createChannelWeb({ accounts: accounts.wiring(), transport: wrap }), server],
     async deliver({ id, conversation, text }) {
       if (!chats.has(conversation)) chats.set(conversation, { first: id, chatId: await chatIdFor(conversation, `web:${id}`) });
       if (await send(conversation, id, text)) return;

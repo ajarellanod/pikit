@@ -7,9 +7,18 @@
  *   (`/chat/api/auth/*`, forwarded to the accounts as they come) asks the accounts for the session's
  *   user: none, `401`, nothing read. The cookies the accounts renewed on the way (better-auth's cookie
  *   cache, when the session was read from the database) go back with the route's answer.
- * - **The key is the session's.** A route names a conversation by the chat id in its path only, and the
- *   key is `keyOf(user, chat id)`, built in one place (`refOf`): another user's chat id names no
- *   conversation of theirs, and is `404` as one that never existed.
+ * - **The key is the session's, the directory decides.** A route names a conversation by the chat id in
+ *   its path (and `?user=` for another member's chat of a project), and the key is `keyOf(user, chat id)`,
+ *   built in one place (`opened`), which then asks `conversations.directory`'s `access` with the session's
+ *   viewer (`directory.ts`): a conversation the user may not see is `404` as one that never existed,
+ *   before anything of its object is called. The user's own key the directory shows nothing of yet (a
+ *   new chat, before its first activity is recorded) is theirs to read, write and stop, as the App that
+ *   holds it says (`ChatBackend.conversation`, `not_found` for a key never made). Only its author writes
+ *   in a conversation or stops its run (`403`); renaming, archiving and deleting it for everyone are what
+ *   the directory's `may` says (`403` otherwise), hiding it and marking it read are anyone's who sees it.
+ * - **Lists are the directory's** (`list`, with the session's viewer): the user's own chats (`owned`,
+ *   channel `web`), in a project's space or their personal one, listed, archived or hidden by them, by
+ *   title; its cursor, its order.
  * - **Projects are the project store's** (`projects`, optional: `project-routes.ts`): `?project=` and a
  *   new chat's `project` name only one the user is a member of (`404` otherwise, checked before any chat
  *   is made in it), and a message in a project's chat goes only while its author is a member and its
@@ -41,7 +50,7 @@
  */
 
 import type { AppContext, Pikit } from "@pikit/core";
-import { ActorCallError, type HttpRoute } from "@pikit/contracts";
+import { ActorCallError, type ConversationDirectory, type DirectoryEntry, type HttpRoute, type Principals } from "@pikit/contracts";
 import Type, { type Static, type TSchema } from "typebox";
 import Value from "typebox/value";
 import type { AccountUser, Accounts } from "./accounts/types.ts";
@@ -71,8 +80,9 @@ import {
   TITLE_MAX,
 } from "./api.ts";
 import { type Assets, BASE } from "./assets.ts";
-import type { ChatBackend, ChatRef, NewMessage } from "./backend.ts";
-import { chatIdFor, filesBytesOf, filesProblem, imagesProblem, isChatId, isProjectId, keyOf, newChatId, REQUEST_ID, requestIdOf } from "./chat.ts";
+import type { ChatBackend, ChatRef, LocalChat, NewMessage } from "./backend.ts";
+import { CHANNEL, chatIdFor, filesBytesOf, filesProblem, imagesProblem, isChatId, isProjectId, keyOf, newChatId, personalSpace, projectOfSpace, REQUEST_ID, requestIdOf } from "./chat.ts";
+import { chatOf, type PeopleViewer, refOfEntry, stateAsked, UNTITLED, viewerOf } from "./directory.ts";
 import { type ChannelWebConfig, providerName, type SignUpSettings, type VisibilitySettings } from "./config.ts";
 import { routedAgent } from "./routed.ts";
 import type { ProjectAccess } from "./project-routes.ts";
@@ -149,7 +159,7 @@ const STATUS: Record<string, number> = {
   unsupported: 415,
 };
 /** The errors whose `code` is a refusal to answer with (`STATUS`), wherever they come from. */
-const REFUSALS = new Set(["ActorCallError", "ProjectError", "SpaceFilesError", "ConvertError", "ChangeInputError"]);
+const REFUSALS = new Set(["ActorCallError", "ProjectError", "SpaceFilesError", "ConvertError", "ChangeInputError", "DirectoryError"]);
 /** `error`'s code, when it is a refusal `STATUS` knows. */
 export function refusalOf(error: unknown): { status: number; code: string; message: string } | undefined {
   if (!(error instanceof Error) || (!REFUSALS.has(error.name) && !(error instanceof ActorCallError))) return undefined;
@@ -191,8 +201,30 @@ function chatIdOf(request: Request): string {
   return id;
 }
 
-/** The conversation `user` names with `chatId`: the only place a route makes a key. */
-const refOf = (user: AccountUser, chatId: string): ChatRef => ({ userId: user.id, chatId, key: keyOf(user.id, chatId) });
+/** `?user=` of `request`: another member's chat (its author's id), or `undefined` for the user's own. */
+function authorOf(request: Request): string | undefined {
+  const user = new URL(request.url).searchParams.get("user");
+  if (user === null || user === "") return undefined;
+  if (user.length > 256) throw new Refused(404, "not_found", "no such conversation");
+  return user;
+}
+
+/**
+ * A chat a user opened: its ref (the only place a route makes a key), whether it is theirs, the
+ * directory's entry when it shows them one, the viewer that asked.
+ */
+export type Opened = { ref: ChatRef; mine: boolean; entry?: DirectoryEntry; viewer: PeopleViewer };
+
+/** What an opened chat is about (its agent, its space), from the directory's entry or, for the user's own new one, the App that holds it. */
+export const factsOf = async (opened: Opened, backend: ChatBackend, ctx: AppContext): Promise<LocalChat> =>
+  opened.entry === undefined
+    ? backend.conversation(opened.ref, ctx)
+    : { agent: opened.entry.agent, ...(opened.entry.space !== undefined && { space: opened.entry.space }), busy: opened.entry.busy };
+
+/** Only its author writes in a chat or stops its run: another member's is `403`. */
+export function authorOnly(opened: Opened): void {
+  if (!opened.mine) throw new Refused(403, "forbidden", "only who started this chat writes in it");
+}
 
 /** `?limit&cursor`, checked. */
 export function pageOf(request: Request): { limit: number; cursor?: string } {
@@ -306,6 +338,26 @@ function projected(events: AsyncIterable<ChatEvent>, visibility: VisibilitySetti
   };
 }
 
+/** The user's own chat the directory shows nothing of yet (a new one): what the App holding it says. */
+export const newChatOf = (ref: ChatRef, local: LocalChat): ChatConversation => {
+  const project = projectOfSpace(local.space);
+  return {
+    id: ref.chatId,
+    title: UNTITLED,
+    busy: local.busy,
+    archived: false,
+    hidden: false,
+    lastActivity: 0,
+    createdAt: 0,
+    unread: 0,
+    userId: ref.userId,
+    mine: true,
+    may: { rename: false, archive: false, delete: false },
+    ...(local.agent !== "" && { agent: local.agent }),
+    ...(project !== "" && { project }),
+  };
+};
+
 /** A conversation as `config` lets users see it: its agent only when it is one they may pick. */
 export function shownConversation<C extends ChatConversation>(conversation: C, config: ChatConfig): C {
   const { agent, ...rest } = conversation;
@@ -370,6 +422,10 @@ export interface RouteOptions {
   /** Read in a handler, never in setup. */
   accounts(): Accounts;
   backend(): ChatBackend;
+  /** Which conversations exist, as each user may see them (`conversations.directory`). Read in a handler. */
+  directory(): ConversationDirectory;
+  /** A person's other identities (`principals`), when installed: the viewer's. */
+  principals(): Principals | undefined;
   config: ChannelWebConfig;
   /**
    * What `GET /chat/api/config` answers, as the App where the accounts are makes it (`chatConfigOf`):
@@ -486,10 +542,39 @@ export function userRoutes(pikit: Pikit, accounts: () => Accounts): UserRoute {
   };
 }
 
+/**
+ * The chat `chatId` of `author` (default: `me`) as `me` may see it now (`conversations.directory`'s
+ * `access`, the session's viewer): `404` for another's they may not see, before anything else is asked.
+ */
+export async function openChat(directory: ConversationDirectory, principals: Principals | undefined, me: AccountUser, chatId: string, author: string | undefined, ctx: AppContext): Promise<Opened> {
+  const userId = author ?? me.id;
+  const ref: ChatRef = { userId, chatId, key: keyOf(userId, chatId) };
+  const { viewer } = await viewerOf(me, principals, ctx);
+  const entry = await directory.access(viewer, { key: ref.key }, ctx);
+  const mine = userId === me.id;
+  // Another's chat the directory does not show this user: as one that never existed.
+  if (entry === undefined && !mine) throw new Refused(404, "not_found", "no such conversation");
+  return { ref, mine, viewer, ...(entry !== undefined && { entry }) };
+}
+
 /** Registers every chat route of the App `pikit` sets up, and the page's files. */
 export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   const user = userRoutes(pikit, () => options.accounts());
   const backend = () => options.backend();
+  const directory = () => options.directory();
+  /** The chat of the route's `:id` (and `?user=`), as `me` may see it. */
+  const opened = (request: Request, me: AccountUser, ctx: AppContext): Promise<Opened> => openChat(directory(), options.principals(), me, chatIdOf(request), authorOf(request), ctx);
+  /** Its entry, for an act on it: a chat the directory does not show yet has none to act on (`404`). */
+  const entryOf = (chat: Opened): DirectoryEntry => {
+    if (chat.entry === undefined) throw new Refused(404, "not_found", "no such conversation");
+    return chat.entry;
+  };
+  /** A chat as the page reads it, its agent as `config` lets users see it. */
+  const shownChat = async (entry: DirectoryEntry, me: AccountUser, ctx: AppContext): Promise<ChatConversation> => {
+    const chat = chatOf(entry, me.id);
+    if (chat === undefined) throw new Refused(404, "not_found", "no such conversation");
+    return shownConversation(chat, await options.chatConfig(ctx));
+  };
 
   pikit.provideKeyed(
     "http.route",
@@ -535,21 +620,23 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
 
   user(`GET ${API}/conversations`, async (request, ctx, me) => {
     const params = new URL(request.url).searchParams;
-    const archived = params.get("archived");
-    if (archived !== null && archived !== "1" && archived !== "0") throw new Refused(400, "invalid_request", "archived is 1 or 0");
+    const state = stateAsked(params);
+    if (state === undefined) throw new Refused(400, "invalid_request", "archived and hidden are 1 or 0, one of them");
     const q = params.get("q")?.trim() ?? "";
     if (q.length > SEARCH_MAX) throw new Refused(400, "invalid_request", `q is at most ${SEARCH_MAX} characters`);
     // A project's own, or (`none`) those of no project; one that is no project id is no project of theirs.
     const given = params.get("project");
     if (given !== null && given !== NO_PROJECT && !isProjectId(given)) throw new Refused(404, "not_found", "no such project");
-    const project = given === null ? undefined : given === NO_PROJECT ? "" : given;
     // Only a project the user is a member of (the store says): any other is no project, 404.
-    if (project !== undefined && project !== "") await projectsOf(options).listing(me, project, ctx);
-    const listed = await backend().list(me.id, { ...pageOf(request), archived: archived === "1", ...(q !== "" && { q }), ...(project !== undefined && { project }) }, ctx);
+    const space = given === null ? undefined : given === NO_PROJECT ? personalSpace(me.id) : await projectsOf(options).listing(me, given, ctx);
+    const { viewer } = await viewerOf(me, options.principals(), ctx);
+    const listed = await directory().list(viewer, { ...pageOf(request), state, owned: true, channels: [CHANNEL], ...(q !== "" && { q }), ...(space !== undefined && { space }) }, ctx);
+    const items = listed.items.flatMap((entry) => chatOf(entry, me.id) ?? []);
+    const page = { items, ...(listed.next !== undefined && { next: listed.next }) };
     // The policy only when there is an agent to say or not.
-    if (!listed.items.some((each) => each.agent !== undefined)) return json<ChatPage<ChatConversation>>(200, listed);
+    if (!items.some((each) => each.agent !== undefined)) return json<ChatPage<ChatConversation>>(200, page);
     const config = await options.chatConfig(ctx);
-    return json<ChatPage<ChatConversation>>(200, { ...listed, items: listed.items.map((each) => shownConversation(each, config)) });
+    return json<ChatPage<ChatConversation>>(200, { ...page, items: items.map((each) => shownConversation(each, config)) });
   });
 
   /** `429` when `me` sent too many messages this minute; `undefined` when this one may go. */
@@ -575,14 +662,11 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
       if (!isProjectId(project)) throw new Refused(404, "not_found", "no such project");
       made = await projectsOf(options).starting(me, project, agent, ctx);
     }
-    // The page's request id names the conversation too: a retry reaches the same one.
+    // The page's request id names the conversation too: a retry reaches the same one (the user's own key).
     const chatId = given === undefined ? newChatId() : await chatIdFor(me.id, given);
     const requestId = requestIdOf(given);
-    const started = await backend().start(
-      refOf(me, chatId),
-      { ...message, requestId, ...(made.agent !== undefined && { agent: made.agent }), ...(project !== undefined && made.space !== undefined && { project, space: made.space }) },
-      ctx,
-    );
+    const { ref } = await openChat(directory(), options.principals(), me, chatId, undefined, ctx);
+    const started = await backend().start(ref, { ...message, requestId, ...(made.agent !== undefined && { agent: made.agent }), ...(made.space !== undefined && { space: made.space }) }, ctx);
     ctx.logger.info("channel-web: a user started a conversation", {
       user: me.id,
       chat: chatId,
@@ -596,48 +680,72 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     return json<ChatStartResponse>(201, { id: chatId, ...started });
   });
 
-  /** A conversation as the user may see it (its agent only when one they may pick). */
-  const shown = async (conversation: ChatConversation, ctx: AppContext): Promise<ChatConversation> => shownConversation(conversation, await options.chatConfig(ctx));
-
-  user(`GET ${API}/conversations/:id`, async (request, ctx, me) => json<ChatConversation>(200, await shown(await backend().conversation(refOf(me, chatIdOf(request)), ctx), ctx)));
-
-  user(`PATCH ${API}/conversations/:id`, async (request, ctx, me) => {
-    const chatId = chatIdOf(request);
-    const title = checked(RenameBody, await bodyOf(request, MAX_SMALL_BODY)).title.replace(/\s+/g, " ").trim();
-    if (title === "" || title.length > TITLE_MAX) throw new Refused(400, "invalid_request", `/title: 1 to ${TITLE_MAX} characters`);
-    const renamed = await backend().rename(refOf(me, chatId), title, ctx);
-    ctx.logger.info("channel-web: a user renamed a conversation", { user: me.id, chat: chatId });
-    return json<ChatConversation>(200, await shown(renamed, ctx));
+  user(`GET ${API}/conversations/:id`, async (request, ctx, me) => {
+    const chat = await opened(request, me, ctx);
+    if (chat.entry !== undefined) return json<ChatConversation>(200, await shownChat(chat.entry, me, ctx));
+    // The user's own new chat: what its App says (404 for a key never made).
+    return json<ChatConversation>(200, shownConversation(newChatOf(chat.ref, await backend().conversation(chat.ref, ctx)), await options.chatConfig(ctx)));
   });
 
-  for (const [action, archived] of [
-    ["archive", true],
-    ["unarchive", false],
+  user(`PATCH ${API}/conversations/:id`, async (request, ctx, me) => {
+    const title = checked(RenameBody, await bodyOf(request, MAX_SMALL_BODY)).title.replace(/\s+/g, " ").trim();
+    if (title === "" || title.length > TITLE_MAX) throw new Refused(400, "invalid_request", `/title: 1 to ${TITLE_MAX} characters`);
+    const chat = await opened(request, me, ctx);
+    // For everyone, as the directory lets (its owner; a project's owner): 403 otherwise.
+    const renamed = await directory().rename(chat.viewer, refOfEntry(entryOf(chat)), title, ctx);
+    ctx.logger.info("channel-web: a user renamed a conversation", { user: me.id, chat: chat.ref.chatId, ...(!chat.mine && { author: chat.ref.userId }) });
+    return json<ChatConversation>(200, await shownChat(renamed, me, ctx));
+  });
+
+  for (const [action, state] of [
+    ["archive", "archived"],
+    ["unarchive", "listed"],
   ] as const) {
     user(`POST ${API}/conversations/:id/${action}`, async (request, ctx, me) => {
-      const chatId = chatIdOf(request);
-      const changed = await backend().archive(refOf(me, chatId), archived, ctx);
-      ctx.logger.info(`channel-web: a user ${archived ? "archived a conversation" : "put a conversation back in their list"}`, { user: me.id, chat: chatId });
-      return json<ChatConversation>(200, await shown(changed, ctx));
+      const chat = await opened(request, me, ctx);
+      // For everyone, as the directory lets (its owner; a project's owner): 403 otherwise.
+      const changed = await directory().setState(chat.viewer, refOfEntry(entryOf(chat)), state, ctx);
+      ctx.logger.info(`channel-web: a user ${state === "archived" ? "archived a conversation for everyone" : "put a conversation back for everyone"}`, { user: me.id, chat: chat.ref.chatId, ...(!chat.mine && { author: chat.ref.userId }) });
+      return json<ChatConversation>(200, await shownChat(changed, me, ctx));
     });
   }
 
+  for (const [action, hidden] of [
+    ["hide", true],
+    ["unhide", false],
+  ] as const) {
+    user(`POST ${API}/conversations/:id/${action}`, async (request, ctx, me) => {
+      const chat = await opened(request, me, ctx);
+      // For this user only: anyone who sees it.
+      const changed = await directory().mine(chat.viewer, refOfEntry(entryOf(chat)), { hidden }, ctx);
+      ctx.logger.info(`channel-web: a user ${hidden ? "hid a conversation for themselves" : "put a conversation they hid back"}`, { user: me.id, chat: chat.ref.chatId });
+      return json<ChatConversation>(200, await shownChat(changed, me, ctx));
+    });
+  }
+
+  user(`POST ${API}/conversations/:id/read`, async (request, ctx, me) => {
+    const chat = await opened(request, me, ctx);
+    const read = await directory().mine(chat.viewer, refOfEntry(entryOf(chat)), { readUpTo: ctx.clock.now() }, ctx);
+    return json<ChatConversation>(200, await shownChat(read, me, ctx));
+  });
+
   user(`DELETE ${API}/conversations/:id`, async (request, ctx, me) => {
-    const chatId = chatIdOf(request);
-    await backend().hide(refOf(me, chatId), ctx);
-    ctx.logger.info("channel-web: a user deleted a conversation from their list", { user: me.id, chat: chatId });
+    const chat = await opened(request, me, ctx);
+    // For everyone, as the directory lets (its owner; never a project's owner): 403 otherwise. Its key starts over.
+    await directory().setState(chat.viewer, refOfEntry(entryOf(chat)), "deleted", ctx);
+    ctx.logger.info("channel-web: a user deleted a conversation for everyone", { user: me.id, chat: chat.ref.chatId });
     return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
   });
 
   user(`GET ${API}/conversations/:id/transcript`, async (request, ctx, me) => {
-    const read = await backend().transcript(refOf(me, chatIdOf(request)), pageOf(request), ctx);
+    const page = pageOf(request);
+    const read = await backend().transcript((await opened(request, me, ctx)).ref, page, ctx);
     const { visibility } = await options.chatConfig(ctx);
     const items = read.items.flatMap((entry) => projectEntry(entry, visibility) ?? []);
     return json<ChatPage<ChatTranscriptEntry>>(200, { items, ...(read.next !== undefined && { next: read.next }) });
   });
 
   user(`GET ${API}/conversations/:id/messages/:messageId/images/:n`, async (request, ctx, me) => {
-    const chatId = chatIdOf(request);
     const [, , , , , , rawId = "", , rawIndex = ""] = new URL(request.url).pathname.split("/");
     let messageId = "";
     try {
@@ -647,7 +755,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     }
     const index = Number(rawIndex);
     if (!REQUEST_ID.test(messageId) || !/^[0-9]$/.test(rawIndex) || index >= MAX_IMAGES) throw new Refused(404, "not_found", "no such image");
-    const image = await backend().image(refOf(me, chatId), messageId, index, ctx);
+    const image = await backend().image((await opened(request, me, ctx)).ref, messageId, index, ctx);
     const bytes = Uint8Array.from(atob(image.data), (char) => char.charCodeAt(0));
     return new Response(bytes, {
       headers: {
@@ -667,18 +775,21 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     const chatId = chatIdOf(request);
     const { requestId: given, ...message } = await messageOf(request, options.limits());
     const requestId = requestIdOf(given);
+    const chat = await opened(request, me, ctx);
+    authorOnly(chat);
     // In a project's chat, only while its author is a member and its agent one the project allows (403).
     if (options.projects !== undefined) {
-      const conversation = await backend().conversation(refOf(me, chatId), ctx);
-      if (conversation.project !== undefined) await options.projects.posting(me, conversation, ctx);
+      const local = await factsOf(chat, backend(), ctx);
+      const project = projectOfSpace(local.space);
+      if (project !== "") await options.projects.posting(me, { project, agent: local.agent }, ctx);
     }
-    const sent = await backend().send(refOf(me, chatId), { ...message, requestId }, ctx);
+    const sent = await backend().send(chat.ref, { ...message, requestId }, ctx);
     ctx.logger.info("channel-web: a user sent a message", { user: me.id, chat: chatId, requestId, admission: sent.admission, ...commandFacts(sent), ...facts(message) });
     return json<ChatSendResponse>(202, sent);
   });
 
   user(`GET ${API}/conversations/:id/events`, async (request, ctx, me) => {
-    const ref = refOf(me, chatIdOf(request));
+    const { ref } = await opened(request, me, ctx);
     // The policy first: no stream is opened that could not be cut by it.
     const { visibility } = await options.chatConfig(ctx);
     return eventStream(projected(await backend().live(ref, ctx), visibility), heartbeatOf(options), ctx);
@@ -686,7 +797,9 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
 
   user(`POST ${API}/conversations/:id/abort`, async (request, ctx, me) => {
     const chatId = chatIdOf(request);
-    await backend().abort(refOf(me, chatId), ctx);
+    const chat = await opened(request, me, ctx);
+    authorOnly(chat);
+    await backend().abort(chat.ref, ctx);
     ctx.logger.info("channel-web: a user stopped a run", { user: me.id, chat: chatId });
     return json<ChatAbortResponse>(200, { id: chatId });
   });

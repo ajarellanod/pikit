@@ -8,7 +8,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { type ComponentDefinition, defineApp, defineComponent, halt, silentLogger } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { describeConversation } from "@pikit/contracts";
+import { cleanTitle, describeConversation } from "@pikit/contracts";
 import { createConversationDescribeConformance, HOSTILE_NAME } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import {
@@ -24,13 +24,14 @@ import {
   TITLE_MAX,
 } from "./api.ts";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
-import { chatIdFor, cleanTitle, keyOf, parseKey, projectOfSpace } from "./chat.ts";
+import { chatIdFor, keyOf, parseKey, projectOfSpace } from "./chat.ts";
+import { type TestDirectory, testDirectory } from "./directory.test-support.ts";
 import { runEntryId } from "./entries.ts";
 import channelWeb, { createChannelWeb, NAME, usersPagePath } from "./index.ts";
 import { avatarHosts, cspOf } from "./assets.ts";
 import { maxBodyOf } from "./routes.ts";
 import { MemoryProjects, projectsComponent } from "./projects.test-support.ts";
-import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, liveReader, OPERATOR, PIXEL, Runtime, router, SECRETS, type Served, secretsOf, serve } from "./runtime.test-support.ts";
+import { adminAuth, answerOf, eventually, FakeAccounts, imageOf, kvOf, liveReader, OPERATOR, PIXEL, Runtime, router, SECRETS, type Served, secretsOf, serve, tickingClock } from "./runtime.test-support.ts";
 
 const apps: Served[] = [];
 afterEach(async () => {
@@ -41,6 +42,8 @@ interface Chat {
   served: Served;
   runtime: Runtime;
   accounts: FakeAccounts;
+  /** The App's `conversations.directory`: the contracts' double, recorded from the runtime's events. */
+  directory: TestDirectory;
 }
 
 async function chat(options: { admin?: boolean; config?: Record<string, unknown>; components?: ComponentDefinition[]; secrets?: Record<string, string> } = {}): Promise<Chat> {
@@ -48,10 +51,13 @@ async function chat(options: { admin?: boolean; config?: Record<string, unknown>
   const accounts = new FakeAccounts();
   accounts.add("ana");
   accounts.add("ben");
+  const directory = testDirectory();
   const served = await serve(
     [
       secretsOf(options.secrets),
       runtime.component(),
+      directory.provider(),
+      directory.recorder(),
       kvOf(),
       sqliteStorage(),
       router,
@@ -60,9 +66,12 @@ async function chat(options: { admin?: boolean; config?: Record<string, unknown>
       createChannelWeb({ accounts: accounts.wiring() }),
     ],
     { [NAME]: options.config ?? {} },
+    "server",
+    undefined,
+    tickingClock(),
   );
   apps.push(served);
-  return { served, runtime, accounts };
+  return { served, runtime, accounts, directory };
 }
 
 const as = (user: string, init: RequestInit = {}): RequestInit => ({
@@ -136,7 +145,7 @@ test("it refuses to start without CHANNEL_WEB_AUTH_SECRET, with a short one, wit
   const failing = async (secrets: Record<string, string>, config: Record<string, unknown> = {}) => {
     const runtime = new Runtime();
     const app = await defineApp({
-      components: [secretsOf(secrets), runtime.component(), kvOf(), sqliteStorage(), router, createChannelWeb({ accounts: new FakeAccounts().wiring() })],
+      components: [secretsOf(secrets), runtime.component(), kvOf(), sqliteStorage(), router, testDirectory().provider(), createChannelWeb({ accounts: new FakeAccounts().wiring() })],
       config: { [NAME]: config },
       logger: silentLogger,
     }).create();
@@ -207,7 +216,7 @@ test("a conversation: started with its first message through admitInbound (the u
   expect(c.runtime.dispatched).toEqual([
     {
       requestId: started.requestId,
-      conversation: { key, agent: "assistant", channel: "web", space: "web:ana", conversationId: "c1" },
+      conversation: { key, agent: "assistant", channel: "web", space: "web:ana", owner: { channel: "web", id: "ana" }, conversationId: "c1" },
       prompt: "  What is   the plan\nfor today?",
       images: [{ mimeType: "image/png", data: PIXEL }],
       sender: { channel: "web", id: "ana" },
@@ -274,8 +283,9 @@ test("the list: newest activity first, paged with a cursor; a forged cursor is 4
   expect(after.items.map((each) => each.id)).toEqual([ids[0] as string, ids[2] as string]);
   for (const path of ["", "/transcript", "/events"]) expect((await c.served.fetch(`${API}/conversations/${ids[1]}${path}`, as("ana"))).status).toBe(404);
   expect((await c.served.fetch(`${API}/conversations/${ids[1]}/messages`, post("ana", { text: "hi" }))).status).toBe(404);
-  // Nothing of the runtime's is deleted.
-  expect(c.runtime.conversations.size).toBe(3);
+  // Deleted for everyone: its key started over (a new runtime conversation), nothing of the runtime's deleted.
+  expect(c.runtime.resets).toEqual([keyOf("ana", ids[1] as string)]);
+  expect(c.runtime.conversations.size).toBe(4);
 });
 
 test("archive: listed apart (?archived=1), still read and written to; unarchive puts it back; new activity lists it again; a delete takes it from both lists", async () => {
@@ -483,7 +493,8 @@ test("a run that ends before its admission returns (a quick model): the list and
   expect(states).toEqual({ [requestId]: "answered", [sent.requestId]: "answered" });
   // A run going (started, not ended) is still busy in the list.
   c.runtime.runsAtOnce = false;
-  await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "a long one" }));
+  const long = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "a long one" }))).json()) as { requestId: string };
+  await c.runtime.start(keyOf("ana", id), [long.requestId]);
   expect((await listed()).map((each) => each.busy)).toEqual([true]);
 });
 
@@ -839,7 +850,7 @@ test("stop: the run of the key's current conversation is aborted", async () => {
   const { id } = await start(c, "ana", "hello");
   const aborted = await c.served.fetch(`${API}/conversations/${id}/abort`, post("ana", {}));
   expect(await aborted.json()).toEqual({ id });
-  expect(c.runtime.aborted).toEqual([{ key: `web:ana:${id}`, agent: "assistant", channel: "web", space: "web:ana", conversationId: "c1" }]);
+  expect(c.runtime.aborted).toEqual([{ key: `web:ana:${id}`, agent: "assistant", channel: "web", space: "web:ana", owner: { channel: "web", id: "ana" }, conversationId: "c1" }]);
   expect(c.served.logged.find((each) => each.message.includes("stopped a run"))?.fields).toEqual({ user: "ana", chat: id });
 });
 
@@ -899,7 +910,8 @@ test("images and bodies: at most 4, of the image types, base64, 5 MB each (413);
   // On a server 4 images of 1 MB pass (Cloudflare's limit is the Worker's and the object's).
   const many = await start(c, "ana", "", { images: Array.from({ length: 4 }, () => imageOf(MAX_DURABLE_IMAGE_BYTES)) });
   expect(many.admission).toBe("started");
-  expect(await (await c.served.fetch(`${API}/conversations/${many.id}`, as("ana"))).json()).toMatchObject({ title: "Image" });
+  // Nothing written names it: the page's fallback until a model titles it.
+  expect(await (await c.served.fetch(`${API}/conversations/${many.id}`, as("ana"))).json()).toMatchObject({ title: "New conversation" });
 });
 
 /** `execution` keeping files in memory (only what writeAttachments calls); `failWrites` makes every write fail until it is cleared. */
@@ -1005,7 +1017,7 @@ test("refusals: the router's deny is 403, a stage's halt 422, no router 500; not
   const noRouter = new Runtime();
   const accounts = new FakeAccounts();
   accounts.add("ana");
-  const bare = await serve([secretsOf(), noRouter.component(), kvOf(), sqliteStorage(), createChannelWeb({ accounts: accounts.wiring() })]);
+  const bare = await serve([secretsOf(), noRouter.component(), kvOf(), sqliteStorage(), testDirectory().provider(), createChannelWeb({ accounts: accounts.wiring() })]);
   apps.push(bare);
   const none = await bare.fetch(`${API}/conversations`, post("ana", { text: "hi" }));
   expect({ status: none.status, body: await none.json() }).toMatchObject({ status: 500, body: { error: "no_route" } });
@@ -1068,11 +1080,13 @@ test("the operator's routes: absent without admin.auth (404); with it 401 withou
 
   expect((await admin("/users/ben", { method: "DELETE" })).status).toBe(204);
   expect(c.accounts.users.has("ben")).toBe(false);
-  // Signed up again with the same id, they would find no conversation listed; the runtime keeps it.
+  // Their chats deleted for everyone (each key started over): signed up again with the same id, they would find none; the runtime keeps them.
+  expect(c.runtime.resets).toEqual([keyOf("ben", id)]);
   c.accounts.add("ben");
   expect(await (await c.served.fetch(`${API}/conversations`, as("ben"))).json()).toEqual({ items: [] });
   expect((await c.served.fetch(`${API}/conversations/${id}`, as("ben"))).status).toBe(404);
-  expect(c.runtime.conversations.size).toBe(1);
+  expect(c.runtime.conversations.size).toBe(2);
+  expect(await c.directory.memory.directory.list({ kind: "operator", id: "ops" }, { state: "deleted" }, c.served.app.context())).toMatchObject({ items: [{ key: keyOf("ben", id), state: "deleted", stateBy: { kind: "component", name: "channel-web" } }] });
 
   const logged = c.served.logged.filter((each) => each.message.includes("an operator"));
   expect(logged.map((each) => each.fields?.operator)).toEqual(["ops", "ops", "ops", "ops", "ops"]);
@@ -1089,12 +1103,12 @@ test("signUp is a live setting when settings is installed: declared with the con
 });
 
 test("what setup declares", async () => {
-  const app = await defineApp({ components: [secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, channelWeb], logger: silentLogger }).create();
+  const app = await defineApp({ components: [secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, testDirectory().provider(), channelWeb], logger: silentLogger }).create();
   const described = app.describe().components.find((each) => each.name === NAME);
   expect(described).toMatchObject({
     name: NAME,
     provides: ["http.route"],
-    requires: ["secrets", "conversations.registry", "agent.runtime", "agent.observe", "agent.submissions", "storage.kv", "storage.sql"],
+    requires: ["secrets", "conversations.registry", "agent.runtime", "agent.observe", "agent.submissions", "storage.kv", "storage.sql", "conversations.directory"],
     optional: [
       "wakeups",
       "outbound.queue",
@@ -1107,7 +1121,6 @@ test("what setup declares", async () => {
       "admin.auth",
       "agent.definition",
       "agent.directory",
-      "model.complete",
       "agent.command",
       "projects",
       "space.files",
@@ -1120,7 +1133,7 @@ test("what setup declares", async () => {
 
 for (const c of createLifecycleConformance(() => {
   const runtime = new Runtime();
-  return { component: createChannelWeb({ accounts: new FakeAccounts().wiring() }), providers: [secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router] };
+  return { component: createChannelWeb({ accounts: new FakeAccounts().wiring() }), providers: [secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, testDirectory().provider()] };
 })) {
   test(`${c.group}: ${c.name}`, () => c.run());
 }
@@ -1130,7 +1143,7 @@ for (const c of createConversationDescribeConformance(() => {
   const accounts = new FakeAccounts();
   const chatId = crypto.randomUUID();
   return {
-    components: [secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, createChannelWeb({ accounts: accounts.wiring() })],
+    components: [secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, testDirectory().provider(), createChannelWeb({ accounts: accounts.wiring() })],
     kind: "web",
     async known() {
       const ana = accounts.add("ana", "ana@example.com");
@@ -1165,7 +1178,7 @@ for (const c of createConversationDescribeConformance(() => {
 test("a conversation's user with no name is named by their email; one the accounts cannot read is described by the key, logged", async () => {
   const accounts = new FakeAccounts();
   accounts.add("ana", "ana@example.com").name = " ";
-  const served = await serve([secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, createChannelWeb({ accounts: accounts.wiring() })]);
+  const served = await serve([secretsOf(), new Runtime().component(), kvOf(), sqliteStorage(), router, testDirectory().provider(), createChannelWeb({ accounts: accounts.wiring() })]);
   apps.push(served);
   const chatId = crypto.randomUUID();
   const ctx = served.app.context();
@@ -1269,7 +1282,7 @@ test("SPACES: a chat of no project is in its user's personal space (web:<user>),
   expect([spaceOf("ana", first.id), spaceOf("ana", second.id), spaceOf("ben", bens.id), spaceOf("ana", inProject.id)]).toEqual(["web:ana", "web:ana", "web:ben", `project:${work.id}`]);
   expect(c.runtime.dispatched.map((each) => each.conversation.space)).toEqual(["web:ana", "web:ana", "web:ben", `project:${work.id}`]);
   expect(parseKey("web:ana")).toBeUndefined();
-  expect(projectOfSpace("ana", "web:ana")).toBe("");
+  expect([projectOfSpace("web:ana"), projectOfSpace(`project:${work.id}`), projectOfSpace(`web:ana:project:${work.id}`), projectOfSpace(`project:${work.id}x`)]).toEqual(["", work.id, work.id, ""]);
 
   // A command runs there too, also in a chat it makes.
   await c.served.fetch(`${API}/conversations/${first.id}/messages`, post("ana", { text: "/rules be brief" }));
@@ -1297,7 +1310,8 @@ test("COMMANDS: a first message that is a command makes the chat (empty, New con
   expect(await transcriptOf(c, "ana", body.id)).toEqual([]);
   expect(c.runtime.dispatched).toEqual([]);
   expect(commands.typed()).toEqual([{ name: "rules", key: keyOf("ana", body.id), space: `project:${work.id}`, args: "be brief", sender: { channel: "web", id: "ana" } }]);
-  expect(await titlesOf(c, "ana", `?project=${work.id}`)).toEqual(["New conversation"]);
+  // Listed once a message reaches it (the directory lists conversations with activity): read by its id meanwhile.
+  expect(await titlesOf(c, "ana", `?project=${work.id}`)).toEqual([]);
 
   const retried = await c.served.fetch(`${API}/conversations`, post("ana", { text: "/rules be brief", requestId: "web:first-cmd", project: work.id }));
   expect(await retried.json()).toMatchObject({ id: body.id, admission: "duplicate", command: { name: "rules", outcome: "ran" } });
@@ -1309,7 +1323,8 @@ test("COMMANDS: a first message that is a command makes the chat (empty, New con
   expect(denied.status).toBe(403);
   expect((await c.served.fetch(`${API}/conversations`, post("ana", { text: "/rules x", requestId: "web:denied-start" }))).status).toBe(403);
   expect(commands.typed().length).toBe(1);
-  expect(await titlesOf(c, "ana")).toEqual(["New conversation"]);
+  expect(await titlesOf(c, "ana")).toEqual([]);
+  expect((await c.served.fetch(`${API}/conversations/${await chatIdFor("ana", "web:denied-start")}`, as("ana"))).status).toBe(404);
   deny = false;
   const later = await c.served.fetch(`${API}/conversations/${body.id}/messages`, post("ana", { text: "/rules later", requestId: "web:denied-cmd" }));
   expect(await later.json()).toMatchObject({ admission: "command", command: { outcome: "ran", text: "kept: later" } });

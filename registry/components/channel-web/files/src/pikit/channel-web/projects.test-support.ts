@@ -45,6 +45,7 @@ import {
   samePrincipal,
   textOf,
 } from "@pikit/contracts";
+import { audienceStage } from "@pikit/contracts";
 import type { Memory, MemoryFilter, MemoryOwner, MemoryStore, NewMemory } from "./contract.ts";
 
 type Entry = Change & { before?: unknown; after?: unknown };
@@ -193,6 +194,19 @@ export class MemoryProjects implements ProjectStore {
     const record = this.record(space);
     if (record === undefined || this.role(record, caller) === undefined) return undefined;
     return this.shown(record, caller);
+  }
+
+  /**
+   * The spaces `principals` are current members of (only `space` when given), each with their role: what
+   * projects-sql's stage of `conversation.audience` answers (`audienceStage("projects", ...)`), so the
+   * directory lists a project's chats to its members. Not one of the store's calls (`calls`).
+   */
+  grants(principals: readonly Principal[], space: string | undefined): { space: string; role: "owner" | "member" }[] {
+    return [...this.spaces.values()].flatMap((record) => {
+      if (record.removed || (space !== undefined && record.project.space !== space)) return [];
+      const role = roleOfMembers(record.members, principals, this.now(), STALE_AFTER_MS_DEFAULT);
+      return role === undefined ? [] : [{ space: record.project.space, role }];
+    });
   }
 
   async roleOf(space: string, principals: readonly Principal[]): Promise<"owner" | "member" | undefined> {
@@ -772,12 +786,19 @@ export function projectDoubles(now: () => number = () => Date.now()): ProjectDou
   return { projects: new MemoryProjects(now), files: new MemorySpaceFiles(now), memory: new MemoryMemory(now), principals: new FakePrincipals(), convert: new FakeConverter() };
 }
 
-/** A component providing `doubles` (those given: `projects` alone gives no files, memory...). */
+/**
+ * A component providing `doubles` (those given: `projects` alone gives no files, memory...), and with
+ * `projects` its stage of `conversation.audience`, as projects-sql's halves give both.
+ */
 export function projectsComponent(doubles: Partial<ProjectDoubles>, name = "projects-doubles") {
   return defineComponent({
     name,
     setup(pikit) {
-      if (doubles.projects !== undefined) pikit.provide("projects", doubles.projects);
+      const projects = doubles.projects;
+      if (projects !== undefined) {
+        pikit.provide("projects", projects);
+        pikit.pipeline("conversation.audience", audienceStage("projects", { grants: async (principals, space) => projects.grants(principals, space) }), { id: name });
+      }
       if (doubles.files !== undefined) pikit.provide("space.files", doubles.files);
       if (doubles.memory !== undefined) pikit.provide("memory", doubles.memory);
       if (doubles.principals !== undefined) pikit.provide("principals", doubles.principals);

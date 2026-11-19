@@ -46,9 +46,10 @@ import type {
 import { memberKey } from "./api.ts";
 import { keyOf } from "./chat.ts";
 import { memoryItemId, type MemoryStore } from "./contract.ts";
+import { type TestDirectory, testDirectory } from "./directory.test-support.ts";
 import { createChannelWeb, NAME } from "./index.ts";
 import { FakeConverter, FakePrincipals } from "./projects.test-support.ts";
-import { adminAuth, answerOf, FakeAccounts, kvOf, OPERATOR, Runtime, router, type Served, secretsOf, serve } from "./runtime.test-support.ts";
+import { adminAuth, answerOf, FakeAccounts, kvOf, OPERATOR, Runtime, router, type Served, secretsOf, serve, tickingClock } from "./runtime.test-support.ts";
 
 /** The stores a fixture may give. */
 export type StoreName = "projects" | "files" | "memory";
@@ -91,6 +92,8 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
     served: Served;
     runtime: Runtime;
     accounts: FakeAccounts;
+    /** The App's `conversations.directory` (the contracts' double), kept across a restart. */
+    directory: TestDirectory;
     stores: OpenedStores;
     principals: FakePrincipals;
     convert: FakeConverter;
@@ -111,6 +114,7 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
     const dir = options.restartOf?.dir ?? mkdtempSync(pathJoin(tmpdir(), "pikit-channel-web-projects-"));
     if (options.restartOf === undefined) dirs.push(dir);
     const clock = options.clock;
+    const directory = options.restartOf?.directory ?? testDirectory();
     const stores = await fixture.open({ only: only.filter((name): name is StoreName => name === "projects" || name === "files" || name === "memory"), now: () => clock?.now() ?? Date.now(), dir, ...(options.restartOf !== undefined && { restartOf: options.restartOf.stores }) });
     stores.resetCalls();
     const principals = options.restartOf?.principals ?? new FakePrincipals();
@@ -147,11 +151,26 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
       },
     });
     const served = await serve(
-      [secretsOf(), runtime.component(), kvOf(), sqliteStorage(pathJoin(dir, "chat.db")), probe, router, agents, adminAuth, ...stores.components, doubles, ...(options.components ?? []), createChannelWeb({ accounts: accounts.wiring() })],
+      [
+        secretsOf(),
+        runtime.component(),
+        kvOf(),
+        sqliteStorage(pathJoin(dir, "chat.db")),
+        probe,
+        router,
+        agents,
+        adminAuth,
+        directory.provider(),
+        directory.recorder(),
+        ...stores.components,
+        doubles,
+        ...(options.components ?? []),
+        createChannelWeb({ accounts: accounts.wiring() }),
+      ],
       { [NAME]: { agents: ["assistant", "helper"], ...options.config }, ...stores.config },
       "server",
       "http://pikit.test",
-      clock,
+      clock ?? tickingClock(),
     );
     apps.push(served);
     const need = <T>(value: T | undefined, what: string): T => {
@@ -162,6 +181,7 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
       served,
       runtime,
       accounts,
+      directory,
       stores,
       principals,
       convert,
@@ -718,11 +738,18 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
       ["The budget", "ben", true],
       ["The plan", "ana", false],
     ]);
-    const transcript = await ok<ChatPage<ChatTranscriptEntry>>(c, "ben", "GET", `/projects/${work.id}/conversations/${anas.id}/transcript`);
+    const transcript = await ok<ChatPage<ChatTranscriptEntry>>(c, "ben", "GET", `/projects/${work.id}/conversations/${anas.id}/transcript?user=ana`);
     expect(transcript.items.length).toBeGreaterThan(0);
-    // Ben cannot write in Ana's chat: it is not his conversation.
+    expect(await ok<ChatPage<ChatTranscriptEntry>>(c, "ben", "GET", `/conversations/${anas.id}/transcript?user=ana`)).toEqual(transcript);
+    // By its id alone it is no chat of Ben's; another project's space is no chat of this one.
+    expect((await call(c, "ben", "GET", `/projects/${work.id}/conversations/${anas.id}/transcript`)).status).toBe(404);
+    // Ben cannot write in Ana's chat, nor stop its run: only its author.
     expect((await call(c, "ben", "POST", `/conversations/${anas.id}/messages`, { text: "x" })).status).toBe(404);
+    expect((await call(c, "ben", "POST", `/conversations/${anas.id}/messages?user=ana`, { text: "x" })).status).toBe(403);
+    expect((await call(c, "ben", "POST", `/conversations/${anas.id}/abort?user=ana`)).status).toBe(403);
     expect((await call(c, "cy", "GET", `/projects/${work.id}/conversations`)).status).toBe(404);
+    expect((await call(c, "cy", "GET", `/projects/${work.id}/conversations/${anas.id}/transcript?user=ana`)).status).toBe(404);
+    expect((await call(c, "cy", "GET", `/conversations/${anas.id}/transcript?user=ana`)).status).toBe(404);
   });
 
   test("NOTICES: a chat's are the logs' entries whose author worked in it (an agent's note, file, link; its author's command), newest first; another chat's never; none for a non-member or a chat of no project", async () => {
@@ -786,12 +813,11 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
       ["ben", bens, "Ben's"],
     ];
     const c = await chat({ before: formerTable(rows) });
-    // A chat made in the old project before: its row names the project (the tables made by a first read).
-    await ok(c, "ana", "GET", "/conversations");
-    await c.sql().run(
-      "INSERT INTO channel_web_conversations (key, user_id, chat_id, agent, project, title, title_search, created_at, last_activity, hidden, archived, busy, version) VALUES (?, 'ana', ?, 'assistant', ?, 'Old chat', 'old chat', 1, 1, 0, 0, 0, 1)",
-      [keyOf("ana", "00000000-0000-4000-8000-000000000001"), "00000000-0000-4000-8000-000000000001", work],
-    );
+    // A chat made in the old project before: the directory has it in the project's space.
+    const old = { key: keyOf("ana", "00000000-0000-4000-8000-000000000001"), conversationId: "old" };
+    const place = { agent: "assistant", channel: "web", space: `web:ana:project:${work}`, owner: { channel: "web", id: "ana" } };
+    c.directory.memory.seen({ kind: "dispatched", ref: { ...old, ...place }, requestId: "web:old", sender: { channel: "web", id: "ana" }, duplicate: false, at: 1, seq: 1 });
+    await c.directory.memory.directory.title(old, { text: "Old chat", source: "first" }, c.ctx());
     // One carried over already (a run cut after its create): left as it is.
     await c.projects().create({ id: home, space: `web:ana:project:${home}`, name: "Home (kept)", owner: { channel: "web", id: "ana" } }, { kind: "component", name: "channel-web" }, c.ctx());
     expect(await tableExists(c.sql())).toBe(true);

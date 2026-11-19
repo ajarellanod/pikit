@@ -1,14 +1,9 @@
 /**
- * The channel's own store, in `storage.sql` (tables prefixed `channel_web_`): what the users see of
- * their conversations. It is the channel's platform: what a run wrote is stored into it.
+ * The channel's own store, in `storage.sql` (tables prefixed `channel_web_`): the transcripts of its
+ * conversations. It is the channel's platform: what a run wrote is stored into it. Which conversations
+ * exist, their titles, their order and who sees them are `conversations.directory`'s
+ * (`directory.ts`): nothing here lists conversations.
  *
- * - **`channel_web_conversations`**: one row per conversation (its key, user, chat id, the agent it was
- *   made with, the project it was made in (`""`: none), title (and the title lowercased, for a search), when it was made, its newest activity,
- *   whether the user deleted it from the list, whether they archived it (listed apart until new
- *   activity comes), whether a run goes, and a version). On a server it is the App's own table, and the
- *   list reads it. On Cloudflare each conversation's object holds its own row, the truth, and tells the
- *   users' index (the same table in the accounts actor, `channel-web:accounts`) each new version
- *   (`seen`): an upsert that a late or repeated version changes nothing with.
  * - **`channel_web_entries`**: the conversation's transcript, one row per entry (`entries.ts` makes
  *   them `ChatTranscriptEntry`s):
  *   - `user`: a user's message, written once admitted (its images with it, its files' names alone, state `pending`); its state
@@ -24,11 +19,16 @@
  *   in the turn of the newest user message it answered (positions `1…`), whenever it ends. Read newest
  *   first (`turn`, `pos`, `id`). A message's images' bytes are read only by `image`, one at a time; a
  *   page of entries holds at most `PAGE_JSON_MAX` characters of stored JSON (at least one entry).
- *   On Cloudflare, in the conversation's object.
+ *   On Cloudflare, in the conversation's object. A key's entries are its current runtime conversation's:
+ *   they go when the key is reset ("Delete for everyone", an operator's reset: `startOver`), so a key
+ *   started over never shows what its previous conversation said.
+ * - **`channel_web_resets`**: the keys started over, each with the runtime conversation it was pointed
+ *   to: that conversation is no chat of its user's (every route `404`) until a first message starts one
+ *   in it (`started`). On Cloudflare, in the conversation's object.
  *
  * - **`channel_web_projects`**: the projects this channel kept itself before the project store
- *   (`projects`) kept them: read once by the migration (`formerProjects`, beside the users' index; on
- *   Cloudflare in the accounts actor), each row dropped once carried over, then the table.
+ *   (`projects`) kept them: read once by the migration (`formerProjects`; on Cloudflare in the accounts
+ *   actor), each row dropped once carried over, then the table.
  * - **`channel_web_commands`**: the commands typed in a conversation, by request id (claimed before it
  *   runs, then what came of it): a request id runs a command at most once. On Cloudflare, in the
  *   conversation's object.
@@ -42,33 +42,10 @@ import { ActorCallError, type SqlDatabase } from "@pikit/contracts";
 import { type ChatImage, type ChatTranscriptEntry, PAGE_JSON_MAX } from "./api.ts";
 import type { UserRow } from "./entries.ts";
 
-const CONVERSATIONS = "channel_web_conversations";
 const ENTRIES = "channel_web_entries";
 const PROJECTS = "channel_web_projects";
 const COMMANDS = "channel_web_commands";
-
-/** One conversation as the channel keeps it. JSON: it crosses an actor (`seen`). */
-export type ConversationRow = {
-  key: string;
-  userId: string;
-  chatId: string;
-  /** The agent it was made with (`ConversationRef.agent`). */
-  agent: string;
-  /** The user's project it was made in (`ChatProject.id`), for good; `""`: none. */
-  project: string;
-  title: string;
-  createdAt: number;
-  /** Epoch ms of its newest message. */
-  lastActivity: number;
-  /** The user deleted it from their list: it is gone for them (every route `404`), kept in the runtime. */
-  hidden: boolean;
-  /** The user archived it: listed apart (`list`'s `archived`), still theirs; newer activity lists it again. */
-  archived: boolean;
-  /** Whether a run goes, as last told (a single conversation's read asks the runtime). */
-  busy: boolean;
-  /** Bumped by every change: the index keeps the newest. */
-  version: number;
-};
+const RESETS = "channel_web_resets";
 
 export type MessageState = NonNullable<ChatTranscriptEntry["state"]>;
 
@@ -88,12 +65,6 @@ export type StoreNote = { type: "entry"; entry: ChatTranscriptEntry } | { type: 
 
 export type Paged<T> = { items: T[]; next?: string };
 
-/**
- * A page of the list: not archived, or with `archived` the archived ones; with `q`, only titles holding
- * it; with `project`, only that project's (`""`: those of no project, or of a project that is no more).
- */
-export type ListQuery = { limit: number; cursor?: string; archived?: boolean; q?: string; project?: string };
-
 /** A project this channel kept itself before the project store (its former table). */
 export type FormerProjectRow = { userId: string; id: string; name: string; createdAt: number };
 
@@ -101,34 +72,11 @@ export type FormerProjectRow = { userId: string; id: string; name: string; creat
 export type CommandRow = { name: string; outcome: "ran" | "failed" | "unfinished"; text?: string };
 
 export interface ChatStore {
-  conversation(key: string): Promise<ConversationRow | undefined>;
-  /** Makes the conversation's row unless it has one; the row stored. */
-  create(row: Omit<ConversationRow, "version" | "hidden" | "archived">): Promise<ConversationRow>;
-  /**
-   * Changes the row (a newer activity only moves it forward, and takes it out of the archived ones unless
-   * `archived` is given) and bumps its version; `undefined` when there is none, or with `whenTitle` when
-   * its title is not that one now (a model's title never replaces one the user gave meanwhile).
-   */
-  change(key: string, change: { title?: string; hidden?: boolean; archived?: boolean; busy?: boolean; activity?: number; whenTitle?: string }): Promise<ConversationRow | undefined>;
-
-  /** The index's: keeps each row unless it holds a newer version of it. */
-  seen(rows: readonly ConversationRow[]): Promise<void>;
-  /** The index's: `userId`'s conversations not deleted, newest activity first. Throws `invalid_cursor`. */
-  list(userId: string, query: ListQuery): Promise<Paged<ConversationRow>>;
-  /** The index's: `userId`'s conversations and projects leave it (the user was removed). */
-  forget(userId: string): Promise<void>;
-
-  /** The index's: every user's conversations (not deleted) of project `id`, newest activity first. Throws `invalid_cursor`. */
-  listProject(id: string, page: { limit: number; cursor?: string }): Promise<Paged<ConversationRow>>;
-  /** The index's: the conversation `chatId` of project `id` (any user's, not deleted), or `undefined`. */
-  projectConversation(id: string, chatId: string): Promise<ConversationRow | undefined>;
-  /** The index's: how many conversations (not deleted) each of the projects `ids` has (`0` for none). */
-  projectChats(ids: readonly string[]): Promise<Record<string, number>>;
-  /** The index's: the former projects' rows (none once the table went). */
+  /** The former projects' rows (none once the table went). */
   formerProjects(): Promise<FormerProjectRow[]>;
-  /** The index's: a former project's row, carried over. */
+  /** A former project's row, carried over. */
   dropFormerProject(userId: string, id: string): Promise<void>;
-  /** The index's: the former projects' table, once every row was carried over. */
+  /** The former projects' table, once every row was carried over. */
   dropFormerProjects(): Promise<void>;
 
   /**
@@ -153,10 +101,14 @@ export interface ChatStore {
   addAnswer(key: string, run: string, id: string, message: unknown, at: number): Promise<boolean>;
   /** The transcript, newest first, held messages left out, at most `PAGE_JSON_MAX` of JSON. Throws `invalid_cursor`. */
   entries(key: string, page: { limit: number; cursor?: string }): Promise<Paged<EntryRow>>;
-  /** The text of the first user's message stored in `key` (`""` with images only), or `undefined` before one is. */
-  firstText(key: string): Promise<string | undefined>;
   /** Image `index` of the user's message `id` in `key`, or `undefined`. */
   image(key: string, id: string, index: number): Promise<ChatImage | undefined>;
+  /** `key` was reset to runtime conversation `conversationId`: its entries gone, and that conversation no chat until `started`. */
+  startOver(key: string, conversationId: string): Promise<void>;
+  /** The conversation `key` was last reset to, while no first message started a chat in it. */
+  startedOver(key: string): Promise<string | undefined>;
+  /** A first message started a chat in `key`: no longer one started over. */
+  started(key: string): Promise<void>;
   /** Moves the user's messages `ids` still `pending` to `state`: the ids it moved. */
   settle(key: string, ids: readonly string[], state: MessageState): Promise<string[]>;
   /** Puts every held message of `key` in the transcript: those it released. */
@@ -169,8 +121,8 @@ export interface ChatStore {
   /**
    * The request that started the run going in runtime conversation `conversationId` (`agent.started`),
    * until it ends: in memory, in the App that runs it (a server, or the conversation's object). A run
-   * that ended before its admission returned is told from one started since by it (`backend.ts`'s
-   * `endedEarly`). Lost with the process: nothing stale outlives it.
+   * that ended before its admission returned settles its message from `agent.submissions` unless one
+   * goes (`backend.ts`'s `endedEarly`). Lost with the process: nothing stale outlives it.
    */
   runStarted(conversationId: string, requestId: string): void;
   runEnded(conversationId: string): void;
@@ -178,19 +130,6 @@ export interface ChatStore {
 }
 
 const invalidCursor = (): ActorCallError => new ActorCallError("invalid_cursor", "the cursor is not one this API gave");
-
-/** `<number>:<text>` of a list page's last row; the text URI-encoded. */
-function parseCursor(cursor: string): { at: number; id: string } {
-  const at = cursor.indexOf(":");
-  const number = cursor.slice(0, at);
-  if (at <= 0 || !/^[0-9]+$/.test(number)) throw invalidCursor();
-  try {
-    return { at: Number(number), id: decodeURIComponent(cursor.slice(at + 1)) };
-  } catch {
-    throw invalidCursor();
-  }
-}
-const cursorOf = (at: number, id: string): string => `${at}:${encodeURIComponent(id)}`;
 
 /** `<turn>.<pos>:<id>` of a transcript page's last entry. */
 function parseEntryCursor(cursor: string): { turn: number; pos: number; id: string } {
@@ -203,20 +142,6 @@ function parseEntryCursor(cursor: string): { turn: number; pos: number; id: stri
   }
 }
 
-type ConversationSqlRow = {
-  key: string;
-  user_id: string;
-  chat_id: string;
-  agent: string;
-  project: string;
-  title: string;
-  created_at: number;
-  last_activity: number;
-  hidden: number;
-  archived: number;
-  busy: number;
-  version: number;
-};
 type EntrySqlRow = {
   id: string;
   kind: string;
@@ -235,21 +160,6 @@ type EntrySqlRow = {
 
 type FormerProjectSqlRow = { user_id: string; id: string; name: string; created_at: number };
 
-const rowOf = (row: ConversationSqlRow): ConversationRow => ({
-  key: row.key,
-  userId: row.user_id,
-  chatId: row.chat_id,
-  agent: row.agent,
-  project: row.project,
-  title: row.title,
-  createdAt: Number(row.created_at),
-  lastActivity: Number(row.last_activity),
-  hidden: Number(row.hidden) === 1,
-  archived: Number(row.archived) === 1,
-  busy: Number(row.busy) === 1,
-  version: Number(row.version),
-});
-
 const userOf = (row: Pick<EntrySqlRow, "id" | "text" | "image_types" | "file_names" | "at" | "state">): UserRow => ({
   id: row.id,
   text: row.text ?? "",
@@ -264,13 +174,7 @@ const entryOf = (row: EntrySqlRow): EntryRow =>
     ? { kind: "user", ...userOf(row), ...(row.conversation !== null && { conversation: row.conversation }) }
     : { kind: row.kind === "answer" ? "answer" : "run", id: row.id, run: row.run ?? "", message: JSON.parse(row.message ?? "null") as unknown, at: Number(row.at) };
 
-const COLUMNS = "key, user_id, chat_id, agent, project, title, title_search, created_at, last_activity, hidden, archived, busy, version";
-const SELECTED = "key, user_id, chat_id, agent, project, title, created_at, last_activity, hidden, archived, busy, version";
 const ENTRY_COLUMNS = "id, kind, turn, pos, run, text, image_types, file_names, message, at, state, conversation, size";
-/** A title as a search reads it: lowercased here (SQLite's `lower` knows ASCII only). */
-const searchOf = (title: string): string => title.toLowerCase();
-/** `q` as `LIKE` reads it: lowercased, its wildcards escaped. */
-const likeOf = (q: string): string => `%${searchOf(q).replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 
 /** The store over `sql()` (`storage.sql`); its tables are made at the first use. */
 export function createChatStore(sql: () => SqlDatabase): ChatStore {
@@ -278,11 +182,6 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
   const db = async (): Promise<SqlDatabase> => {
     const database = sql();
     ready ??= (async () => {
-      await database.run(
-        `CREATE TABLE IF NOT EXISTS ${CONVERSATIONS} (key TEXT PRIMARY KEY, user_id TEXT NOT NULL, chat_id TEXT NOT NULL, agent TEXT NOT NULL, project TEXT NOT NULL, title TEXT NOT NULL, ` +
-          "title_search TEXT NOT NULL, created_at BIGINT NOT NULL, last_activity BIGINT NOT NULL, hidden INTEGER NOT NULL, archived INTEGER NOT NULL, busy INTEGER NOT NULL, version BIGINT NOT NULL)",
-      );
-      await database.run(`CREATE INDEX IF NOT EXISTS ${CONVERSATIONS}_user ON ${CONVERSATIONS} (user_id, last_activity, chat_id)`);
       await database.run(
         `CREATE TABLE IF NOT EXISTS ${ENTRIES} (key TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, turn BIGINT NOT NULL, pos INTEGER NOT NULL, run TEXT, ` +
           "text TEXT, images TEXT, image_types TEXT, file_names TEXT, message TEXT, at BIGINT NOT NULL, state TEXT, conversation TEXT, held INTEGER NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (key, id))",
@@ -292,6 +191,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       await database.run(
         `CREATE TABLE IF NOT EXISTS ${COMMANDS} (key TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, outcome TEXT NOT NULL, text TEXT, at BIGINT NOT NULL, PRIMARY KEY (key, id))`,
       );
+      await database.run(`CREATE TABLE IF NOT EXISTS ${RESETS} (key TEXT PRIMARY KEY, conversation TEXT NOT NULL)`);
     })().catch((error: unknown) => {
       ready = undefined;
       throw error;
@@ -302,11 +202,6 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
   const followers = new Map<string, Set<(note: StoreNote) => void>>();
   /** The request that started each runtime conversation's run going (`runStarted`). */
   const starters = new Map<string, string>();
-
-  const conversation = async (key: string): Promise<ConversationRow | undefined> => {
-    const [row] = await (await db()).query<ConversationSqlRow>(`SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE key = ?`, [key]);
-    return row === undefined ? undefined : rowOf(row);
-  };
 
   /** The turn of a run that took `requestIds`: the newest of them stored, else the newest turn of `key`. */
   const turnOf = async (tx: Pick<SqlDatabase, "query">, key: string, requestIds: readonly string[]): Promise<number> => {
@@ -321,134 +216,6 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
   };
 
   return {
-    conversation,
-
-    async create(row) {
-      await (await db()).run(
-        `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 1) ON CONFLICT (key) DO NOTHING`,
-        [row.key, row.userId, row.chatId, row.agent, row.project, row.title, searchOf(row.title), Math.floor(row.createdAt), Math.floor(row.lastActivity), row.busy ? 1 : 0],
-      );
-      return (await conversation(row.key)) as ConversationRow;
-    },
-
-    async change(key, change) {
-      const database = await db();
-      const changed = await database.transaction(async (tx) => {
-        const { changes } = await tx.run(
-          `UPDATE ${CONVERSATIONS} SET title = COALESCE(?, title), title_search = COALESCE(?, title_search), hidden = COALESCE(?, hidden), busy = COALESCE(?, busy), ` +
-            // Every right-hand side reads the row as it was: newer activity unarchives it.
-            "archived = COALESCE(?, CASE WHEN ? > last_activity THEN 0 ELSE archived END), " +
-            "last_activity = CASE WHEN ? > last_activity THEN ? ELSE last_activity END, version = version + 1 WHERE key = ? AND (? IS NULL OR title = ?)",
-          [
-            change.title ?? null,
-            change.title === undefined ? null : searchOf(change.title),
-            change.hidden === undefined ? null : change.hidden ? 1 : 0,
-            change.busy === undefined ? null : change.busy ? 1 : 0,
-            change.archived === undefined ? null : change.archived ? 1 : 0,
-            Math.floor(change.activity ?? 0),
-            Math.floor(change.activity ?? 0),
-            Math.floor(change.activity ?? 0),
-            key,
-            change.whenTitle ?? null,
-            change.whenTitle ?? null,
-          ],
-        );
-        if (changes === 0) return undefined;
-        const [row] = await tx.query<ConversationSqlRow>(`SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE key = ?`, [key]);
-        return row;
-      });
-      return changed === undefined ? undefined : rowOf(changed);
-    },
-
-    async seen(rows) {
-      if (rows.length === 0) return;
-      const database = await db();
-      await database.transaction(async (tx) => {
-        for (const row of rows) {
-          await tx.run(
-            `INSERT INTO ${CONVERSATIONS} (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET ` +
-              "title = excluded.title, title_search = excluded.title_search, last_activity = excluded.last_activity, hidden = excluded.hidden, archived = excluded.archived, " +
-              `busy = excluded.busy, version = excluded.version WHERE excluded.version > ${CONVERSATIONS}.version`,
-            [
-              row.key,
-              row.userId,
-              row.chatId,
-              row.agent,
-              row.project,
-              row.title,
-              searchOf(row.title),
-              Math.floor(row.createdAt),
-              Math.floor(row.lastActivity),
-              row.hidden ? 1 : 0,
-              row.archived ? 1 : 0,
-              row.busy ? 1 : 0,
-              Math.floor(row.version),
-            ],
-          );
-        }
-      });
-    },
-
-    async list(userId, { limit, cursor, archived = false, q, project }) {
-      const after = cursor === undefined ? undefined : parseCursor(cursor);
-      const search = q === undefined || q.trim() === "" ? undefined : likeOf(q.trim());
-      const inProject = project === undefined ? "" : " AND project = ?";
-      const rows = await (await db()).query<ConversationSqlRow>(
-        `SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE user_id = ? AND hidden = 0 AND archived = ?` +
-          inProject +
-          (search === undefined ? "" : " AND title_search LIKE ? ESCAPE '\\'") +
-          (after === undefined ? "" : " AND (last_activity < ? OR (last_activity = ? AND chat_id > ?))") +
-          " ORDER BY last_activity DESC, chat_id ASC LIMIT ?",
-        [
-          userId,
-          archived ? 1 : 0,
-          ...(project === undefined ? [] : [project]),
-          ...(search === undefined ? [] : [search]),
-          ...(after === undefined ? [] : [after.at, after.at, after.id]),
-          limit + 1,
-        ],
-      );
-      const items = rows.slice(0, limit).map(rowOf);
-      const last = items.at(-1);
-      return { items, ...(rows.length > limit && last !== undefined && { next: cursorOf(last.lastActivity, last.chatId) }) };
-    },
-
-    async forget(userId) {
-      await (await db()).run(`DELETE FROM ${CONVERSATIONS} WHERE user_id = ?`, [userId]);
-    },
-
-    async listProject(id, { limit, cursor }) {
-      const after = cursor === undefined ? undefined : parseCursor(cursor);
-      const rows = await (await db()).query<ConversationSqlRow>(
-        `SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE project = ? AND hidden = 0` +
-          (after === undefined ? "" : " AND (last_activity < ? OR (last_activity = ? AND key > ?))") +
-          " ORDER BY last_activity DESC, key ASC LIMIT ?",
-        [id, ...(after === undefined ? [] : [after.at, after.at, after.id]), limit + 1],
-      );
-      const items = rows.slice(0, limit).map(rowOf);
-      const last = items.at(-1);
-      return { items, ...(rows.length > limit && last !== undefined && { next: cursorOf(last.lastActivity, last.key) }) };
-    },
-
-    async projectConversation(id, chatId) {
-      const [row] = await (await db()).query<ConversationSqlRow>(`SELECT ${SELECTED} FROM ${CONVERSATIONS} WHERE project = ? AND chat_id = ? AND hidden = 0 LIMIT 1`, [id, chatId]);
-      return row === undefined ? undefined : rowOf(row);
-    },
-
-    async projectChats(ids) {
-      const counts: Record<string, number> = Object.fromEntries(ids.map((id) => [id, 0]));
-      for (let at = 0; at < ids.length; at += 100) {
-        const chunk = ids.slice(at, at + 100);
-        if (chunk.length === 0) continue;
-        const rows = await (await db()).query<{ project: string; chats: number }>(
-          `SELECT project, COUNT(*) AS chats FROM ${CONVERSATIONS} WHERE hidden = 0 AND project IN (${chunk.map(() => "?").join(", ")}) GROUP BY project`,
-          [...chunk],
-        );
-        for (const row of rows) counts[row.project] = Number(row.chats);
-      }
-      return counts;
-    },
-
     async formerProjects() {
       const database = await db();
       // Made here when it never was (a new App): read empty, then dropped. Dialect-neutral, no catalogue read.
@@ -571,15 +338,27 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       return { items: page.map(entryOf), ...(rows.length > kept && last !== undefined && { next: `${Number(last.turn)}.${Number(last.pos)}:${encodeURIComponent(last.id)}` }) };
     },
 
-    async firstText(key) {
-      const [row] = await (await db()).query<{ text: string | null }>(`SELECT text FROM ${ENTRIES} WHERE key = ? AND kind = 'user' ORDER BY turn, id LIMIT 1`, [key]);
-      return row === undefined ? undefined : (row.text ?? "");
-    },
-
     async image(key, id, index) {
       const [row] = await (await db()).query<{ images: string | null }>(`SELECT images FROM ${ENTRIES} WHERE key = ? AND id = ? AND kind = 'user'`, [key, id]);
       if (row?.images === null || row?.images === undefined) return undefined;
       return (JSON.parse(row.images) as ChatImage[])[index];
+    },
+
+    async startOver(key, conversationId) {
+      const database = await db();
+      await database.transaction(async (tx) => {
+        await tx.run(`DELETE FROM ${ENTRIES} WHERE key = ?`, [key]);
+        await tx.run(`INSERT INTO ${RESETS} (key, conversation) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET conversation = excluded.conversation`, [key, conversationId]);
+      });
+    },
+
+    async startedOver(key) {
+      const [row] = await (await db()).query<{ conversation: string }>(`SELECT conversation FROM ${RESETS} WHERE key = ?`, [key]);
+      return row?.conversation;
+    },
+
+    async started(key) {
+      await (await db()).run(`DELETE FROM ${RESETS} WHERE key = ?`, [key]);
     },
 
     async settle(key, ids, state) {

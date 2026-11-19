@@ -22,7 +22,7 @@
 
 import type { ChannelTransport, DeliveryPolicy, RunSettlement } from "@pikit/contracts";
 import { parseKey } from "./chat.ts";
-import type { ChatStore, ConversationRow } from "./store.ts";
+import type { ChatStore } from "./store.ts";
 
 /** The one instance of the channel, as `startAnswerDelivery` names it. */
 export const INSTANCE = "web";
@@ -48,14 +48,12 @@ export function runOfPiece(pieceKey: string): string | undefined {
 export interface TransportOptions {
   store: ChatStore;
   now(): number;
-  /** The conversation's row changed (its activity): tell the index. */
-  changed(row: ConversationRow): Promise<void>;
   /** Resolves once the end of the run `run` of `key` was heard and handled here, or after `HEARD_WAIT_MS` when it was not. */
   heard(key: string, run: string): Promise<void>;
 }
 
 /** The transport into the channel's table. */
-export function createTransport({ store, now, changed, heard }: TransportOptions): ChannelTransport {
+export function createTransport({ store, now, heard }: TransportOptions): ChannelTransport {
   return {
     idempotent: true,
     // One answer, one message: the table takes any length.
@@ -66,8 +64,6 @@ export function createTransport({ store, now, changed, heard }: TransportOptions
       const at = now();
       const message = { role: "assistant", content: [{ type: "text", text: piece.text }], timestamp: at, stopReason: "stop" };
       if (piece.text.trim() !== "" && (await store.addAnswer(piece.conversationKey, run, piece.key, message, at))) {
-        const row = await store.change(piece.conversationKey, { activity: at });
-        if (row !== undefined) await changed(row);
         store.notify(piece.conversationKey, { type: "changed" });
       }
       return { platformMessageId: piece.key };

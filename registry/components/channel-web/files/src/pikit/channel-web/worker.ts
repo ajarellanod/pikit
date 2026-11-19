@@ -1,12 +1,13 @@
 /**
  * channel-web's Worker half, on Cloudflare (SPEC §4.1, C1): the same routes as a server's
  * (`routes.ts`, `admin-routes.ts`), served by the Worker's App, over the remote backend (`remote.ts`:
- * each conversation's object, and the accounts actor's index for the list) and the remote accounts
+ * each conversation's object), `conversations.directory` (its Worker half: the lists, titles, states,
+ * and who may see a chat, asked before any object is called) and the remote accounts
  * (every call to the accounts actor, `channel-web:accounts`, but a session the signed cookie cache
  * vouches for, checked here). The page's files are bundled in (`chat-files.ts`).
  *
  * It needs `secrets` (`CHANNEL_WEB_AUTH_SECRET`, to check the cookie cache; `PIKIT_PUBLIC_URL` when
- * set) and `actor.mailbox` (actors-do); `admin.auth` for the operator's routes; for projects, the
+ * set), `actor.mailbox` (actors-do) and `conversations.directory`; `admin.auth` for the operator's routes; for projects, the
  * stores' Worker halves (`projects`, and `space.files`, `memory`, `principals`, `document.convert` when
  * given), whose routes run here (`project-routes.ts`). The page's config
  * (`GET /chat/api/config`: the sign-in methods, the live sign-up mode, whether email is sent) is the
@@ -46,6 +47,7 @@ export function createChannelWebWorker(wiring: AccountsWiring = BETTER_AUTH) {
     setup(pikit, config) {
       const secrets = pikit.use("secrets");
       const mailbox = pikit.use("actor.mailbox");
+      const directory = pikit.use("conversations.directory");
       const auth = pikit.useOptional("admin.auth");
       // Projects (project-routes.ts): the stores' Worker halves give them here, where the routes run.
       const projects = pikit.useOptional("projects");
@@ -84,11 +86,24 @@ export function createChannelWebWorker(wiring: AccountsWiring = BETTER_AUTH) {
         services: { projects: () => projects.get(), files: () => spaceFiles.get(), memory: () => memory.get(), principals: () => principals.get(), convert: () => convert.get() },
         accounts: accountsNow,
         backend: () => backend,
+        directory: () => directory.get(),
         chatConfig,
       });
-      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => "durable", rate, routed, assets, projects: projectAccess });
+      provideRoutes(pikit, {
+        accounts: accountsNow,
+        backend: () => backend,
+        directory: () => directory.get(),
+        principals: () => principals.get(),
+        config,
+        chatConfig,
+        limits: () => "durable",
+        rate,
+        routed,
+        assets,
+        projects: projectAccess,
+      });
       // The Worker's host is its route's: Cloudflare routes by it, so a client cannot make it another's.
-      provideAdminRoutes(pikit, { auth, accounts: accountsNow, backend: () => backend, projects: projectAccess, origin: (request) => linkOrigin(request.url, publicUrl, true) });
+      provideAdminRoutes(pikit, { auth, accounts: accountsNow, directory: () => directory.get(), projects: projectAccess, origin: (request) => linkOrigin(request.url, publicUrl, true) });
 
       return {
         async start(ctx) {

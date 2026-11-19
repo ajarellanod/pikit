@@ -11,6 +11,7 @@ import { type App, type AppContext, type ComponentDefinition, defineApp, defineC
 import { type ActorCallHandler, type ActorMailbox, ActorCallError, answerCall, CLIENT_ADDRESS_HEADER, callResult, type EmailMessage, type JsonValue } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import { fakeOidc, type Profile } from "./accounts/accounts.test-support.ts";
+import { testDirectory } from "./directory.test-support.ts";
 import { createChannelWeb, NAME } from "./index.ts";
 import { adminAuth, kvOf, OPERATOR, Runtime, router, SECRETS, type Served, secretsOf, serve } from "./runtime.test-support.ts";
 import { AUTH_CALL, BETTER_AUTH } from "./wiring.ts";
@@ -109,7 +110,7 @@ test("only the accounts actor answers the accounts' calls: any other object refu
 
 test("on a server: a person signs up through /chat/api/auth (better-auth), then has a session for the chat's routes; it never opens the admin's, nor the admin's credential the chat's", async () => {
   const runtime = new Runtime();
-  const app = await serve([secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, adminAuth, createChannelWeb()], OPEN, "server", ORIGIN);
+  const app = await serve([secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, adminAuth, testDirectory().provider(), createChannelWeb()], OPEN, "server", ORIGIN);
   served.push(app);
   const ana = browser(app.fetch);
   const signedUp = await ana.send("/chat/api/auth/sign-up/email", { json: { email: "ana@example.com", password: "a-long-password-1", name: "Ana" } });
@@ -144,6 +145,7 @@ test("on a server: a person signs up through /chat/api/auth (better-auth), then 
 async function cloud(config: Record<string, unknown>, secrets: Record<string, string> = SECRETS, extra: ComponentDefinition[] = [], channel: () => ComponentDefinition = () => createChannelWeb()) {
   const apps = new Map<string, Promise<{ app: App; answers: Map<string, ActorCallHandler>; ctx: AppContext }>>();
   const calls: string[] = [];
+  const directory = testDirectory();
   const mailbox: ActorMailbox = {
     send: async () => {},
     call: async (key, type, message) => {
@@ -160,7 +162,7 @@ async function cloud(config: Record<string, unknown>, secrets: Record<string, st
             },
           });
           const app = await defineApp({
-            components: [secretsOf(secrets), new Runtime(String).component(), kvOf(), sqliteStorage(), router, platform, ...extra, channel()],
+            components: [secretsOf(secrets), new Runtime(String).component(), kvOf(), sqliteStorage(), router, platform, directory.provider(), ...extra, channel()],
             config,
             target: "durable",
             logger: silentLogger,
@@ -180,7 +182,7 @@ async function cloud(config: Record<string, unknown>, secrets: Record<string, st
       throw new Error("no streams here");
     },
   };
-  const worker = await serve([secretsOf(secrets), defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", mailbox) }), adminAuth, createChannelWebWorker()], { "channel-web-worker": config[NAME] }, "durable", ORIGIN);
+  const worker = await serve([secretsOf(secrets), defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", mailbox) }), adminAuth, directory.provider(), createChannelWebWorker()], { "channel-web-worker": config[NAME] }, "durable", ORIGIN);
   served.push(worker);
   return { worker, calls };
 }
@@ -203,12 +205,13 @@ test("on Cloudflare: auth is forwarded to the accounts actor (every set-cookie k
   calls.length = 0;
   ana.jar.delete("pikit_chat.session_data");
   expect((await ana.send("/chat/api/conversations")).status).toBe(200);
-  expect(calls).toEqual([`channel-web:accounts ${AUTH_CALL.user}`, `channel-web:accounts channel-web.list`]);
+  // The list is the directory's: no call for it.
+  expect(calls).toEqual([`channel-web:accounts ${AUTH_CALL.user}`]);
   // The actor's answer renewed the cookie cache, which the route sent back: the next request costs no call for the session.
   expect([...ana.jar.keys()]).toContain("pikit_chat.session_data");
   calls.length = 0;
   expect((await ana.send("/chat/api/conversations")).status).toBe(200);
-  expect(calls).toEqual([`channel-web:accounts channel-web.list`]);
+  expect(calls).toEqual([]);
 
   const users = (await (await worker.fetch("/admin/api/channel-web/users", { headers: OPERATOR })).json()) as { items: { email: string }[] };
   expect(users.items.map((each) => each.email)).toEqual(["ana@example.com"]);
@@ -286,7 +289,7 @@ function emailOf(sent: EmailMessage[]): ComponentDefinition {
 /** Both targets, each with every sign-in method and email: `fetch` its routes. */
 async function targets(discoveryUrl: string): Promise<{ name: string; fetch: Served["fetch"] }[]> {
   const { config, secrets, channel } = everyMethod(discoveryUrl);
-  const server = await serve([secretsOf(secrets), new Runtime().component(), kvOf(), sqliteStorage(), router, adminAuth, emailOf([]), channel()], config, "server", ORIGIN);
+  const server = await serve([secretsOf(secrets), new Runtime().component(), kvOf(), sqliteStorage(), router, adminAuth, emailOf([]), testDirectory().provider(), channel()], config, "server", ORIGIN);
   served.push(server);
   const { worker } = await cloud(config, secrets, [emailOf([])], channel);
   return [

@@ -3,7 +3,7 @@
   "name": "channel-web",
   "version": "0.0.1",
   "title": "Web chat: your users talk to the assistant from a page of their own (/chat/), with accounts",
-  "description": "A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and files and stop a run. With a project store, they share projects (context, files, memory, members, chats, History with undo). The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object.",
+  "description": "A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations (a view of conversations.directory: one title, Hide for me, Archive and Delete for everyone), watch the answer as it is written, attach images and files and stop a run. With a project store, they share projects (context, files, memory, members, chats, History with undo). The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object.",
   "targets": [
     "server",
     "durable"
@@ -20,7 +20,8 @@
       "agent.submissions",
       "storage.kv",
       "storage.sql",
-      "actor.mailbox"
+      "actor.mailbox",
+      "conversations.directory"
     ]
   },
   "optional": {
@@ -35,7 +36,6 @@
       "admin.auth",
       "agent.definition",
       "agent.directory",
-      "model.complete",
       "agent.command",
       "projects",
       "space.files",
@@ -62,7 +62,8 @@
         "agent.observe",
         "agent.submissions",
         "storage.kv",
-        "storage.sql"
+        "storage.sql",
+        "conversations.directory"
       ],
       "optional": [
         "wakeups",
@@ -76,7 +77,6 @@
         "admin.auth",
         "agent.definition",
         "agent.directory",
-        "model.complete",
         "agent.command",
         "projects",
         "space.files",
@@ -91,7 +91,8 @@
       ],
       "requires": [
         "secrets",
-        "actor.mailbox"
+        "actor.mailbox",
+        "conversations.directory"
       ],
       "optional": [
         "admin.auth",
