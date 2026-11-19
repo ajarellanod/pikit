@@ -21,6 +21,10 @@ A channel names a conversation with a key (`channel-http` uses `http:<conversati
 - After that, the key resolves to the same conversation. A conversation keeps the agent and the channel
   it was created with, even if a later route names another agent or a later resolve another channel; a
   reset keeps the channel too. Every ref it gives has the channel.
+- So with a space and an owner (`ConversationPlace.space`, `.owner`), when the first resolve gives
+  them (`admitInbound`'s `space` and `owner`): recorded then, kept through resets and restarts, never
+  replaced by a later resolve's, and given with every ref. Of an owner only its channel and id are
+  kept. An empty space, or an owner with an empty channel or id, is refused and records nothing.
 - A reset creates a new conversation and moves the pointer to it. The old conversation is kept, and its id
   is added to `previousConversationIds`. It then emits `conversation.reset`.
 - No pointer is ever deleted. A conversation that went idle and was closed in memory keeps its
@@ -47,6 +51,8 @@ The file (mode `0600`):
     "http:c1": {
       "agent": "assistant",
       "conversationId": "…",
+      "channel": "web",
+      "owner": { "channel": "web", "id": "ana" },
       "previousConversationIds": ["…"],
       "createdAt": 1790000000000,
       "updatedAt": 1790000000000

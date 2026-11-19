@@ -372,7 +372,11 @@ the same. `@pikit/pi-adapter`'s README, "Offered tools", has the details.
 **Who a run answers.** Each message's `sender` (the channel's user, the dashboard's operator, a
 delegating agent) is kept with it and given to the run that takes it: `await
 context.value(RUN_REQUESTS)?.list(context)` lists the run's requests, each with its sender, in a tool,
-a section or a hook, after a restart too.
+a section or a hook, after a restart too. `agent.dispatched` carries it too (`sender`, as the request
+gave it, a duplicate's included; absent when it had none), so a listener knows whose activity it is (a
+channel's user, or the dashboard's operator for a follow-up). A conversation's owner
+(`ConversationRef.owner`) is `conversations.registry`'s: the runtime records none, and its events and
+runs carry none, whatever ref a caller gave; read it from the registry.
 
 ## Skills
 

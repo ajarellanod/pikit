@@ -100,6 +100,20 @@ test("admitInbound: the channel's space is given to the registry with the messag
   expect(plain.dispatched[0]?.conversation).not.toHaveProperty("space");
 });
 
+test("admitInbound: the channel's owner is given to the registry with the place (its channel and id), apart from the sender; none when the channel gives none", async () => {
+  const places: unknown[] = [];
+  const owned = ends();
+  const resolve = owned.conversations.resolve;
+  owned.conversations.resolve = (key, agent, place, ctx) => (places.push(place), resolve(key, agent, place, ctx));
+  await admitInbound(await appWith(() => {}), message, { ...owned, key: "test:c1", owner: { channel: "web", id: "u1", name: "Ana" } });
+  expect(places).toEqual([{ channel: "test", owner: { channel: "web", id: "u1" } }]);
+  expect(owned.dispatched[0]?.sender).toEqual({ channel: "test", id: "someone" });
+
+  const plain = ends();
+  await admitInbound(await appWith(() => {}), message, { ...plain, key: "test:c1" });
+  expect(plain.dispatched[0]?.conversation).not.toHaveProperty("owner");
+});
+
 test("admitInbound: the sender is the actor a normalize stage leaves (it may resolve one), on the message's own channel", async () => {
   const e = ends();
   const ctx = await appWith((pikit) => pikit.pipeline("inbound.normalize", (m) => ({ ...m, actor: { id: `person:${m.actor.id}` } })));

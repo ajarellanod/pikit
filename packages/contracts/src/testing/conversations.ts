@@ -161,6 +161,44 @@ export function createConversationRegistryConformance(
       expect(await w.registry.get("test:empty", w.ctx), undefined, "no pointer after the refusal");
     }),
 
+    registryCase("a conversation keeps the owner it was created with (its channel and id): a later resolve's, a reset and a restart change nothing; none given, none", async (s) => {
+      const ana = { channel: "web", id: "ana" };
+      const first = await s.worker();
+      const created = await first.registry.resolve("test:o1", "support", { channel: "test", owner: { ...ana, name: "Ana" } }, first.ctx);
+
+      expect(created.owner, ana, "the owner of the first resolve, its channel and id");
+      expect((await first.registry.resolve("test:o1", "support", { channel: "test", owner: { channel: "web", id: "bob" } }, first.ctx)).owner, ana, "the owner after a resolve naming another");
+      expect((await first.registry.resolve("test:o1", "support", { channel: "test" }, first.ctx)).owner, ana, "the owner after a resolve naming none");
+      expect((await first.registry.get("test:o1", first.ctx))?.owner, ana, "get's owner");
+      expect((await first.registry.reset("test:o1", undefined, first.ctx))?.conversation.owner, ana, "the owner after a reset");
+      expect((await first.registry.reset("test:o1", "sales", first.ctx))?.conversation.owner, ana, "the owner after a reset to another agent");
+      const plain = await first.registry.resolve("test:o9", "support", { channel: "test" }, first.ctx);
+      check(!("owner" in plain) || plain.owner === undefined, "no owner on a conversation resolved with none");
+      expect((await first.registry.resolve("test:o9", "support", { channel: "test", owner: ana }, first.ctx)).owner, undefined, "an owner given after the first resolve");
+      await first.app.stop();
+
+      const second = await s.worker();
+      expect((await second.registry.get("test:o1", second.ctx))?.owner, ana, "the owner after a restart");
+      expect((await second.registry.get("test:o9", second.ctx))?.owner, undefined, "still none after a restart");
+    }),
+
+    registryCase("an owner with an empty channel or id is refused", async (s) => {
+      const w = await s.worker();
+      for (const [key, owner] of [
+        ["test:no-id", { channel: "web", id: "" }],
+        ["test:no-channel", { channel: "", id: "ana" }],
+      ] as const) {
+        let refused = false;
+        try {
+          await w.registry.resolve(key, "support", { channel: "test", owner }, w.ctx);
+        } catch {
+          refused = true;
+        }
+        check(refused, `resolve with the owner ${JSON.stringify(owner)} to throw`);
+        expect(await w.registry.get(key, w.ctx), undefined, `no pointer after refusing ${JSON.stringify(owner)}`);
+      }
+    }),
+
     registryCase("any string is a key: keys are opaque", async (s) => {
       const w = await s.worker();
       const keys = ["http:a/b", 'http:"quoted" ñandú ✓', "http:../../etc", "http:a.b:c"];
@@ -280,8 +318,8 @@ function createSubject(fixture: ConversationRegistryFixture, workers: App[]): Su
 
 function same(actual: ConversationRef | undefined, expected: ConversationRef, what: string): void {
   expect(
-    actual === undefined ? undefined : { key: actual.key, agent: actual.agent, conversationId: actual.conversationId, channel: actual.channel, space: actual.space },
-    { key: expected.key, agent: expected.agent, conversationId: expected.conversationId, channel: expected.channel, space: expected.space },
+    actual === undefined ? undefined : { key: actual.key, agent: actual.agent, conversationId: actual.conversationId, channel: actual.channel, space: actual.space, owner: actual.owner },
+    { key: expected.key, agent: expected.agent, conversationId: expected.conversationId, channel: expected.channel, space: expected.space, owner: expected.owner },
     what,
   );
 }

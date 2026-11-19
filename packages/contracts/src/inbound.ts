@@ -22,6 +22,7 @@
 
 import { type AppContext, Halt } from "@pikit/core";
 import type { Admission, AgentImage, AgentRuntime, ConversationRef } from "./agent.ts";
+import type { Principal } from "./change.ts";
 import type { ConversationRegistry } from "./conversations.ts";
 import { type CommandLookup, type CommandOutcome, commandOf, runAgentCommand } from "./command.ts";
 import { DASHBOARD_REQUEST_PREFIX, isDashboardRequest } from "./delivery.ts";
@@ -142,6 +143,14 @@ export interface AdmitOptions {
    */
   space?: string;
   /**
+   * The conversation's owner (`ConversationRef.owner`), when the channel's conversations are a person's:
+   * channel-web's user (`{ channel: "web", id }`). Given to the registry with the place, recorded with
+   * the key's first resolve (its channel and id) and kept for good, as the space; a later message's
+   * changes nothing. Not the message's sender (`actor`), which may be anyone the channel lets write.
+   * A channel and an id, both non-empty, when given.
+   */
+  owner?: Principal;
+  /**
    * The App's commands (`agent.command`, as `useKeyed` gives them), when the channel runs commands
    * typed in its chat: a message whose text (as `inbound.normalize` left it) is `/name args` for one of
    * them (`commandOf`) is routed like any message (a denied sender runs nothing), then runs in its
@@ -229,7 +238,11 @@ async function admit(ctx: AppContext, message: InboundMessage, options: AdmitOpt
     return { kind: "denied", message: normalized, reason: `the agent "${error.agent}" is no agent now` };
   };
   // The message's channel is the conversation's when this message creates it (the registry keeps the first).
-  const place = { channel: normalized.channel, ...(options.space !== undefined && { space: options.space }) };
+  const place = {
+    channel: normalized.channel,
+    ...(options.space !== undefined && { space: options.space }),
+    ...(options.owner !== undefined && { owner: { channel: options.owner.channel, id: options.owner.id } }),
+  };
   let conversation = await options.conversations.resolve(options.key, decision.agent, place, ctx);
   const command = options.commands === undefined ? undefined : commandOf(normalized.text, options.commands);
   if (command !== undefined && options.commands !== undefined) {

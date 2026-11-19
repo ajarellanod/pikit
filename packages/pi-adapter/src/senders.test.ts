@@ -130,3 +130,40 @@ test("an extension's sections and tool hooks run in the conversation's scope: it
   expect(shown).toEqual(["<who>\nr1 from telegram:1001\n</who>"]);
   expect(seen).toEqual({ hook: [{ requestId: "r1", sender: alice }], conversation: conversation.key });
 });
+
+test("agent.dispatched carries the request's sender as dispatched: a channel's user (its duplicate too), an operator's follow-up the dashboard's, none without one", async () => {
+  const db = records();
+  const w = await db.worker();
+  const conversation = await w.conversation();
+  const operator: Sender = { channel: "dashboard", id: "ops" };
+  const dispatched = () => w.events.flatMap((e) => (e.name === "agent.dispatched" ? [e.payload] : []));
+
+  await w.runtime.dispatch({ requestId: "r1", conversation, prompt: "hi", sender: alice }, w.ctx);
+  await w.result("r1");
+  await w.runtime.dispatch({ requestId: "r1", conversation, prompt: "hi", sender: alice }, w.ctx);
+  await w.runtime.dispatch({ requestId: "dashboard:f1", conversation, prompt: "a note", whenBusy: "followUp", sender: operator }, w.ctx);
+  await w.result("dashboard:f1");
+  await w.runtime.dispatch({ requestId: "r2", conversation, prompt: "who?" }, w.ctx);
+  await w.result("r2");
+
+  expect(dispatched().map(({ admission, sender }) => [admission.requestId, admission.kind, sender])).toEqual([
+    ["r1", "started", alice],
+    ["r1", "duplicate", alice],
+    ["dashboard:f1", "started", operator],
+    ["r2", "started", undefined],
+  ]);
+  expect(dispatched().at(-1)).not.toHaveProperty("sender");
+});
+
+test("the runtime records no owner: a caller's ref with one gives events and runs a ref without it", async () => {
+  const db = records();
+  const w = await db.worker();
+  const conversation = await w.conversation();
+  const owned = { ...conversation, owner: { channel: "web", id: "ana" } };
+
+  await w.runtime.dispatch({ requestId: "r1", conversation: owned, prompt: "hi", sender: alice }, w.ctx);
+  const result = await w.result("r1");
+
+  for (const event of w.events) expect(event.payload.conversation).not.toHaveProperty("owner");
+  expect(result.conversation).toEqual(conversation);
+});
