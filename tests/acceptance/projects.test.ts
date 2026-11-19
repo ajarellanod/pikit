@@ -11,12 +11,12 @@
  * - tool-space-files (`space.files`, `project_file_save`), its bytes in storage-blob-fs, each chat's
  *   workspace execution-local's and workspace-local's;
  * - projects-context (the `<project>` section, `project_search`, `project_read`, `project_link`);
- * - conversations-kv over storage-kv-sql (each chat's space recorded), wakeups on the test's clock.
+ * - conversations-kv over storage-kv-sql (each chat's space recorded), wakeups on the test's clock;
+ * - conversations-directory (the chats' lists, titles and states), with projects-sql's stage of
+ *   `conversation.audience` (who sees a project's chats).
  *
  * Doubles: the accounts (channel-web's, a session a cookie), `principals` (a directory linking a
- * person's identities), the router (every message to `assistant`), the operator's `admin.auth`, and
- * `conversations.directory` (the contracts' double, recorded from the runtime's events, with
- * projects-sql's real stage of `conversation.audience`), until conversations-directory is here.
+ * person's identities), the router (every message to `assistant`) and the operator's `admin.auth`.
  *
  * What it proves, through the page's routes and the model's own requests: a project made, a member
  * added, its instructions and a core document set; a chat started in it sees one section, `<project>`
@@ -55,9 +55,9 @@ import type {
   ChatStartResponse,
 } from "../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
 import { createChannelWeb, NAME as CHANNEL_WEB } from "../../registry/components/channel-web/files/src/pikit/channel-web/index.ts";
-import { testDirectory } from "../../registry/components/channel-web/files/src/pikit/channel-web/directory.test-support.ts";
 import { FakePrincipals } from "../../registry/components/channel-web/files/src/pikit/channel-web/projects.test-support.ts";
 import { adminAuth, FakeAccounts, router, secretsOf } from "../../registry/components/channel-web/files/src/pikit/channel-web/runtime.test-support.ts";
+import conversationsDirectory from "../../registry/components/conversations-directory/files/src/pikit/conversations-directory/index.ts";
 import conversationsKv from "../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import executionLocal from "../../registry/components/execution-local/files/src/pikit/execution-local/index.ts";
 import mailboxLocal from "../../registry/components/mailbox-local/files/src/pikit/mailbox-local/index.ts";
@@ -115,7 +115,6 @@ async function world() {
       pikit.provide("principals", principals);
     },
   });
-  const directory = testDirectory();
   const components = [
     sqliteStorage(join(dir, "pikit.db")),
     storageKvSql,
@@ -128,8 +127,7 @@ async function world() {
     providerFaux,
     runtimePi,
     conversationsKv,
-    directory.provider(),
-    directory.recorder(),
+    conversationsDirectory,
     executionLocal,
     workspaceLocal,
     storageBlobFs,
