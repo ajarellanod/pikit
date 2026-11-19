@@ -752,6 +752,56 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
     expect((await call(c, "cy", "GET", `/conversations/${anas.id}/transcript?user=ana`)).status).toBe(404);
   });
 
+  test("A PROJECT'S CHATS FOR EVERYONE AND FOR ME (the directory's permissions): the project's owner renames and archives a member's chat for everyone, never deletes it; a member does none of these to another's; anyone who sees one hides it for themselves only; a member removed sees it no more", async () => {
+    const c = await chat();
+    const work = await make(c, "ana", "Work");
+    await join(c, "ana", work, "ben");
+    await join(c, "ana", work, "cy");
+    const anas = await start(c, "ana", "the plan", { project: work.id });
+    const bens = await start(c, "ben", "the budget", { project: work.id });
+    const titles = async (user: string, query = "") =>
+      (await ok<ChatPage<ChatProjectConversation>>(c, user, "GET", `/projects/${work.id}/conversations${query}`)).items.map((each) => `${each.title}${each.archived ? " (archived)" : ""}`).sort();
+    const listed = await ok<ChatPage<ChatProjectConversation>>(c, "ana", "GET", `/projects/${work.id}/conversations`);
+    expect(Object.fromEntries(listed.items.map((each) => [each.userId, each.may]))).toEqual({ ana: { rename: true, archive: true, delete: true }, ben: { rename: true, archive: true, delete: false } });
+
+    // Ben, a member, on Ana's chat: nothing for everyone (403), and by its id alone it is no chat of his (404).
+    for (const [method, path] of [
+      ["PATCH", ""],
+      ["POST", "/archive"],
+      ["DELETE", ""],
+    ] as const) {
+      expect({ method, path, status: (await call(c, "ben", method, `/conversations/${anas.id}${path}?user=ana`, method === "PATCH" ? { title: "Mine" } : undefined)).status }).toEqual({ method, path, status: 403 });
+      expect({ method, path, status: (await call(c, "ben", method, `/conversations/${anas.id}${path}`, method === "PATCH" ? { title: "Mine" } : undefined)).status }).toEqual({ method, path, status: 404 });
+    }
+    // Ana, the project's owner, on Ben's chat: renamed and archived for everyone; never deleted.
+    expect(await ok(c, "ana", "PATCH", `/conversations/${bens.id}?user=ben`, { title: "Budget 2027" })).toMatchObject({ id: bens.id, title: "Budget 2027", mine: false, userId: "ben" });
+    expect(await ok(c, "ana", "POST", `/conversations/${bens.id}/archive?user=ben`, undefined, 200)).toMatchObject({ archived: true });
+    expect((await call(c, "ana", "DELETE", `/conversations/${bens.id}?user=ben`)).status).toBe(403);
+    expect(await titles("cy")).toEqual(["The plan"]);
+    expect(await titles("cy", "?archived=1")).toEqual(["Budget 2027 (archived)"]);
+    // Ben's own list says so too, and he puts it back (his chat: he may).
+    expect((await ok<ChatPage<{ title: string }>>(c, "ben", "GET", `/conversations?project=${work.id}&archived=1`)).items.map((each) => each.title)).toEqual(["Budget 2027"]);
+    await ok(c, "ben", "POST", `/conversations/${bens.id}/unarchive`, undefined, 200);
+
+    // Cy hides Ana's chat for himself: gone from his list only.
+    expect(await ok(c, "cy", "POST", `/conversations/${anas.id}/hide?user=ana`, undefined, 200)).toMatchObject({ hidden: true });
+    expect(await titles("cy")).toEqual(["Budget 2027"]);
+    expect(await titles("cy", "?hidden=1")).toEqual(["The plan"]);
+    expect(await titles("ben")).toEqual(["Budget 2027", "The plan"]);
+    // Ana's next message lists it again for Cy.
+    expect((await call(c, "ana", "POST", `/conversations/${anas.id}/messages`, { text: "more" })).status).toBe(202);
+    expect(await titles("cy")).toEqual(["Budget 2027", "The plan"]);
+
+    // Ben removed from the project: Ana's chat is no chat of his any more; his own stays his.
+    await ok(c, "ana", "DELETE", `/projects/${work.id}/members/${encodeURIComponent(memberKey({ channel: "web", id: "ben" }))}`, undefined, 204);
+    expect((await call(c, "ben", "GET", `/conversations/${anas.id}/transcript?user=ana`)).status).toBe(404);
+    expect((await call(c, "ben", "GET", `/conversations/${bens.id}`)).status).toBe(200);
+    // Ana deletes her own chat for everyone: gone from every member's list, its key started over.
+    await ok(c, "ana", "DELETE", `/conversations/${anas.id}`, undefined, 204);
+    expect(await titles("cy")).toEqual(["Budget 2027"]);
+    expect(c.runtime.resets).toEqual([keyOf("ana", anas.id)]);
+  });
+
   test("NOTICES: a chat's are the logs' entries whose author worked in it (an agent's note, file, link; its author's command), newest first; another chat's never; none for a non-member or a chat of no project", async () => {
     const c = await chat();
     const work = await make(c, "ana", "Work");

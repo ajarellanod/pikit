@@ -329,6 +329,73 @@ test("archive: listed apart (?archived=1), still read and written to; unarchive 
   expect((await c.served.fetch(`${API}/conversations/${three}/unarchive`, as("ana", { method: "POST" }))).status).toBe(404);
 });
 
+test("HIDE FOR ME: listed apart (?hidden=1) for this user only, still read and written to; unhide puts it back; their next activity lists it again; read marks it read (unread by the assistant's answers, never one's own messages)", async () => {
+  const c = await chat();
+  const one = await start(c, "ana", "one");
+  const two = await start(c, "ana", "two");
+  const list = async (query = "") => ((await (await c.served.fetch(`${API}/conversations${query}`, as("ana"))).json()) as { items: ChatConversation[] }).items.map((each) => each.title);
+  const hidden = await c.served.fetch(`${API}/conversations/${two.id}/hide`, as("ana", { method: "POST" }));
+  expect({ status: hidden.status, body: await hidden.json() }).toMatchObject({ status: 200, body: { id: two.id, hidden: true, archived: false } });
+  expect(await list()).toEqual(["One"]);
+  expect(await list("?hidden=1")).toEqual(["Two"]);
+  expect(await list("?archived=1")).toEqual([]);
+  expect((await c.served.fetch(`${API}/conversations?hidden=1&archived=1`, as("ana"))).status).toBe(400);
+  // Hidden for this user only: for everyone it is listed (an operator's list), and it is still theirs to read.
+  const everyone = await c.directory.memory.directory.list({ kind: "operator", id: "ops" }, {}, c.served.app.context());
+  expect(everyone.items.map((each) => each.state).sort()).toEqual(["listed", "listed"]);
+  expect((await transcriptOf(c, "ana", two.id)).length).toBe(1);
+  expect(await (await c.served.fetch(`${API}/conversations/${two.id}/unhide`, as("ana", { method: "POST" }))).json()).toMatchObject({ hidden: false });
+  expect(await list()).toEqual(["Two", "One"]);
+  // Hidden again, its next activity (a message of theirs) lists it again.
+  await c.served.fetch(`${API}/conversations/${two.id}/hide`, as("ana", { method: "POST" }));
+  expect((await c.served.fetch(`${API}/conversations/${two.id}/messages`, post("ana", { text: "more" }))).status).toBe(202);
+  expect(await list()).toEqual(["Two", "One"]);
+
+  // Unread: the assistant's answer, never the user's own messages; read marks it so.
+  const unreadOf = async (id: string) => ((await (await c.served.fetch(`${API}/conversations/${id}`, as("ana"))).json()) as ChatConversation).unread;
+  expect(await unreadOf(one.id)).toBe(0);
+  await c.runtime.end(keyOf("ana", one.id), [one.requestId]);
+  expect(await unreadOf(one.id)).toBe(1);
+  expect(await (await c.served.fetch(`${API}/conversations/${one.id}/read`, as("ana", { method: "POST" }))).json()).toMatchObject({ id: one.id, unread: 0 });
+  // Another user's chat: none of these.
+  for (const action of ["hide", "unhide", "read"]) expect((await c.served.fetch(`${API}/conversations/${one.id}/${action}`, as("ben", { method: "POST" }))).status).toBe(404);
+});
+
+test("A NEW CHAT the directory has not recorded yet (its activity flushed later): the user's own key is theirs to read, write and stop; another's, or a key never made, 404; nothing to rename, archive or hide yet", async () => {
+  const runtime = new Runtime();
+  const accounts = new FakeAccounts();
+  accounts.add("ana");
+  accounts.add("ben");
+  // The directory without its recorder: it holds nothing of these chats.
+  const directory = testDirectory();
+  const served = await serve([secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, directory.provider(), createChannelWeb({ accounts: accounts.wiring() })], {}, "server", undefined, tickingClock());
+  apps.push(served);
+  const c: Chat = { served, runtime, accounts, directory };
+  const { id, requestId } = await start(c, "ana", "fresh");
+  expect(await (await served.fetch(`${API}/conversations`, as("ana"))).json()).toEqual({ items: [] });
+  expect(await (await served.fetch(`${API}/conversations/${id}`, as("ana"))).json()).toMatchObject({ id, title: "New conversation", mine: true, userId: "ana", lastActivity: 0, may: { rename: false, archive: false, delete: false } });
+  expect((await transcriptOf(c, "ana", id)).map((each) => each.id)).toEqual([requestId]);
+  expect((await served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "and more" }))).status).toBe(202);
+  expect((await served.fetch(`${API}/conversations/${id}/abort`, post("ana", {}))).status).toBe(200);
+  for (const [method, path] of [
+    ["PATCH", ""],
+    ["POST", "/archive"],
+    ["POST", "/hide"],
+    ["DELETE", ""],
+  ] as const) {
+    const response = await served.fetch(`${API}/conversations/${id}${path}`, as("ana", { method, ...(method === "PATCH" && { body: JSON.stringify({ title: "x" }) }) }));
+    expect({ method, path, status: response.status }).toEqual({ method, path, status: 404 });
+  }
+  // Its first title was given to the directory (for when it records the conversation).
+  const ref = { key: keyOf("ana", id), conversationId: (runtime.pointers.get(keyOf("ana", id)) as { conversationId: string }).conversationId };
+  directory.memory.seen({ kind: "dispatched", ref: { ...ref, agent: "assistant", channel: "web", owner: { channel: "web", id: "ana" } }, requestId, sender: { channel: "web", id: "ana" }, duplicate: false, at: Date.now(), seq: 1 });
+  expect(await (await served.fetch(`${API}/conversations/${id}`, as("ana"))).json()).toMatchObject({ id, title: "Fresh" });
+  // Ben: by its id it names a key of his never made; naming ana, the directory shows him nothing.
+  for (const path of ["", "/transcript", "?user=ana", "/transcript?user=ana"]) expect((await served.fetch(`${API}/conversations/${id}${path}`, as("ben"))).status).toBe(404);
+  expect((await served.fetch(`${API}/conversations/${crypto.randomUUID()}`, as("ana"))).status).toBe(404);
+  expect(runtime.dispatched.length).toBe(2);
+});
+
 test("ISOLATION: user B naming user A's chat id gets 404 on every route, and A's conversation is untouched", async () => {
   const c = await chat();
   const { id } = await start(c, "ana", "my secret plan");
