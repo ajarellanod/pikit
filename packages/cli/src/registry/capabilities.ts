@@ -319,6 +319,13 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: 'One HTTP endpoint per "METHOD /path", as a fetch handler; one server component serves them all, the client address its own (x-pikit-client-address).',
   },
+  "actor.kind": {
+    mode: "keyed",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Read by the deployment's host and `pikit doctor`, never used by a component: a value, not a part.
+    summary: "The actor keys a component owns, exactly or by prefix, under its own name: on the durable target an object of one of them runs its owners and what they use, not the whole App (SPEC C9).",
+  },
   "model.provider": {
     mode: "keyed",
     definedIn: "@pikit/pi-adapter",
