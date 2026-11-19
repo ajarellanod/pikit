@@ -159,6 +159,8 @@ export class Runtime {
   pointers = new Map<string, ConversationRef>();
   dispatched: AgentRequest[] = [];
   aborted: ConversationRef[] = [];
+  /** The keys reset (`conversations.registry.reset`), in order. */
+  resets: string[] = [];
   readonly record = createMemorySubmissions();
   /** The next dispatches that throw (the runtime cannot take messages for a while). */
   failing = 0;
@@ -263,7 +265,7 @@ export class Runtime {
       const busy = this.conversations.get(request.conversation.conversationId)?.busy === true;
       const admission = { kind: duplicate ? "duplicate" : busy ? "queued" : "started", requestId: request.requestId } as const;
       if (!duplicate) await this.record.submissions.admitted(request.conversation, request.requestId, ctx);
-      await ctx.emit("agent.dispatched", { conversation: request.conversation, admission });
+      await ctx.emit("agent.dispatched", { conversation: request.conversation, admission, ...(request.sender !== undefined && { sender: request.sender }) });
       if (this.runsAtOnce && admission.kind === "started") {
         await this.start(request.conversation.key, [request.requestId]);
         await this.end(request.conversation.key, [request.requestId], { text: `answer: ${request.prompt}` });
@@ -284,13 +286,17 @@ export class Runtime {
       return conversation;
     },
     get: async (key) => this.pointers.get(key),
-    reset: async (key, agent) => {
+    reset: async (key, agent, ctx) => {
       const previous = this.pointers.get(key);
       if (previous === undefined) return undefined;
       const conversation = { ...previous, ...(agent !== undefined && { agent }), conversationId: this.idOf(this.next++) };
       this.pointers.set(key, conversation);
       this.conversations.set(conversation.conversationId, { conversationId: conversation.conversationId, busy: false, usage: ZERO });
-      return { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
+      const reset = { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
+      this.resets.push(key);
+      // In the App that holds the key (on the fake platform its object's), whoever asked.
+      await (this.events ?? ctx).emit("conversation.reset", reset);
+      return reset;
     },
   };
 
@@ -361,6 +367,21 @@ export class Runtime {
       },
     });
   }
+}
+
+/**
+ * A clock whose every reading is later than the one before (at least by 1 ms): a test's activities and
+ * acts are ordered as they happened, never tied within a millisecond.
+ */
+export function tickingClock(): Clock {
+  let last = 0;
+  return {
+    now: () => {
+      last = Math.max(Date.now(), last + 1);
+      return last;
+    },
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  };
 }
 
 /** `storage.kv` in memory, surviving the Apps of a test. */

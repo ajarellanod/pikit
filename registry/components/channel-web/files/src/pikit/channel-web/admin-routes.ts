@@ -9,18 +9,19 @@
  * - A link's origin is `PIKIT_PUBLIC_URL` when set, else the request's when its host is trusted
  *   (`linkOrigin`: on a server a loopback host only, on Cloudflare the Worker's): else `400
  *   public_url_required`, before anything is made, so no link goes out under a host a client wrote.
- * - Removing a user removes their sessions and accounts (the accounts), and their conversations leave
- *   the users' list (`ChatBackend.forget`); the runtime keeps the conversations. With projects, each
+ * - Removing a user removes their sessions and accounts (the accounts), and their conversations are
+ *   deleted for everyone (`conversations.directory`, the channel's own viewer: `deleteChatsOf`), each key
+ *   started over; the runtime keeps the conversations. With projects, each
  *   project they own goes to its oldest manual member (else is archived), and they leave every project
  *   (`ProjectAccess.userRemoved`, as the operator).
  */
 
 import type { AppContext, Handle, Pikit } from "@pikit/core";
-import type { AdminAuth, Operator } from "@pikit/contracts";
+import type { AdminAuth, ConversationDirectory, Operator } from "@pikit/contracts";
 import { type Accounts, accountsQuery } from "./accounts/types.ts";
 import type { AdminChatInvitation, AdminChatLink, AdminChatUsersPage, AdminChatUserState } from "./admin-api.ts";
-import type { ChatBackend } from "./backend.ts";
 import { PUBLIC_URL_REQUIRED } from "./accounts/links.ts";
+import { deleteChatsOf } from "./directory.ts";
 import type { ProjectAccess } from "./project-routes.ts";
 import { failure } from "./routes.ts";
 
@@ -47,7 +48,8 @@ class Refused extends Error {
 export interface AdminRouteOptions {
   auth: Handle<AdminAuth | undefined>;
   accounts(): Accounts;
-  backend(): ChatBackend;
+  /** Which conversations exist (`conversations.directory`): a removed user's are deleted for everyone. */
+  directory(): ConversationDirectory;
   /** The projects, when there is a project store: a removed user's handed over. */
   projects?: ProjectAccess;
   /** The origin links are made under (`linkOrigin`); `undefined` when the request's host is not trusted. */
@@ -152,9 +154,9 @@ export function provideAdminRoutes(pikit: Pikit, options: AdminRouteOptions): vo
   admin(`DELETE ${ADMIN}/users/:id`, async (request, ctx, operator) => {
     const id = userIdOf(request);
     await accounts().remove(id, ctx);
-    await options.backend().forget(id, ctx);
+    const chats = await deleteChatsOf(options.directory(), id, ctx);
     await options.projects?.userRemoved(id, operator.id, ctx);
-    ctx.logger.info("channel-web: an operator removed a user", { operator: operator.id, user: id });
+    ctx.logger.info("channel-web: an operator removed a user", { operator: operator.id, user: id, chats });
     return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
   });
 }

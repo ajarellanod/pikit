@@ -46,9 +46,10 @@ import type {
 import { memberKey } from "./api.ts";
 import { keyOf } from "./chat.ts";
 import { memoryItemId, type MemoryStore } from "./contract.ts";
+import { type TestDirectory, testDirectory } from "./directory.test-support.ts";
 import { createChannelWeb, NAME } from "./index.ts";
 import { FakeConverter, FakePrincipals } from "./projects.test-support.ts";
-import { adminAuth, answerOf, FakeAccounts, kvOf, OPERATOR, Runtime, router, type Served, secretsOf, serve } from "./runtime.test-support.ts";
+import { adminAuth, answerOf, FakeAccounts, kvOf, OPERATOR, Runtime, router, type Served, secretsOf, serve, tickingClock } from "./runtime.test-support.ts";
 
 /** The stores a fixture may give. */
 export type StoreName = "projects" | "files" | "memory";
@@ -91,6 +92,8 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
     served: Served;
     runtime: Runtime;
     accounts: FakeAccounts;
+    /** The App's `conversations.directory` (the contracts' double), kept across a restart. */
+    directory: TestDirectory;
     stores: OpenedStores;
     principals: FakePrincipals;
     convert: FakeConverter;
@@ -111,6 +114,7 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
     const dir = options.restartOf?.dir ?? mkdtempSync(pathJoin(tmpdir(), "pikit-channel-web-projects-"));
     if (options.restartOf === undefined) dirs.push(dir);
     const clock = options.clock;
+    const directory = options.restartOf?.directory ?? testDirectory();
     const stores = await fixture.open({ only: only.filter((name): name is StoreName => name === "projects" || name === "files" || name === "memory"), now: () => clock?.now() ?? Date.now(), dir, ...(options.restartOf !== undefined && { restartOf: options.restartOf.stores }) });
     stores.resetCalls();
     const principals = options.restartOf?.principals ?? new FakePrincipals();
@@ -147,11 +151,26 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
       },
     });
     const served = await serve(
-      [secretsOf(), runtime.component(), kvOf(), sqliteStorage(pathJoin(dir, "chat.db")), probe, router, agents, adminAuth, ...stores.components, doubles, ...(options.components ?? []), createChannelWeb({ accounts: accounts.wiring() })],
+      [
+        secretsOf(),
+        runtime.component(),
+        kvOf(),
+        sqliteStorage(pathJoin(dir, "chat.db")),
+        probe,
+        router,
+        agents,
+        adminAuth,
+        directory.provider(),
+        directory.recorder(),
+        ...stores.components,
+        doubles,
+        ...(options.components ?? []),
+        createChannelWeb({ accounts: accounts.wiring() }),
+      ],
       { [NAME]: { agents: ["assistant", "helper"], ...options.config }, ...stores.config },
       "server",
       "http://pikit.test",
-      clock,
+      clock ?? tickingClock(),
     );
     apps.push(served);
     const need = <T>(value: T | undefined, what: string): T => {
@@ -162,6 +181,7 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
       served,
       runtime,
       accounts,
+      directory,
       stores,
       principals,
       convert,
@@ -718,11 +738,68 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
       ["The budget", "ben", true],
       ["The plan", "ana", false],
     ]);
-    const transcript = await ok<ChatPage<ChatTranscriptEntry>>(c, "ben", "GET", `/projects/${work.id}/conversations/${anas.id}/transcript`);
+    const transcript = await ok<ChatPage<ChatTranscriptEntry>>(c, "ben", "GET", `/projects/${work.id}/conversations/${anas.id}/transcript?user=ana`);
     expect(transcript.items.length).toBeGreaterThan(0);
-    // Ben cannot write in Ana's chat: it is not his conversation.
+    expect(await ok<ChatPage<ChatTranscriptEntry>>(c, "ben", "GET", `/conversations/${anas.id}/transcript?user=ana`)).toEqual(transcript);
+    // By its id alone it is no chat of Ben's; another project's space is no chat of this one.
+    expect((await call(c, "ben", "GET", `/projects/${work.id}/conversations/${anas.id}/transcript`)).status).toBe(404);
+    // Ben cannot write in Ana's chat, nor stop its run: only its author.
     expect((await call(c, "ben", "POST", `/conversations/${anas.id}/messages`, { text: "x" })).status).toBe(404);
+    expect((await call(c, "ben", "POST", `/conversations/${anas.id}/messages?user=ana`, { text: "x" })).status).toBe(403);
+    expect((await call(c, "ben", "POST", `/conversations/${anas.id}/abort?user=ana`)).status).toBe(403);
     expect((await call(c, "cy", "GET", `/projects/${work.id}/conversations`)).status).toBe(404);
+    expect((await call(c, "cy", "GET", `/projects/${work.id}/conversations/${anas.id}/transcript?user=ana`)).status).toBe(404);
+    expect((await call(c, "cy", "GET", `/conversations/${anas.id}/transcript?user=ana`)).status).toBe(404);
+  });
+
+  test("A PROJECT'S CHATS FOR EVERYONE AND FOR ME (the directory's permissions): the project's owner renames and archives a member's chat for everyone, never deletes it; a member does none of these to another's; anyone who sees one hides it for themselves only; a member removed sees it no more", async () => {
+    const c = await chat();
+    const work = await make(c, "ana", "Work");
+    await join(c, "ana", work, "ben");
+    await join(c, "ana", work, "cy");
+    const anas = await start(c, "ana", "the plan", { project: work.id });
+    const bens = await start(c, "ben", "the budget", { project: work.id });
+    const titles = async (user: string, query = "") =>
+      (await ok<ChatPage<ChatProjectConversation>>(c, user, "GET", `/projects/${work.id}/conversations${query}`)).items.map((each) => `${each.title}${each.archived ? " (archived)" : ""}`).sort();
+    const listed = await ok<ChatPage<ChatProjectConversation>>(c, "ana", "GET", `/projects/${work.id}/conversations`);
+    expect(Object.fromEntries(listed.items.map((each) => [each.userId, each.may]))).toEqual({ ana: { rename: true, archive: true, delete: true }, ben: { rename: true, archive: true, delete: false } });
+
+    // Ben, a member, on Ana's chat: nothing for everyone (403), and by its id alone it is no chat of his (404).
+    for (const [method, path] of [
+      ["PATCH", ""],
+      ["POST", "/archive"],
+      ["DELETE", ""],
+    ] as const) {
+      expect({ method, path, status: (await call(c, "ben", method, `/conversations/${anas.id}${path}?user=ana`, method === "PATCH" ? { title: "Mine" } : undefined)).status }).toEqual({ method, path, status: 403 });
+      expect({ method, path, status: (await call(c, "ben", method, `/conversations/${anas.id}${path}`, method === "PATCH" ? { title: "Mine" } : undefined)).status }).toEqual({ method, path, status: 404 });
+    }
+    // Ana, the project's owner, on Ben's chat: renamed and archived for everyone; never deleted.
+    expect(await ok(c, "ana", "PATCH", `/conversations/${bens.id}?user=ben`, { title: "Budget 2027" })).toMatchObject({ id: bens.id, title: "Budget 2027", mine: false, userId: "ben" });
+    expect(await ok(c, "ana", "POST", `/conversations/${bens.id}/archive?user=ben`, undefined, 200)).toMatchObject({ archived: true });
+    expect((await call(c, "ana", "DELETE", `/conversations/${bens.id}?user=ben`)).status).toBe(403);
+    expect(await titles("cy")).toEqual(["The plan"]);
+    expect(await titles("cy", "?archived=1")).toEqual(["Budget 2027 (archived)"]);
+    // Ben's own list says so too, and he puts it back (his chat: he may).
+    expect((await ok<ChatPage<{ title: string }>>(c, "ben", "GET", `/conversations?project=${work.id}&archived=1`)).items.map((each) => each.title)).toEqual(["Budget 2027"]);
+    await ok(c, "ben", "POST", `/conversations/${bens.id}/unarchive`, undefined, 200);
+
+    // Cy hides Ana's chat for himself: gone from his list only.
+    expect(await ok(c, "cy", "POST", `/conversations/${anas.id}/hide?user=ana`, undefined, 200)).toMatchObject({ hidden: true });
+    expect(await titles("cy")).toEqual(["Budget 2027"]);
+    expect(await titles("cy", "?hidden=1")).toEqual(["The plan"]);
+    expect(await titles("ben")).toEqual(["Budget 2027", "The plan"]);
+    // Ana's next message lists it again for Cy.
+    expect((await call(c, "ana", "POST", `/conversations/${anas.id}/messages`, { text: "more" })).status).toBe(202);
+    expect(await titles("cy")).toEqual(["Budget 2027", "The plan"]);
+
+    // Ben removed from the project: Ana's chat is no chat of his any more; his own stays his.
+    await ok(c, "ana", "DELETE", `/projects/${work.id}/members/${encodeURIComponent(memberKey({ channel: "web", id: "ben" }))}`, undefined, 204);
+    expect((await call(c, "ben", "GET", `/conversations/${anas.id}/transcript?user=ana`)).status).toBe(404);
+    expect((await call(c, "ben", "GET", `/conversations/${bens.id}`)).status).toBe(200);
+    // Ana deletes her own chat for everyone: gone from every member's list, its key started over.
+    await ok(c, "ana", "DELETE", `/conversations/${anas.id}`, undefined, 204);
+    expect(await titles("cy")).toEqual(["Budget 2027"]);
+    expect(c.runtime.resets).toEqual([keyOf("ana", anas.id)]);
   });
 
   test("NOTICES: a chat's are the logs' entries whose author worked in it (an agent's note, file, link; its author's command), newest first; another chat's never; none for a non-member or a chat of no project", async () => {
@@ -786,12 +863,11 @@ export function projectRouteCases(fixture: ProjectStoresFixture): void {
       ["ben", bens, "Ben's"],
     ];
     const c = await chat({ before: formerTable(rows) });
-    // A chat made in the old project before: its row names the project (the tables made by a first read).
-    await ok(c, "ana", "GET", "/conversations");
-    await c.sql().run(
-      "INSERT INTO channel_web_conversations (key, user_id, chat_id, agent, project, title, title_search, created_at, last_activity, hidden, archived, busy, version) VALUES (?, 'ana', ?, 'assistant', ?, 'Old chat', 'old chat', 1, 1, 0, 0, 0, 1)",
-      [keyOf("ana", "00000000-0000-4000-8000-000000000001"), "00000000-0000-4000-8000-000000000001", work],
-    );
+    // A chat made in the old project before: the directory has it in the project's space.
+    const old = { key: keyOf("ana", "00000000-0000-4000-8000-000000000001"), conversationId: "old" };
+    const place = { agent: "assistant", channel: "web", space: `web:ana:project:${work}`, owner: { channel: "web", id: "ana" } };
+    c.directory.memory.seen({ kind: "dispatched", ref: { ...old, ...place }, requestId: "web:old", sender: { channel: "web", id: "ana" }, duplicate: false, at: 1, seq: 1 });
+    await c.directory.memory.directory.title(old, { text: "Old chat", source: "first" }, c.ctx());
     // One carried over already (a run cut after its create): left as it is.
     await c.projects().create({ id: home, space: `web:ana:project:${home}`, name: "Home (kept)", owner: { channel: "web", id: "ana" } }, { kind: "component", name: "channel-web" }, c.ctx());
     expect(await tableExists(c.sql())).toBe(true);

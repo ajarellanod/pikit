@@ -4,14 +4,15 @@
  * `fetch` (`createWorkerHost`), its objects `PlatformConversation`s (`src/platform.ts`).
  *
  * - The objects' App, composed as a project's: storage-do, storage-kv-sql, actors-do (mailbox, inbox,
- *   wakeups), runtime-pi on provider-faux's `faux/scripted`, conversations-kv, router-basic,
+ *   wakeups), runtime-pi on provider-faux's `faux/scripted`, conversations-kv, conversations-directory, router-basic,
  *   outbound-durable, admin-auth-token, admin-api, execution-do and tool-write (each chat's workspace),
  *   projects-sql (the directory `projects:index`, each project in the object of its space), memory-sql
  *   (each space's memory in its object), memory-recall, tool-space-files (each space's index in its
  *   object), projects-context and channel-web (better-auth in the accounts actor).
- * - The Worker's App: actors-do, admin-auth-token, admin-api's, projects-sql's, memory-sql's,
- *   tool-space-files' and channel-web's Worker halves: the page's routes run there, every store reached
- *   by RPC.
+ * - The Worker's App: actors-do, admin-auth-token, conversations-directory's, admin-api's, projects-sql's,
+ *   memory-sql's, tool-space-files' and channel-web's Worker halves: the page's routes run there, every
+ *   store reached by RPC; a project's chats listed to its members by the directory (projects-sql's
+ *   stage of `conversation.audience` granting the project's space).
  * - Doubles: `principals` (no kit provider), and `storage.blob` (tool-space-files' in-memory double, one
  *   for the isolate the objects share; on Cloudflare a bucket every App reaches).
  *
@@ -21,7 +22,8 @@
  * with its source; `project_search` finds each kind across the three stores' objects and `project_read`
  * reads them; the chat's notices and History come from the three logs; Ben removes the note and brings
  * it back exactly from History; Cy, no member, gets `404`; Ben removed, his chat refuses his message
- * (`403`); Ana's chat of no project has the plain memory and files tools and no section.
+ * (`403`); Ana, the project's owner, sees Ben's chat and may archive it for everyone, never delete it;
+ * Ana's chat of no project has the plain memory and files tools and no section.
  */
 
 import { type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
@@ -32,6 +34,7 @@ import adminApi, { worker as adminApiWorker } from "../../../registry/components
 import adminAuthToken from "../../../registry/components/admin-auth-token/files/src/pikit/admin-auth-token/index.ts";
 import type { ChatChange, ChatMemory, ChatNotices, ChatPage, ChatProject, ChatTranscriptEntry } from "../../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
 import channelWeb, { worker as channelWebWorker } from "../../../registry/components/channel-web/files/src/pikit/channel-web/index.ts";
+import conversationsDirectory, { worker as conversationsDirectoryWorker } from "../../../registry/components/conversations-directory/files/src/pikit/conversations-directory/index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerHost } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
 import executionDo from "../../../registry/components/execution-do/files/src/pikit/execution-do/index.ts";
@@ -86,6 +89,7 @@ function compose() {
     providerFaux,
     runtimePi,
     conversationsKv,
+    conversationsDirectory,
     routerBasic,
     outboundDurable,
     adminAuthToken,
@@ -109,7 +113,7 @@ function compose() {
     "projects-context": { ...WINDOWS, pageUrl: PAGE },
   });
   const worker = defineApp({
-    components: [actorsDo, secrets, adminAuthToken, adminApiWorker, memoryBlob(blobs), principals("principals-worker"), projectsSqlWorker, memorySqlWorker, spaceFilesWorker, channelWebWorker],
+    components: [actorsDo, secrets, adminAuthToken, conversationsDirectoryWorker, adminApiWorker, memoryBlob(blobs), principals("principals-worker"), projectsSqlWorker, memorySqlWorker, spaceFilesWorker, channelWebWorker],
     config: { "actors-do": { binding: PLATFORM_BINDING }, "channel-web-worker": chat },
     target: "durable",
     logger: silentLogger,
@@ -259,6 +263,18 @@ it("a project end to end on Cloudflare: made on the page, its chat's agent sees 
   // Cy, no member: 404, nothing read.
   for (const path of [P, `${P}/members`, `${P}/files`, `${P}/memory`, `${P}/history`, `${P}/conversations`]) expect([path, (await cy.send(path)).status]).toEqual([path, 404]);
   expect((await cy.send("/chat/api/conversations", { json: { text: "hello", project: project.id } })).status).toBe(404);
+
+  // Ana, the project's owner, sees Ben's chat (the directory, by the project's grant) and may rename and archive it for everyone, never delete it.
+  const benAuthor = ((await (await ben.send("/chat/api/me")).json()) as { user: { id: string } }).user.id;
+  await vi.waitFor(
+    async () =>
+      expect((await ana.json<ChatPage<{ id: string; userId: string; may: unknown }>>(`${P}/conversations`)).items).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: chat, userId: benAuthor, may: { rename: true, archive: true, delete: false } })]),
+      ),
+    { timeout: 10_000, interval: 100 },
+  );
+  expect((await ana.send(`/chat/api/conversations/${chat}?user=${encodeURIComponent(benAuthor)}`, { method: "DELETE" })).status).toBe(403);
+  expect((await cy.send(`/chat/api/conversations/${chat}/transcript?user=${encodeURIComponent(benAuthor)}`)).status).toBe(404);
 
   // Ben removed: his chat refuses his message, the project's routes are 404 for him.
   const benId = ((await (await ben.send("/chat/api/me")).json()) as { user: { id: string } }).user.id;

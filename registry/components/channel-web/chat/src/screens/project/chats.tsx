@@ -1,8 +1,10 @@
 /**
  * A project's Chats: every member's (a project's chats are shared by its members), newest activity
- * first, each saying whose it is. One's own opens as any conversation; another member's opens read only
- * (`ProjectChatReader`, `#/projects/<id>/chats?chat=<chat id>`): its transcript in the shared view, cut by
- * the operator's policy as one's own, with no composer: only its author writes in it.
+ * first, each saying whose it is, with its menu as the server lets this user (`may`: the project's owner
+ * renames and archives another's for everyone; anyone hides one for themselves). One's own opens as any
+ * conversation; another member's opens read only (`ProjectChatReader`,
+ * `#/projects/<id>/chats?chat=<chat id>&user=<its author>`): its transcript in the shared view, cut by the
+ * operator's policy as one's own, with no composer: only its author writes in it.
  */
 
 import { ChatBubble, Plus } from "iconoir-react";
@@ -21,7 +23,7 @@ import { chatPath } from "@/lib/location";
 import { principalName, projectApi } from "@/lib/project";
 import { projectPath } from "@/lib/routes";
 import type { LiveEvent } from "@/lib/transcript";
-import { titleOf, useNewChat } from "../layout";
+import { titleOf, useConversationMenu, useNewChat } from "../layout";
 import type { TabProps } from "./index";
 
 const PAGE = 30;
@@ -29,6 +31,7 @@ const PAGE = 30;
 export function ChatsTab({ overview }: TabProps) {
   const { project } = overview;
   const newChat = useNewChat();
+  const menu = useConversationMenu();
   const read = useGet<ChatPage<ChatProjectConversation>>(projectApi(project.id, `/conversations?limit=${PAGE}`), 30_000);
   const [more, setMore] = useState<{ items: ChatProjectConversation[]; next?: string | undefined }>();
   const [error, setError] = useState<Error>();
@@ -61,11 +64,14 @@ export function ChatsTab({ overview }: TabProps) {
           items={items.map((conversation) => ({
             id: conversation.id,
             title: titleOf(conversation),
-            href: conversation.mine ? `#${chatPath(conversation.id)}` : `#${projectPath(project.id, "chats")}?chat=${conversation.id}`,
+            href: conversation.mine ? `#${chatPath(conversation.id)}` : `#${projectPath(project.id, "chats")}?chat=${conversation.id}&user=${encodeURIComponent(conversation.userId)}`,
             lastActivity: conversation.lastActivity,
             busy: conversation.busy,
             tag: conversation.mine ? "Yours" : nameOf(conversation.userId),
-            actions: [],
+            actions: menu(conversation, () => {
+              setMore(undefined);
+              read.reload();
+            }),
           }))}
         />
       )}
@@ -87,14 +93,16 @@ export function ChatsTab({ overview }: TabProps) {
   );
 }
 
-/** Another member's chat of `project`, read only, in the shared view. */
-export function ProjectChatReader({ project, chatId }: { project: ChatProject; chatId: string }) {
+/** Another member's chat of `project` (`author` its author's user id), read only, in the shared view. */
+export function ProjectChatReader({ project, chatId, author }: { project: ChatProject; chatId: string; author?: string | undefined }) {
   const sent = useConversations();
   const source = useMemo(
     () => ({
       id: `${project.id}:${chatId}`,
       transcript: ({ limit, cursor }: { limit: number; cursor?: string }) =>
-        get<ChatPage<ChatTranscriptEntry>>(projectApi(project.id, `/conversations/${chatId}/transcript?limit=${limit}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`)),
+        get<ChatPage<ChatTranscriptEntry>>(
+          projectApi(project.id, `/conversations/${chatId}/transcript?limit=${limit}${author === undefined ? "" : `&user=${encodeURIComponent(author)}`}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`),
+        ),
       // No live view of another's chat: its state is read once, then the stream waits until the view goes.
       follow: (onEvent: (event: LiveEvent) => void, signal: AbortSignal) =>
         new Promise<void>((resolve) => {
@@ -104,7 +112,7 @@ export function ProjectChatReader({ project, chatId }: { project: ChatProject; c
       send: () => Promise.reject(new Error("Only who started this chat writes in it.")),
       abort: () => Promise.resolve(),
     }),
-    [project.id, chatId],
+    [project.id, chatId, author],
   );
   return (
     <div className="flex min-h-0 flex-1 flex-col">

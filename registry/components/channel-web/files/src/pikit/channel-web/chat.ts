@@ -1,6 +1,6 @@
 /**
  * The channel's names and checks, each in one place: the conversation key (`keyOf`), chat ids,
- * request ids, a message's images and files, titles.
+ * request ids, a message's images and files. Titles are `conversations.directory`'s (one everywhere).
  *
  * **Keys.** A user's conversation is `web:<user id>:<chat id>`, the chat id a UUID the server made
  * (`isChatId`: no `:` in it, so a key names one user and one chat). Every route builds the key from the
@@ -20,7 +20,6 @@ import {
   MAX_FILES_BYTES,
   MAX_IMAGE_BYTES,
   MAX_IMAGES,
-  TITLE_MAX,
 } from "./api.ts";
 
 /** The channel's name: `InboundMessage.channel`, and the sender's `channel` (`{ channel: "web", id: <user id> }`). */
@@ -79,12 +78,15 @@ export function personalSpace(userId: string): string {
   return `${KEY_PREFIX}${userId}`;
 }
 
-/** The project of `userId` that `space` names (as `conversations.registry` recorded it), or `""` (none). */
-export function projectOfSpace(userId: string, space: string | undefined): string {
-  const prefix = `${KEY_PREFIX}${userId}:project:`;
-  if (space === undefined || !space.startsWith(prefix)) return "";
-  const projectId = space.slice(prefix.length);
-  return isProjectId(projectId) ? projectId : "";
+/**
+ * The project a conversation's space (`ConversationRef.space`, the directory's `space`) names, or `""`
+ * (none): a project's space is `project:<id>` (the project store's), or `web:<user>:project:<id>` for a
+ * project this channel kept itself before (`projectSpace`). Only what the page shows: who may see the
+ * conversation is the directory's to say, never this.
+ */
+export function projectOfSpace(space: string | undefined): string {
+  const match = space === undefined ? null : /^(?:project:|web:.+:project:)([0-9a-f]{32})$/s.exec(space);
+  return match?.[1] ?? "";
 }
 
 /**
@@ -151,40 +153,3 @@ export function filesProblem(files: readonly ChatFile[], target: string): { stat
   if (total > most) return { status: 413, message: `the files of a message are at most ${most / 1024 / 1024} MB in all here` };
   return undefined;
 }
-
-const ELLIPSIS = String.fromCharCode(0x2026);
-
-const chars = (...codes: number[]): string => String.fromCharCode(...codes);
-/** Typographic quotes and brackets a title may be wrapped in: single and double curly quotes, guillemets, CJK corner brackets. */
-const QUOTES = chars(0x2018, 0x2019, 0x201c, 0x201d, 0xab, 0xbb, 0x300c, 0x300d);
-/** Labels a model may put before a title ("Title: ", "Titre - "), in a few languages: taken off. */
-const TITLE_LABEL = new RegExp(`^(?:title|name|subject|topic|t${chars(0xed)}tulo|titulo|titre|titel|titolo|nombre|nom)(?:\\s*:\\s*|\\s+[-${chars(0x2013, 0x2014)}]\\s+)`, "i");
-/** Quotes and markdown a title is wrapped in. */
-const TITLE_WRAP = new RegExp(`^[\\s"'\`*_#>${QUOTES}-]+|[\\s"'\`*_${QUOTES}]+$`, "g");
-/** What a title never ends with. */
-const TRAILING = /[.,;:\s]+$/u;
-
-/**
- * A conversation's title from a text (its first message, or a model's answer): its first line with
- * words, without a label ("Title:"), quotes or markdown around it, spaces collapsed, no `.`, `,`, `;` or
- * `:` at its end, its first letter a capital, at most `TITLE_MAX` characters (cut at a word, with an
- * ellipsis); `undefined` when nothing is left. The rules of admin-api's titles, so the dashboard, which
- * cleans what `/name` gives it the same way, lists a conversation by the same title as the chat.
- */
-export function cleanTitle(text: string): string | undefined {
-  const line = text
-    .split(/\r?\n/)
-    .map((each) => each.replace(TITLE_WRAP, "").replace(TITLE_LABEL, "").replace(TITLE_WRAP, "").replace(/\s+/g, " ").trim())
-    .find((each) => /[\p{L}\p{N}]/u.test(each));
-  if (line === undefined) return undefined;
-  let title = line.replace(TRAILING, "");
-  if (title.length > TITLE_MAX) {
-    const cut = title.slice(0, TITLE_MAX - 1);
-    const space = cut.lastIndexOf(" ");
-    title = `${(space >= TITLE_MAX / 3 ? cut.slice(0, space) : cut).replace(TRAILING, "")}${ELLIPSIS}`;
-  }
-  return title === "" ? undefined : title.charAt(0).toLocaleUpperCase() + title.slice(1);
-}
-
-/** The title of a conversation started with `text`: the text's, else what it holds. */
-export const firstTitle = (text: string, images: number): string => cleanTitle(text) ?? (images > 0 ? "Image" : "New conversation");

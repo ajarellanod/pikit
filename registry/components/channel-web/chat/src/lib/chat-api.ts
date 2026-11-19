@@ -9,8 +9,15 @@
  * `ChatError` with its status.
  *
  * A conversation is named by its chat id (`ChatConversation.id`, a UUID the server made): the
- * conversation key is `web:<user id>:<chat id>`, built from the session's user. A chat id of another
- * user's is `404`, as one that never existed.
+ * conversation key is `web:<user id>:<chat id>`, built from the session's user (or, with `?user=`,
+ * another member's chat of a project the user sees). Which conversations a user sees, and what they may
+ * do to them, is `conversations.directory`'s (features/conversation-directory.md): their own, and a
+ * project's chats while they are a member. A chat they may not see is `404`, as one that never existed.
+ * Its title is one in every view (the chat's, the dashboard's): its first message, then a model's, then
+ * a rename. "Hide for me" hides it for this user only (until new activity); "Archive for everyone" and
+ * "Delete for everyone" (`ChatConversation.may`) change it for every view: its owner does both, a
+ * project's owner archives (never deletes) another member's chat. Delete for everyone also starts its
+ * key over: a message sent to it later is a new conversation.
  *
  * With a project store installed (`projects`; `ChatConfig.projects` says so), conversations are made in
  * projects (`ChatProject`): each the record of one space, shared by its members (one owner), whose chats,
@@ -59,20 +66,26 @@
  * | `GET`, `POST /chat/api/projects/:id/links`, `DELETE …/links/:link` | `ChatPage<ChatLink>`; `ChatLinkRequest` → `201 ChatLink`; `204` |
  * | `GET /chat/api/projects/:id/history?limit&cursor` | `ChatPage<ChatChange>`: the project's, its memory's and its files' logs merged, newest first |
  * | `POST /chat/api/projects/:id/history/:log/:n/restore` | `200 ChatChange`: the state before change `n` of `log` back, through the store that holds it (the owner's for members and the project's own record) |
- * | `GET /chat/api/projects/:id/conversations?limit&cursor` | `ChatPage<ChatProjectConversation>`: every member's chats of the project |
- * | `GET /chat/api/projects/:id/conversations/:chat/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`: a member's chat, read only |
+ * | `GET /chat/api/projects/:id/conversations?limit&cursor&archived&hidden` | `ChatPage<ChatProjectConversation>`: every member's chats of the project, as for `GET /chat/api/conversations` |
+ * | `GET /chat/api/projects/:id/conversations/:chat/transcript?user&limit&cursor` | `ChatPage<ChatTranscriptEntry>`: a member's chat (`user` its author, default the user), read only |
  * | `GET /chat/api/conversations/:id/notices` | `ChatNotices`: what was added to its project from this chat (the logs' entries whose author's conversation is it) |
- * | `GET /chat/api/conversations?limit&cursor&archived&q&project` | `ChatPage<ChatConversation>`, newest activity first: those not archived, or with `archived=1` the archived ones; with `q`, only those whose title holds it (any case); with `project`, only that project's (`none`: those of no project) |
+ * | `GET /chat/api/conversations?limit&cursor&archived&hidden&q&project` | `ChatPage<ChatConversation>`: the user's own, newest activity first: those listed, or with `archived=1` those archived for everyone, with `hidden=1` those they hid; with `q`, only those whose title holds it (any case); with `project`, only that project's (`none`: those of no project) |
  * | `POST /chat/api/conversations` | `ChatStartRequest` → `201 ChatStartResponse` (a command too: the conversation is made, the command ran in it; `429` past `ChatConfig`'s rate; `400` for an `agent` not in `ChatConfig.agents` or not one the project allows; `404` for a `project` the user is no member of; `403` in an archived one) |
  * | `GET /chat/api/conversations/:id` | `ChatConversation` |
- * | `PATCH /chat/api/conversations/:id` | `ChatRenameRequest` → `200 ChatConversation` |
- * | `POST /chat/api/conversations/:id/archive`, `…/unarchive` | `200 ChatConversation`: listed apart, or back in the list (new activity lists an archived one again) |
- * | `DELETE /chat/api/conversations/:id` | `204`: out of the list, gone for the user (nothing of the runtime's is deleted) |
+ * | `PATCH /chat/api/conversations/:id` | `ChatRenameRequest` → `200 ChatConversation`: renamed for everyone (`may.rename`, else `403`) |
+ * | `POST /chat/api/conversations/:id/archive`, `…/unarchive` | `200 ChatConversation`: archived for everyone, or back (`may.archive`, else `403`; new activity lists an archived one again) |
+ * | `POST /chat/api/conversations/:id/hide`, `…/unhide` | `200 ChatConversation`: hidden for this user only, or back (new activity they see lists it again) |
+ * | `POST /chat/api/conversations/:id/read` | `200 ChatConversation`: read up to now (`unread` 0) |
+ * | `DELETE /chat/api/conversations/:id` | `204`: deleted for everyone (`may.delete`, else `403`): gone from every view, its key started over (nothing of the runtime's is deleted) |
  * | `GET /chat/api/conversations/:id/transcript?limit&cursor` | `ChatPage<ChatTranscriptEntry>`, newest first, at most `PAGE_JSON_MAX` characters of stored JSON (then fewer than `limit`, and `next`) |
  * | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | the bytes of image `n` of the user's message `messageId` (a user message's image part's `url`), its type, cached privately |
  * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`413` past a message's bounds: its images, its files; `403` in a project's chat once its author is no member, or its agent no longer allowed) |
  * | `GET /chat/api/conversations/:id/events` | server-sent events, one `ChatEvent` per `data:` line, a `live` with `["r", ChatLive]` first |
  * | `POST /chat/api/conversations/:id/abort` | `200 ChatAbortResponse` |
+ *
+ * Every `/chat/api/conversations/:id…` route takes `?user=<user id>` for another member's chat of a
+ * project the user sees: read, renamed, archived, hidden or marked read as `may` says; only its author
+ * writes in it or stops its run (`403`).
  */
 
 /** The header every request that changes something carries: `x-pikit-chat: 1`. */
@@ -487,10 +500,7 @@ export interface ChatLinkRequest {
 }
 
 /** A chat of a project, any member's: who made it (`userId`, `mine`). */
-export interface ChatProjectConversation extends ChatConversation {
-  userId: string;
-  mine: boolean;
-}
+export type ChatProjectConversation = ChatConversation;
 
 /** What was added to a chat's project from it (newest first): agents' notes, rules, files and links, a member's commands. */
 export interface ChatNotices {
@@ -499,20 +509,37 @@ export interface ChatNotices {
   items: ChatChange[];
 }
 
-/** One of the user's conversations. */
+/** What a user may do to a conversation for everyone (`ChatConversation.may`): anyone who sees it hides it and marks it read for themselves. */
+export interface ChatPermissions {
+  rename: boolean;
+  archive: boolean;
+  delete: boolean;
+}
+
+/** A conversation as this user sees it: one of theirs, or another member's chat of a project. */
 export interface ChatConversation {
   /** Its chat id: what `:id` is in the routes. */
   id: string;
-  /** Its title: the user's, else its first message, cleaned (at most `TITLE_MAX` characters). */
+  /** Its title, the same in every view: its first message's, then a model's, then a rename (at most `TITLE_MAX` characters); `New conversation` while it has none. */
   title: string;
   /** Whether a run is going now. */
   busy: boolean;
-  /** Whether the user archived it: listed apart (`?archived=1`) until new activity lists it again. */
+  /** Archived for everyone: listed apart (`?archived=1`) until new activity lists it again. */
   archived: boolean;
-  /** Epoch ms of its newest message. */
+  /** Hidden for this user only ("Hide for me"): listed apart (`?hidden=1`) until new activity they see. */
+  hidden: boolean;
+  /** Epoch ms of its newest activity this user sees (0: none yet). */
   lastActivity: number;
-  /** Epoch ms it was made. */
+  /** Epoch ms it was made (0: not yet listed). */
   createdAt: number;
+  /** Activity after this user's read mark by others (its assistant's answers included), at most 99. */
+  unread: number;
+  /** Who started it (its author, who alone writes in it). */
+  userId: string;
+  /** It is this user's own. */
+  mine: boolean;
+  /** What this user may do to it for everyone: its owner all; a project's owner rename and archive; another member none. */
+  may: ChatPermissions;
   /** The assistant it was made with, when it is one of `ChatConfig.agents`. */
   agent?: string;
   /** The project it was made in (`ChatProject.id`), for good; absent: none. */

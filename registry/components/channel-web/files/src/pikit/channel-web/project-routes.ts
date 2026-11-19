@@ -9,7 +9,8 @@
  *
  * - **The caller is the session's.** Every route builds `{ kind: "people", principals }` from the
  *   session's user (`{ channel: "web", id }` with its name, then `principals.of` when given), in one
- *   place (`who`), and an author `{ kind: "person", principal }` from it: never from the page's words.
+ *   place (`who`, over `directory.ts`' `viewerOf`: the same as the directory's viewer), and an author
+ *   `{ kind: "person", principal }` from it: never from the page's words.
  * - **The store decides.** A route finds the project's space with `locate(id)` (the former projects
  *   carried over first, `migrateProjects`), then asks the store with that caller: a non-member, a
  *   missing or removed project are `404` alike, with nothing read or written; an owner's act by a member
@@ -27,7 +28,9 @@
  *   not archived, with an agent the project allows (`Project.agents`, when not empty, among those users
  *   may pick), in the project's space (`Project.space`); a message posted in one only while its author
  *   is still a member, the project not archived, and its agent still allowed (`403`). Every member reads
- *   every chat of the project (`.../conversations`, cut by the policy as one's own).
+ *   every chat of the project (`.../conversations`, cut by the policy as one's own): the directory lists
+ *   them to its members (the project store's stage of `conversation.audience` grants its space), and
+ *   counts them (`count`, the channel's own viewer: every member's, listed).
  * - **The notices of a chat** (`GET /chat/api/conversations/:id/notices`): what was added to its project
  *   from it, read from the three logs (entries whose author's `conversation` is this chat's key), shown
  *   by the page under the answer that made it, with Undo: the notice does not depend on the model.
@@ -43,6 +46,8 @@ import {
   type Change,
   type ChangePage,
   type ChangePageRequest,
+  type ConversationDirectory,
+  DIRECTORY_COUNT_MAX,
   DOCUMENT_TITLE_MAX,
   type DocumentConverter,
   isTextType,
@@ -67,7 +72,6 @@ import {
   type ChatAuthor,
   type ChatChange,
   type ChatConfig,
-  type ChatConversation,
   type ChatDocument,
   type ChatDocumentRead,
   type ChatDocuments,
@@ -93,9 +97,10 @@ import {
   PROJECT_NAME_MAX,
 } from "./api.ts";
 import type { ChatBackend } from "./backend.ts";
-import { CHANNEL, isChatId, isProjectId, keyOf } from "./chat.ts";
+import { CHANNEL, isChatId, isProjectId, projectOfSpace } from "./chat.ts";
 import { type Memory, memoryItemId, type MemoryOwner, type MemoryStore, memoryWords } from "./contract.ts";
-import { API, bodyOf, bytesOf, checked, json, pageOf, Refused, shownConversation, userRoutes } from "./routes.ts";
+import { CHANNEL_VIEWER, chatOf, stateAsked, viewerOf } from "./directory.ts";
+import { API, bodyOf, bytesOf, checked, factsOf, json, openChat, pageOf, Refused, shownConversation, userRoutes } from "./routes.ts";
 import { projectEntry } from "./visibility.ts";
 
 /** The capabilities the routes use, each optional (`useOptional`), read in a handler. */
@@ -112,6 +117,8 @@ export interface ProjectRouteOptions {
   /** Read in a handler, never in setup. */
   accounts(): Accounts;
   backend(): ChatBackend;
+  /** Which conversations exist, as each user may see them (`conversations.directory`): a project's chats, their counts. */
+  directory(): ConversationDirectory;
   /** The page's config: the agents users may pick (`agents`), its `visibility`, whether email is sent. */
   chatConfig(ctx: AppContext): Promise<ChatConfig>;
 }
@@ -125,10 +132,10 @@ export interface ProjectAccess {
    * made with. Refuses `404` (no project of theirs), `403` (archived), `400` (an agent it does not allow).
    */
   starting(user: AccountUser, id: string, agent: string | undefined, ctx: AppContext): Promise<{ space: string; agent?: string }>;
-  /** Before `user`'s message in their `conversation` of a project: `403` once they are no member, it is archived, or its agent is no longer allowed. */
-  posting(user: AccountUser, conversation: ChatConversation, ctx: AppContext): Promise<void>;
-  /** Before listing `user`'s chats of project `id`: `404` when they are no member. */
-  listing(user: AccountUser, id: string, ctx: AppContext): Promise<void>;
+  /** Before `user`'s message in their chat of `project` (made with `agent`): `403` once they are no member, it is archived, or its agent is no longer allowed. */
+  posting(user: AccountUser, chat: { project: string; agent: string }, ctx: AppContext): Promise<void>;
+  /** Before listing `user`'s chats of project `id`: its space; `404` when they are no member. */
+  listing(user: AccountUser, id: string, ctx: AppContext): Promise<string>;
   /** The user `userId` was removed by `operator`: their projects handed over (or archived), their memberships gone. Never rejects. */
   userRemoved(userId: string, operator: string, ctx: AppContext): Promise<void>;
 }
@@ -367,12 +374,8 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
 
   /** The caller and the author of `user`'s requests: the session's, never the page's words. */
   const who = async (me: AccountUser, ctx: AppContext): Promise<Who> => {
-    const name = me.name.replace(/\s+/g, " ").trim().slice(0, PRINCIPAL_NAME_MAX);
-    const principal: Principal = { channel: CHANNEL, id: me.id, ...(name !== "" && { name }) };
-    const directory = services.principals();
-    const others = directory === undefined ? [] : await directory.of({ channel: CHANNEL, id: me.id }, ctx);
-    const principals = [principal, ...others.filter((each) => !samePrincipal(each, principal))].slice(0, 20);
-    return { principal, principals, caller: { kind: "people", principals }, author: { kind: "person", principal } };
+    const { principal, viewer } = await viewerOf(me, services.principals(), ctx);
+    return { principal, principals: viewer.principals, caller: viewer, author: { kind: "person", principal } };
   };
 
   /** The space of project `id` (after the migration), or `404`. */
@@ -412,8 +415,18 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
   };
   const ownerOf = (space: string): MemoryOwner => ({ type: "space", space });
 
-  /** How many chats `ids` have (every member's). */
-  const chatsOf = (ids: readonly string[], ctx: AppContext) => (ids.length === 0 ? Promise.resolve({} as Record<string, number>) : backend().projectChats(ids, ctx));
+  /** How many chats (every member's, listed) the projects of `spaces` have: the directory's count, the channel's own viewer. */
+  const chatsOf = async (spaces: readonly string[], ctx: AppContext): Promise<Record<string, number>> => {
+    const counts: Record<string, number> = {};
+    const unique = [...new Set(spaces)];
+    for (let at = 0; at < unique.length; at += DIRECTORY_COUNT_MAX) Object.assign(counts, await options.directory().count(CHANNEL_VIEWER, unique.slice(at, at + DIRECTORY_COUNT_MAX), ctx));
+    return counts;
+  };
+  /** Whether the project of `space` has any chat, archived ones too (a project with chats is not removed). */
+  const hasChats = async (space: string, ctx: AppContext): Promise<boolean> => {
+    if (((await chatsOf([space], ctx))[space] ?? 0) > 0) return true;
+    return (await options.directory().list(CHANNEL_VIEWER, { space, state: "archived", limit: 1 }, ctx)).items.length > 0;
+  };
 
   /** One page of `log` of `space`, as `who` may read it (the project's log asks the store; the others were checked by `roleOf`). */
   const readLog = (log: Log, space: string, asking: Who, page: ChangePageRequest, ctx: AppContext): Promise<ChangePage> => {
@@ -471,10 +484,10 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
       if (cursor === undefined) break;
     }
     const chats = await chatsOf(
-      found.map((each) => each.id),
+      found.map((each) => each.space),
       ctx,
     );
-    return json<ChatPage<ChatProject>>(200, { items: found.map((each) => chatProjectOf(each, chats[each.id] ?? 0)) });
+    return json<ChatPage<ChatProject>>(200, { items: found.map((each) => chatProjectOf(each, chats[each.space] ?? 0)) });
   });
 
   user(`POST ${API}/projects`, async (request, ctx, me) => {
@@ -488,7 +501,7 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
   });
 
   user(`GET ${API}/projects/:id`, async (request, ctx, me) => {
-    const { id, projects, space, who: asking } = await at(request, me, ctx);
+    const { projects, space, who: asking } = await at(request, me, ctx);
     const project = await projects.get(space, asking.caller, ctx);
     if (project === undefined) throw notFound();
     const files = services.files();
@@ -497,7 +510,7 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
     const [documents, links, chats, recent, usage, counts] = await Promise.all([
       projects.documents(space, asking.caller, ctx),
       projects.links(space, asking.caller, ctx),
-      chatsOf([id], ctx),
+      chatsOf([space], ctx),
       history(space, asking, RECENT, {}, ctx),
       files === undefined ? undefined : files.list(space, { limit: 1 }, ctx),
       memory === undefined
@@ -509,7 +522,7 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
           ]),
     ]);
     return json<ChatProjectOverview>(200, {
-      project: chatProjectOf(project, chats[id] ?? 0),
+      project: chatProjectOf(project, chats[space] ?? 0),
       documents: documents.length,
       coreTokens: documents.filter((each) => each.mode === "core").reduce((sum, each) => sum + each.tokens, 0),
       coreBudget: project.coreTokens,
@@ -541,15 +554,15 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
       ctx,
     );
     ctx.logger.info("channel-web: a user changed a project", { user: me.id, project: id });
-    return json<ChatProject>(200, chatProjectOf(changed, (await chatsOf([id], ctx))[id] ?? 0));
+    return json<ChatProject>(200, chatProjectOf(changed, (await chatsOf([space], ctx))[space] ?? 0));
   });
 
   user(`DELETE ${API}/projects/:id`, async (request, ctx, me) => {
     const { id, projects, space, who: asking } = await at(request, me, ctx);
     const project = await projects.get(space, asking.caller, ctx);
     if (project === undefined) throw notFound();
-    // Its chats stay readable: a project with any is archived instead.
-    if (((await chatsOf([id], ctx))[id] ?? 0) > 0) throw new Refused(409, "not_empty", "this project has conversations: archive it instead");
+    // Its chats stay readable: a project with any (archived ones too) is archived instead.
+    if (await hasChats(space, ctx)) throw new Refused(409, "not_empty", "this project has conversations: archive it instead");
     await projects.remove(space, asking.caller, ctx);
     ctx.logger.info("channel-web: a user removed a project", { user: me.id, project: id });
     return noContent();
@@ -624,7 +637,7 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
     const { id, projects, space, who: asking } = await at(request, me, ctx);
     const changed = await projects.transferOwnership(space, { channel: body.channel, id: body.id }, asking.caller, ctx);
     ctx.logger.info("channel-web: a project changed owner", { user: me.id, project: id });
-    return json<ChatProject>(200, chatProjectOf(changed, (await chatsOf([id], ctx))[id] ?? 0));
+    return json<ChatProject>(200, chatProjectOf(changed, (await chatsOf([space], ctx))[space] ?? 0));
   });
 
   // Instructions and documents.
@@ -984,11 +997,17 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
 
   user(`GET ${API}/projects/:id/conversations`, async (request, ctx, me) => {
     const page = pageOf(request);
-    const { id, projects, space, who: asking } = await at(request, me, ctx);
+    const state = stateAsked(new URL(request.url).searchParams);
+    if (state === undefined) throw new Refused(400, "invalid_request", "archived and hidden are 1 or 0, one of them");
+    const { projects, space, who: asking } = await at(request, me, ctx);
     if ((await projects.get(space, asking.caller, ctx)) === undefined) throw notFound();
-    const [listed, config] = await Promise.all([backend().projectConversations(id, page, ctx), options.chatConfig(ctx)]);
+    // Every member's, as the directory lists them to this member (the project's space granted them).
+    const [listed, config] = await Promise.all([options.directory().list(asking.caller, { ...page, state, space, channels: [CHANNEL] }, ctx), options.chatConfig(ctx)]);
     return json<ChatPage<ChatProjectConversation>>(200, {
-      items: listed.items.map((each) => ({ ...shownConversation(each, config), userId: each.userId, mine: each.userId === me.id })),
+      items: listed.items.flatMap((entry) => {
+        const chat = chatOf(entry, me.id);
+        return chat === undefined ? [] : [shownConversation(chat, config)];
+      }),
       ...(listed.next !== undefined && { next: listed.next }),
     });
   });
@@ -997,10 +1016,14 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
     const chatId = segment(request, 6);
     if (!isChatId(chatId)) throw notFound("no such conversation");
     const page = pageOf(request);
-    const { id, projects, space, who: asking } = await at(request, me, ctx);
+    const author = new URL(request.url).searchParams.get("user") ?? undefined;
+    if (author !== undefined && (author === "" || author.length > 256)) throw notFound("no such conversation");
+    const { projects, space, who: asking } = await at(request, me, ctx);
     if ((await projects.get(space, asking.caller, ctx)) === undefined) throw notFound();
-    const { userId } = await backend().projectConversation(id, chatId, ctx);
-    const [read, { visibility }] = await Promise.all([backend().transcript({ userId, chatId, key: keyOf(userId, chatId) }, page, ctx), options.chatConfig(ctx)]);
+    // A chat of this project the directory shows this member: any other is no chat of it.
+    const chat = await openChat(options.directory(), services.principals(), me, chatId, author, ctx);
+    if ((await factsOf(chat, backend(), ctx)).space !== space) throw notFound("no such conversation");
+    const [read, { visibility }] = await Promise.all([backend().transcript(chat.ref, page, ctx), options.chatConfig(ctx)]);
     const items = read.items.flatMap((entry) => projectEntry(entry, visibility) ?? []);
     return json<ChatPage<ChatTranscriptEntry>>(200, { items, ...(read.next !== undefined && { next: read.next }) });
   });
@@ -1010,10 +1033,10 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
   user(`GET ${API}/conversations/:id/notices`, async (request, ctx, me) => {
     const chatId = segment(request, 4);
     if (!isChatId(chatId)) throw notFound("no such conversation");
-    const key = keyOf(me.id, chatId);
-    const conversation = await backend().conversation({ userId: me.id, chatId, key }, ctx);
-    const project = conversation.project;
-    if (project === undefined || services.projects() === undefined) return json<ChatNotices>(200, { items: [] });
+    const chat = await openChat(options.directory(), services.principals(), me, chatId, undefined, ctx);
+    const { key } = chat.ref;
+    const project = projectOfSpace((await factsOf(chat, backend(), ctx)).space);
+    if (project === "" || services.projects() === undefined) return json<ChatNotices>(200, { items: [] });
     const located = await locate(project, ctx).catch((error: unknown) => {
       if (error instanceof Refused && error.status === 404) return undefined;
       throw error;
@@ -1060,7 +1083,6 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
     },
 
     async posting(me, conversation, ctx) {
-      if (conversation.project === undefined) return;
       const located = await locate(conversation.project, ctx).catch((error: unknown) => {
         if (error instanceof Refused && error.status === 404) return undefined;
         throw error;
@@ -1070,7 +1092,7 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
       const project = await located.projects.get(located.space, asking.caller, ctx);
       if (project === undefined) throw new Refused(403, "forbidden", "you are no longer a member of this chat's project");
       if (project.archivedAt !== undefined) throw new Refused(403, "forbidden", "this chat's project is archived: it is read only");
-      if (project.agents.length > 0 && (conversation.agent === undefined || !project.agents.includes(conversation.agent))) {
+      if (project.agents.length > 0 && !project.agents.includes(conversation.agent)) {
         throw new Refused(403, "forbidden", "this chat's assistant is no longer one its project allows: start a new chat");
       }
     },
@@ -1078,6 +1100,7 @@ export function provideProjectRoutes(pikit: Pikit, options: ProjectRouteOptions)
     async listing(me, id, ctx) {
       const { projects, space } = await locate(id, ctx);
       if ((await projects.get(space, (await who(me, ctx)).caller, ctx)) === undefined) throw notFound();
+      return space;
     },
 
     async userRemoved(userId, operator, ctx) {

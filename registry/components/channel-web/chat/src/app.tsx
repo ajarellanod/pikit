@@ -152,7 +152,7 @@ export function App() {
     ) : route.path === PROJECTS_PATH && config.projects !== undefined ? (
       <ProjectsScreen />
     ) : project !== undefined ? (
-      <ProjectScreen key={project.id} id={project.id} tab={project.tab} chat={route.query.get("chat") ?? undefined} />
+      <ProjectScreen key={project.id} id={project.id} tab={project.tab} chat={route.query.get("chat") ?? undefined} author={route.query.get("user") ?? undefined} />
     ) : (
       <div className="p-8 text-[13.5px] text-ink-3">
         No page here. <a href="#/" className="font-medium text-ink underline underline-offset-2">Start a new chat</a>

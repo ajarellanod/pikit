@@ -4,8 +4,9 @@
  * `createWorkerHost`, which boots the Worker's App at its first request). Each conversation's object
  * and the accounts actor (`channel-web:accounts`) run the objects' App, composed as a project's: storage-do,
  * storage-kv-sql, actors-do (mailbox, inbox, wakeups), runtime-pi with provider-faux (`faux/echo`),
- * conversations-kv, router-basic, outbound-durable, admin-auth-token, admin-api and channel-web; the
- * Worker's App runs actors-do, admin-auth-token, admin-api's and channel-web's Worker halves.
+ * conversations-kv, conversations-directory, router-basic, outbound-durable, admin-auth-token, admin-api
+ * and channel-web; the Worker's App runs actors-do, admin-auth-token, conversations-directory's,
+ * admin-api's and channel-web's Worker halves. The lists, titles and states are the directory's.
  *
  * - A user signs up (`open`) and in with a password (better-auth in the accounts actor: its bundle,
  *   AsyncLocalStorage, scrypt from `node:crypto` under the `workerd` condition, Web Crypto), gets the
@@ -26,12 +27,12 @@
  *   apart): a chat made in one admitted in the project's space (as conversations-kv records it: a
  *   `/rules` fixture in the objects' App says the space it runs in), the same for every chat of it, the
  *   user's personal space (`web:<user>`) for a chat of no project; a command typed runs in the conversation's object, once by request id; a
- *   non-member's every route `404` until added, then every member's chats read, and posting refused
- *   (`403`) once removed; a project with chats is not removed (`409`); the former projects carried over
- *   by the accounts actor with their spaces, its table gone.
- * - Titles: after its first answer a model (faux/echo, through runtime-pi's `model.complete`) titles a
- *   web conversation in its object; the dashboard lists the same title (channel-web runs admin-api's
- *   `/name` there), its own titler never tries, and the user's rename is the dashboard's too.
+ *   non-member's every route `404` until added, then every member's chats read (`?user=` its author),
+ *   and posting refused (`403`) once removed; a project with chats is not removed (`409`); the former
+ *   projects carried over by the accounts actor with their spaces, its table gone.
+ * - Titles: one, the directory's: the first message's, then a model's after its first answer
+ *   (faux/echo, through runtime-pi's `model.complete`), the same in the chat and the dashboard; the
+ *   user's rename is the dashboard's too.
  */
 
 import { type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
@@ -41,11 +42,11 @@ import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
 import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import adminApi, { worker as adminApiWorker } from "../../../registry/components/admin-api/files/src/pikit/admin-api/index.ts";
-import { INDEX_KEY } from "../../../registry/components/admin-api/files/src/pikit/admin-api/conversation-index.ts";
 import adminAuthToken from "../../../registry/components/admin-auth-token/files/src/pikit/admin-auth-token/index.ts";
 import type { ChatConfig, ChatConversation, ChatEvent, ChatLive, ChatPage, ChatTranscriptEntry } from "../../../registry/components/channel-web/files/src/pikit/channel-web/api.ts";
 import channelWeb, { ACCOUNTS_KEY, worker as channelWebWorker } from "../../../registry/components/channel-web/files/src/pikit/channel-web/index.ts";
 import { projectDoubles, projectsComponent } from "../../../registry/components/channel-web/files/src/pikit/channel-web/projects.test-support.ts";
+import conversationsDirectory, { worker as conversationsDirectoryWorker } from "../../../registry/components/conversations-directory/files/src/pikit/conversations-directory/index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import { createWorkerHost } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
 import outboundDurable from "../../../registry/components/outbound-durable/files/src/pikit/outbound-durable/index.ts";
@@ -95,11 +96,11 @@ function fakeEmail() {
 /** The objects' App and the Worker's, with channel-web's config in both (and `extra`, `workerExtra` in each); the Worker's `fetch`. */
 function compose(chat: Record<string, unknown>, extra: ComponentDefinition[] = [], workerExtra: ComponentDefinition[] = []) {
   composeObjects(
-    [storageDo, storageKvSql, actorsDo, secrets, agent, providerFaux, runtimePi, conversationsKv, routerBasic, outboundDurable, adminAuthToken, adminApi, ...extra, channelWeb],
+    [storageDo, storageKvSql, actorsDo, secrets, agent, providerFaux, runtimePi, conversationsKv, conversationsDirectory, routerBasic, outboundDurable, adminAuthToken, adminApi, ...extra, channelWeb],
     { "router-basic": { defaultAgent: "echo" }, "channel-web": chat },
   );
   const worker = defineApp({
-    components: [actorsDo, secrets, adminAuthToken, adminApiWorker, ...workerExtra, channelWebWorker],
+    components: [actorsDo, secrets, adminAuthToken, conversationsDirectoryWorker, adminApiWorker, ...workerExtra, channelWebWorker],
     config: { "actors-do": { binding: PLATFORM_BINDING }, "channel-web-worker": chat },
     target: "durable",
     logger: silentLogger,
@@ -285,8 +286,14 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   const { id: chat } = (await started.json()) as { id: string };
   expect(await answered(ana, chat, 2)).toEqual(["user: hello (answered)", "assistant: faux: hello"]);
   const key = `web:${me.user.id}:${chat}`;
-  const listed = (await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string }>;
-  expect(listed.items.map((each) => each.id)).toEqual([chat]);
+  // Listed by the directory once its recorder's flush reached it (an alarm of the conversation's object).
+  await vi.waitFor(
+    async () => {
+      const listed = (await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string }>;
+      expect(listed.items.map((each) => each.id)).toEqual([chat]);
+    },
+    { timeout: 10_000, interval: 100 },
+  );
 
   // Live: the user's state whole first; the next answer as written, then the entries the transcript has.
   const view = live(await ana.send(`/chat/api/conversations/${chat}/events`));
@@ -321,7 +328,10 @@ it("a user signs up and in, talks to the agent and follows it live; another user
     [`${theirs}/abort`, { method: "POST" }],
     [`${theirs}/archive`, { method: "POST" }],
     [`${theirs}/unarchive`, { method: "POST" }],
+    [`${theirs}/hide`, { method: "POST" }],
     [theirs, { method: "DELETE" }],
+    [`${theirs}?user=${encodeURIComponent(me.user.id)}`, {}],
+    [`${theirs}/transcript?user=${encodeURIComponent(me.user.id)}`, {}],
   ];
   for (const [path, init] of tries) {
     const response = await ben.send(path, init);
@@ -368,7 +378,7 @@ it("a user signs up and in, talks to the agent and follows it live; another user
     },
     { timeout: 15_000, interval: 100 },
   );
-  // Archived (by her conversation's object, which tells the accounts actor's index): listed apart.
+  // Archived for everyone (the directory's): listed apart.
   const archived = await ana.send(`/chat/api/conversations/${chat}/archive`, { method: "POST" });
   expect(await archived.json()).toMatchObject({ id: chat, archived: true });
   expect(((await (await ana.send("/chat/api/conversations")).json()) as ChatPage<unknown>).items).toEqual([]);
@@ -378,7 +388,10 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   // And it lists the archived conversation again.
   expect((await ana.send(`/chat/api/conversations/${chat}/messages`, { json: { text: "third" } })).status).toBe(202);
   const lines = await answered(ana, chat, 6);
-  expect(((await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string; archived: boolean }>).items).toMatchObject([{ id: chat, archived: false }]);
+  await vi.waitFor(
+    async () => expect(((await (await ana.send("/chat/api/conversations")).json()) as ChatPage<{ id: string; archived: boolean }>).items).toMatchObject([{ id: chat, archived: false }]),
+    { timeout: 10_000, interval: 100 },
+  );
   expect(lines.slice(4)).toEqual(["user: third (answered)", "assistant: faux: third"]);
   expect(JSON.stringify(lines)).not.toContain("operator only");
   await view.until((seen) => entriesOf(seen.slice(before)).some((entry) => JSON.stringify(entry.messages).includes("faux: third")));
@@ -390,11 +403,11 @@ it("a user signs up and in, talks to the agent and follows it live; another user
   await view.close();
   await benView.close();
 
-  // The accounts' tables: in the accounts actor, never in a conversation's object or admin-api's index.
+  // The accounts' tables: in the accounts actor, never in a conversation's object; no index of channel-web's anywhere.
   expect(await tablesOf(ACCOUNTS_KEY)).toEqual(expect.arrayContaining(ACCOUNT_TABLES));
   expect((await tablesOf(key)).filter((name) => ACCOUNT_TABLES.includes(name))).toEqual([]);
-  expect(await tablesOf(key)).toEqual(expect.arrayContaining(["channel_web_conversations", "channel_web_entries"]));
-  expect((await tablesOf(INDEX_KEY)).filter((name) => ACCOUNT_TABLES.includes(name))).toEqual([]);
+  expect(await tablesOf(key)).toContain("channel_web_entries");
+  expect([...(await tablesOf(key)), ...(await tablesOf(ACCOUNTS_KEY))]).not.toContain("channel_web_conversations");
 });
 
 it("an invitation's link sets a password and signs in; a ban takes effect once the cookie cache expired, the accounts actor asked then", async () => {
@@ -522,7 +535,7 @@ it("an agent picked for a new chat makes the conversation with it, another is 40
   expect(((await (await gus.send(`/chat/api/conversations/${chat}`)).json()) as ChatConversation).agent).toBe("echo");
 });
 
-it("titles: a web conversation is named by its first message in both apps, then by the model's title after its first answer, the same in the chat and the dashboard, which asks no model; the user's rename is the dashboard's too", async () => {
+it("titles: one, the directory's: a web conversation is named by its first message, then by the model's title after its first answer, the same in the chat and the dashboard; the user's rename is the dashboard's too", async () => {
   const fetch = compose({ name: "Ada", signUp: { mode: "open" } });
   const tess = browser(fetch, HTTPS, "10.0.0.7");
   await signUp(tess, "tess@example.com", "Tess");
@@ -543,14 +556,11 @@ it("titles: a web conversation is named by its first message in both apps, then 
     },
     { timeout: 15_000, interval: 100 },
   );
-  // The dashboard's title is the channel's (`/name`, run in the conversation's object): its own titler never tried.
-  const titles = await runInDurableObject(env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.idFromName(key)), (_instance, state) =>
-    state.storage.sql.exec("SELECT title, source, tries FROM admin_api_conversation_titles").toArray(),
+  // The list has it too (one title: the directory's).
+  await vi.waitFor(
+    async () => expect(((await (await tess.send("/chat/api/conversations")).json()) as ChatPage<ChatConversation>).items.map((each) => each.title)).toEqual(["Faux: plan a trip to Lisbon"]),
+    { timeout: 10_000, interval: 100 },
   );
-  expect(titles).toEqual([{ title: "Faux: plan a trip to Lisbon", source: "operator", tries: 0 }]);
-  // The list (the users' index) has it too.
-  const listed = (await (await tess.send("/chat/api/conversations")).json()) as ChatPage<ChatConversation>;
-  expect(listed.items.map((each) => each.title)).toEqual(["Faux: plan a trip to Lisbon"]);
 
   // The user's rename: the dashboard's title too, and searched by it there.
   expect((await tess.send(`/chat/api/conversations/${chat}`, { method: "PATCH", json: { title: "My Lisbon trip" } })).status).toBe(200);
@@ -602,7 +612,7 @@ it("projects: through the project store (a double in both Apps: the Worker's rou
     return { id: body.id, admission: body.admission, text: body.command?.text };
   };
 
-  // A first message that is a command: the chat is made, empty, in Work's space.
+  // A first message that is a command: the chat is made, empty, in Work's space (listed once a message reaches it).
   const first = await noteOf(await ivy.send("/chat/api/conversations", { json: { text: "/rules a", project: work, requestId: "web:rules-a" } }));
   expect(first).toEqual({ id: expect.any(String), admission: "command", text: `a space=project:${work} sender=${me}` });
   expect(await transcriptOf(ivy, first.id as string)).toEqual([]);
@@ -620,7 +630,7 @@ it("projects: through the project store (a double in both Apps: the Worker's rou
   await vi.waitFor(
     async () => {
       const listed = (await (await ivy.send(`/chat/api/conversations?project=${work}`)).json()) as ChatPage<ChatConversation>;
-      expect(listed.items.map((each) => each.id).sort()).toEqual([first.id, second.id].sort());
+      expect(listed.items.map((each) => each.id)).toEqual([second.id]);
     },
     { timeout: 10_000, interval: 100 },
   );
@@ -642,8 +652,11 @@ it("projects: through the project store (a double in both Apps: the Worker's rou
 
   // Added by Ivy: Jon reads every member's chats, and posts in his own; removed, he posts no more.
   expect((await ivy.send(`/chat/api/projects/${work}/members`, { json: { email: "jon@example.com" } })).status).toBe(201);
-  await vi.waitFor(async () => expect(((await (await jon.send(`/chat/api/projects/${work}/conversations`)).json()) as ChatPage<unknown>).items).toHaveLength(2), { timeout: 10_000, interval: 100 });
-  expect((await jon.send(`/chat/api/projects/${work}/conversations/${second.id}/transcript`)).status).toBe(200);
+  await vi.waitFor(async () => expect(((await (await jon.send(`/chat/api/projects/${work}/conversations`)).json()) as ChatPage<unknown>).items).toHaveLength(1), { timeout: 10_000, interval: 100 });
+  expect((await jon.send(`/chat/api/projects/${work}/conversations/${second.id}/transcript?user=${encodeURIComponent(me)}`)).status).toBe(200);
+  // Read only: his to read, never to write in or to archive or delete for everyone.
+  expect((await jon.send(`/chat/api/conversations/${second.id}/messages?user=${encodeURIComponent(me)}`, { json: { text: "mine now" } })).status).toBe(403);
+  expect((await jon.send(`/chat/api/conversations/${second.id}/archive?user=${encodeURIComponent(me)}`, { method: "POST" })).status).toBe(403);
   const jons = (await (await jon.send("/chat/api/conversations", { json: { text: "/rules f", project: work } })).json()) as { id: string };
   const jonId = (await meOf(jon)).user.id;
   expect((await ivy.send(`/chat/api/projects/${work}/members/${encodeURIComponent(`web:${jonId}`)}`, { method: "DELETE" })).status).toBe(204);
@@ -655,10 +668,11 @@ it("projects: through the project store (a double in both Apps: the Worker's rou
   const projects = (await (await ivy.send("/chat/api/projects")).json()) as ChatPage<{ name: string; chats: number }>;
   await vi.waitFor(async () => {
     const now = (await (await ivy.send("/chat/api/projects")).json()) as ChatPage<{ name: string; chats: number }>;
+    // The directory's count: the chats a message reached (a chat of commands only is not listed).
     expect(now.items.map((each) => [each.name, each.chats]).sort()).toEqual([
-      ["Home", 1],
-      ["Old", 1],
-      ["Work", 3],
+      ["Home", 0],
+      ["Old", 0],
+      ["Work", 1],
     ]);
   });
   expect(projects.items).toHaveLength(3);

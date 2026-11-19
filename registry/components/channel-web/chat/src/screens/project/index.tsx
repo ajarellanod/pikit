@@ -55,7 +55,7 @@ export interface TabProps {
   changed(): void;
 }
 
-export function ProjectScreen({ id, tab, chat }: { id: string; tab: ProjectTab; chat?: string | undefined }) {
+export function ProjectScreen({ id, tab, chat, author }: { id: string; tab: ProjectTab; chat?: string | undefined; author?: string | undefined }) {
   const { config } = useSession();
   const projects = useProjects();
   const projectMenu = useProjectMenu();
@@ -78,7 +78,7 @@ export function ProjectScreen({ id, tab, chat }: { id: string; tab: ProjectTab; 
   }
   if (overview === undefined) return <PageLoading eyebrow="Project" />;
   // Another member's chat, read only, fills the pane.
-  if (tab === "chats" && chat !== undefined) return <ProjectChatReader project={overview.project} chatId={chat} />;
+  if (tab === "chats" && chat !== undefined) return <ProjectChatReader project={overview.project} chatId={chat} author={author} />;
 
   const project = overview.project;
   const changed = () => {

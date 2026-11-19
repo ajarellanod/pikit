@@ -40,19 +40,22 @@ export const transcriptPath = (id: string, { limit, cursor }: { limit: number; c
   `${conversationPath(id)}/transcript?limit=${limit}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`;
 
 /**
- * The conversations, a page: the archived ones with `archived`, those whose title holds `q` with one,
- * those of a project with `project` (its id, or `NO_PROJECT`: those of none).
+ * The conversations, a page: the archived ones with `archived` (for everyone), those the user hid with
+ * `hidden` (for them), those whose title holds `q` with one, those of a project with `project` (its id,
+ * or `NO_PROJECT`: those of none).
  */
 export function conversationsPath({
   limit,
   cursor,
   archived = false,
+  hidden = false,
   q = "",
   project,
-}: { limit: number; cursor?: string | undefined; archived?: boolean; q?: string; project?: string | undefined }): string {
+}: { limit: number; cursor?: string | undefined; archived?: boolean; hidden?: boolean; q?: string; project?: string | undefined }): string {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor !== undefined) params.set("cursor", cursor);
   if (archived) params.set("archived", "1");
+  else if (hidden) params.set("hidden", "1");
   if (q.trim() !== "") params.set("q", q.trim());
   if (project !== undefined) params.set("project", project);
   return `/conversations?${params}`;
