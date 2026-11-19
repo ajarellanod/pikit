@@ -2,8 +2,10 @@
  * The user's latest conversations (`GET /chat/api/conversations`), newest activity first, for the
  * sidebar and the tabs: the first `PAGE` (the sidebar's `SIDEBAR_CHATS`), read again every `every(20 s)`
  * while the person is here (busy flags, new titles), never more (every one, and the archived ones, are
- * on the Conversations page, `screens/chats.tsx`); renaming, archiving and deleting change it at once,
- * and move `changed`, which that page follows. A conversation written to here goes first at once
+ * on the Conversations page, `screens/chats.tsx`); renaming, archiving, hiding and deleting change it at
+ * once, and move `changed`, which that page follows. Archiving and deleting are for everyone, as the
+ * server lets (`ChatConversation.may`); hiding is for this user only ("Hide for me"). Another member's
+ * chat of a project is named with its author (`conversationApi`: `?user=`). A conversation written to here goes first at once
  * (`writtenFirst`), and the list is read again once the message is in (`screens/conversation.tsx`).
  *
  * Also what the pages share: the messages sent and not shown yet (`SentMessages`, the shared
@@ -20,6 +22,10 @@ import { every } from "./activity.ts";
 import type { ChatCommandResult, ChatConversation, ChatPage } from "./chat-api.ts";
 import { request, useGet } from "./client.ts";
 import { conversationsPath } from "./source.ts";
+
+/** The API path of `conversation` (with `rest`): another member's chat names its author (`?user=`). */
+export const conversationApi = (conversation: Pick<ChatConversation, "id" | "userId" | "mine">, rest = ""): string =>
+  `/conversations/${encodeURIComponent(conversation.id)}${rest}${conversation.mine ? "" : `?user=${encodeURIComponent(conversation.userId)}`}`;
 
 /** The conversations read: the sidebar's (`SIDEBAR_CHATS`). */
 const PAGE = 20;
@@ -73,10 +79,14 @@ export interface Conversations extends SentMessages {
   reload(): void;
   /** Moves at each conversation renamed, archived, restored or deleted here: a list of its own reads again. */
   changed: number;
-  rename(id: string, title: string): Promise<ChatConversation>;
-  /** Archives it (listed apart) or restores it (`archived` false). */
-  archive(id: string, archived: boolean): Promise<ChatConversation>;
-  remove(id: string): Promise<void>;
+  /** Renames it for everyone (`may.rename`). */
+  rename(conversation: ChatConversation, title: string): Promise<ChatConversation>;
+  /** Archives it for everyone (listed apart) or restores it (`archived` false): `may.archive`. */
+  archive(conversation: ChatConversation, archived: boolean): Promise<ChatConversation>;
+  /** Hides it for this user only (listed apart until new activity) or shows it again. */
+  hide(conversation: ChatConversation, hidden: boolean): Promise<ChatConversation>;
+  /** Deletes it for everyone (`may.delete`). */
+  remove(conversation: ChatConversation): Promise<void>;
   /** What the commands typed in conversation `id` answered, oldest first. */
   notesOf(id: string): CommandNote[];
   addNote(id: string, result: ChatCommandResult): void;
@@ -107,19 +117,20 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
   // A newer read of the first page knows better than what was changed here.
   useEffect(() => setChanged(new Map()), [latest.data]);
 
-  const rename = useCallback(async (id: string, title: string) => {
-    const renamed = await request<ChatConversation>("PATCH", `/conversations/${encodeURIComponent(id)}`, { title });
-    setChanged((current) => new Map(current).set(id, renamed));
+  const rename = useCallback(async (conversation: ChatConversation, title: string) => {
+    const renamed = await request<ChatConversation>("PATCH", conversationApi(conversation), { title });
+    setChanged((current) => new Map(current).set(conversation.id, renamed));
     setChanges((n) => n + 1);
     return renamed;
   }, []);
 
   const reload = reloadLatest;
 
-  const archive = useCallback(
-    async (id: string, archive: boolean) => {
-      const now = await request<ChatConversation>("POST", `/conversations/${encodeURIComponent(id)}/${archive ? "archive" : "unarchive"}`, {});
-      setChanged((current) => new Map(current).set(id, now));
+  /** `action` (`archive`, `unarchive`, `hide`, `unhide`) of `conversation`, its new state kept. */
+  const act = useCallback(
+    async (conversation: ChatConversation, action: string) => {
+      const now = await request<ChatConversation>("POST", conversationApi(conversation, `/${action}`), {});
+      setChanged((current) => new Map(current).set(conversation.id, now));
       setChanges((n) => n + 1);
       // Restored, it may be among the latest again.
       reload();
@@ -127,12 +138,14 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
     },
     [reload],
   );
+  const archive = useCallback((conversation: ChatConversation, archived: boolean) => act(conversation, archived ? "archive" : "unarchive"), [act]);
+  const hide = useCallback((conversation: ChatConversation, hidden: boolean) => act(conversation, hidden ? "hide" : "unhide"), [act]);
 
-  const remove = useCallback(async (id: string) => {
-    await request<void>("DELETE", `/conversations/${encodeURIComponent(id)}`);
-    setChanged((current) => new Map(current).set(id, null));
+  const remove = useCallback(async (conversation: ChatConversation) => {
+    await request<void>("DELETE", conversationApi(conversation));
+    setChanged((current) => new Map(current).set(conversation.id, null));
     setChanges((n) => n + 1);
-    setTabs((all) => all.filter((tab) => tab.id !== id));
+    setTabs((all) => all.filter((tab) => tab.id !== conversation.id));
   }, []);
 
   useEffect(() => {
@@ -165,7 +178,7 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
     if (latest.data === undefined) return undefined;
     const listed = latest.data.items.flatMap((each) => {
       const now = changed.get(each.id);
-      return now === null || now?.archived === true ? [] : [now ?? each];
+      return now === null || now?.archived === true || now?.hidden === true ? [] : [now ?? each];
     });
     return writtenFirst(listed, latest.at, (each) => lastSentAt(each.id));
   }, [latest.data, latest.at, changed, lastSentAt]);
@@ -187,6 +200,7 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
       changed: changes,
       rename,
       archive,
+      hide,
       remove,
       notesOf,
       addNote,
@@ -195,7 +209,7 @@ export function ConversationsProvider({ userId, children }: { userId: string; ch
       openTab,
       closeTab,
     }),
-    [sentOf, addSent, updateSent, lastSentAt, items, latest.data, latest.error, reload, changes, rename, archive, remove, notesOf, addNote, tabs, tabTitle, openTab, closeTab],
+    [sentOf, addSent, updateSent, lastSentAt, items, latest.data, latest.error, reload, changes, rename, archive, hide, remove, notesOf, addNote, tabs, tabTitle, openTab, closeTab],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

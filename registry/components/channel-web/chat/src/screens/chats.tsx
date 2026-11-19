@@ -2,12 +2,13 @@
  * The user's conversations, newest activity first, full width, a page at a time ("Load more"): the
  * sidebar lists only the latest (`SIDEBAR_CHATS`; its "View all" leads here). Each row opens its
  * conversation (the shared `ConversationList`, as the dashboard's Conversations), and its menu (the
- * sidebar row's own, `useConversationMenu`) renames, archives or deletes it; a change made anywhere on
- * the page reads the list again (`useConversations().changed`).
+ * sidebar row's own, `useConversationMenu`) renames, archives or deletes it for everyone, or hides it for
+ * the user, as the server lets; a change made anywhere on the page reads the list again
+ * (`useConversations().changed`).
  *
  * A search field finds them by title (`?q=`, the server's: the user's own only, any case), as the
- * person stops typing; "Archived" lists the archived ones instead (`?archived=1`), searched alike: the
- * only place they are.
+ * person stops typing; "Archived" lists the archived ones instead (`?archived=1`), "Hidden" those the
+ * user hid (`?hidden=1`), searched alike: the only place they are.
  *
  * A project's page (`#/projects/<id>`, a card of Projects) lists only its chats, searched and archived
  * alike, under its name, with its menu (a new chat in it, Rename, Delete); in Conversations, each chat
@@ -53,27 +54,27 @@ function useDebounced<T>(value: T, ms: number): T {
  * The conversations `q` finds, archived or not, of `project` (an id, or any): `undefined`
  * items until read; read again when `round` moves. More pages on demand.
  */
-function useFound(q: string, archived: boolean, project: string | undefined, round: number) {
+function useFound(q: string, archived: boolean, hidden: boolean, project: string | undefined, round: number) {
   const [found, setFound] = useState<{ key: string; items: ChatConversation[]; next?: string | undefined }>();
   const [error, setError] = useState<Error>();
-  const key = `${archived}:${project ?? ""}:${q}`;
+  const key = `${archived}:${hidden}:${project ?? ""}:${q}`;
 
   useEffect(() => {
     let live = true;
     setError(undefined);
-    get<ChatPage<ChatConversation>>(conversationsPath({ limit: PAGE, archived, q, project })).then(
+    get<ChatPage<ChatConversation>>(conversationsPath({ limit: PAGE, archived, hidden, q, project })).then(
       (page) => live && (setFound({ key, items: page.items, next: page.next }), setError(undefined)),
       (thrown: unknown) => live && setError(asError(thrown)),
     );
     return () => {
       live = false;
     };
-  }, [key, q, archived, project, round]);
+  }, [key, q, archived, hidden, project, round]);
 
   const current = found?.key === key ? found : undefined;
   const loadMore = async () => {
     if (current?.next === undefined) return;
-    const page = await get<ChatPage<ChatConversation>>(conversationsPath({ limit: PAGE, archived, q, project, cursor: current.next }));
+    const page = await get<ChatPage<ChatConversation>>(conversationsPath({ limit: PAGE, archived, hidden, q, project, cursor: current.next }));
     const ids = new Set(current.items.map((each) => each.id));
     setFound({ key, items: [...current.items, ...page.items.filter((each) => !ids.has(each.id))], next: page.next });
   };
@@ -91,11 +92,12 @@ export function ChatsScreen({ project }: { project?: string | undefined }) {
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [archived, setArchived] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const shown = projects.get(project);
   usePageTitle(config.name, project === undefined ? "Conversations" : (shown?.name ?? "Project"));
   const q = useDebounced(query.trim(), DEBOUNCE_MS);
   // Read again when a project's count changes too (a chat made or deleted in it).
-  const found = useFound(q, archived, project, conversations.changed);
+  const found = useFound(q, archived, hidden, project, conversations.changed);
   const items = found.items;
   const nameOf = (id: string | undefined) => projects.get(id)?.name;
 
@@ -116,8 +118,18 @@ export function ChatsScreen({ project }: { project?: string | undefined }) {
         <div className="flex flex-wrap items-center gap-3">
           <SearchField value={query} onChange={(value) => setQuery(value.slice(0, SEARCH_MAX))} placeholder="Search by title" label="Search the conversations" className="min-w-0 flex-1" />
           <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px] text-ink-2">
-            <Switch checked={archived} onChange={setArchived} size="sm" label="Archived" />
+            <Switch checked={archived} onChange={(on) => {
+                setArchived(on);
+                if (on) setHidden(false);
+              }} size="sm" label="Archived" />
             <span aria-hidden>Archived</span>
+          </label>
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[13px] text-ink-2">
+            <Switch checked={hidden} onChange={(on) => {
+                setHidden(on);
+                if (on) setArchived(false);
+              }} size="sm" label="Hidden" />
+            <span aria-hidden>Hidden</span>
           </label>
         </div>
         {found.error !== undefined && <ErrorNote error={found.error} title="The conversations cannot be read" />}
@@ -129,13 +141,25 @@ export function ChatsScreen({ project }: { project?: string | undefined }) {
         )}
         {items !== undefined && items.length === 0 && (
           <EmptyState
-            icon={q !== "" ? <Search /> : archived ? <Archive /> : project !== undefined ? <Folder /> : <ChatBubble />}
-            title={q !== "" ? `No ${archived ? "archived " : ""}conversation titled with “${q}”` : archived ? "No archived conversations" : project !== undefined ? "No chats in this project yet" : "No conversations yet"}
+            icon={q !== "" ? <Search /> : archived || hidden ? <Archive /> : project !== undefined ? <Folder /> : <ChatBubble />}
+            title={
+              q !== ""
+                ? `No ${archived ? "archived " : hidden ? "hidden " : ""}conversation titled with “${q}”`
+                : archived
+                  ? "No archived conversations"
+                  : hidden
+                    ? "No hidden conversations"
+                    : project !== undefined
+                      ? "No chats in this project yet"
+                      : "No conversations yet"
+            }
             hint={
               q !== ""
                 ? "Search finds words of a title, in any case."
                 : archived
-                  ? "A conversation you archive is listed here."
+                  ? "A conversation archived for everyone is listed here."
+                  : hidden
+                    ? "A conversation you hide is listed here, until something new is said in it."
                   : project !== undefined
                     ? "Its chats share what the assistant keeps for the project. A chat stays in the project it starts in."
                     : "Start one: what you write is answered here."

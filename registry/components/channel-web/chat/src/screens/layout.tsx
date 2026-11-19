@@ -13,7 +13,7 @@
  * refuses before: its words are shown); a member leaves it. A chat's project is fixed when it is made.
  *
  * A conversation has one menu wherever it shows (the sidebar's row, the list's, its own header):
- * Rename, Archive (Restore when archived), Delete (`useConversationMenu`, `bui/ActionsMenu`). Renaming
+ * Rename, Archive for everyone (Restore), Hide for me, Delete for everyone, as the server lets (`may`; `useConversationMenu`, `bui/ActionsMenu`). Renaming
  * and deleting ask in a dialog. Settings is a modal (`settings.tsx`), opened from the foot's menu or
  * by `#/settings/<section>` (the route opens it over a new chat).
  *
@@ -23,7 +23,7 @@
  * Archived, Context and menu), and beside the window a panel a page may fill (`SidePanel`: the Context).
  */
 
-import { Archive, ChatBubble, EditPencil, Folder, LogOut, Plus, Settings, Trash, Undo, User } from "iconoir-react";
+import { Archive, ChatBubble, EditPencil, EyeClosed, Folder, LogOut, Plus, Settings, Trash, Undo, User } from "iconoir-react";
 import { createContext, Fragment, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { ActionsMenuItem } from "@/components/bui/ActionsMenu";
@@ -172,7 +172,7 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
 
   const remove = ({ conversation, changed }: { conversation: ChatConversation; changed?: (() => void) | undefined }) => {
     setProblem(undefined);
-    conversations.remove(conversation.id).then(
+    conversations.remove(conversation).then(
       () => {
         projects.reload();
         if (openId === conversation.id) go("/", true);
@@ -216,25 +216,33 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
     [newChat, update],
   );
 
-  const { archive } = conversations;
+  const { archive, hide } = conversations;
+  /** A conversation's menu, as the server lets this user (`may`): for everyone rename, archive, delete; for themselves hide. */
   const menu: ConversationMenu = useCallback(
     (conversation, changed) => {
-      const put = (archived: boolean) => {
+      const done = (work: Promise<unknown>) => {
         setProblem(undefined);
-        archive(conversation.id, archived).then(
+        work.then(
           () => changed?.(),
           (error: unknown) => setProblem({ error: asError(error), title: "The conversation could not be changed" }),
         );
       };
       return [
-        { key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenaming({ conversation, changed }) },
-        conversation.archived
-          ? { key: "unarchive", label: "Restore", icon: <Undo />, onSelect: () => put(false) }
-          : { key: "archive", label: "Archive", icon: <Archive />, onSelect: () => put(true) },
-        { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeleting({ conversation, changed }) },
+        ...(conversation.may.rename ? [{ key: "rename", label: "Rename", icon: <EditPencil />, onSelect: () => setRenaming({ conversation, changed }) }] : []),
+        ...(conversation.may.archive
+          ? [
+              conversation.archived
+                ? { key: "unarchive", label: "Restore for everyone", icon: <Undo />, onSelect: () => done(archive(conversation, false)) }
+                : { key: "archive", label: "Archive for everyone", icon: <Archive />, onSelect: () => done(archive(conversation, true)) },
+            ]
+          : []),
+        conversation.hidden
+          ? { key: "unhide", label: "Show again", icon: <Undo />, onSelect: () => done(hide(conversation, false)) }
+          : { key: "hide", label: "Hide for me", icon: <EyeClosed />, onSelect: () => done(hide(conversation, true)) },
+        ...(conversation.may.delete ? [{ key: "delete", label: "Delete for everyone", icon: <Trash />, danger: true, onSelect: () => setDeleting({ conversation, changed }) }] : []),
       ];
     },
-    [archive],
+    [archive, hide],
   );
 
   const items: SidebarItem[] = [
@@ -333,7 +341,7 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
         onClose={() => setRenaming(undefined)}
         onRename={async (title) => {
           if (renaming === undefined) return;
-          await conversations.rename(renaming.conversation.id, title);
+          await conversations.rename(renaming.conversation, title);
           renaming.changed?.();
         }}
       />
@@ -394,8 +402,8 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
       />
       <ConfirmDialog
         open={deleting !== undefined}
-        title="Delete this conversation?"
-        description={<>“{deleting === undefined ? "" : titleOf(deleting.conversation)}” leaves your list for good.</>}
+        title="Delete this conversation for everyone?"
+        description={<>“{deleting === undefined ? "" : titleOf(deleting.conversation)}” goes from every list, yours and everyone's who sees it. To take it out of your list only, hide it.</>}
         action="Delete"
         onClose={() => setDeleting(undefined)}
         onConfirm={() => deleting !== undefined && remove(deleting)}
