@@ -5,9 +5,8 @@ Claude Pro/Max or ChatGPT login) alike, kept by one Durable Object that every co
 expiring token is refreshed once, under that object's lock, and every conversation gets the new one.
 On a server, `credentials-file` keeps them in a file.
 
-- **Provides:** `model.credentials` (pi-ai's `CredentialStore`) to every object's App, and
-  `actor.kind` for the owner's key (`credentials-do`, below); the Worker's half provides `http.route`:
-  the operator's routes below.
+- **Provides:** `model.credentials` (pi-ai's `CredentialStore`) to every object's App; the Worker's
+  half provides `http.route`: the operator's routes below.
 - **Requires:** `storage.sql` (the credentials, in one object: storage-do), `actor.inbox` and
   `actor.mailbox` (actors-do). The Worker's half requires `actor.mailbox`; **uses, if installed,**
   `admin.auth` (who is an operator; without it, its routes answer nobody).
@@ -34,11 +33,6 @@ subscription before you log in here. An API key is the provider's way for a depl
 - **One copy, one object.** The credentials are one object's, `credentials-do` (of the
   conversations' class, never a conversation), in its SQLite. Each conversation's object reads them
   with a call (`actor.mailbox`); nothing is stored in a conversation.
-- **The owner object runs only credentials-do.** The default export declares the owner's key as its
-  actor kind (`actor.kind`, `{ keys: ["credentials-do"] }`, SPEC C9): deployment-cloudflare starts in
-  that object credentials-do and what it uses (storage-do, actors-do), not the whole App, so waking
-  it after idleness starts no runtime and calls no other object. Delete that line of `index.ts` to
-  run the whole App there again.
 - **Kept in memory for a minute.** Each call is a subrequest, which Cloudflare counts per
   invocation (50 on the Free plan, shared by a whole alarm slice), and pi-ai reads the credential
   before every model request. So a conversation's object keeps what it read (a missing credential
@@ -145,10 +139,6 @@ App of its key) and pi-ai's own Anthropic flow against a local fake of the token
 - a lost release: retried until taken, a repeat of a taken one answered as done (and the same lease
   with another outcome refused); one never taken leaves the refreshed tokens with the object that
   refreshed, which keeps working without a call, logs no secret, and writes them back after the TTL;
-- its actor kind: the owner's key exactly, a conversation's key not; its kind's App is credentials-do,
-  the storage and the platform, whose start calls no object; and the `actor.kind` suite
-  (`createActorKindConformance`): an upload, the list, reads and a delete give the same answers and
-  rows in the owner object running its kind's App as running the whole App;
 - the routes: upload, list, delete for an operator; `401` for anyone else (and for everyone without
   `admin.auth`) before the owner is asked; a bad body refused without echoing it; no secret in any
   answer, error or log line.

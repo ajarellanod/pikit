@@ -16,9 +16,6 @@
  * - **The OAuth flows bundled.** pi-ai loads a provider's OAuth flow with an import no bundler
  *   follows: `start` registers them statically (`bundleOAuthFlows`, `@pikit/pi-adapter/oauth-flows`),
  *   so a Worker can use and refresh a subscription's tokens.
- * - **Its own actor kind.** It declares the owner's key as `actor.kind` (SPEC C9): on Cloudflare the
- *   owner object runs credentials-do and what it uses (storage-do, actors-do), not the whole App, so
- *   waking it starts no runtime and no other object.
  * - **Logged in from the operator's machine.** `pikit configure --login <provider>` runs pi-ai's
  *   login there and uploads the credential to the Worker's half (`worker.ts`, its routes behind
  *   `admin.auth`), which hands it to the owner.
@@ -31,7 +28,6 @@
 import { BACKGROUND_CONTEXT, type AppContext, defineComponent } from "@pikit/core";
 import { bundleOAuthFlows } from "@pikit/pi-adapter/oauth-flows";
 import Type from "typebox";
-import { CREDENTIALS_KEY } from "./calls.ts";
 import { answerCalls, createOwner } from "./owner.ts";
 import { createRemoteCredentials } from "./remote.ts";
 
@@ -58,8 +54,6 @@ export default defineComponent({
     const inbox = pikit.use("actor.inbox");
     const mailbox = pikit.use("actor.mailbox");
     let context: AppContext | undefined;
-    // The owner object is this component's actor (SPEC C9): it runs this component and what it uses.
-    pikit.provideKeyed("actor.kind", "credentials-do", { keys: [CREDENTIALS_KEY] });
     pikit.provide("model.credentials", createRemoteCredentials({ mailbox: () => mailbox.get(), context: () => context, clock: pikit.clock, cacheTtlMs: config.cacheTtlMs }));
     const owner = createOwner({ sql: () => sql.get(), clock: pikit.clock, retryAfterMs: config.retryAfterMs });
     return {

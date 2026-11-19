@@ -42,7 +42,6 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.blob` | single | storage-blob-fs, storage-blob-s3 | execution-cloudflare-sandbox, tool-space-files, execution-boat?, execution-gondolin?, workspace-local? | `createBlobConformance` |
 | `actor.mailbox` | single | actors-do, mailbox-local | admin-api, admin-approvals, approvals-sql, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, memory-sql, projects-sql, repo-github-app, scheduler-admit, scheduler-routines, settings-store, tool-mcp-oauth, tool-notify, tool-space-files, provider-failover? | `createMailboxConformance` |
 | `actor.inbox` | single | actors-do, mailbox-local | admin-approvals, approvals-sql, channel-telegram-webhook, credentials-do, memory-sql, projects-sql, repo-github-app, scheduler-admit, scheduler-routines, tool-mcp-oauth, tool-notify, tool-space-files, admin-api?, channel-google-chat?, channel-http?, channel-web?, provider-failover?, settings-store? | `createMailboxConformance` |
-| `actor.kind` | keyed | credentials-do | none | `createActorKindConformance` (read by the deployment's host and `pikit doctor`, not by a component) |
 | `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, memory-summaries, outbound-durable, projects-sql, scheduler-sql, tool-space-files, channel-web?, execution-do?, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-approvals, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, channel-web, credentials-do, execution-cloudflare-sandbox, execution-serve, health-registry, projects-sql, repo-github-app, settings-store, tool-mcp-oauth | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-approvals?, admin-proposals?, channel-web?, credentials-do?, health-registry?, projects-sql?, repo-github-app?, settings-store?, tool-mcp-oauth? | `createAdminAuthConformance` |
@@ -789,42 +788,6 @@ Providers: mailbox-local (server: the App itself is every key's actor, `scope` `
 (an RPC to the Durable Object `idFromName(key)`; the object's own key is a local call; `scope` `"one"`). Types in use:
 `telegram.update`, `telegram.stranger` (channel-telegram-webhook), and admin-api's `admin-api.*`
 messages, calls and its one stream (`admin-api.live`). Suite: `createMailboxConformance`; double: `createMemoryMailbox`.
-
-### `actor.kind` (keyed, [actor-kind.ts](../packages/contracts/src/actor-kind.ts), C9)
-
-The actor keys a component owns, so that on the `durable` target an object of one of them runs that
-kind's App instead of the whole default export. Provided under the declaring component's own name:
-
-```ts
-interface ActorKind { keys?: readonly string[]; prefixes?: readonly string[] }
-pikit.provideKeyed("actor.kind", "credentials-do", { keys: ["credentials-do"] });
-pikit.provideKeyed("actor.kind", "memory-sql", { prefixes: ["memory:"] });
-```
-
-- A value, never a loaded part: no component uses it. deployment-cloudflare's object host reads it
-  from the whole App (`useKeyed` in a reader of its own, `describe()`), once per isolate.
-- `actorKindOf(declarations, key)`: an exact key over any prefix, the longest prefix over shorter
-  ones; components that declare the same pattern own it together. No match (a conversation's key,
-  `pikit:health`): the whole App.
-- `actorKindProblems`: a declaration under a key that is not its provider's name, no key and no
-  prefix, an empty pattern, one that starts with `pikit:` (the host's own). The host fails every
-  object's start on one, so `/health` fails and the deploy rolls back.
-- `actorComposition(describe(), owners)`: the owners, the providers of `actor.inbox` and `wakeups`,
-  and transitively, for every capability an included component uses (required, optional, keyed), the
-  selected provider of a single one when installed and every provider of a keyed one; plus the
-  selected provider of a single capability an included component provides among several. Events and
-  pipeline stages are not followed: **a kind's handlers depend only on the capabilities its components
-  use, never on another component's listener or stage running in its object.**
-- `actorKindOptions(definition, names)`: that subset of the project's components, in list order, the
-  config reduced to them and to the selections of included providers: what `defineApp` composes.
-  `actorKinds(declarations)` lists every kind (one per pattern), for `/health` and `doctor`;
-  `actorKindDeclarations(description, handle)` reads them, in start order.
-
-A component that answers calls or messages on a kind's keys declares the same pattern, or in a kind's
-object its calls are `no_handler` (the host's message names the kind and its components). Suite:
-`createActorKindConformance` (a key's object running the whole App, `withoutActorKinds(components)`,
-and its kind's: the same outcomes, the same rows, no call to another actor from the kind's start).
-Declared by credentials-do (`credentials-do`); the other kit owners follow (features/object-composition.md).
 
 ### `wakeups` ([wakeups.ts](../packages/contracts/src/wakeups.ts), C3, C4)
 

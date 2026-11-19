@@ -24,8 +24,8 @@ export interface Entrypoint {
 }
 
 /**
- * `object` is `pikit.config.ts`'s default export, composed once per object: whole, or the part an
- * actor kind's object runs (SPEC C9); `worker`, its `export const worker`, run once per Worker isolate.
+ * `object` is `pikit.config.ts`'s default export, run once per object; `worker`, its
+ * `export const worker`, run once per Worker isolate.
  */
 export function createEntrypoint(object: AppDefinition, worker: AppDefinition | undefined, options: HostOptions = {}): Entrypoint {
   class Conversation extends DurableObject {

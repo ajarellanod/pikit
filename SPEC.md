@@ -292,10 +292,10 @@ Each decision was proven by a spike on Cloudflare (September 2026, Workers Free 
 written here. Status (built or not) is not tracked here, as for the kernel.
 
 - **C1. A thin Worker, and one Durable Object per conversation running the App.** A project on
-  Cloudflare has two Apps (K7), both in `pikit.config.ts`: the default export is the conversation
-  objects' App (the channel's other half, the router, the registry, the runtime, storage,
-  delivery) and the source of each actor kind's App (C9), and `export const worker` is the Worker's
-  App (the ingress half of each channel, the mailbox, secrets). A component with a half for each exports the Worker's half by the name its
+  Cloudflare has two Apps (K7), both in `pikit.config.ts`: the default export is the Durable
+  Object's App (the channel's other half, the router, the registry, the runtime, storage,
+  delivery), and `export const worker` is the Worker's App (the ingress half of each channel, the
+  mailbox, secrets). A component with a half for each exports the Worker's half by the name its
   `component.json` declares, and `pikit add` puts each half in its App. The Worker checks and routes;
   the object owns the conversation. *Why:* events, feeds and the outbox stay local to the object
   that owns the conversation, so nothing crosses objects but the message itself; two explicit Apps
@@ -384,35 +384,6 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   checks its webhook as it starts, once per isolate, and changes it only when Telegram has another
   (`channel-telegram-webhook`). *Why:* registering against the previous version fails for no reason a
   user can see; the version that registers itself is by definition the one answering.
-- **C9. An actor kind's object runs only its kind's App.** A component that owns actor keys (C2: an
-  actor key need not be a conversation's) declares them as `actor.kind`, keyed under its own name,
-  exactly or by prefix (`{ keys: ["credentials-do"] }`, `{ prefixes: ["memory:"] }`;
-  `packages/contracts/src/actor-kind.ts`). On the `durable` target an object whose key belongs to a
-  kind (an exact key over any prefix, the longest prefix over shorter ones; components that declare
-  one pattern own it together) runs the closure of its owners over the capability graph, computed by
-  one pure function over the whole App's `describe()` (`actorComposition`): the owners, the providers
-  of `actor.inbox` and `wakeups`, and transitively the selected provider of every single capability an
-  included component uses (required, or optional when installed), every provider of a keyed one, and
-  the selected provider of a single capability an included component provides among several. It is
-  the project's own components, a subset in their list order, its config reduced to them
-  (`actorKindOptions`), never a component of the host's. Any other key (a conversation's,
-  `pikit:health`, an object whose key is not known) runs the whole default export. The host learns
-  an object's key before it composes anything: the event's own (`deliver`, `call`, `stream`), checked
-  to be the object's (another is refused and never chooses an App), else the platform's name for
-  the object (`ctx.id.name`), else the key it kept (`pikit:key`), else none. A declaration problem
-  (`actorKindProblems`: under another component's name, empty, a `pikit:` pattern) fails every
-  object's start; `/health` also creates every kind's App, so a kind that does not compose fails the
-  deploy (C8); a call or message a kind's object has no handler for says which kind it runs. Events
-  and pipeline stages are not followed, so the rule an owner keeps: **an actor kind's handlers
-  depend only on the capabilities its components use, never on another component's listener or
-  pipeline stage running in its object** (a stage an actor needs comes with its own field, when such
-  an actor comes to the kit). The host reads `describe()` as whoever runs an App does (K4, K13); no
-  component reads its kind, and on a server nothing reads it: one process is every key's actor. A
-  project keeps a kind whole by deleting its component's declaration, a line of its own source;
-  there is no switch (P4). *Why:* a message that crossed ten cold one-purpose objects paid ten
-  whole-App starts and the calls their starts made to other objects, which may be cold too
-  (features/object-composition.md); with no declaration every object runs the whole App as before,
-  and each kind's App is shown by `pikit doctor` and by its object's own `APP_DESCRIPTION`.
 
 ## 5. The dashboard is required
 

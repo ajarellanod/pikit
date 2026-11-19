@@ -6,11 +6,11 @@
  */
 
 import { expect, test } from "bun:test";
-import { APP_DESCRIPTION, type AppContext, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { type AppContext, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import type { JsonValue } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
-import { createActorKindConformance, createHttpRouteConformance, withoutActorKinds } from "@pikit/contracts/testing";
-import { createObjectHost, createWorkerHost, createWorkerServer, GUARD_FIRST_MS, GUARD_MAX_MS, HEALTH_OBJECT, OBJECT_KEY, type ObjectState, START_FAILURES_KEY } from "./host.ts";
+import { createHttpRouteConformance } from "@pikit/contracts/testing";
+import { createObjectHost, createWorkerHost, createWorkerServer, GUARD_FIRST_MS, GUARD_MAX_MS, HEALTH_OBJECT, type ObjectState, START_FAILURES_KEY } from "./host.ts";
 
 // What every handler can rely on (`http.route`): the Worker's server passes the suite, prefixes included.
 for (const c of createHttpRouteConformance(() => {
@@ -27,7 +27,7 @@ function fakeStorage() {
     values,
     alarm: null as number | null,
     get: async (key: string) => values.get(key),
-    put: async (key: string, value: number | string) => void values.set(key, value),
+    put: async (key: string, value: number) => void values.set(key, value),
     delete: async (key: string) => values.delete(key),
     getAlarm: async () => storage.alarm,
     setAlarm: async (time: number) => void (storage.alarm = time),
@@ -35,14 +35,10 @@ function fakeStorage() {
   return storage;
 }
 
-/**
- * A DurableObjectState's part the entrypoint uses; counts `blockConcurrencyWhile` calls and whether one
- * is running. `name` is the one `idFromName` was given (Cloudflare's `ctx.id.name`); none, as for an
- * object the platform gives no name (`null`).
- */
-function fakeState(name: string | null = "chat:1", id = `object-${name ?? "unnamed"}`) {
+/** A DurableObjectState's part the entrypoint uses; counts `blockConcurrencyWhile` calls and whether one is running. */
+function fakeState(id = "object-1") {
   const state = {
-    id: { toString: () => id, name: name ?? undefined },
+    id: { toString: () => id },
     storage: fakeStorage(),
     blocked: 0,
     inside: false,
@@ -97,7 +93,7 @@ test("the object's App starts on its first event, once, inside blockConcurrencyW
   expect(state.blocked).toBe(1);
   expect(seen.insideBlock).toEqual([true]);
   expect(seen.host?.env).toBe(env);
-  expect(seen.host?.object?.id).toBe("object-chat:1");
+  expect(seen.host?.object?.id).toBe("object-1");
   expect(seen.host?.object?.storage).toBe(state.storage);
   expect(seen.delivered).toEqual([["text", "chat:1", { text: "hi" }]]);
   expect(seen.alarms).toBe(1);
@@ -109,7 +105,7 @@ test("an alarm nobody handles is logged and dropped; a delivery nobody handles r
   const host = createObjectHost(defineApp({ components: [] }), fakeState(), {}, { logger });
   await host.alarm();
   expect(warnings).toEqual(["pikit: the object's alarm fired, but no component handles it"]);
-  await expect(host.deliver("text", "chat:1", null)).rejects.toThrow(/no component in the object's App handles deliveries/);
+  await expect(host.deliver("text", "k", null)).rejects.toThrow(/no component in the object's App handles deliveries/);
 });
 
 test("a second alarm, delivery or call handler fails the start: the object has one of each", async () => {
@@ -240,19 +236,17 @@ test("a start past its deadline, with a rollback that hangs, still ends within b
  * its alarm handler and its `GET /up` route.
  */
 function readyHangsOnce() {
-  // Counted at start, not setup: an object's host also composes the App once (never started) to read its actor kinds.
   let apps = 0;
-  let readies = 0;
   const alarms: boolean[] = [];
   const component = defineComponent({
     name: "ready-hangs-once",
     setup(pikit) {
+      const first = ++apps === 1;
       let up = false;
-      pikit.on("runtime.ready", () => (++readies === 1 ? new Promise<void>(() => {}) : undefined));
+      pikit.on("runtime.ready", () => (first ? new Promise<void>(() => {}) : undefined));
       pikit.provideKeyed("http.route", "GET /up", () => Response.json({ up }));
       return {
         start(ctx) {
-          apps++;
           up = true;
           ctx.value(WORKERS_HOST)?.object?.onAlarm(async () => void alarms.push(up));
         },
@@ -416,255 +410,3 @@ test("a route sees cf-connecting-ip as x-pikit-client-address, never the client'
   expect(await seen({ "cf-connecting-ip": "198.51.100.7", "x-pikit-client-address": "203.0.113.9" })).toBe("198.51.100.7");
   expect(await seen({ "x-pikit-client-address": "203.0.113.9" })).toBeNull();
 });
-
-// ---- Actor kinds (SPEC C9): which App an object runs ----
-
-declare module "@pikit/core" {
-  interface AppCapabilities {
-    "test.host-store": Map<string, JsonValue>;
-  }
-}
-
-/**
- * A small project, as an object's host sees it: `actors` (the object's RPC and alarm through
- * `WORKERS_HOST`, as actors-do; a mailbox recording the keys it reaches), `store`, `counter` (the owner
- * of the keys `counter:`, declared unless `declare` is false), and `conversation`, whose start calls
- * another actor (as runtime-pi's start read the credentials) and which handles `text`. Each object's
- * App records the components it is made of (its own `APP_DESCRIPTION`), and each component's setups
- * are counted.
- */
-function kindProject(options: { declare?: boolean; extra?: ReturnType<typeof defineComponent>[] } = {}) {
-  const seen = { apps: [] as string[][], reached: [] as string[], setups: new Map<string, number>(), rows: new Map<string, JsonValue>(), alarms: 0 };
-  const counted = (name: string) => seen.setups.set(name, (seen.setups.get(name) ?? 0) + 1);
-  const actors = defineComponent({
-    name: "actors",
-    setup(pikit) {
-      counted("actors");
-      const answers = new Map<string, (key: string, message: JsonValue) => Promise<JsonValue>>();
-      const handlers = new Map<string, (key: string, message: JsonValue) => Promise<void>>();
-      pikit.provide("actor.inbox", {
-        scope: "one",
-        handle: (type, handler) => void handlers.set(type, (key, message) => handler(key, message, undefined as never)),
-        answer: (type, handler) => void answers.set(type, (key, message) => handler(key, message, undefined as never)),
-        answerStream: () => {},
-      });
-      pikit.provide("actor.mailbox", {
-        send: async (key) => void seen.reached.push(key),
-        call: async (key) => (seen.reached.push(key), null),
-        stream: async () => {
-          throw new Error("no streams");
-        },
-      });
-      pikit.provide("wakeups", { handle: () => {}, at: async () => {}, cancel: async () => {} });
-      return {
-        start(ctx) {
-          seen.apps.push((ctx.value(APP_DESCRIPTION)?.components ?? []).map((c) => c.name));
-          const object = ctx.value(WORKERS_HOST)?.object;
-          object?.onAlarm(async () => void seen.alarms++);
-          object?.onDeliver(async (type, key, message) => {
-            const handler = handlers.get(type);
-            if (handler === undefined) throw new Error(`actors: no handler for "${type}"`);
-            await handler(key, message);
-          });
-          object?.onCall?.(async (type, key, message) => {
-            const answer = answers.get(type);
-            return answer === undefined ? { ok: false, code: "no_handler", message: `actors: no answer handler for "${type}"` } : { ok: true, answer: await answer(key, message) };
-          });
-        },
-      };
-    },
-  });
-  const store = defineComponent({
-    name: "store",
-    setup(pikit) {
-      counted("store");
-      pikit.provide("test.host-store", seen.rows);
-    },
-  });
-  const conversation = defineComponent({
-    name: "conversation",
-    setup(pikit) {
-      counted("conversation");
-      const mailbox = pikit.use("actor.mailbox");
-      const inbox = pikit.use("actor.inbox");
-      return {
-        async start(ctx) {
-          await mailbox.get().call("credentials-do", "credentials-do.read", null, ctx);
-          inbox.get().handle("text", async () => {});
-        },
-      };
-    },
-  });
-  const counter = defineComponent({
-    name: "counter",
-    setup(pikit) {
-      counted("counter");
-      const rows = pikit.use("test.host-store");
-      const inbox = pikit.use("actor.inbox");
-      if (options.declare !== false) pikit.provideKeyed("actor.kind", "counter", { prefixes: ["counter:"] });
-      return {
-        start() {
-          inbox.get().answer("counter.add", async (key, message) => {
-            const count = ((rows.get().get(key) as number | undefined) ?? 0) + (message as number);
-            rows.get().set(key, count);
-            return count;
-          });
-        },
-      };
-    },
-  });
-  return { seen, components: [actors, store, conversation, counter, ...(options.extra ?? [])] };
-}
-
-/** A namespace whose ids are `id-<name>`, as the host checks an event's key against. */
-const namedIds = { idFromName: (name: string) => ({ toString: () => `id-${name}` }), get: () => ({ health: async () => ({ ok: true }) }) };
-
-test("an object of a kind's key runs its kind's App, with no call to another actor; a conversation's and a key of no kind, the whole App", async () => {
-  const { seen, components } = kindProject();
-  const definition = defineApp({ components });
-  const counter = createObjectHost(definition, fakeState("counter:1"), {}, { logger: silentLogger });
-  expect(await counter.call("counter.add", "counter:1", 2)).toEqual({ ok: true, answer: 2 });
-  expect(seen.apps).toEqual([["actors", "store", "counter"]]);
-  expect(seen.reached).toEqual([]);
-
-  await createObjectHost(definition, fakeState("chat:1"), {}, { logger: silentLogger }).deliver("text", "chat:1", "hi");
-  await createObjectHost(definition, fakeState("telegram:5"), {}, { logger: silentLogger }).health();
-  expect(seen.apps.slice(1)).toEqual([
-    ["actors", "store", "conversation", "counter"],
-    ["actors", "store", "conversation", "counter"],
-  ]);
-  expect(seen.reached).toEqual(["credentials-do", "credentials-do"]);
-});
-
-test("the whole App is composed once per isolate to read the kinds (never started), not per object", async () => {
-  const { seen, components } = kindProject();
-  const definition = defineApp({ components });
-  for (const key of ["counter:1", "counter:2", "counter:3"]) await createObjectHost(definition, fakeState(key), {}, { logger: silentLogger }).call("counter.add", key, 1);
-  // One reading composition, then three kind Apps: the conversation never set up in them.
-  expect(Object.fromEntries(seen.setups)).toEqual({ actors: 4, store: 4, conversation: 1, counter: 4 });
-  expect(seen.reached).toEqual([]);
-  // A project that declares nothing: every object the whole App, as before C9.
-  const plain = kindProject({ declare: false });
-  await createObjectHost(defineApp({ components: plain.components }), fakeState("counter:1"), {}, { logger: silentLogger }).call("counter.add", "counter:1", 1);
-  expect(plain.seen.apps).toEqual([["actors", "store", "conversation", "counter"]]);
-});
-
-test("an object's key: the event's, checked to be its own; else the platform's name; else the one it kept (pikit:key); else none, the whole App", async () => {
-  const { seen, components } = kindProject();
-  const definition = defineApp({ components });
-
-  // Named by the platform: another key is refused before anything starts.
-  const named = fakeState("counter:1");
-  const refused = await createObjectHost(definition, named, {}, { logger: silentLogger }).call("counter.add", "counter:2", 1);
-  expect(refused).toEqual({ ok: false, code: "invalid", message: expect.stringContaining("its key is not this object's name: refused") });
-  expect(named.blocked).toBe(0);
-  // The message names the object, never the key.
-  expect((refused as { message: string }).message).not.toContain("counter:2");
-
-  // No name: the key is checked by idFromName against the object's id, and kept for its alarms.
-  const unnamed = fakeState(null, "id-counter:7");
-  const host = createObjectHost(definition, unnamed, { CONVERSATION: namedIds }, { logger: silentLogger });
-  expect(await host.call("counter.add", "counter:6", 1)).toEqual({ ok: false, code: "invalid", message: expect.stringContaining("its key names another object") });
-  await expect(host.deliver("text", "chat:1", null)).rejects.toThrow(/its key names another object/);
-  expect(await host.call("counter.add", "counter:7", 1)).toEqual({ ok: true, answer: 1 });
-  expect(unnamed.storage.values.get(OBJECT_KEY)).toBe("counter:7");
-  // Its next instance, woken by its alarm, finds its kind again from what it kept.
-  await createObjectHost(definition, unnamed, { CONVERSATION: namedIds }, { logger: silentLogger }).alarm();
-  // The binding checked is the host's: another class's binding name works the same way.
-  await createObjectHost(definition, fakeState(null, "id-counter:8"), { OTHER: namedIds }, { logger: silentLogger, binding: "OTHER" }).call("counter.add", "counter:8", 1);
-  // Named, the alarm needs nothing kept.
-  const alarmed = fakeState("counter:9");
-  await createObjectHost(definition, alarmed, {}, { logger: silentLogger }).alarm();
-  expect(alarmed.storage.values.has(OBJECT_KEY)).toBe(false);
-  // Nothing known (an object made before C9 woken by its alarm): the whole App.
-  await createObjectHost(definition, fakeState(null, "id-old"), { CONVERSATION: namedIds }, { logger: silentLogger }).alarm();
-  expect(seen.apps).toEqual([
-    ["actors", "store", "counter"],
-    ["actors", "store", "counter"],
-    ["actors", "store", "counter"],
-    ["actors", "store", "counter"],
-    ["actors", "store", "conversation", "counter"],
-  ]);
-
-  // No name and no binding to check against: refused, saying which.
-  await expect(createObjectHost(definition, fakeState(null), {}, { logger: silentLogger }).deliver("text", "chat:1", null)).rejects.toThrow(/no CONVERSATION binding to check its key against/);
-});
-
-test("a declaration problem fails every object's start, conversations' too", async () => {
-  const wrong = defineComponent({ name: "wrong", setup: (pikit) => pikit.provideKeyed("actor.kind", "wrong", { prefixes: ["pikit:"] }) });
-  const { components } = kindProject({ extra: [wrong] });
-  const definition = defineApp({ components });
-  for (const key of ["chat:1", "counter:1"]) {
-    await expect(createObjectHost(definition, fakeState(key), {}, { logger: silentLogger }).health()).rejects.toThrow(/actor kinds are refused \(SPEC C9\):\n {2}actor.kind "wrong": declares "pikit:"/);
-  }
-});
-
-test("health() starts its App and creates every kind's App: a kind that does not compose fails it, naming the kind", async () => {
-  const { components } = kindProject();
-  await createObjectHost(defineApp({ components }), fakeState(HEALTH_OBJECT), {}, { logger: silentLogger }).health();
-
-  // A part that composes in the whole App and not in the kind's: its third setup (reading, the health
-  // object's whole App, then the kind's) throws.
-  let setups = 0;
-  const fragile = defineComponent({
-    name: "fragile",
-    setup(pikit) {
-      if (++setups === 3) throw new Error("not this time");
-      pikit.provideKeyed("actor.kind", "fragile", { keys: ["fragile"] });
-    },
-  });
-  const broken = kindProject({ extra: [fragile] });
-  const host = createObjectHost(defineApp({ components: broken.components }), fakeState(HEALTH_OBJECT), {}, { logger: silentLogger });
-  await expect(host.health()).rejects.toThrow('deployment-cloudflare: the actor kind "fragile" (fragile) does not compose: not this time');
-  // The health object's own App is the whole one.
-  expect(broken.seen.apps).toEqual([["actors", "store", "conversation", "counter", "fragile"]]);
-});
-
-test("a call or message a kind's object has no handler for says which kind it runs; the whole App's says nothing more", async () => {
-  const { components } = kindProject();
-  const definition = defineApp({ components });
-  const counter = createObjectHost(definition, fakeState("counter:1"), {}, { logger: silentLogger });
-  const note = 'this object runs the actor kind "counter:": actors, store, counter, not the whole App; a component that handles "text" on these keys declares actor.kind for them too';
-  expect(await counter.call("text", "counter:1", null)).toEqual({ ok: false, code: "no_handler", message: `actors: no answer handler for "text" (${note}, SPEC C9)` });
-  await expect(counter.deliver("text", "counter:1", null)).rejects.toThrow(`actors: no handler for "text" (${note}, SPEC C9)`);
-  expect(await createObjectHost(definition, fakeState("chat:1"), {}, { logger: silentLogger }).call("counter.nope", "chat:1", null)).toEqual({
-    ok: false,
-    code: "no_handler",
-    message: 'actors: no answer handler for "counter.nope"',
-  });
-});
-
-test("the object's start is logged with its kind (the pattern, never the key), its components, compose and start times, and the isolate", async () => {
-  const lines: [string, Record<string, unknown> | undefined][] = [];
-  const logger: Logger = { ...silentLogger, info: (message, fields) => void lines.push([message, fields as Record<string, unknown>]) };
-  const { components } = kindProject();
-  await createObjectHost(defineApp({ components }), fakeState("counter:secret-person"), {}, { logger }).call("counter.add", "counter:secret-person", 1);
-  const started = lines.find(([message]) => message === "pikit: object started")?.[1];
-  expect(started).toEqual({ object: "object-counter:secret-person", kind: "counter:", components: 3, composeMs: expect.any(Number), startMs: expect.any(Number), isolate: expect.stringMatching(/^(new|warm)$/) });
-  expect(lines.find(([message]) => message === "pikit: actor kinds read")?.[1]).toEqual({ kinds: 1, components: 4, ms: expect.any(Number) });
-});
-
-// The equivalence suite over this host: a `counter:` object running the whole App and its kind's.
-for (const c of createActorKindConformance(() => ({
-  key: "counter:1",
-  steps: [
-    { call: "counter.add", message: 2 },
-    { call: "counter.add", message: 3 },
-    { call: "counter.missing", message: null },
-    { send: "counter.missing", message: null },
-  ],
-  async open(app) {
-    const { seen, components } = kindProject();
-    const host = createObjectHost(defineApp({ components: app === "whole" ? withoutActorKinds(components) : components }), fakeState("counter:1"), {}, { logger: silentLogger });
-    await host.health();
-    const startCalls = [...seen.reached];
-    return {
-      send: (type, message) => host.deliver(type, "counter:1", message),
-      call: (type, message) => host.call(type, "counter:1", message),
-      rows: async () => Object.fromEntries(seen.rows),
-      startCalls: () => startCalls,
-    };
-  },
-}))) {
-  test(`host ${c.group}: ${c.name}`, () => c.run());
-}

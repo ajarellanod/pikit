@@ -9,7 +9,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 |---|---|---|
 | Model | one long-lived process | one actor (Durable Object) per conversation, evicted between events |
 | Provider today | `deployment-docker`; `deployment-local` (a systemd or launchd service of this machine) | `deployment-cloudflare`; `deployment-celld` (your machines, celld) |
-| Apps in `pikit.config.ts` | one (default export) | two: the object's (default; an actor kind's object runs its part of it, SPEC C9) and the Worker's (`worker`) |
+| Apps in `pikit.config.ts` | one (default export) | two: the object's (default) and the Worker's (`worker`) |
 | Requests arrive at | `server-bun` (Hono on `Bun.serve`, port 3000) | the Worker (deployment-cloudflare's host), then RPC to an object |
 | `storage.sql`, `storage.sqlite` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
 | `storage.blob` | `storage-blob-fs`: files under `.pikit/blobs/`; or `storage-blob-s3` | `storage-blob-s3`: any S3 API (R2, S3, a celld fleet's bucket), reached from every object |
@@ -73,16 +73,10 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
   both Apps. The Worker composes `export const worker` once per isolate, on its first request, with
   `WORKERS_HOST` `{ env, origin }`. It serves the Worker App's `http.route`s like server-bun does, and
   its own public `GET /health`, which starts the Worker's App and one object of its own
-  (`idFromName("pikit:health")`, the whole default export), creates every actor kind's App there
-  (never started: a kind that does not compose fails it), and answers `{ ok, version }`.
+  (`idFromName("pikit:health")`) and answers `{ ok, version }`.
 - **Objects.** One `Conversation` Durable Object (SQLite-backed, bound as `CONVERSATION`) per
   conversation key. It composes the default export on its first event, inside `blockConcurrencyWhile`
-  (20 s start deadline, 5 s rollback). An object whose key belongs to an actor kind (a component's
-  `actor.kind`: `credentials-do`, `memory:`...) composes only that kind's part of it: its owners and
-  what they use through the capability graph (SPEC C9); the key comes from the event (checked to be
-  the object's), else `ctx.id.name`, else the key it kept (`pikit:key`), else none (the whole App).
-  deployment-celld's host composes the whole default export in every object until it does the same
-  (features/object-composition.md). A failed start is rethrown so Cloudflare resets the object.
+  (20 s start deadline, 5 s rollback). A failed start is rethrown so Cloudflare resets the object.
   The object is never stopped: it is evicted without warning (K6). Its RPC methods are `health()`,
   `deliver(type, key, message)`, `call(type, key, message)`, `stream(type, key, message)` and `alarm()`.
 - **Halves.** A component that must be in both Apps has a Worker half (`apps.worker` in

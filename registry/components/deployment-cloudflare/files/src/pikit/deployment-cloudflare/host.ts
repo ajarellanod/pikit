@@ -3,12 +3,9 @@
  * C1, C4, C5), with no `cloudflare:*` import: `entrypoint.ts` hands them the platform's objects, typed
  * here by what is used of them, so this file runs under `bun test` as well as in workerd.
  *
- * - **The object** (`createObjectHost`) composes its App once per object, on its first event (an RPC
- *   or an alarm), inside `blockConcurrencyWhile`: no other event reaches the object before its App has
- *   started. Which App is its key's (SPEC C9): an object whose key belongs to an actor kind (a
- *   component's `actor.kind`) runs that kind's App, its owners and what they use
- *   (`actorComposition`); any other (a conversation's, `pikit:health`, one whose key is not known)
- *   runs `pikit.config.ts`'s whole default export. See "Actor kinds" below. Its start context carries `WORKERS_HOST` with the object: its
+ * - **The object** (`createObjectHost`) composes `pikit.config.ts`'s default export once per object,
+ *   on its first event (an RPC or an alarm), inside `blockConcurrencyWhile`: no other event reaches the
+ *   object before its App has started. Its start context carries `WORKERS_HOST` with the object: its
  *   id, its storage, and the hooks its alarm and its `deliver` RPC call. A start that fails or passes
  *   its deadline is rolled back within a deadline of its own and rethrown, so Cloudflare resets the
  *   object and the next event starts over (K2, K6). The App is never stopped otherwise: an object is
@@ -24,16 +21,6 @@
  *   "If an alarm is queued, there's no point in retrying the current one"), so the guard is the retry,
  *   and it never ends. Once the App runs, its alarm's owner (actors-do's `wakeups`) sets the
  *   alarm as its rows say, which replaces the guard.
- * - **Actor kinds.** Once per isolate, on its first object event, the whole default export is composed
- *   (setups only, never started) with a reader of `actor.kind` (named `deployment-cloudflare`, as the
- *   Worker's server is): its `describe()` and declarations kept, the App dropped. A declaration
- *   problem fails every start. An object learns its key, before it composes anything, from the event
- *   (`deliver`, `call` and `stream` carry it, checked to be the object's: `ctx.id.name`, or
- *   `idFromName(key)` against its id; another key is refused, it never chooses an App), else from
- *   `ctx.id.name` (an alarm), else from its storage (`pikit:key`, written at its first keyed event
- *   where the platform gives no name), else not at all: the whole App. `health()` also creates (never
- *   starts) every kind's App, so a kind that does not compose fails `/health` and the deploy rolls
- *   back; a call or message a kind's object has no handler for says which kind it runs.
  * - **The Worker** (`createWorkerHost`) composes `export const worker` once per isolate, on its first
  *   request, with `WORKERS_HOST` `{ env, origin }` on its start context (`origin`: that request's, where
  *   the Worker is reached), and serves its `http.route`s, as
@@ -51,26 +38,13 @@ import {
   type ComponentDefinition,
   type Context,
   consoleLogger,
-  type KeyedHandle,
   defineApp,
   defineComponent,
   type Logger,
   withAbortSignal,
   withContextValue,
 } from "@pikit/core";
-import {
-  type ActorCallOutcome,
-  type ActorKind,
-  type ActorKindDeclaration,
-  type ActorKindMatch,
-  type ActorStreamOutcome,
-  actorComposition,
-  actorKindDeclarations,
-  actorKindOf,
-  actorKindOptions,
-  actorKindProblems,
-  actorKinds,
-  compareHttpRoutes, type HttpRoute, type HttpRouteKey, type JsonValue, matchesHttpRoute, parseHttpRouteKey, withClientAddress } from "@pikit/contracts";
+import { type ActorCallOutcome, type ActorStreamOutcome, compareHttpRoutes, type HttpRoute, type HttpRouteKey, type JsonValue, matchesHttpRoute, parseHttpRouteKey, withClientAddress } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 
 /**
@@ -86,11 +60,6 @@ export const GUARD_FIRST_MS = 30_000;
 export const GUARD_MAX_MS = 60 * 60_000;
 /** In the object's key-value storage: its alarms' failed starts in a row, while there are some. */
 export const START_FAILURES_KEY = "pikit:start-failures";
-/**
- * In the object's key-value storage: its key (SPEC C9), written at its first keyed event where the
- * platform does not give the object its name (`ctx.id.name`), so that its alarm finds its App again.
- */
-export const OBJECT_KEY = "pikit:key";
 /** The Durable Object binding in `wrangler.jsonc`: the `Conversation` class. */
 export const OBJECT_BINDING = "CONVERSATION";
 /** The object `GET /health` starts: one of its own, never a conversation's. */
@@ -107,17 +76,12 @@ export interface HostOptions {
   rollbackDeadlineMs?: number;
   /** The Apps' clock. Default: the core's `systemClock`; tests pass a manual one. */
   clock?: Clock;
-  /**
-   * The binding of the objects' class, against which an event's key is checked when the platform does
-   * not give an object its name (`idFromName(key)` must be its id). Default: `OBJECT_BINDING`.
-   */
-  binding?: string;
 }
 
 /** What the host uses of a `DurableObjectStorage` (Cloudflare's type, written structurally): the guard alarm's. */
 export interface ObjectStorage {
   get(key: string): Promise<unknown>;
-  put(key: string, value: number | string): Promise<void>;
+  put(key: string, value: number): Promise<void>;
   delete(key: string): Promise<boolean>;
   getAlarm(): Promise<number | null>;
   setAlarm(time: number): Promise<void>;
@@ -125,8 +89,7 @@ export interface ObjectStorage {
 
 /** What the entrypoint uses of a `DurableObjectState` (Cloudflare's type, written structurally). */
 export interface ObjectState {
-  /** `name`: the one `idFromName` was given, where the platform says it (Cloudflare does since March 2026). */
-  id: { toString(): string; readonly name?: string | undefined };
+  id: { toString(): string };
   /** The object's `DurableObjectStorage`, passed on untouched in `WORKERS_HOST`. */
   storage: ObjectStorage;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
@@ -162,13 +125,10 @@ type StreamHandler = (type: string, key: string, message: JsonValue) => Promise<
 
 export function createObjectHost(definition: AppDefinition, state: ObjectState, env: WorkersHost["env"], options: HostOptions = {}): ObjectHost {
   const logger = options.logger ?? consoleLogger;
-  const binding = options.binding ?? OBJECT_BINDING;
   let onAlarm: AlarmHandler | undefined;
   let onDeliver: DeliverHandler | undefined;
   let onCall: CallHandler | undefined;
   let onStream: StreamHandler | undefined;
-  /** The App this instance runs, once it started: its kind (none for the whole App) and its components. */
-  let running: ObjectApp | undefined;
   const host: WorkersHost = {
     env,
     object: {
@@ -195,34 +155,8 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
     },
   };
 
-  /**
-   * Why an event's `key` is not this object's, or `undefined` when it is: the platform's name for the
-   * object, else `idFromName(key)` against its id. Never the key itself: it may name a person.
-   */
-  const notOurs = (key: unknown): string | undefined => {
-    if (typeof key !== "string" || key === "") return "its key is empty";
-    const name = state.id.name;
-    if (name !== undefined) return name === key ? undefined : "its key is not this object's name";
-    const namespace = env[binding] as Partial<ObjectNamespace> | undefined;
-    if (typeof namespace?.idFromName !== "function") return `no ${binding} binding to check its key against (wrangler.jsonc)`;
-    return String(namespace.idFromName(key)) === state.id.toString() ? undefined : "its key names another object";
-  };
-  const refusal = (what: string, why: string): string => {
-    logger.warn("pikit: an event with a key that is not the object's was refused", { object: host.object?.id, why });
-    return `deployment-cloudflare: ${what} reached the object ${host.object?.id} but ${why}: refused (a wrong key never chooses an object's App)`;
-  };
-
-  /** The object's key, before its App is composed: the platform's name, the event's (kept where there is no name), the kept one, or none. */
-  const keyOf = async (eventKey: string | undefined): Promise<string | undefined> => {
-    if (state.id.name !== undefined) return state.id.name;
-    const kept = await state.storage.get(OBJECT_KEY);
-    if (eventKey === undefined) return typeof kept === "string" ? kept : undefined;
-    if (kept !== eventKey) await state.storage.put(OBJECT_KEY, eventKey);
-    return eventKey;
-  };
-
   let started: Promise<void> | undefined;
-  const start = (eventKey?: string): Promise<void> =>
+  const start = (): Promise<void> =>
     (started ??= state
       .blockConcurrencyWhile(async () => {
         // A new App registers its own handlers; a failed one's are gone with it.
@@ -230,24 +164,9 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
         onDeliver = undefined;
         onCall = undefined;
         onStream = undefined;
-        running = undefined;
-        const kinds = await kindsOf(definition, logger, options.clock);
-        const chosen = kinds.appFor(await keyOf(eventKey));
-        const composing = Date.now();
-        const app = await compose(chosen.options, [], logger, options.clock);
-        const starting = Date.now();
+        const app = await compose(definition, [], logger, options.clock);
         await startWithin(app, withContextValue(WORKERS_HOST, host, BACKGROUND_CONTEXT), options, logger);
-        running = chosen;
-        // The kind's pattern, never the key (it may name a person). `startMs` is the start's waits:
-        // workerd's clock moves only on I/O.
-        logger.info("pikit: object started", {
-          object: host.object?.id,
-          kind: chosen.kind?.pattern ?? null,
-          components: chosen.options.components.length,
-          composeMs: starting - composing,
-          startMs: Date.now() - starting,
-          isolate: objectsStarted++ === 0 ? "new" : "warm",
-        });
+        logger.info("pikit: object started", { object: host.object?.id });
       })
       .catch((error: unknown) => {
         // Rethrown from inside blockConcurrencyWhile, the error resets the object; should the instance
@@ -256,14 +175,6 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
         logger.error("pikit: the object's App failed to start", { object: host.object?.id, error });
         throw error;
       }));
-
-  /** In an actor kind's object, what it runs, for a message about a handler it lacks; nothing in the whole App's. */
-  const kindNote = (type: string): string => {
-    const kind = running?.kind;
-    if (kind === undefined) return "";
-    const names = (running?.options.components ?? []).map((c) => c.name).join(", ");
-    return ` (this object runs the actor kind "${kind.pattern}": ${names}, not the whole App; a component that handles "${type}" on these keys declares actor.kind for them too, SPEC C9)`;
-  };
 
   /**
    * Before an alarm starts the App: when its start failed before, sets the guard alarm (unless a
@@ -291,8 +202,6 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
   return {
     async health() {
       await start();
-      // Every kind's App composes, or this version is not healthy: /health fails and the deploy rolls back.
-      await (await kindsOf(definition, logger, options.clock)).composeEvery();
       return { ok: true };
     },
     async alarm(info) {
@@ -301,131 +210,27 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
       await start();
       if (guarded) await state.storage.delete(START_FAILURES_KEY);
       if (onAlarm === undefined) {
-        logger.warn("pikit: the object's alarm fired, but no component handles it", { object: host.object?.id, kind: running?.kind?.pattern ?? null });
+        logger.warn("pikit: the object's alarm fired, but no component handles it", { object: host.object?.id });
         return;
       }
       await onAlarm();
     },
     async deliver(type, key, message) {
-      const wrong = notOurs(key);
-      if (wrong !== undefined) throw new Error(refusal(`a "${type}" message`, wrong));
-      await start(key);
+      await start();
       // Rejected, so the sender (`actor.mailbox.send`) rejects and its platform retries (C2).
-      if (onDeliver === undefined) throw new Error(`deployment-cloudflare: a "${type}" message was delivered, but no component in the object's App handles deliveries (onDeliver)${kindNote(type)}`);
-      try {
-        await onDeliver(type, key, message);
-      } catch (error) {
-        if (running?.kind === undefined) throw error;
-        throw new Error(`${error instanceof Error ? error.message : String(error)}${kindNote(type)}`, { cause: error });
-      }
+      if (onDeliver === undefined) throw new Error(`deployment-cloudflare: a "${type}" message was delivered, but no component in the object's App handles deliveries (onDeliver)`);
+      await onDeliver(type, key, message);
     },
     async call(type, key, message) {
-      const wrong = notOurs(key);
-      if (wrong !== undefined) return { ok: false, code: "invalid", message: refusal(`a "${type}" call`, wrong) };
-      await start(key);
-      if (onCall === undefined) return { ok: false, code: "no_handler", message: `deployment-cloudflare: a "${type}" call was made, but no component in the object's App answers calls (onCall)${kindNote(type)}` };
-      const outcome = await onCall(type, key, message);
-      return !outcome.ok && outcome.code === "no_handler" ? { ...outcome, message: `${outcome.message}${kindNote(type)}` } : outcome;
+      await start();
+      if (onCall === undefined) return { ok: false, code: "no_handler", message: `deployment-cloudflare: a "${type}" call was made, but no component in the object's App answers calls (onCall)` };
+      return await onCall(type, key, message);
     },
     async stream(type, key, message) {
-      const wrong = notOurs(key);
-      if (wrong !== undefined) return { ok: false, code: "invalid", message: refusal(`a "${type}" stream`, wrong) };
-      await start(key);
-      if (onStream === undefined) return { ok: false, code: "no_handler", message: `deployment-cloudflare: a "${type}" stream was opened, but no component in the object's App answers streams (onStream)${kindNote(type)}` };
-      const outcome = await onStream(type, key, message);
-      return !outcome.ok && outcome.code === "no_handler" ? { ...outcome, message: `${outcome.message}${kindNote(type)}` } : outcome;
+      await start();
+      if (onStream === undefined) return { ok: false, code: "no_handler", message: `deployment-cloudflare: a "${type}" stream was opened, but no component in the object's App answers streams (onStream)` };
+      return await onStream(type, key, message);
     },
-  };
-}
-
-/** Objects whose App started in this isolate: the first one's log line says `isolate: "new"`. */
-let objectsStarted = 0;
-
-/** What an object's App is made of: its kind (none for the whole default export) and `defineApp`'s components and config. */
-interface ObjectApp {
-  kind: ActorKindMatch | undefined;
-  options: ProjectApp;
-}
-
-/** The project's components and config, as `AppDefinition` holds them. */
-type ProjectApp = { readonly components: readonly ComponentDefinition[]; readonly config: Readonly<Record<string, unknown>> };
-
-/** The default export's actor kinds (SPEC C9), read once per isolate. */
-interface Kinds {
-  declarations: readonly ActorKindDeclaration[];
-  /** The App an object of `key` runs: its kind's, or the whole one (no key, or a key of no kind). */
-  appFor(key: string | undefined): ObjectApp;
-  /** Creates (never starts) every kind's App once; rejects naming the first kind that does not compose. */
-  composeEvery(): Promise<void>;
-}
-
-/**
- * Per isolate, per definition: its kinds, read again only when the definition's components or config
- * are other objects than they were (the workerd lane recomposes one definition between tests).
- */
-const isolateKinds = new WeakMap<AppDefinition, { project: ProjectApp; kinds: Promise<Kinds> }>();
-
-function kindsOf(definition: AppDefinition, logger: Logger, clock: Clock | undefined): Promise<Kinds> {
-  const project: ProjectApp = { components: definition.components, config: definition.config };
-  const cached = isolateKinds.get(definition);
-  if (cached !== undefined && cached.project.components === project.components && cached.project.config === project.config) return cached.kinds;
-  const kinds = readKinds(project, logger, clock);
-  isolateKinds.set(definition, { project, kinds });
-  // A failed read is read again by the next start (it fails again, loudly, until the deploy is fixed).
-  kinds.catch(() => {
-    if (isolateKinds.get(definition)?.kinds === kinds) isolateKinds.delete(definition);
-  });
-  return kinds;
-}
-
-/** Composes the whole App with a reader of `actor.kind`, keeps its description and declarations, and drops it. */
-async function readKinds(project: ProjectApp, logger: Logger, clock: Clock | undefined): Promise<Kinds> {
-  let handle: KeyedHandle<ActorKind> | undefined;
-  const reader = defineComponent({
-    name: "deployment-cloudflare",
-    setup(pikit) {
-      handle = pikit.useKeyed("actor.kind");
-    },
-  });
-  const reading = Date.now();
-  const description = (await compose(project, [reader], logger, clock)).describe();
-  const declarations = actorKindDeclarations(description, handle as KeyedHandle<ActorKind>);
-  const problems = actorKindProblems(declarations);
-  if (problems.length > 0) throw new Error(`deployment-cloudflare: the default export's actor kinds are refused (SPEC C9):\n  ${problems.join("\n  ")}`);
-  const whole: ObjectApp = { kind: undefined, options: project };
-  const apps = new Map<string, ObjectApp>();
-  const appOf = (kind: ActorKindMatch): ObjectApp => {
-    const id = `${kind.exact ? "key" : "prefix"}:${kind.pattern}`;
-    let app = apps.get(id);
-    if (app === undefined) {
-      app = { kind, options: actorKindOptions(project, actorComposition(description, kind.owners)) };
-      apps.set(id, app);
-    }
-    return app;
-  };
-  logger.info("pikit: actor kinds read", { kinds: actorKinds(declarations).length, components: project.components.length, ms: Date.now() - reading });
-  let composed: Promise<void> | undefined;
-  return {
-    declarations,
-    appFor(key) {
-      const kind = key === undefined ? undefined : actorKindOf(declarations, key);
-      return kind === undefined ? whole : appOf(kind);
-    },
-    composeEvery: () =>
-      (composed ??= (async () => {
-        for (const kind of actorKinds(declarations)) {
-          const app = appOf(kind);
-          try {
-            await compose(app.options, [], logger, clock);
-          } catch (error) {
-            logger.error("pikit: an actor kind's App does not compose", { kind: kind.pattern, components: app.options.components.map((c) => c.name), error });
-            throw new Error(`deployment-cloudflare: the actor kind "${kind.pattern}" (${kind.owners.join(", ")}) does not compose: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-          }
-        }
-      })().catch((error: unknown) => {
-        composed = undefined;
-        throw error;
-      })),
   };
 }
 
@@ -534,11 +339,10 @@ async function startWithin(app: App, parent: Context, options: HostOptions, logg
 }
 
 /**
- * The App as `pikit.config.ts` composes it (or an actor kind's part of it), recomposed with this
- * deployment's target and logger (as `deployment-docker`'s entrypoint does), plus the entrypoint's own
- * components.
+ * The App as `pikit.config.ts` composes it, recomposed with this deployment's target and logger (as
+ * `deployment-docker`'s entrypoint does), plus the entrypoint's own components.
  */
-function compose(definition: ProjectApp | undefined, own: AppDefinition["components"], logger: Logger, clock?: Clock): Promise<App> {
+function compose(definition: AppDefinition | undefined, own: AppDefinition["components"], logger: Logger, clock?: Clock): Promise<App> {
   return defineApp({
     components: [...(definition?.components ?? []), ...own],
     config: { ...(definition?.config ?? {}) },
