@@ -94,7 +94,7 @@ the dashboard applies to the next run of every conversation.
   `storage.sql` on a server; on Cloudflare the object `settings-store:settings` (`SETTINGS_KEY`) keeps
   it, the Worker's half (`settings-store-worker`) serves the routes as calls to it (and provides
   `settings` to the Worker's App, read the same way: admin-proposals' routes are the Worker's), and each
-  conversation's object reads it when used, cached with its version for `freshMs` (1 s). The routes:
+  conversation's object reads it when used, cached with its version for `freshMs` (5 s). The routes:
   `GET /admin/api/settings`, `GET` and `PUT /admin/api/settings/:component`, behind `admin.auth`.
 - **The CLI**: `component.json`'s `settings` (a folder) is copied to `src/dashboard/src/settings/<name>/`
   as a view is (add, `ui on`, upgrade, remove, `ui off`), checked by `registry validate`, built by
@@ -138,7 +138,7 @@ the dashboard applies to the next run of every conversation.
   falls back to the definition as a failing `prepare` does. Tools are "on" names among the
   definition's: a tool `prepare` adds beyond them stays.
 - **Cloudflare: one call per admission at most, by time, not by admission.** An object answers `get`
-  from what it read for `freshMs` (1 s) after its last call, and the call carries the values only when
+  from what it read for `freshMs` (5 s) after its last call, and the call carries the values only when
   the version changed: router-basic's read and runtime-pi's, in one admission, cost one call. A
   change through an object's own routes (settings-store's `set`) forgets its cache. A Durable
   Object's start (inside `blockConcurrencyWhile`) never calls the settings object: runtime-pi reads
