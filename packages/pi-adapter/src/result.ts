@@ -15,7 +15,7 @@
  * transcript, so a run's parts are the same whoever builds its result (live, or a reconciliation).
  */
 
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Conversation, Cursor, EntryId, EntryQuery, EntryRecord, Page, SubmissionRecord } from "@earendil-works/pi-durable";
 import type { AgentResult, ConversationRef, MessagePart, RunSettlement } from "@pikit/contracts";
 import { partsOfInput, partsOfToolResult } from "./parts.ts";

@@ -18,8 +18,7 @@
  *   environment's shell against a remote, with real git's meaning, on every `execution` provider.
  */
 
-import type { Context } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
 import {
   createRegistry,
   defineExtension,

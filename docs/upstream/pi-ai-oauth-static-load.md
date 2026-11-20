@@ -1,7 +1,10 @@
 # Proposal for pi-ai: OAuth refresh and `toAuth` reachable in a bundle
 
-Status: draft for upstream (`@earendil-works/pi-ai`, written against 1.3.0; still so in 1.5.0, whose
-`auth/oauth/load.ts` still reads `import.meta.url`). From pikit, whose agents run in
+Status: draft for upstream (`@earendil-works/pi-ai`, written against 1.3.0; still so in 1.6.0, whose
+`auth/oauth/load.ts` still reads `import.meta.url`; 1.5.1 added `@earendil-works/pi-ai/lazy-oauth`
+(`registerLazyOAuthFlows()`: each flow through a literal dynamic `import()`, loaded at its first use),
+which pikit could call in place of `registerBunOAuthFlows()` once `oauth-flows.test.ts` shows a
+wrangler bundle refreshing with it). From pikit, whose agents run in
 Cloudflare Workers (one Durable Object per conversation), bundled by wrangler (esbuild).
 
 ## Problem

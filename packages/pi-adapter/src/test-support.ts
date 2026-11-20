@@ -11,7 +11,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Context as ChordContext } from "@earendil-works/chord";
+import type { Context as ChordContext } from "@earendil-works/chord/context";
 import { defineTool } from "@earendil-works/pi-durable";
 import { type AppContext, type AppEvents, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import type { AgentDefinition, ConversationRef, SqlDatabase } from "@pikit/contracts";

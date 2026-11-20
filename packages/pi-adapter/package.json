@@ -52,6 +52,7 @@
     "./providers/qwen-token-plan": "./src/providers/qwen-token-plan.ts",
     "./providers/qwen-token-plan-cn": "./src/providers/qwen-token-plan-cn.ts",
     "./providers/qwen-token-plan-individual": "./src/providers/qwen-token-plan-individual.ts",
+    "./providers/qwen-token-plan-individual-cn": "./src/providers/qwen-token-plan-individual-cn.ts",
     "./providers/radius": "./src/providers/radius.ts",
     "./providers/together": "./src/providers/together.ts",
     "./providers/typesafe": "./src/providers/typesafe.ts",
@@ -86,10 +87,10 @@
     "bun": ">=1.4.0"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-durable": "1.5.0",
-    "@earendil-works/pi-mcp": "1.5.0",
+    "@earendil-works/chord": "1.6.0",
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-durable": "1.6.0",
+    "@earendil-works/pi-mcp": "1.6.0",
     "@pikit/contracts": "workspace:*",
     "@pikit/core": "workspace:*",
     "typebox": "1.3.27"

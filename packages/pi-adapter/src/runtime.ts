@@ -54,7 +54,7 @@
  * and a run is logged and announced by one step only.
  */
 
-import { copyJson, type JsonValue } from "@earendil-works/chord";
+import { copyJson, type JsonValue } from "@earendil-works/chord/json";
 import {
   type CommitChange,
   type Conversation,
@@ -1366,10 +1366,11 @@ function driven(task: TaskInspection): boolean {
 /**
  * When the earliest sleeping task is due (a model retry's backoff, a deferred response's poll, a
  * compaction's retry: pi-durable's sleeps, which survive a restart), or `undefined` when none sleeps.
+ * A sleep that waits only for signals (no `until`) has no time to be due at.
  */
 function sleepsUntil(inspection: HarnessInspection): number | undefined {
   let at: number | undefined;
-  for (const { state } of inspection.tasks) if (state.kind === "sleeping" && (at === undefined || state.until < at)) at = state.until;
+  for (const { state } of inspection.tasks) if (state.kind === "sleeping" && state.until !== undefined && (at === undefined || state.until < at)) at = state.until;
   return at;
 }
 

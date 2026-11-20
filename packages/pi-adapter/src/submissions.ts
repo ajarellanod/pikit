@@ -32,8 +32,8 @@
  *   (docs/upstream/README.md, proposal 13).
  */
 
-import type { Context as ChordContext } from "@earendil-works/chord";
-import type { JsonValue } from "@earendil-works/chord";
+import type { Context as ChordContext } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { type ConversationId, defineDoc, type Storage } from "@earendil-works/pi-durable";
 import type { SettledInput } from "./result.ts";
 

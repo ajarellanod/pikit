@@ -1,5 +1,5 @@
 /**
- * Facts about @earendil-works/pi-durable 1.5.0 that the durable runtime (`runtime.ts`) relies on,
+ * Facts about @earendil-works/pi-durable 1.6.0 that the durable runtime (`runtime.ts`) relies on,
  * asserted on pi-durable directly (a `MemoryStorage`, pi-ai's faux provider), so a Pi bump that
  * changes one fails here before it breaks the runtime. Each names what depends on it.
  */
@@ -103,7 +103,7 @@ class FlakyStorage extends MemoryStorage {
   }
 }
 
-describe("pi-durable facts (1.5.0)", () => {
+describe("pi-durable facts (1.6.0)", () => {
   test("a storage error closes the Harness: close listeners run, the call rejects, later calls reject with SessionFailed, closed settles failed (runtime.ts's dropFailed)", async () => {
     const storage = new FlakyStorage();
     const { harness, conversation } = await open([fauxAssistantMessage("one")], { storage });

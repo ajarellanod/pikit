@@ -361,6 +361,19 @@ line names its area.
   The scripted test model (`@pikit/pi-adapter/testing`) also calls the tool a tool result names
   (`call: <tool> <json>`).
 
+### Pi adapter (`@pikit/pi-adapter`)
+
+- On Pi 1.6.0 (`chord`, `pi-ai`, `pi-durable` and `pi-mcp` 1.6.0, exact pins), from 1.5.0. A
+  conversation database a 1.6.0 Harness wrote is not meant to be opened by an older one
+  (`pi.tool` version 4, `pi.generation` version 3): an App that ran on it does not go back to 1.5.0.
+- pi-ai's fixes reach every provider: socket errors (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`) and
+  "Connection closed." are retried; Anthropic message threads are on for any provider on
+  api.anthropic.com; `openai-completions` sends the `developer` role only to api.openai.com. New
+  models (GPT-6.2 Astra and Sol, Claude Fable 5.2…) and the provider subpath
+  `@pikit/pi-adapter/providers/qwen-token-plan-individual-cn`.
+- `agent.observe`: a tool call pi-durable parks (`sleeping`, `waiting`) shows as `running`; a sleep that
+  waits only for signals gives the runtime no time to wake for.
+
 ### CLI (`pikit`)
 
 - `pikit registry validate` refuses an `agent.tool` a component's setup provides with its default

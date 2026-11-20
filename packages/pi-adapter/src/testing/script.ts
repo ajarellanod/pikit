@@ -12,7 +12,7 @@
  * Neutral: it runs on every target (the workerd lane uses it).
  */
 
-import type { Context as ChordContext } from "@earendil-works/chord";
+import type { Context as ChordContext } from "@earendil-works/chord/context";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";

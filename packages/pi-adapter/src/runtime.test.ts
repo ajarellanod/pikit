@@ -272,8 +272,8 @@ describe("abort", () => {
 describe("contexts", () => {
   test("a tool sees its conversation and a cancelled caller does not stop the run; abort() signals the tool", async () => {
     const TENANT = createContextKey<string>("tenant");
-    let seen!: (context: import("@earendil-works/chord").Context) => void;
-    const inTool = new Promise<import("@earendil-works/chord").Context>((resolve) => (seen = resolve));
+    let seen!: (context: import("@earendil-works/chord/context").Context) => void;
+    const inTool = new Promise<import("@earendil-works/chord/context").Context>((resolve) => (seen = resolve));
     const hold = holdTool(
       (context) =>
         new Promise<string>((_, reject) => {

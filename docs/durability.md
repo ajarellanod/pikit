@@ -8,7 +8,7 @@ Esta guía parte de conocimientos básicos de programación. Primero explica qu�
 cómo SQLite protege los datos, cómo pi-durable guarda el trabajo y cómo Cloudflare Durable Objects
 y Rivet permiten separar ese trabajo de una máquina concreta.
 
-**Alcance:** pi-durable 1.5.0, la versión fijada por este proyecto. Cloudflare está implementado en
+**Alcance:** pi-durable 1.6.0, la versión fijada por este proyecto. Cloudflare está implementado en
 pikit. Rivet se explica como tecnología investigada, **no como un despliegue disponible en pikit**:
 la [propuesta de integración](../features/deployment-rivet.md) se estudió sobre Rivet 2.3.27,
 commit `aa8800b`. Los detalles internos de estas plataformas pueden cambiar.
@@ -664,8 +664,8 @@ espacio; recuperar puede repetir solicitudes externas, añadir latencia y genera
 
 ## Fuentes y siguientes lecturas
 
-- [pi-durable 1.5.0: README](https://github.com/earendil-works/pi/blob/v1.5.0/packages/durable/README.md)
-  y [especificación](https://github.com/earendil-works/pi/blob/v1.5.0/packages/durable/docs/spec.md):
+- [pi-durable 1.6.0: README](https://github.com/earendil-works/pi/blob/v1.6.0/packages/durable/README.md)
+  y [especificación](https://github.com/earendil-works/pi/blob/v1.6.0/packages/durable/docs/spec.md):
   commits, tareas, replay, vistas y límites del almacenamiento.
 - [Pi coding-agent: SessionManager](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/src/core/session-manager.ts):
   persistencia del historial JSONL, distinta del protocolo de tareas de pi-durable.

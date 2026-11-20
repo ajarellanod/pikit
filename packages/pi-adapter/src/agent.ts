@@ -34,7 +34,8 @@
  *   (a state update, a reopened Harness) uses the answer kept, so a restart offers the same.
  */
 
-import { type Context as ChordContext, copyJson, type JsonValue } from "@earendil-works/chord";
+import type { Context as ChordContext } from "@earendil-works/chord/context";
+import { copyJson, type JsonValue } from "@earendil-works/chord/json";
 import { Type } from "typebox";
 import {
   type AgentChange,

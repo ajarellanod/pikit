@@ -19,7 +19,7 @@
  * (`@pikit/pi-adapter/node`).
  */
 
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 import { type AuthProvider, type CallToolResult, StreamableHttpTransport, type StreamableHttpTransportOptions, type Tool, toLlmContent } from "@earendil-works/pi-mcp";
 import { type TSchema, Type } from "typebox";

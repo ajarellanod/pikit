@@ -16,7 +16,7 @@
  * refused. Reading skips what is not a part.
  */
 
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import type { ToolExecutionResult } from "@earendil-works/pi-durable";
 import { isJsonObject, type MessagePart, partProblem } from "@pikit/contracts";
 import type { DurableMessage } from "./result.ts";

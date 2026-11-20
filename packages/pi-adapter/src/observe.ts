@@ -17,7 +17,8 @@
  * object's own (features/completed/conversation-directory.md).
  */
 
-import type { Context as ChordContext, WatchEnd } from "@earendil-works/chord";
+import type { Context as ChordContext } from "@earendil-works/chord/context";
+import type { WatchEnd } from "@earendil-works/chord/watch";
 import {
   type ConversationId,
   type ConversationView,
@@ -230,7 +231,8 @@ function liveOf(harness: Harness, chord: ChordContext): (view: ConversationView)
       busy: run !== undefined,
       ...(requests !== undefined && { requests }),
       ...(message !== undefined && { partial: message as unknown as JsonValue }),
-      tools: (state?.tools ?? []).map((slot) => ({ callId: slot.callId, name: slot.name, status: slot.status, ...(slot.output !== undefined && { output: slot.output }) })),
+      // A parked call (pi-durable 1.6: `sleeping`, `waiting`) is still under way: the contract shows it running.
+      tools: (state?.tools ?? []).map((slot) => ({ callId: slot.callId, name: slot.name, status: slot.status === "sleeping" || slot.status === "waiting" ? "running" : slot.status, ...(slot.output !== undefined && { output: slot.output }) })),
       ...(failure !== undefined && { failure: { reason: failure.reason, ...(failure.detail !== undefined && { detail: failure.detail }) } }),
     };
   };

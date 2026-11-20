@@ -58,7 +58,8 @@
  * with no call between actors.
  */
 
-import type { Context as ChordContext, JsonValue } from "@earendil-works/chord";
+import type { Context as ChordContext } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
 import {
   type ConversationId,
   type Cursor,

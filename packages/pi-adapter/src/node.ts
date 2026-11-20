@@ -14,7 +14,7 @@
  * files at the same paths. Not a sandbox: commands run as this process's OS user.
  */
 
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ExecutionEnv, ShellExecOptions } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 

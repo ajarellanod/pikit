@@ -5,8 +5,7 @@
  * `abortSignal`. Re-attaching the signal with Chord's own `withAbortSignal` stores it under that key.
  */
 
-import type { Context as ChordContext } from "@earendil-works/chord";
-import { withAbortSignal, withoutAbortSignal } from "@earendil-works/chord/context";
+import { type Context as ChordContext, withAbortSignal, withoutAbortSignal } from "@earendil-works/chord/context";
 import type { AppContext, Context } from "@pikit/core";
 
 /** A pikit context as the Chord context pi-durable takes, keeping its cancellation. */

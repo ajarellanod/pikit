@@ -37,6 +37,15 @@ pi-durable 1.1.0 ships `openDurableObjectSqliteStorage`. pikit keeps `storage-do
 own storages, and host tables join it only through Pi's adapter, which `storage.sql` does not import). pi-durable ships its own `ExecutionEnv` suite (`createEnvConformance`); pikit runs it and keeps only the cases it
 lacks (`packages/pi-adapter/src/testing/execution.ts`), which could be offered to it.
 
+Re-checked against Pi 1.6.0 (2026-11-20, pikit went from 1.5.0 to 1.6.0): every proposal open above
+stands, and no issue was opened, shipped or declined for them since 1.5.0. pi-durable 1.6.0's signals,
+parking tools, gates and `onAbort: "keep"` change none of them (a signal wakes one task, it does not
+carry a caller's values to tools, nor time or order submissions); pi-ai 1.5.1's `lazy-oauth`
+(`registerLazyOAuthFlows()`) may replace pikit's static registration of every flow for 19, still to
+be tried in a wrangler bundle; Chord 1.5.1 made v2 its root (`Context` now only from `./context`,
+`JsonValue` and `copyJson` from `./json`, the watch types from `./watch`: the adapter's imports
+moved) and 1.6.0 adds 3 more breaking changes, still with no stability statement.
+
 Re-checked against Pi 1.5.0 (2026-11-05): pi-durable 1.4.0 shipped proposals 1 (durable sleeps and
 `Harness.wake()`/`onWake`), 2 (`settings.afterFailedRun`) and 18 (retention timers declined in
 Workers), and its telemetry carries a trace across queued inputs and reopened tasks (part of 3).

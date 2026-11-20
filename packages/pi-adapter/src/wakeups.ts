@@ -23,8 +23,7 @@
  *   conversation, a placed one has one.
  */
 
-import type { Context } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT, withoutAbortSignal } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, type Context, withoutAbortSignal } from "@earendil-works/chord/context";
 import type { Harness, HarnessInspection } from "@earendil-works/pi-durable";
 
 
@@ -49,7 +48,8 @@ export function nextWakeAtOf(inspection: Pick<HarnessInspection, "tasks">, optio
   for (const { state } of inspection.tasks) {
     // Due now is the earliest anything can be.
     if (state.kind === "running" || state.kind === "pending") return now();
-    if (state.kind === "sleeping" && (earliest === undefined || state.until < earliest)) earliest = state.until;
+    // A sleep that waits only for signals (no `until`) has no time to wake for.
+    if (state.kind === "sleeping" && state.until !== undefined && (earliest === undefined || state.until < earliest)) earliest = state.until;
   }
   return earliest;
 }
