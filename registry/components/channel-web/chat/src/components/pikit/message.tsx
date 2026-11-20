@@ -245,11 +245,12 @@ export function userText(message: UserMessage): { text: string; operator: boolea
 const RISE_MS = 220;
 
 /**
- * A person's message, at the right, its images inline or by URL (who wrote it is the conversation's, never each message's). It rises
+ * A person's message, at the right, its images inline or by URL. Who wrote it is the conversation's, unless the app says otherwise
+ * (`from`: a muted line above it, such as the dashboard's "You, from the dashboard" in another channel's conversation). It rises
  * in when it mounts, as a reply does; `risen` ms of it already played (the transcript's copy of a message just sent, taking the
  * sent bubble's place: it goes on from where that one was, never starting again). Read once: a later change never starts it.
  */
-export function UserBubble({ message, risen = 0 }: { message: UserMessage; risen?: number }) {
+export function UserBubble({ message, risen = 0, from }: { message: UserMessage; risen?: number; from?: ReactNode }) {
   const { text, images, files } = userText(message);
   const [played] = useState(Math.max(0, risen));
   const [viewing, setViewing] = useState<number>();
@@ -257,6 +258,7 @@ export function UserBubble({ message, risen = 0 }: { message: UserMessage; risen
   const viewed = images.map((image, i) => ({ src: imageSrc(image), alt: `Image ${i + 1}` }));
   return (
     <div className={`flex flex-col items-end gap-1 pl-10 sm:pl-24 ${rise ? "rise-in" : ""}`} style={rise && played > 0 ? { animationDelay: `-${played}ms` } : undefined}>
+      {from !== undefined && from !== null && <span className="px-1 chat-text-11.5 text-ink-3">{from}</span>}
       {images.length > 0 && (
         <div className="flex max-w-full flex-wrap justify-end gap-2">
           {viewed.map((image, i) => (

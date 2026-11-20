@@ -15,6 +15,8 @@
  * going) whose answer stays here. In another channel's conversation nothing said here reaches that
  * channel's chat (the agent reads that the message is the operator's, and that the user sees neither
  * it nor the answer); a run that also answers a user's message is delivered to the user, as always.
+ * There, a line above a message says it is an operator's ("You, from the dashboard") or scheduled,
+ * from the request its entry names (`from.ts`).
  *
  * With an outbound queue (`lib/delivery-feed.ts`, read once for the whole dashboard), an answer of this
  * conversation the queue gave up, or that is stuck in it, gets a quiet note in the thread where the
@@ -28,6 +30,7 @@ import { ActionsMenu } from "@/components/bui/ActionsMenu";
 import { ConversationView, type ThreadNote } from "@/components/pikit/conversation";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { PartyChip, partyOf } from "@/components/pikit/party";
+import { isDashboardKey } from "@/lib/admin-api";
 import { api, type ApiCommandResponse, type ApiConversation, post, useApi } from "@/lib/api";
 import { agentsOf, type CommandNote, useChats } from "@/lib/chats";
 import type { StuckAnswer, UndeliveredAnswer } from "@/lib/delivery";
@@ -36,6 +39,7 @@ import { formatAgo } from "@/lib/format";
 import { Link, navigate, pagePath } from "@/lib/router";
 import { SidePanel, TabActions, useShell } from "@/lib/shell";
 import { assistantOptions, imageLimits, webSearchOf } from "./composer";
+import { fromLine } from "./from";
 import { adminSource } from "./source";
 
 /** What a command answered: a quiet note in the thread, the operator's only. */
@@ -75,7 +79,7 @@ function DeliveryNoteRow({ answer }: { answer: { kind: "undelivered"; of: Undeli
 export function ConversationPage({ params }: { params: Record<string, string> }) {
   const id = params.id ?? "";
   const chats = useChats();
-  const { app, agents: described, commands, newChat, conversationActions } = useShell();
+  const { app, agents: described, commands, newChat, conversationActions, operator } = useShell();
   const agents = agentsOf(app, described);
   const delivery = useDelivery((app.capabilities["outbound.queue"]?.providers.length ?? 0) > 0).problems;
   const { reload: reloadChats } = chats;
@@ -151,6 +155,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
       onChange={reload}
       onFirstText={onFirstText}
       notes={notes}
+      from={conversation === undefined || isDashboardKey(conversation.key) ? undefined : (entry) => fromLine(entry, operator)}
       actions={(contextButton) =>
         conversation !== undefined && (
           <TabActions>

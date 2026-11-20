@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { createAssets, type DashboardFiles } from "../registry/components/admin-api/files/src/pikit/admin-api/assets.ts";
 import { capitalizeFirst } from "../registry/dashboard/files/src/lib/format.ts";
 import { assistantName } from "../registry/dashboard/files/src/lib/names.ts";
+import { fromLine } from "../registry/dashboard/files/src/views/conversations/from.ts";
 import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/lib/sources.ts";
 import type { JsonOp } from "../registry/dashboard/files/src/lib/json-ops.ts";
 import { failureText, INITIAL, type LiveEvent, type LiveState, reduce, type RunFailure } from "../registry/dashboard/files/src/lib/transcript.ts";
@@ -201,6 +202,21 @@ test("the Context panel reads a transcript's sources as the websearch and fetch 
 
 test("an assistant is shown by its words, each capitalized; its stored name stays as it is", () => {
   expect(["assistant", "support-bot", "sales_helper-v2", "Ops", "a--b", "-", "notm-bot", "trader-plus", "designer_minion"].map(assistantName)).toEqual(["Assistant", "Support Bot", "Sales Helper V2", "Ops", "A B", "-", "Notm Bot", "Trader Plus", "Designer Minion"]);
+});
+
+test("in another channel's conversation, an operator's message and a scheduled one say so above their bubble, by their request; a person's says nothing", () => {
+  const operator = { channel: "dashboard", id: "ana" };
+  expect(fromLine({ requestId: "dashboard:1f2e", sender: operator }, "ana")).toBe("You, from the dashboard");
+  expect(fromLine({ requestId: "dashboard:1f2e", sender: operator }, undefined)).toBe("You, from the dashboard");
+  expect(fromLine({ requestId: "dashboard:1f2e" }, "ana")).toBe("You, from the dashboard");
+  expect(fromLine({ requestId: "dashboard:1f2e", sender: operator }, "bob")).toBe("ana, from the dashboard");
+  expect(fromLine({ requestId: "scheduler:daily-report:1767225600000", sender: { channel: "scheduler", id: "daily-report" } }, "ana")).toBe("Scheduled");
+  expect(fromLine({ requestId: "telegram:42", sender: { channel: "telegram", id: "1001" } }, "ana")).toBeUndefined();
+  expect(fromLine({}, "ana")).toBeUndefined();
+  // The view asks it only outside the dashboard's own conversations, and gives each message the entry that holds it.
+  const view = read("src/views/conversations/conversation.tsx");
+  expect(view).toContain("from={conversation === undefined || isDashboardKey(conversation.key) ? undefined : (entry) => fromLine(entry, operator)}");
+  expect(read("src/components/pikit/conversation.tsx")).toContain("from={fromOf(turn.message)}");
 });
 
 test('the "/" menu lists only the commands the App registered; titles are the API\'s, never kept or looked for in the browser', () => {

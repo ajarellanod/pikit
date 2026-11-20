@@ -24,6 +24,10 @@ export interface TranscriptEntry {
   /** `message`, `pi.reset`, …: the runtime's words. */
   kind: string;
   messages: unknown[];
+  /** The request whose message the entry holds, when whatever serves it says (admin-api: on every message's entry). */
+  requestId?: string;
+  /** That request's sender, when it had one and whatever serves it says. */
+  sender?: { channel: string; id: string };
 }
 
 /** One page of a transcript, newest first, and the cursor of the next (absent on the last page). */

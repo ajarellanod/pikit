@@ -15,8 +15,10 @@
  *
  * What is the app's own goes in slots: the header's actions (`actions`, given the Context button), where
  * the Context panel goes (`side`), rows of its own in the thread (`notes`: the dashboard's commands'
- * notes), what replaces the composer when the conversation cannot be talked to (`closed`), and the
- * composer's own props (the picker, the commands, web search, images).
+ * notes), a line above a person's message, given the entry that holds it (`from`: the dashboard says
+ * which messages of another channel's conversation are an operator's or scheduled, by their request),
+ * what replaces the composer when the conversation cannot be talked to (`closed`), and the composer's
+ * own props (the picker, the commands, web search, images).
  *
  * The live stream is open only while the page is active (`useActive`: the tab visible, the person there
  * in the last minutes): on Cloudflare an open stream keeps the conversation's Durable Object in memory.
@@ -324,6 +326,8 @@ export interface ConversationViewProps {
   side?: (panel: ReactNode) => ReactNode;
   /** Rows of the app's own in the thread (the dashboard's commands' notes). */
   notes?: readonly ThreadNote[];
+  /** A line above a person's message, given the transcript entry that holds it (its request, its sender); none when it gives nothing. */
+  from?: (entry: TranscriptEntry) => ReactNode;
   /** The live stream said the conversation changed (a message, its usage): read what the app shows of it again. */
   onChange?: () => void;
   /** The first words written in it, once its start is read: its name until it has a title. */
@@ -331,7 +335,7 @@ export interface ConversationViewProps {
 }
 
 /** The thread, the activity line, the floating composer and the Context panel of one conversation. */
-export function ConversationView({ source, sent, composer = {}, closed, context = true, toolDetails = true, actions, side, notes = [], onChange, onFirstText }: ConversationViewProps) {
+export function ConversationView({ source, sent, composer = {}, closed, context = true, toolDetails = true, actions, side, notes = [], from, onChange, onFirstText }: ConversationViewProps) {
   const id = source.id;
   const live = useLive(source);
   const transcript = useTranscript(source, live.changes);
@@ -350,8 +354,15 @@ export function ConversationView({ source, sent, composer = {}, closed, context 
     return () => clearTimeout(timer);
   }, [live.changes, live.busy]);
 
-  const messages = mergedEntries(transcript.entries, live.entries).flatMap((entry) => entry.messages as Message[]);
+  const entries = mergedEntries(transcript.entries, live.entries);
+  const messages = entries.flatMap((entry) => entry.messages as Message[]);
   const turns = turnsOf(messages, live);
+  // The entry each message is in: what `from` is given for a person's message.
+  const entryOf = new Map(entries.flatMap((entry) => (entry.messages as Message[]).map((message) => [message, entry] as const)));
+  const fromOf = (message: Message): ReactNode => {
+    const entry = from === undefined ? undefined : entryOf.get(message);
+    return entry === undefined ? undefined : from?.(entry);
+  };
 
   // The messages sent from here the conversation does not show yet.
   const sameText = (text: string) => messages.filter((message) => message.role === "user" && userText(message).text.trim() === text).length;
@@ -495,7 +506,7 @@ export function ConversationView({ source, sent, composer = {}, closed, context 
           {turns.map((turn, i) => (
             <div key={turn.key} className="mx-auto flex w-full max-w-[720px] flex-col gap-8">
               {turn.kind === "user" && notesBefore(i, turn.message.timestamp).map((each) => <Fragment key={each.key}>{each.node}</Fragment>)}
-              {turn.kind === "user" ? <UserBubble message={turn.message} risen={risen(turn.message)} /> : <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />}
+              {turn.kind === "user" ? <UserBubble message={turn.message} risen={risen(turn.message)} from={fromOf(turn.message)} /> : <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />}
             </div>
           ))}
           {notes
