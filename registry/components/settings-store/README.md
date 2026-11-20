@@ -86,17 +86,22 @@ every key's actor (`"all"`, a server; or no `actor.inbox`) or one key's (`"one"`
   (`export const worker`, `settings-store-worker`) serves the routes as calls to it; it validates
   against its App's declarations (every object runs the same App), stores and logs. The Worker's half
   also provides `settings` to the Worker's App, read as an object reads it, for a component whose
-  routes the Worker serves (admin-proposals declares its repository there too). A conversation's
-  object reads it when used, keeping the values with their version: a `get` within `freshMs` of the
-  last call is answered from them, and past it the call says whether the version changed (the values
-  cross only when it did). One call per admission at most. When the call fails, the values read last
-  apply (logged).
+  routes the Worker serves (admin-proposals declares its repository there too). Each App (a
+  conversation's object, a Worker isolate) reads it when used, keeping the values with their version: a
+  `get` within `freshMs` (5 s) of the last call is answered from them, and past it the call says
+  whether the version changed (the values cross only when it did). Concurrent reads share one call. So
+  a message costs one call per App on its path, however many components read their settings there (the
+  Worker's route, the routers, runtime-pi at the admission and at the run's first wakeup), as long as
+  that App's part of it takes under `freshMs`. When the call fails, the values read last apply (logged).
+- **How fresh:** a change made through an App's own routes (the Worker's `PUT`) applies to that App's
+  next `get` at once; every other App (each object, each Worker isolate) applies it within `freshMs`.
+  A run already going keeps what it read.
 
 ## Config
 
 ```ts
 "settings-store": {
-  freshMs: 1000, // default; Cloudflare only: how long an object answers from the values it read last
+  freshMs: 5000, // default; Cloudflare only: how long an object answers from the values it read last (the Worker's half: always 5 s)
 }
 ```
 
@@ -109,7 +114,9 @@ component, copies, a value outliving a restart, a key a later schema refuses tak
 (logged), and a change read by another App. Its own tests cover its operator side on both targets
 (the value a change answers, a refused value storing nothing, unknown components, sections, the log
 without values, components seeing `declare` and `get` only), the routes (`401`, the statuses), the
-Worker's routes as calls to the settings object, and what an object's cache spends in calls.
+Worker's routes as calls to the settings object, and what an App's cache spends in calls (concurrent
+reads, one call; another App's change seen within `freshMs`; its own at once; a shared read a waiter
+lost read again together).
 
 ## Replace it
 

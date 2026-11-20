@@ -122,7 +122,7 @@ it("the Worker reads and sets the objects' settings in the settings object; a co
   const told: string[] = [];
   composeObjects(
     [storageDo, storageKvSql, actorsDo, ...model(told), runtimePi, conversationsKv, auth, settingsStore, routerBasic, channelActor(answers)],
-    { "router-basic": { defaultAgent: "scripted" } },
+    { "router-basic": { defaultAgent: "scripted" }, "settings-store": { freshMs: 1_000 } },
   );
   const worker = await workerApp();
   const chat = `test:${crypto.randomUUID()}`;

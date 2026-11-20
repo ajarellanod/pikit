@@ -28,7 +28,7 @@ import { createSettingsConformance, type SettingsFixtureApp } from "@pikit/contr
 import { createManualClock } from "@pikit/core/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import Type from "typebox";
-import { CALL, SETTINGS_KEY } from "./calls.ts";
+import { CALL, createRemoteSource, FRESH_MS, SETTINGS_KEY } from "./calls.ts";
 import settingsStore, { worker } from "./index.ts";
 import { MAX_BODY } from "./routes.ts";
 import { createDeclarations, createSettings, type SettingsSection } from "./settings.ts";
@@ -387,16 +387,17 @@ test("on Cloudflare the Worker's App reads its components' settings from the set
   const settings = inWorker.settings as Settings;
 
   expect(await settings.get("agent", workerApp.app.context())).toEqual({ model: "faux/small", prompt: "Be brief." });
-  // Set from the dashboard (the Worker's route): the Worker reads it once its second is past.
+  expect(await inObject.settings?.get("agent", object.app.context())).toEqual({ model: "faux/small", prompt: "Be brief." });
+  // Set from the dashboard (the Worker's route): the Worker reads it at once; the object, another App, within FRESH_MS.
   expect((await workerApp.fetch("/admin/api/settings/agent", put({ model: "faux/large" }))).status).toBe(200);
-  await clock.advance(1_000);
   expect(await settings.get("agent", workerApp.app.context())).toEqual({ model: "faux/large", prompt: "Be brief." });
+  await clock.advance(FRESH_MS);
   expect(await inObject.settings?.get("agent", object.app.context())).toEqual({ model: "faux/large", prompt: "Be brief." });
   // The operator side is the routes': a component of the Worker's App declares and reads.
   expect(Object.keys(settings).sort()).toEqual(["declare", "get"]);
 });
 
-test("an object asks the settings object at most once per freshMs, and only for what changed; unreachable, it keeps what it read", async () => {
+test("an object asks the settings object at most once per freshMs (5 s), and only for what changed; another App's change within it, its own at once; unreachable, it keeps what it read", async () => {
   const objects = new Objects();
   const clock = createManualClock();
   const holder: { settings?: Settings } = {};
@@ -406,20 +407,49 @@ test("an object asks the settings object at most once per freshMs, and only for 
   const settings = holder.settings as Settings;
   const ctx = served.app.context();
 
+  // A message's components reading at once, then again later in its admission and its first wakeup: one call.
+  await Promise.all(Array.from({ length: 6 }, () => settings.get("agent", ctx)));
+  await clock.advance(FRESH_MS - 1);
   await settings.get("agent", ctx);
-  await Promise.all([settings.get("agent", ctx), settings.get("agent", ctx)]);
   expect(objects.calls).toEqual([`${SETTINGS_KEY} ${CALL.read}`]);
 
-  await clock.advance(1_000);
+  // Another App's change (a call to the settings object, as the Worker's route makes): seen past FRESH_MS.
+  await objects.mailbox.call(SETTINGS_KEY, CALL.set, { component: "agent", value: { prompt: "Brief." }, operator: "ops" }, ctx);
+  expect(await settings.get("agent", ctx)).toEqual({ model: "faux/small", prompt: "Be brief." });
+  await clock.advance(1);
+  expect(await settings.get("agent", ctx)).toEqual({ model: "faux/small", prompt: "Brief." });
+  objects.calls.length = 0;
+
   expect((await served.fetch("/admin/api/settings/agent", put({ prompt: "Shorter." }))).status).toBe(200);
   // A change through its own routes: it reads again at once (the route's answer), and its next get answers from that.
   expect(await settings.get("agent", ctx)).toEqual({ model: "faux/small", prompt: "Shorter." });
-  expect(objects.calls).toEqual([`${SETTINGS_KEY} ${CALL.read}`, `${SETTINGS_KEY} ${CALL.set}`, `${SETTINGS_KEY} ${CALL.read}`]);
+  expect(objects.calls).toEqual([`${SETTINGS_KEY} ${CALL.set}`, `${SETTINGS_KEY} ${CALL.read}`]);
 
-  await clock.advance(1_000);
+  await clock.advance(FRESH_MS);
   objects.unreachable = true;
   expect(await settings.get("agent", ctx)).toEqual({ model: "faux/small", prompt: "Shorter." });
   expect(logged).toContain("settings-store: the settings object could not be read; the values read last apply");
+});
+
+test("a shared read that fails for its waiters (on Workers, one made by a request that ended) is read again by them, together, and nothing stays stuck", async () => {
+  let calls = 0;
+  const mailbox = {
+    call: async () => {
+      calls++;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (calls === 1) throw new Error("This promise was created by a request that has since ended");
+      return { version: 1, values: { agent: { prompt: "Brief." } } };
+    },
+  } as unknown as ActorMailbox;
+  const source = createRemoteSource(() => mailbox, createManualClock());
+  const ctx = { logger: silentLogger } as unknown as AppContext;
+
+  const [mine, ...waiting] = await Promise.allSettled([source.read(ctx), source.read(ctx), source.read(ctx)]);
+  // The request that made the read sees its failure; its waiters share one more call.
+  expect(mine.status).toBe("rejected");
+  expect(waiting.map((each) => each.status === "fulfilled" && each.value)).toEqual([{ agent: { prompt: "Brief." } }, { agent: { prompt: "Brief." } }]);
+  expect(await source.read(ctx)).toEqual({ agent: { prompt: "Brief." } });
+  expect(calls).toBe(2);
 });
 
 test("an object that never read the settings object, which cannot be reached, rejects get: its caller keeps what it had", async () => {

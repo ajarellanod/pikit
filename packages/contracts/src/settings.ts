@@ -33,7 +33,7 @@
  *   default. A stored key the schema no longer accepts (a deploy changed it, an agent was removed) is
  *   left out, its default used, and logged. The answer is a copy.
  * - **An operator's change applies to the next `get`** of every App of the deployment within the
- *   provider's bound (settings-store on Cloudflare: a Durable Object's cache, a second at most): to
+ *   provider's bound (settings-store on Cloudflare: each App's cache, `freshMs`, 5 s by default): to
  *   the next run, not to one already going.
  * - **It outlives a restart**, as storage does.
  * - **Errors are typed** (`SettingsError`): `unknown_component` for a component that declared

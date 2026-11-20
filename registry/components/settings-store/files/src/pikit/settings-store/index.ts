@@ -18,8 +18,8 @@
  *   App). The values are
  *   one object's, `settings-store:settings` (`SETTINGS_KEY`, `calls.ts`), of the conversations' class,
  *   never a conversation, which answers the calls every object can answer. A conversation's object
- *   reads it when used, keeping what it read with its version, asked again at most every second: one
- *   call per admission at most. The routes are the Worker's half's (`worker.ts`, `export const
+ *   reads it when used, keeping what it read with its version, asked again at most every `freshMs`
+ *   (5 s): one call per admission and its first wakeup; this App's own change is read at once. The routes are the Worker's half's (`worker.ts`, `export const
  *   worker`), calls to that object; they are registered in the object's App too, where no server
  *   serves them. The Worker's half provides `settings` too, read the same way, for the components of
  *   the Worker's App (admin-proposals, whose routes the Worker serves).
@@ -38,7 +38,8 @@ export { worker, WORKER_NAME } from "./worker.ts";
 const Config = Type.Object({
   /**
    * On Cloudflare: how long, in ms, a conversation's object answers from the values it read last before
-   * it asks the settings object again. 0 asks at every read.
+   * it asks the settings object again: the bound within which another App's change applies here. 0 asks
+   * at every read.
    */
   freshMs: Type.Integer({ minimum: 0, default: FRESH_MS }),
 });

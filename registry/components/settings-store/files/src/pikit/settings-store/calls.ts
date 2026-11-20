@@ -13,11 +13,13 @@
  * `SettingsError`; `invalid_value`, an `InvalidSettingsError`), or `invalid_request` for a malformed
  * call; the caller turns it back.
  *
- * - **A conversation's object reads at most one call per admission** (`createRemoteSource`): it keeps
- *   the values with their version, and a `get` within `freshMs` of the last call (a second) is
- *   answered from them; past it, the call says whether the version changed, and carries the values
- *   only when it did. Concurrent reads share one call. When the call fails, the values it holds are
- *   used (logged); with none, `get` rejects and its caller keeps what it had.
+ * - **An App reads at most one call per `freshMs`** (`createRemoteSource`, 5 s by default): it keeps
+ *   the values with their version, and a `get` within `freshMs` of the last call is answered from
+ *   them, so a message's admission and its first wakeup in a conversation's object, or a request to
+ *   the Worker, cost one call however many components read. Past it, the call says whether the version
+ *   changed, and carries the values only when it did. Concurrent reads share one call. This App's own
+ *   `set` is read at once (`forget`); another App's, within `freshMs`. When the call fails, the values
+ *   it holds are used (logged); with none, `get` rejects and its caller keeps what it had.
  * - **The Worker** (`worker.ts`) serves the routes: `sections` and `set` are calls, validated and
  *   logged in the settings object, against its App's declarations (the same as every object's). Its
  *   App's components (admin-proposals' routes) read their settings as an object does
@@ -48,8 +50,12 @@ export const CALL = {
   set: "settings-store.set",
 } as const;
 
-/** How long an object answers `get` from the values it read last, before it asks again (one call per admission at most). */
-export const FRESH_MS = 1_000;
+/**
+ * How long an App answers `get` from the values it read last, before it asks again: longer than a
+ * message's path through one object (its admission, then its first wakeup) or a Worker's request, so
+ * each costs one call; the bound within which an operator's change reaches every App.
+ */
+export const FRESH_MS = 5_000;
 
 type Fields = Record<string, unknown>;
 const fieldsOf = (message: JsonValue): Fields => (isJsonObject(message) ? message : {});
@@ -102,16 +108,20 @@ export function answerCalls(inbox: ActorInbox, table: SettingsTable, local: Sett
 export function createRemoteSource(mailbox: () => ActorMailbox | undefined, clock: Clock, freshMs = FRESH_MS): SettingsSource & { forget(): void } {
   let held: { version: number; values: Record<string, SettingsValue>; at: number } | undefined;
   let reading: Promise<Record<string, SettingsValue>> | undefined;
+  /** Bumped by `forget`: a read that started before this App's own set is never kept as fresh. */
+  let generation = 0;
 
   const fetchValues = async (ctx: AppContext): Promise<Record<string, SettingsValue>> => {
+    const started = generation;
     const calls = mailbox();
     if (calls === undefined) throw new Error("settings-store: in a Durable Object's App it reads the settings object, which needs actor.mailbox: install actors-do");
     try {
       const answer = fieldsOf(await calls.call(SETTINGS_KEY, CALL.read, { version: held?.version ?? -1 }, ctx));
       const { version, values } = answer;
       if (typeof version !== "number") throw new Error("settings-store: the settings object answered no version");
-      if (values !== undefined || held === undefined) held = { version, values: (isJsonObject(values) ? values : {}) as Record<string, SettingsValue>, at: clock.now() };
-      else held = { ...held, at: clock.now() };
+      const at = started === generation ? clock.now() : Number.NEGATIVE_INFINITY;
+      if (values !== undefined || held === undefined) held = { version, values: (isJsonObject(values) ? values : {}) as Record<string, SettingsValue>, at };
+      else held = { ...held, at };
       return held.values;
     } catch (error) {
       if (held === undefined) throw error;
@@ -120,19 +130,39 @@ export function createRemoteSource(mailbox: () => ActorMailbox | undefined, cloc
     }
   };
 
+  const fresh = (): Record<string, SettingsValue> | undefined => (held !== undefined && clock.now() - held.at < freshMs ? held.values : undefined);
+  /** The read in flight, which every concurrent `get` shares; `mine`: this one started it. */
+  const join = (ctx: AppContext): { attempt: Promise<Record<string, SettingsValue>>; mine: boolean } => {
+    const mine = reading === undefined;
+    const attempt = (reading ??= fetchValues(ctx).finally(() => {
+      if (reading === attempt) reading = undefined;
+    }));
+    return { attempt, mine };
+  };
+
   return {
     async read(ctx) {
-      if (held !== undefined && clock.now() - held.at < freshMs) return held.values;
-      reading ??= fetchValues(ctx).finally(() => {
-        reading = undefined;
-      });
-      return reading;
+      const values = fresh();
+      if (values !== undefined) return values;
+      const first = join(ctx);
+      try {
+        return await first.attempt;
+      } catch (error) {
+        if (reading === first.attempt) reading = undefined;
+        if (first.mine) throw error;
+        // On Workers a promise settles only in the request that made it: a read shared with a request
+        // that ended (a reload cancels it) fails for its waiters. They read again, once, together,
+        // never leaving the isolate stuck on it.
+        return fresh() ?? (await join(ctx).attempt);
+      }
     },
     write() {
       throw new Error("settings-store: an object writes through the settings object (createRemoteAdmin)");
     },
-    /** After this App's own set: its next `get` asks. */
+    /** After this App's own set: its next `get` asks, and sees it. */
     forget() {
+      generation++;
+      reading = undefined;
       if (held !== undefined) held = { ...held, at: Number.NEGATIVE_INFINITY };
     },
   };
@@ -141,9 +171,10 @@ export function createRemoteSource(mailbox: () => ActorMailbox | undefined, cloc
 /**
  * The `settings` of an App that is not the settings object (a conversation's object, the Worker's):
  * its own declarations, the values read from the settings object (`createRemoteSource`), and the
- * store's `set` as a call to it, after which this App's next `get` asks again.
+ * store's `set` as a call to it, after which this App's next `get` asks again. `forget` does the same
+ * after a `set` made another way (the Worker's routes, `createRemoteAdmin`).
  */
-export function createRemoteSettings(declarations: Declarations, mailbox: () => ActorMailbox | undefined, clock: Clock, freshMs = FRESH_MS): Settings & SettingsStore {
+export function createRemoteSettings(declarations: Declarations, mailbox: () => ActorMailbox | undefined, clock: Clock, freshMs = FRESH_MS): Settings & SettingsStore & { forget(): void } {
   const source = createRemoteSource(mailbox, clock, freshMs);
   const admin = createRemoteAdmin(mailbox);
   return {
@@ -155,6 +186,7 @@ export function createRemoteSettings(declarations: Declarations, mailbox: () => 
       source.forget();
       return stored;
     },
+    forget: () => source.forget(),
   };
 }
 
