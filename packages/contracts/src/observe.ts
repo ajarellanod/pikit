@@ -10,7 +10,9 @@
  *   what it cost. A conversation a reset left behind is listed too, under the same key: the registry
  *   (`conversations.registry`) says which one a key is in now.
  * - **`transcript`** is one conversation's history, newest first, a page at a time: each entry with the
- *   messages it holds, in the runtime's own JSON (pi-ai's messages for runtime-pi).
+ *   messages it holds, in the runtime's own JSON (pi-ai's messages for runtime-pi), and, for an entry
+ *   that placed a request's input, that request's id and sender: who wrote a message and through what
+ *   is read there, never parsed from its text.
  * - **`watch`** follows one conversation live, as state: what it shows now (`ObservedLive`: whether
  *   a run goes and whose requests it answers, the answer being written, the tool round, why the last
  *   run ended without an answer), sent whole first (`live` with `["r", value]`) and then as the ops
@@ -38,7 +40,7 @@
  */
 
 import type { AppContext } from "@pikit/core";
-import type { Usage } from "./agent.ts";
+import type { Sender, Usage } from "./agent.ts";
 import type { JsonOp } from "./json-ops.ts";
 import type { JsonValue } from "./json.ts";
 import type { Page, PageRequest } from "./page.ts";
@@ -66,6 +68,15 @@ export interface TranscriptEntry {
   kind: string;
   /** The messages it holds, in the runtime's JSON (pi-ai's `Message` for runtime-pi); none for bookkeeping. */
   messages: JsonValue[];
+  /**
+   * The request whose input the entry placed (`AgentRequest.requestId`): on every entry that placed a
+   * request's input, in the transcript and live (`entries` events) alike, so a reader attributes a
+   * message by it (the dashboard's own requests start with `dashboard:`, `isDashboardRequest`). Absent on
+   * every other entry: an answer, a tool's result, bookkeeping.
+   */
+  requestId?: string;
+  /** That request's sender (`AgentRequest.sender`), when it had one; never without `requestId`. */
+  sender?: Sender;
 }
 
 /** A call of the current tool round, as a live view shows it. */

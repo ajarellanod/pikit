@@ -54,7 +54,7 @@ test("a sender outlives the worker that admitted it: the run resumed elsewhere r
   expect(read).toEqual([{ requestId: "r1", sender: alice }]);
 });
 
-test("a sender is in the transcript: its input is an entry of kind pikit.input carrying it; one without a sender is pi.user", async () => {
+test("a sender is in the transcript: an input is an entry of kind pikit.input carrying its request id, and its sender when it has one", async () => {
   const db = records();
   const w = await db.worker();
   const conversation = await w.conversation();
@@ -70,8 +70,8 @@ test("a sender is in the transcript: its input is an entry of kind pikit.input c
   // Newest first: read oldest first.
   const inputs = entries.filter((entry) => entry.model?.some((message) => message.role === "user")).reverse();
   expect(inputs.map((entry) => [entry.kind, entry.data] as unknown)).toEqual([
-    [INPUT_KIND, { sender: alice }],
-    ["pi.user", undefined],
+    [INPUT_KIND, { requestId: "r1", sender: alice }],
+    [INPUT_KIND, { requestId: "r2" }],
   ]);
   // The model reads it as any message, and the run's result is as without a sender.
   expect(second.text).toBe("answer: hello again");

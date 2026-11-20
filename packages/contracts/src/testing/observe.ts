@@ -14,7 +14,7 @@
 
 import { type App, type AppContext, type AppEvents, type ComponentDefinition, defineApp, defineComponent, silentLogger, withAbortSignal } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
-import type { AgentConversations, AgentRuntime, ConversationRef } from "../agent.ts";
+import type { AgentConversations, AgentRuntime, ConversationRef, Sender } from "../agent.ts";
 import { applyOps, type JsonOp } from "../json-ops.ts";
 import type { JsonValue } from "../json.ts";
 import type { AgentObserver, ObservedEvent, ObservedLive, TranscriptEntry } from "../observe.ts";
@@ -73,8 +73,8 @@ interface Running {
   streaming: string;
   /** A new conversation of `agent` (default the fixture's agent), under `key`. */
   conversation(key: string, agent?: string): Promise<ConversationRef>;
-  /** Sends `prompt` and resolves with the run's end, checked to be an answer. */
-  send(conversation: ConversationRef, requestId: string, prompt: string): Promise<Result>;
+  /** Sends `prompt` (from `sender`, when given) and resolves with the run's end, checked to be an answer. */
+  send(conversation: ConversationRef, requestId: string, prompt: string, sender?: Sender): Promise<Result>;
   /** Sends `prompt` and resolves with the run's end, however it ends. */
   dispatch(conversation: ConversationRef, requestId: string, prompt: string): Promise<Result>;
   abort(conversation: ConversationRef): Promise<void>;
@@ -128,13 +128,13 @@ export function createAgentObserveConformance(
         const { runtime, conversations, observe } = handles;
         const ctx = app.context();
         /** Dispatches; `ended` is the run's end. */
-        const dispatch = async (conversation: ConversationRef, requestId: string, prompt: string): Promise<{ ended: Promise<Result> }> => {
+        const dispatch = async (conversation: ConversationRef, requestId: string, prompt: string, sender?: Sender): Promise<{ ended: Promise<Result> }> => {
           const result = new Promise<Result>((resolve) => {
             const done = ended.get(requestId);
             if (done !== undefined) resolve(done);
             else results.set(requestId, resolve);
           });
-          await runtime().dispatch({ requestId, conversation, prompt }, ctx);
+          await runtime().dispatch({ requestId, conversation, prompt, ...(sender !== undefined && { sender }) }, ctx);
           return { ended: result };
         };
         await run({
@@ -143,8 +143,8 @@ export function createAgentObserveConformance(
           observe: observe(),
           streaming: fixture.streaming,
           conversation: async (key, agent) => ({ key, agent: agent ?? fixture.agent, conversationId: await conversations().create(ctx) }),
-          async send(conversation, requestId, prompt) {
-            const settled = await within((await dispatch(conversation, requestId, prompt)).ended, `the answer to ${requestId}`);
+          async send(conversation, requestId, prompt, sender) {
+            const settled = await within((await dispatch(conversation, requestId, prompt, sender)).ended, `the answer to ${requestId}`);
             check(settled.kind === "completed", `the run of ${requestId} to complete, got ${settled.kind} ${JSON.stringify(settled.error)}`);
             return settled;
           },
@@ -227,6 +227,35 @@ export function createAgentObserveConformance(
         cursor = page?.next;
       } while (cursor !== undefined && paged.length < 1000);
       expect(paged, whole?.items.map((entry) => entry.id), "the pages of one entry, as the whole transcript");
+    }),
+
+    observeCase("each entry that placed a request's input names that request and its sender; no other entry does; live as in the transcript", async (s) => {
+      const conversation = await s.conversation("conformance:requests");
+      const w = await s.watch(conversation.conversationId);
+      const someone: Sender = { channel: "conformance", id: "someone" };
+      const sent = [
+        { requestId: "r-from", prompt: "a message with a sender", sender: someone },
+        { requestId: "r-anonymous", prompt: "a message without a sender" },
+      ];
+      for (const each of sent) await s.send(conversation, each.requestId, each.prompt, each.sender);
+
+      const transcript = (await s.observe.transcript(conversation.conversationId, { limit: 500 }, s.ctx))?.items ?? [];
+      const oldestFirst = [...transcript].reverse();
+      for (const each of sent) {
+        const naming = transcript.filter((entry) => entry.requestId === each.requestId);
+        expect(naming.length, 1, `the entries naming ${each.requestId}`);
+        const placed = oldestFirst.find((entry) => JSON.stringify(entry.messages).includes(escaped(each.prompt)));
+        expect(naming[0]?.id, placed?.id, `the entry naming ${each.requestId}: the first holding its message`);
+        expect(naming[0]?.sender, each.sender, `the sender of ${each.requestId}'s entry`);
+      }
+      for (const entry of transcript) {
+        check(entry.requestId === undefined || sent.some((each) => each.requestId === entry.requestId), `entry ${entry.id} to name no other request, got ${JSON.stringify(entry.requestId)}`);
+        check(entry.sender === undefined || entry.requestId !== undefined, `entry ${entry.id} to have no sender without a request: ${JSON.stringify(entry)}`);
+      }
+
+      await w.until(() => sent.every((each) => w.entries.some((entry) => entry.requestId === each.requestId)), "the inputs' entries, live, naming their requests");
+      for (const entry of w.entries) expect(entry, transcript.find((each) => each.id === entry.id), `entry ${entry.id} live, as the transcript has it`);
+      await w.stop();
     }),
 
     observeCase("an unknown conversation is undefined, and watching one fails", async (s) => {
@@ -391,6 +420,15 @@ function liveProblem(value: JsonValue): string | undefined {
   return undefined;
 }
 
+/** What is wrong with `entry` as a `TranscriptEntry`, or `undefined`. */
+function entryProblem(entry: TranscriptEntry): string | undefined {
+  if (typeof entry.id !== "string" || typeof entry.kind !== "string" || !Array.isArray(entry.messages)) return "an id, a kind and messages";
+  if (entry.requestId !== undefined && typeof entry.requestId !== "string") return "a request id not a string";
+  const sender = entry.sender as { channel?: unknown; id?: unknown } | undefined;
+  if (sender !== undefined && (typeof sender.channel !== "string" || typeof sender.id !== "string")) return "a sender without a channel and an id";
+  return undefined;
+}
+
 /** A usage's tokens. `Usage` is the runtime's type (pi-ai's with runtime-pi), opaque in the contracts. */
 function tokensOf(usage: unknown): number | undefined {
   return (usage as { totalTokens?: number } | undefined)?.totalTokens;
@@ -442,7 +480,7 @@ async function follow(observe: AgentObserver, conversationId: string, ctx: AppCo
       }
       case "entries":
         check(event.entries.length > 0, "an entries event to hold an entry");
-        for (const entry of event.entries) check(typeof entry.id === "string" && typeof entry.kind === "string" && Array.isArray(entry.messages), `an entry, got ${JSON.stringify(entry)}`);
+        for (const entry of event.entries) check(entryProblem(entry) === undefined, `an entry (${entryProblem(entry)}), got ${JSON.stringify(entry)}`);
         entries.push(...event.entries);
         break;
       case "usage":

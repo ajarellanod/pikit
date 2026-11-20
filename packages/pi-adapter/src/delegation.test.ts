@@ -15,6 +15,7 @@ import { ConversationDoc } from "./agent.ts";
 import { toChord } from "./context.ts";
 import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { AGENT_DELEGATION, type BackgroundDelegation, type DelegationProgress, PROGRESS_STEPS, RESULT_LIMIT, RESULT_REQUEST_PREFIX, STEP_ARGUMENTS_LIMIT, STEP_TEXT_LIMIT } from "./delegation.ts";
+import { createObserver } from "./observe.ts";
 import { withParts } from "./parts.ts";
 import { databaseFile, holdTool, openWorker, scriptedProvider, type Worker, type WorkerOptions } from "./test-support.ts";
 
@@ -368,6 +369,20 @@ test("steer: reaches the child's run in progress, from the delegating agent; the
     { requestId: expect.stringMatching(/^delegate-steer:/) as never, sender },
   ]);
   expect(reported.text).toContain("answer: hold");
+  // The child's transcript names each input's request and sender, the steer's too; the parent's, the report's.
+  const observe = createObserver(() => w.runtime);
+  const { storage } = await w.runtime.opened(w.ctx);
+  const child = (await storage.scanConversations({}, 100, undefined, toChord(w.ctx))).items.find((record) => record.owner !== undefined);
+  const inputsOf = async (conversationId: string) =>
+    ((await observe.transcript(conversationId, { limit: 500 }, w.ctx))?.items ?? [])
+      .filter((entry) => entry.messages.some((message) => (message as { role?: string }).role === "user"))
+      .reverse()
+      .map((entry) => [entry.requestId, entry.sender]);
+  expect(await inputsOf(String(child?.id))).toEqual([
+    [`delegate:${id}`, sender],
+    [expect.stringMatching(/^delegate-steer:/), sender],
+  ]);
+  expect((await inputsOf(conversation.conversationId)).at(-1)).toEqual([reported.requestId, { channel: "delegate", id: "helper" }]);
   expect(await controlCall(w, conversation, "r3", { op: "steer", id, message: "more" })).toBe("completed");
   expect(await controlCall(w, conversation, "r4", { op: "cancel", id })).toBe("completed");
   expect(await controlCall(w, conversation, "r5", { op: "steer", id: "999", message: "more" })).toBe("not_found");

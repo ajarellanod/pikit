@@ -28,9 +28,11 @@
  *   The runtime is its only writer: giving up on messages is `abandon`, the runtime's own.
  * - **Agents** are applied by `AgentConfigs` (`agent.ts`): each conversation's `pi.agent` selects the
  *   agent's tool extension and the extensions it names (`agent.extension`, resolved through `extension`).
- * - **Senders and parts**: a request with a `sender` or `parts` (checked first: a malformed part refuses
- *   it) is submitted as an input entry of kind `pikit.input` carrying them (pi-durable's `InputEntry`):
- *   one commit with the input, in the transcript for good. A run's tools, sections and hooks read
+ * - **Request ids, senders and parts**: every request is submitted as an input entry of kind
+ *   `pikit.input` carrying its request id, and its `sender` and `parts` when it has them (checked
+ *   first: a malformed part refuses it) (pi-durable's `InputEntry`): one commit with the input, carried
+ *   by a queued or steering input in `pi.inbox`, in the transcript for good, where `agent.observe` gives
+ *   each input entry's request id and sender (`observe.ts`). A run's tools, sections and hooks read
  *   `RUN_REQUESTS`: the run's inputs (`pi.live.run.inputs`) as they are when asked, each with the sender
  *   its entry carries; the run's result has the parts of its inputs' entries before its tools'
  *   (`result.ts`), so a reconciliation after a crash logs them as a live settlement would, once.
@@ -118,7 +120,7 @@ import type { WorkspaceProvider } from "./types.ts";
 import { isSettledInput, type SettledInput, settlementOf, toResult } from "./result.ts";
 import { RecentMap } from "./recent.ts";
 import { openDurableStorage } from "./sql.ts";
-import { ABANDONED, AdmissionsDoc, announced, durableId, INPUT_KIND, runKey, runsOf, senderOfEntry, storedRunsOf } from "./submissions.ts";
+import { ABANDONED, AdmissionsDoc, announced, durableId, INPUT_KIND, inputData, runKey, runsOf, senderOfEntry, storedRunsOf } from "./submissions.ts";
 
 export interface DurableRuntimeOptions {
   /**
@@ -1182,13 +1184,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
               content: inputOf(request),
               requestId,
               ...(request.whenBusy === "steer" && { whenBusy: "steer" }),
-              // A sender and parts are placed with the input, in its entry (pi-durable's `InputEntry`): one commit, kept in the transcript.
-              ...((sender !== undefined || parts.length > 0) && {
-                entry: {
-                  kind: INPUT_KIND,
-                  data: { ...(sender !== undefined && { sender: { channel: sender.channel, id: sender.id } }), ...(parts.length > 0 && { parts: parts as unknown as JsonValue }) },
-                },
-              }),
+              // The request id, its sender and parts are placed with the input, in its entry (pi-durable's `InputEntry`): one commit, kept in the transcript.
+              entry: { kind: INPUT_KIND, data: inputData(requestId, sender, parts) },
             };
             const submission = await conversation.submit(draft, toChord(ctx));
             const status = admitting.get(key) ?? (await submission.status(toChord(ctx))).status;

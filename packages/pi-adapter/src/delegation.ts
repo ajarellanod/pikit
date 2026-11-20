@@ -77,7 +77,7 @@ import { type AppContext, type ContextKey, createContextKey } from "@pikit/core"
 import { type AgentDefinition, type AgentRequest, type ConversationOrigin, type ConversationRef, isAgentUnavailable, type MessagePart, type Sender } from "@pikit/contracts";
 import { ConversationDoc, copyOrigin, type Offers } from "./agent.ts";
 import { isSettledInput, runParts, type SettledInput } from "./result.ts";
-import { INPUT_KIND } from "./submissions.ts";
+import { INPUT_KIND, inputData } from "./submissions.ts";
 
 /** A task for another agent. */
 export interface DelegatedTask {
@@ -305,8 +305,9 @@ export function resultPrompt(agent: string, outcome: DelegatedOutcome): string {
   return `[The task you delegated to the agent "${agent}" was stopped before it answered.]`;
 }
 
+/** A task's input (or a steer's) as the runtime places every input: a `pikit.input` entry with its request id and the task's sender. */
 const inputOf = (task: string, requestId: string, sender: JsonSender | undefined): InputSubmissionDraft =>
-  ({ type: "input", content: task, requestId, ...(sender !== undefined && { entry: { kind: INPUT_KIND, data: { sender } } }) }) as const;
+  ({ type: "input", content: task, requestId, entry: { kind: INPUT_KIND, data: inputData(requestId, sender) } }) as const;
 
 const steerOf = (steer: Steer, sender: JsonSender | undefined): InputSubmissionDraft => ({ ...inputOf(steer.message, steer.requestId, sender), whenBusy: "steer" });
 

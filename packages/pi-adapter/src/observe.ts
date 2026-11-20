@@ -10,7 +10,7 @@
  * | `busy`          | `pi.live`'s `run`, present exactly while a run goes |
  * | `lastActivity`  | the newest message's `timestamp` |
  * | `usage`         | `pi.usage`: every model call and tool, summed (pi-ai's `Usage`) |
- * | `transcript`    | `Conversation.entries`, newest first; an entry's `model` messages are pi-ai's `Message`s |
+ * | `transcript`    | `Conversation.entries`, newest first; an entry's `model` messages are pi-ai's `Message`s; a `pikit.input` entry's data gives its `requestId` and `sender` |
  * | `watch`         | `Conversation.watch` (the view, spec §9.3): `pi.live` projected as `ObservedLive` and diffed, the window's new entries, `pi.usage` changing; a slow consumer gets the values folded |
  *
  * Neutral: on a server it sees every conversation of the storage; in a Cloudflare Durable Object, the
@@ -34,7 +34,7 @@ import type { AppContext } from "@pikit/core";
 import { type AgentObserver, diffOps, type JsonValue, type ObservedConversation, type ObservedEvent, type ObservedLive, type Page, type PageRequest, type TranscriptEntry, type Usage } from "@pikit/contracts";
 import { ConversationDoc } from "./agent.ts";
 import { toChord } from "./context.ts";
-import { durableId } from "./submissions.ts";
+import { durableId, INPUT_KIND, requestOfEntry, senderOfEntry } from "./submissions.ts";
 
 /** What the observer reads: the runtime's open Harness and its storage. */
 export interface ObservedRuntime {
@@ -236,9 +236,11 @@ function liveOf(harness: Harness, chord: ChordContext): (view: ConversationView)
   };
 }
 
-/** A transcript entry as the contract carries it. */
+/** A transcript entry as the contract carries it: an input's (`pikit.input`) with its request id and sender. */
 function entryOf(entry: EntryRecord): TranscriptEntry {
-  return { id: String(entry.id), kind: entry.kind, messages: json(entry.model ?? []) };
+  const requestId = entry.kind === INPUT_KIND ? requestOfEntry(entry.data) : undefined;
+  const sender = requestId === undefined ? undefined : senderOfEntry(entry.data);
+  return { id: String(entry.id), kind: entry.kind, messages: json(entry.model ?? []), ...(requestId !== undefined && { requestId }), ...(sender !== undefined && { sender }) };
 }
 
 /** A pi-durable value as plain JSON: what the contract carries (no `undefined`, no class). */

@@ -8,10 +8,12 @@
  *   its submission, and leaves it once its run is logged. It bounds what a reconciliation examines (a
  *   run is logged at most once, even after the log pruned it) and lists, at start, the conversations
  *   that may hold a settlement a crash left unlogged.
- * - **Senders and parts**: a request with a `sender` or `parts` is placed as an entry of kind
- *   `pikit.input` (`INPUT_KIND`) whose data is `{ sender?, parts? }` (pi-durable's `InputEntry`,
- *   #10407): admitted in the submission's own commit, kept in the transcript, carried by a queued input
- *   in `pi.inbox`. `RUN_REQUESTS` reads the sender from the entries of the run's inputs
+ * - **Request ids, senders and parts**: every input the runtime submits (a request's, a delegated
+ *   task's and its steers) is placed as an entry of kind `pikit.input` (`INPUT_KIND`) whose data is
+ *   `{ requestId, sender?, parts? }` (`InputData`; pi-durable's `InputEntry`, #10407): admitted in the
+ *   submission's own commit, kept in the transcript, carried by a queued or steering input in
+ *   `pi.inbox` until it is placed. `agent.observe` gives each entry's request id and sender
+ *   (`observe.ts`); `RUN_REQUESTS` reads the sender from the entries of the run's inputs
  *   (`pi.live.run.inputs`); a run's result reads the parts from the same entries (`result.ts`).
  * - **Runs**: the inputs one commit settles are grouped exactly (`runsOf`); inputs found settled later
  *   are grouped exactly too (`storedRunsOf`): an answered run by its answer entry, any other placed
@@ -31,6 +33,7 @@
  */
 
 import type { Context as ChordContext } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord";
 import { type ConversationId, defineDoc, type Storage } from "@earendil-works/pi-durable";
 import type { SettledInput } from "./result.ts";
 
@@ -45,11 +48,28 @@ export const AdmissionsDoc = defineDoc<{ conversations: { [conversationId: strin
   checkpointWhen: (_value, _ops, { deltasSinceBase }) => deltasSinceBase >= 64,
 });
 
-/** The kind of the entry an input with a sender or parts is placed as (pi-durable's `InputEntry`); its data is `{ sender?, parts? }`. */
+/** The kind of the entry the runtime places every input as (pi-durable's `InputEntry`); its data is `InputData`. */
 export const INPUT_KIND = "pikit.input";
 
-/** Whether an entry of `kind` placed an input: pi-durable's own `pi.user`, or the runtime's `pikit.input`. */
+/** What a `pikit.input` entry carries: its request's id, and that request's sender and parts when it had them. */
+export type InputData = { requestId: string; sender?: { channel: string; id: string }; parts?: JsonValue };
+
+/** The data of the `pikit.input` entry of request `requestId`. */
+export function inputData(requestId: string, sender: { channel: string; id: string } | undefined, parts: readonly unknown[] = []): InputData {
+  return { requestId, ...(sender !== undefined && { sender: { channel: sender.channel, id: sender.id } }), ...(parts.length > 0 && { parts: parts as unknown as JsonValue }) };
+}
+
+/**
+ * Whether an entry of `kind` placed an input: the runtime's `pikit.input`, or pi-durable's own `pi.user`
+ * (an input submitted without an entry: none of the runtime's).
+ */
 export const isInputKind = (kind: string): boolean => kind === "pi.user" || kind === INPUT_KIND;
+
+/** The request id an input entry carries (`{ requestId }` in its data), or `undefined`. */
+export function requestOfEntry(data: unknown): string | undefined {
+  const requestId = (data as { requestId?: unknown } | null | undefined)?.requestId;
+  return typeof requestId === "string" ? requestId : undefined;
+}
 
 /** The sender an input entry carries (`{ sender }` in its data), or `undefined`. */
 export function senderOfEntry(data: unknown): { channel: string; id: string } | undefined {

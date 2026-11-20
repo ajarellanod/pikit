@@ -6,7 +6,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import { applyOps, defineAgent, type JsonValue, type ObservedEvent, type ObservedLive } from "@pikit/contracts";
+import { applyOps, defineAgent, type JsonValue, type ObservedEvent, type ObservedLive, type Sender, type TranscriptEntry } from "@pikit/contracts";
 import { createAgentObserveConformance } from "@pikit/contracts/testing";
 import { createObserver } from "./observe.ts";
 import { modelsFrom } from "./models.ts";
@@ -140,6 +140,62 @@ test("a consumer behind by more than pi-durable's window (100 entries) is told t
   expect(sent.length).toBeLessThan(transcript?.items.length ?? 0);
   expect(new Set(sent).size).toBe(sent.length);
 });
+
+test("each input entry names its request and its sender, a queued and a steering one too; no other entry does; live as in the transcript", async () => {
+  const hold = releasableHold();
+  const w = await worker({ agents: [scriptedAgent([hold.tool as never])] });
+  const conversation = await w.conversation();
+  const alice: Sender = { channel: "telegram", id: "1001" };
+  const operator: Sender = { channel: "dashboard", id: "ops" };
+  const stop = new AbortController();
+  const live: TranscriptEntry[] = [];
+  const watching = (async () => {
+    for await (const event of w.observe.watch(conversation.conversationId, w.ctx.derive((inner) => withAbortSignal(stop.signal, inner)))) {
+      if (event.type === "entries") live.push(...event.entries);
+    }
+  })();
+
+  await w.runtime.dispatch({ requestId: "r1", conversation, prompt: "hold", sender: alice }, w.ctx);
+  await hold.started;
+  // While r1's run holds: r2 queued in `pi.inbox` (a follow-up), r3 steering into the run.
+  await w.runtime.dispatch({ requestId: "dashboard:r2", conversation, prompt: "queued", sender: operator }, w.ctx);
+  await w.runtime.dispatch({ requestId: "r3", conversation, prompt: "steered", whenBusy: "steer" }, w.ctx);
+  hold.release();
+  await w.result("r1");
+  // r3 joined r1's run (its result is r1's); r2 runs after it.
+  await w.result("dashboard:r2");
+
+  const transcript = (await w.observe.transcript(conversation.conversationId, { limit: 500 }, w.ctx))?.items ?? [];
+  const isInput = (entry: TranscriptEntry) => entry.messages.some((message) => (message as { role?: string }).role === "user");
+  const named = (entries: readonly TranscriptEntry[]) =>
+    entries
+      .filter(isInput)
+      .map((entry) => [entry.requestId, entry.sender])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  expect(named(transcript)).toEqual([
+    ["dashboard:r2", operator],
+    ["r1", alice],
+    ["r3", undefined],
+  ]);
+  const others = transcript.filter((entry) => !isInput(entry));
+  expect(others.length).toBeGreaterThan(0);
+  for (const entry of others) expect([entry.id, "requestId" in entry, "sender" in entry]).toEqual([entry.id, false, false]);
+
+  // Live: every entry sent as the transcript has it, the inputs named alike.
+  await until(() => transcript.every((entry) => live.some((each) => each.id === entry.id)), "every entry live");
+  stop.abort();
+  await watching;
+  for (const entry of live) expect(entry).toEqual(transcript.find((each) => each.id === entry.id) as TranscriptEntry);
+  expect(named(live)).toEqual(named(transcript));
+});
+
+/** Waits until `holds()`, at most 10 s. */
+async function until(holds: () => boolean, what: string): Promise<void> {
+  for (const end = Date.now() + 10_000; !holds(); ) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 test("a cursor the observer did not give, or a page of 0, is refused", async () => {
   const w = await worker();
