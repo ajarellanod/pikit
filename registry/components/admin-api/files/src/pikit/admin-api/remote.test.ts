@@ -248,12 +248,12 @@ test("the Worker's list pages, at most CONVERSATIONS_PER_PAGE whatever limit ask
 test("one conversation and its transcript from its object; an unknown or malformed id is 404; an object that cannot be reached is 503", async () => {
   const { platform, worker: w } = await cloud();
   const runtime = await chat(platform, "telegram:1");
-  runtime.transcripts.set("1", [{ id: "e1", kind: "message", messages: [{ role: "user", content: "hi" }] }]);
+  runtime.transcripts.set("1", [{ id: "e1", kind: "pikit.input", messages: [{ role: "user", content: "hi" }], requestId: "m1", sender: { channel: "telegram", id: "1" } }]);
 
   const one = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}`, { headers: AUTH });
   expect(await one.json()).toMatchObject({ conversationId: "telegram:1~1", key: "telegram:1", current: true });
   const transcript = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/transcript?limit=5`, { headers: AUTH });
-  expect(await transcript.json()).toEqual({ items: [{ id: "e1", kind: "message", messages: [{ role: "user", content: "hi" }] }] });
+  expect(await transcript.json()).toEqual({ items: [{ id: "e1", kind: "pikit.input", messages: [{ role: "user", content: "hi" }], requestId: "m1", sender: { channel: "telegram", id: "1" } }] });
   expect(runtime.pages).toContainEqual({ limit: 5 });
 
   for (const id of ["telegram:1~9", "telegram:1", "telegram:1~x", "telegram:2~1", "%E0"]) {
@@ -435,9 +435,12 @@ test("live events on the Worker: the object's stream, as server-sent events, eac
   // Not polled: what the object's runtime emits arrives, every part of it, over the one stream.
   runtime.push({ type: "live", ops: [["s", ["partial"], { role: "assistant", content: [{ type: "text", text: "hel" }] }]] });
   runtime.push({ type: "live", ops: [["a", ["partial", "content", 0, "text"], "lo"]] });
-  expect(await stream.take(2)).toEqual([
+  const input = { id: "e0", kind: "pikit.input", messages: [{ role: "user", content: "hi" }], requestId: "m1", sender: { channel: "telegram", id: "1" } };
+  runtime.push({ type: "entries", entries: [input] });
+  expect(await stream.take(3)).toEqual([
     { type: "live", ops: [["s", ["partial"], { role: "assistant", content: [{ type: "text", text: "hel" }] }]] },
     { type: "live", ops: [["a", ["partial", "content", 0, "text"], "lo"]] },
+    { type: "entries", entries: [input] },
   ]);
   expect(platform.calls.filter((each) => each.startsWith("telegram:1 "))).toEqual(["telegram:1 admin-api.live"]);
   client.abort();

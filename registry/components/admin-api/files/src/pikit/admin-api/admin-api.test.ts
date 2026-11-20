@@ -284,7 +284,7 @@ test("GET one conversation and its transcript; an unknown one, a malformed id or
   s.hold({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
   s.runtime.transcripts.set("c1", [
     { id: "e2", kind: "message", messages: [{ role: "assistant", content: "hello" }] },
-    { id: "e1", kind: "message", messages: [{ role: "user", content: "hi" }] },
+    { id: "e1", kind: "pikit.input", messages: [{ role: "user", content: "hi" }], requestId: "m1", sender: { channel: "telegram", id: "1" } },
   ]);
 
   const one = await s.fetch(at("telegram:1", "c1"), { headers: AUTH });
@@ -292,6 +292,9 @@ test("GET one conversation and its transcript; an unknown one, a malformed id or
 
   const transcript = await s.fetch(at("telegram:1", "c1", "/transcript?limit=1"), { headers: AUTH });
   expect(await transcript.json()).toEqual({ items: [{ id: "e2", kind: "message", messages: [{ role: "assistant", content: "hello" }] }], next: "1" });
+  // A message's entry keeps its request and sender.
+  const older = await s.fetch(at("telegram:1", "c1", "/transcript?limit=1&cursor=1"), { headers: AUTH });
+  expect(await older.json()).toEqual({ items: [{ id: "e1", kind: "pikit.input", messages: [{ role: "user", content: "hi" }], requestId: "m1", sender: { channel: "telegram", id: "1" } }] });
 
   for (const id of ["nope", "telegram:1~nope", "telegram:2~c1", "c1"]) {
     for (const rest of ["", "/transcript", "/events"]) {
@@ -314,7 +317,9 @@ test("GET …/events: the live state whole, then its changes, entries and hints,
   const stream = sse(response);
   expect(await stream.take(1)).toEqual([{ type: "live", ops: [["r", { busy: false, tools: [] }]] }]);
   const entry = { id: "e1", kind: "message", messages: [{ role: "assistant", content: [{ type: "text", text: "hello" }] }] };
+  const input = { id: "e0", kind: "pikit.input", messages: [{ role: "user", content: "hi" }], requestId: "dashboard:m1", sender: { channel: "dashboard", id: "ops" } };
   const events: ObservedEvent[] = [
+    { type: "entries", entries: [input] },
     { type: "live", ops: [["s", ["busy"], true], ["s", ["partial"], { role: "assistant", content: [{ type: "text", text: "hel" }] }]] },
     { type: "live", ops: [["a", ["partial", "content", 0, "text"], "lo"]] },
     { type: "entries", entries: [entry] },

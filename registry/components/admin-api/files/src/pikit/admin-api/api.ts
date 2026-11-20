@@ -225,6 +225,14 @@ export interface ApiTranscriptEntry {
   /** `message`, `pi.reset`, …: the runtime's words. */
   kind: string;
   messages: unknown[];
+  /**
+   * The request whose input the entry placed (`agent.observe`'s `TranscriptEntry.requestId`): on every
+   * entry of a message, never on an answer's or a tool's. The dashboard's own start with `dashboard:`;
+   * a scheduled message's with `scheduler:` (scheduler-admit).
+   */
+  requestId?: string;
+  /** That request's sender, when it had one: a channel's user, an operator (`{ channel: "dashboard", id }`), a scheduled job. */
+  sender?: { channel: string; id: string };
 }
 
 /** A JSON value, read-only at every depth. */
