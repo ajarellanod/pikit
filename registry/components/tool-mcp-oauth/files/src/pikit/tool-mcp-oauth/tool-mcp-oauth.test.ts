@@ -327,7 +327,11 @@ test("a token is used, kept by the object, and refreshed once after a 401; the r
   const d = await deployment({ figma: { url } });
   expect((await d.run(["login", "figma"])).problems).toEqual([]);
   const first = { access: fake.current.access, refresh: fake.current.refresh };
-  const client = await connect(url, await d.conversation("figma"));
+  const before = d.objects.calls.length;
+  const auth = await d.conversation("figma");
+  // A conversation's start calls the owner for nothing: the first use asks for the token.
+  expect(d.objects.calls.slice(before)).toEqual([]);
+  const client = await connect(url, auth);
 
   expect(await text(client)).toBe("ana");
   expect(await text(client)).toBe("ana");

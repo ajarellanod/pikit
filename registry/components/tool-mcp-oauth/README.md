@@ -116,7 +116,10 @@ per deployment; pikit sends what you configure and nothing else.
 - **Not logged in is not down.** A server with no usable login fails only its tools' calls, with
   that message; the app starts and answers (tool-mcp's exception to its "a server it cannot list
   stops the start" rule), and `health` reports `tool-mcp-oauth:<server>` degraded. On a server the
-  app reports each server's state at start; on Cloudflare each conversation reports what it met.
+  app reports each server's state at start, from its own storage; on Cloudflare each conversation
+  reports what it met at its first use of the server's tools. A start never asks the owner for a
+  login: tool-mcp reaches an OAuth server (reading its token) only at its tools' first call, and logs
+  "no usable OAuth login" then, once per app.
 - **One URL per login.** A login carries the URL it was made for: an upload for another URL than
   the config's is refused (`400`), and one whose server moved to another URL in config is not
   served (log in again).
@@ -177,8 +180,11 @@ rotating refresh tokens, only the latest access token accepted):
   degraded, refuses its token with the command to run; the command against the app's own routes
   logs it in.
 
-tool-mcp's tests cover its side with a stand-in `mcp.auth`: the start that does not stop for a
-server not logged in, its tools failing with the message and described after the login, a refresh
+A conversation's start makes no call to the owner (checked in the token test).
+
+tool-mcp's tests cover its side with a stand-in `mcp.auth`: a start that reads no login, the first
+call that reads it, lists and describes the tools, a server not logged in failing its tools' calls
+with the message and warned once, described after the login, a refresh
 after a 401 naming the rejected token, and the starts refused (no `mcp.auth`, one for another URL).
 
 In the pikit repository, the workerd lane (`tests/workerd/test/tool-mcp-oauth.workerd.ts`) runs
