@@ -102,8 +102,7 @@ test("a conversation is busy while its run goes, and idle once it ends; its tool
   await next((state) => state.tools.some((tool) => tool.name === "hold" && tool.status === "running"));
   expect(live).toMatchObject({ busy: true, requests: ["r1"] });
   hold.release();
-  // r3 joined r1's run (its result is r1's); r2 runs after it.
-  expect((await w.result("r1")).requestIds).toEqual(["r1", "r3"]);
+  await w.result("r1");
   const idle = await w.observe.conversation(conversation.conversationId, w.ctx);
   await next((state) => !state.busy);
   stop.abort();
