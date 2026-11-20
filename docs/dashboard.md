@@ -215,7 +215,7 @@ at it (repo-github-app's setup comes back to `/admin/?settings=repo-github-app`)
 
 | Section | Component | `requires` | What |
 |---|---|---|---|
-| Agents (part 1) | runtime-pi | `settings` | the code's agents ("In the project's code"), each with Edit: its prompt, model, tools and skills overrides, "Use default" |
+| Agents (part 1) | runtime-pi | `settings` | the code's agents ("In the project's code"), each with Edit: its prompt, model, thinking level, tools and skills overrides, "Use default" |
 | Agents (part 2) | agents-live | `settings`, `agent.directory` | "Made here": create, edit, remove live agents |
 | Routing (part 1) | router-rules | `settings` | the rules (channel, chats, senders; an agent, the code's or a live one, or deny with a reason) in two views: "By agent" (a card per agent, its chats as chips with their names, added several at once, moved to another agent; the refusals) and "In order" (each rule a card, dragged; "Add rule"); a search with many chats; Save and Revert while there are changes |
 | Routing (part 2) | router-basic | `settings` | the locked last card: "ELSE · Everything else goes to [agent]" (alone: "ALWAYS · Every message goes to [agent]"), saved at once |

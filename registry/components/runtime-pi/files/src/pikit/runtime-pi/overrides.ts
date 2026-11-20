@@ -1,13 +1,13 @@
 /**
  * The agents' live overrides (features/settings.md, option B): an operator changes an agent's system
- * prompt, model, tools and skills from the dashboard (router-basic's Agent section), as runtime-pi's settings
+ * prompt, model, thinking level, tools and skills from the dashboard (router-basic's Agent section), as runtime-pi's settings
  * (`settings`, when a provider is installed). The definition still owns the agent (SPEC §6): the
  * overrides are data over it, applied where the runtime rebuilds `pi.agent` from the definition (at
  * every admission, in the commit of each state update, before a reopened Harness resumes), after
  * `prepare(state)`. So a restart, a reopened Harness and an evicted object build the same agent.
  *
  * - **What can be overridden**, per agent: `systemPrompt`; `model`, one an installed `model.provider`
- *   with credentials at start has (or the definition's own); `tools`, the tools on among the names its definition gives (a name it leaves out is off;
+ *   with credentials at start has (or the definition's own); `thinkingLevel`, one of `THINKING_LEVELS`; `tools`, the tools on among the names its definition gives (a name it leaves out is off;
  *   tools `prepare` adds beyond the definition's stay); `skills`, the same among the skills its
  *   definition names (a catalog name, or a skill of its own by its name). The schema says which, from the App at start:
  *   a value outside it is refused when set, and left out when read (a deploy removed the model, or its
@@ -19,13 +19,14 @@
  *   failures are.
  */
 
-import type { AgentDefinition, SettingsValue } from "@pikit/contracts";
+import { type AgentDefinition, type SettingsValue, THINKING_LEVELS, type ThinkingLevel } from "@pikit/contracts";
 import Type, { type TSchema } from "typebox";
 
 /** What an operator may change of one agent. Absent: the definition's. */
 export interface AgentOverride {
   systemPrompt?: string;
   model?: string;
+  thinkingLevel?: ThinkingLevel;
   tools?: string[];
   skills?: string[];
 }
@@ -74,6 +75,9 @@ export function overridesSchema(agents: readonly AgentDefinition[], models: read
             Type.String({ maxLength: MAX_PROMPT, title: "System prompt", description: "What the agent is told before every conversation.", default: agent.systemPrompt ?? "" }),
           ),
           model: Type.Optional(choice([...new Set([...models, agent.model])].sort(), { title: "Model", description: "The model that answers, among those of the providers with credentials.", default: agent.model })),
+          thinkingLevel: Type.Optional(
+            choice(THINKING_LEVELS, { title: "Thinking", description: "How much the model thinks before each answer, least to most.", default: agent.thinkingLevel ?? "off" }),
+          ),
           tools: Type.Optional(Type.Array(choice(tools, {}), { uniqueItems: true, title: "Tools", description: "The tools it may call, among those its definition names.", default: tools })),
           skills: Type.Optional(Type.Array(choice(skills, {}), { uniqueItems: true, title: "Skills", description: "The skills it knows, among those its definition names.", default: skills })),
         },
@@ -88,6 +92,7 @@ export function overridesSchema(agents: readonly AgentDefinition[], models: read
           {
             systemPrompt: Type.Optional(Type.String({ maxLength: MAX_PROMPT })),
             model: Type.Optional(choice([...models].sort(), {})),
+            thinkingLevel: Type.Optional(choice(THINKING_LEVELS, {})),
             tools: Type.Optional(Type.Array(choice([...live.tools].sort(), {}), { uniqueItems: true })),
             skills: Type.Optional(Type.Array(choice([...live.skills].sort(), {}), { uniqueItems: true })),
           },
@@ -114,6 +119,7 @@ export function withOverride(agent: AgentDefinition | undefined, override: Agent
         ...changes,
         ...(override.systemPrompt !== undefined && { systemPrompt: override.systemPrompt }),
         ...(override.model !== undefined && { model: override.model }),
+        ...(override.thinkingLevel !== undefined && { thinkingLevel: override.thinkingLevel }),
         ...(off.size > 0 && { tools: tools.filter((tool) => !off.has(typeof tool === "string" ? tool : tool.name)) }),
         ...(unknown.size > 0 && { skills: skills.filter((skill) => !unknown.has(typeof skill === "string" ? skill : skill.name)) }),
       };

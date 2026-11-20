@@ -25,7 +25,7 @@ An entry may hold the sections of several components, one after another: each pa
 component's and edits only that component's settings.
 
 - **runtime-pi** (always installed) brings **Agents**' first part: the code's agents, each one's
-  system prompt, model, tools and skills (among those its definition names) as overrides.
+  system prompt, model, thinking level, tools and skills (among those its definition names) as overrides.
 - **router-basic** (always installed) brings **Routing**'s last part: which agent answers what
   nothing else routes (alone, every message). With these two, the basic version.
 - **The multi-agent feature** (below) adds agents-live's part to **Agents** (create, edit, remove
@@ -117,7 +117,7 @@ the dashboard applies to the next run of every conversation.
 - **runtime-pi** (`overrides.ts`): its settings are an override per agent; read before every
   admission, resume, `/compact` and driving wakeup (on a server also at start), applied after
   `prepare`. Its section, Agents' first part ("In the project's code"): the code's agents, each with
-  Edit opening its system prompt, model, tools and skills overrides, "Use default".
+  Edit opening its system prompt, model, thinking level, tools and skills overrides, "Use default".
 
 ## Decisions taken while building it
 

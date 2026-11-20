@@ -138,12 +138,25 @@ export function spaceOf(ref: ConversationRef): string {
 }
 
 /**
- * What the agent has for one run: model, instructions, tools and extensions. The static fields of an
- * `AgentDefinition` are its defaults; `prepare(state)` returns the fields it changes.
+ * How much a reasoning model thinks before it answers, least to most: Pi's thinking levels. `off` asks
+ * for none. Each model's own API maps a level to what it has (an effort, a token budget), and one it
+ * lacks to the nearest it has; a model that cannot stop thinking thinks at its least for `off`, and a
+ * model that does not reason ignores the level.
+ */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+/** Whether `value` is one of `THINKING_LEVELS`. */
+export const isThinkingLevel = (value: unknown): value is ThinkingLevel => (THINKING_LEVELS as readonly unknown[]).includes(value);
+
+/**
+ * What the agent has for one run: model, thinking level, instructions, tools and extensions. The static
+ * fields of an `AgentDefinition` are its defaults; `prepare(state)` returns the fields it changes.
  */
 export interface TurnConfig {
   /** `provider/modelId`, resolved by the runtime against its models. */
   model: string;
+  /** As in `AgentDefinition.thinkingLevel`. */
+  thinkingLevel?: ThinkingLevel;
   systemPrompt?: string;
   /** As in `AgentDefinition.tools`: names of installed tools, or tool objects. */
   tools: readonly (AgentTool | string)[];
@@ -177,6 +190,12 @@ export interface AgentDefinition<S extends object = object> {
   name: string;
   /** `provider/modelId`. */
   model: string;
+  /**
+   * How much its model thinks before each answer (`THINKING_LEVELS`), sent with every model request of
+   * its runs, compaction's summaries included. Absent: `off`, the runtime's default (a model that cannot
+   * stop thinking then thinks at its least).
+   */
+  thinkingLevel?: ThinkingLevel;
   /**
    * Whether it is the project's steward (SPEC §6): its main agent, the only one that knows what the
    * project is made of (the `pikit-self` extension) and may be asked, by its operators, to change it.
@@ -227,8 +246,8 @@ export interface AgentDefinition<S extends object = object> {
   state?: S;
   /**
    * Runs before every run of a conversation, and again whenever a tool updates its state, with the
-   * conversation's current state, and returns what changes from then on: model, system prompt, tools,
-   * extensions. It is the simple path, for an agent that switches with its state (a phase, a mode).
+   * conversation's current state, and returns what changes from then on: model, thinking level, system
+   * prompt, tools, extensions. It is the simple path, for an agent that switches with its state (a phase, a mode).
    * It must be pure and synchronous: it returns a value and registers nothing, so it is also a plain
    * function in tests (`agent.prepare?.(state, ctx)`). Anything that reads a store, waits, or must
    * see each model request or tool call is an extension (`extensions`), not `prepare`. Without it,
@@ -257,6 +276,9 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
   }
   if (definition.steward !== undefined && typeof definition.steward !== "boolean") {
     throw new Error(`agent "${definition.name}": steward must be true or false`);
+  }
+  if (definition.thinkingLevel !== undefined && !isThinkingLevel(definition.thinkingLevel)) {
+    throw new Error(`agent "${definition.name}": thinkingLevel ${JSON.stringify(definition.thinkingLevel)} must be one of ${THINKING_LEVELS.join(", ")}`);
   }
   const named = (definition.tools ?? []).filter((tool): tool is string => typeof tool === "string");
   for (const [index, name] of named.entries()) {

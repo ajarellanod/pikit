@@ -69,9 +69,9 @@ type SystemEntry = { role: string; sections?: { instructions?: string }; toolsAd
 
 /** Two scripted providers, `faux` and `alt`, recording which was asked and what it was told. */
 function providers() {
-  const asked: { provider: string; system: string; tools: string[] }[] = [];
+  const asked: { provider: string; system: string; tools: string[]; reasoning?: string }[] = [];
   // pi-durable tells the model its instructions and tools in system entries: each one's changes, in order.
-  const record = (provider: string) => (request: ModelRequest) => {
+  const record = (provider: string) => (request: ModelRequest, options?: { reasoning?: string }) => {
     let system = "";
     const tools = new Set<string>();
     for (const message of request.messages as unknown as SystemEntry[]) {
@@ -80,7 +80,7 @@ function providers() {
       for (const each of message.toolsRemoved ?? []) tools.delete(typeof each === "string" ? each : each.name);
       for (const each of message.toolsAdded ?? []) tools.add(each.name);
     }
-    asked.push({ provider, system, tools: [...tools].sort() });
+    asked.push({ provider, system, tools: [...tools].sort(), ...(options?.reasoning !== undefined && { reasoning: options.reasoning }) });
   };
   const faux = scriptedProvider({ id: "faux", onRequest: record("faux") });
   const alt = scriptedProvider({ id: "alt", onRequest: record("alt") });
@@ -170,6 +170,29 @@ test("an operator's override changes the next run's system prompt, model and too
   await second.app.stop();
 }, 30_000);
 
+test("an operator's thinking level goes with the next run's requests; taken back, the definition's", async () => {
+  const settings = memorySettings();
+  const models = providers();
+  const app = await started([sqliteStorage(), agents(defineAgent({ ...assistant, thinkingLevel: "low" })), models.component, settings.component()]);
+  const conversation = await app.conversation("test:thinking");
+
+  await app.ask(conversation, "r1", "hello");
+  expect(models.asked.at(-1)?.reasoning).toBe("low");
+
+  await settings.set("runtime-pi", { assistant: { thinkingLevel: "high" } });
+  await app.ask(conversation, "r2", "think harder");
+  expect(models.asked.at(-1)).toMatchObject({ provider: "faux", reasoning: "high", tools: ["lookup", "notes"] });
+
+  await settings.set("runtime-pi", { assistant: { thinkingLevel: "off" } });
+  await app.ask(conversation, "r3", "no thinking");
+  expect(models.asked.at(-1)?.reasoning).toBeUndefined();
+
+  await settings.set("runtime-pi", {});
+  await app.ask(conversation, "r4", "as defined");
+  expect(models.asked.at(-1)?.reasoning).toBe("low");
+  await app.app.stop();
+}, 30_000);
+
 test("runtime-pi declares an override per agent, among the installed providers' models and the tools its definition names", async () => {
   const settings = memorySettings();
   const models = providers();
@@ -180,10 +203,18 @@ test("runtime-pi declares an override per agent, among the installed providers' 
     expect(Value.Check(schema, { assistant: { model: "alt/scripted", tools: ["notes"], systemPrompt: "Hi." } })).toBe(true);
     expect(Value.Check(schema, { assistant: { model: "nobody/nothing" } })).toBe(false);
     expect(Value.Check(schema, { assistant: { tools: ["bash"] } })).toBe(false);
+    expect(Value.Check(schema, { assistant: { thinkingLevel: "xhigh" } })).toBe(true);
+    expect(Value.Check(schema, { assistant: { thinkingLevel: "ultra" } })).toBe(false);
     expect(Value.Check(schema, { stranger: {} })).toBe(false);
     // What the dashboard shows when nothing is overridden: the definition's.
     const fields = (settings.schema() as { properties: { assistant: { properties: Record<string, { default?: unknown }> } } }).properties.assistant.properties;
-    expect([fields.systemPrompt?.default, fields.model?.default, fields.tools?.default, fields.skills?.default]).toEqual(["Be brief.", "faux/scripted", ["lookup", "notes"], []]);
+    expect([fields.systemPrompt?.default, fields.model?.default, fields.thinkingLevel?.default, fields.tools?.default, fields.skills?.default]).toEqual([
+      "Be brief.",
+      "faux/scripted",
+      "off",
+      ["lookup", "notes"],
+      [],
+    ]);
   } finally {
     await app.stop();
   }
@@ -283,6 +314,8 @@ test("an override goes over what prepare gives; a tool prepare adds beyond the d
   expect(turn?.systemPrompt).toBe("From the operator.");
   expect(turn?.tools?.map((each) => (typeof each === "string" ? each : each.name))).toEqual(["notes", "extra"]);
   expect(changed?.model).toBe("faux/scripted");
+  expect(turn?.thinkingLevel).toBeUndefined();
+  expect(withOverride(agent, { thinkingLevel: "high" })?.prepare?.({}, ref)?.thinkingLevel).toBe("high");
 });
 
 test("an override turns off skills among those the definition names (catalog names or its own); one prepare adds stays", () => {

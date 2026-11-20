@@ -532,8 +532,8 @@ admission; `features/settings.md`), agents that are data (`agent.directory`, bel
 memory kept as documents or files. Code
 changes only through the path below (`features/kit-follow-ups.md`, "No code hot reload").
 
-**The definition owns the agent.** A conversation's `pi.agent` (model, instructions, tools,
-extensions) is what its agent's definition (`defineAgent`, through `prepare(state)`) gives: the
+**The definition owns the agent.** A conversation's `pi.agent` (model, thinking level, instructions,
+tools, extensions) is what its agent's definition (`defineAgent`, through `prepare(state)`) gives: the
 runtime rebuilds it at each admission, in the commit of each state update, and before a reopened
 Harness resumes, so a `configure()` made on the conversation directly is undone at the next of these.
 A live change goes through the state or data the definition reads. The one input besides the state:

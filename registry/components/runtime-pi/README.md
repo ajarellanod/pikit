@@ -35,7 +35,7 @@ it into the app.
   - `wakeups`, if installed: runs are driven inside wakeups, in slices, instead of by promises left
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes;
   - `settings`, if installed (`settings-store`): the agents' live overrides, an operator's system
-    prompt, model, tools and skills per agent, set from the dashboard ("Live overrides" below). Without it,
+    prompt, model, thinking level, tools and skills per agent, set from the dashboard ("Live overrides" below). Without it,
     every agent is its definition;
   - `agent.directory`, if installed (`agents-live`): agents that are data, an operator's, for a name
     no `agent.definition` has ("Live agents" below).
@@ -291,7 +291,8 @@ or must see each model request or tool call is an extension.
 ## Live overrides
 
 With `settings` installed (`settings-store`, installed with the dashboard), an operator changes an
-agent's **system prompt**, **model** (one a provider with credentials has), **tools** and **skills** (on or
+agent's **system prompt**, **model** (one a provider with credentials has), **thinking level** (one of
+`THINKING_LEVELS`; its default the definition's, else `off`), **tools** and **skills** (on or
 off, among those its definition names) from the dashboard's Settings, **Agents**, with no
 deploy and no restart ([features/settings.md](https://github.com/ajarellanod/pikit/blob/main/features/settings.md)). The definition still owns the agent (SPEC §6): the
 overrides are data over it (`overrides.ts`).
@@ -299,7 +300,7 @@ overrides are data over it (`overrides.ts`).
 Its section (`settings/`) is Agents' first part (order 0, "In the project's code"; agents-live's live
 agents follow it in the same entry): the code's agents, each with its model, how many tools and skills it
 has and "changed here" when overridden; Edit opens the agent's page in place of the list (the dashboard's
-`agent-editor`: "← Agents" or Escape goes back), with tabs: General (model, system prompt), Tools and
+`agent-editor`: "← Agents" or Escape goes back), with tabs: General (model, thinking level, system prompt), Tools and
 Skills (searchable switches grouped by family, `delegate_*`, each with its one line, "All on" / "All off"
 per family). Each change saves at once; "Use default" drops the override. It edits runtime-pi's settings only.
 

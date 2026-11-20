@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type Admission, type AgentDefinition, type AgentRuntime, type AgentTool, defineAgent, stewardProblem } from "./index.ts";
+import { type Admission, type AgentDefinition, type AgentRuntime, type AgentTool, defineAgent, isThinkingLevel, stewardProblem, THINKING_LEVELS } from "./index.ts";
 
 test("defineAgent returns the definition unchanged", () => {
   const definition = { name: "support", model: "anthropic/claude-sonnet", systemPrompt: "Be brief." };
@@ -15,6 +15,16 @@ test("defineAgent rejects a name that is not kebab-case and a model without a pr
   expect(() => defineAgent({ name: "Support", model: "anthropic/claude" })).toThrow("kebab-case");
   expect(() => defineAgent({ name: "support", model: "claude" })).toThrow('"provider/modelId"');
   expect(() => defineAgent({ name: "support", model: "anthropic/" })).toThrow('"provider/modelId"');
+});
+
+test("defineAgent takes one of Pi's thinking levels, and refuses any other", () => {
+  for (const level of THINKING_LEVELS) expect(defineAgent({ name: "support", model: "faux/scripted", thinkingLevel: level }).thinkingLevel).toBe(level);
+  expect(defineAgent({ name: "support", model: "faux/scripted" }).thinkingLevel).toBeUndefined();
+  for (const level of ["HIGH", "", "ultra", 3, null]) {
+    expect(() => defineAgent({ name: "support", model: "faux/scripted", thinkingLevel: level as never })).toThrow("thinkingLevel");
+  }
+  expect(isThinkingLevel("xhigh")).toBe(true);
+  expect(isThinkingLevel("none")).toBe(false);
 });
 
 test("an agent names installed tools by name, next to tools of its own", () => {

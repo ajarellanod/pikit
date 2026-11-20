@@ -1,12 +1,12 @@
 /**
  * runtime-pi's section of the Settings dialog (features/settings.md): part 1 of the Agents entry, the
- * agents of the project's code (`src/agents/`), each one's system prompt, model, tools and skills
+ * agents of the project's code (`src/agents/`), each one's system prompt, model, thinking level, tools and skills
  * changed here (an operator's override over the agent's definition, applied from its next run).
  * agents-live's part, the agents made here, follows it. It reads and writes only runtime-pi's settings.
  *
  * The list shows each agent (its model, its tools and skills, "changed here" when overridden); Edit opens
  * the agent's page in place of the list (`useSettingsPage`, the shared `agent-editor`): General (model,
- * system prompt), Tools and Skills (searchable switches, by family). Each change saves at once.
+ * thinking level, system prompt), Tools and Skills (searchable switches, by family). Each change saves at once.
  *
  * What runtime-pi's schema says is all it reads: the agents (its properties; with an `agent.directory`
  * installed it accepts other names too, a live agent's, which are agents-live's to show), each one's
@@ -30,10 +30,10 @@ import { choicesOf, defineSettings, type JsonSchema, type SettingsValue, useSett
 import { useShell } from "@/lib/shell";
 
 /** One agent's override (runtime-pi's settings): absent, the definition's. */
-type Override = { systemPrompt?: string; model?: string; tools?: string[]; skills?: string[] };
+type Override = { systemPrompt?: string; model?: string; thinkingLevel?: string; tools?: string[]; skills?: string[] };
 
 /** What an agent's definition says, as the schema's `default`s carry it. */
-type Definition = { systemPrompt: string; model: string; tools: string[]; skills: string[] };
+type Definition = { systemPrompt: string; model: string; thinkingLevel: string; tools: string[]; skills: string[] };
 
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((each) => b.includes(each));
 
@@ -42,6 +42,7 @@ function definitionOf(fields: Record<string, JsonSchema>): Definition {
   return {
     systemPrompt: typeof fields.systemPrompt?.default === "string" ? fields.systemPrompt.default : "",
     model: typeof fields.model?.default === "string" ? fields.model.default : "",
+    thinkingLevel: typeof fields.thinkingLevel?.default === "string" ? fields.thinkingLevel.default : "off",
     tools: Array.isArray(fields.tools?.default) ? (fields.tools.default as string[]) : [],
     skills: Array.isArray(fields.skills?.default) ? (fields.skills.default as string[]) : [],
   };
@@ -58,7 +59,7 @@ const CHANGED = (
   </span>
 );
 
-/** One agent's page: its model and prompt, its tools and skills; every change saved at once, through `save`. */
+/** One agent's page: its model, thinking level and prompt, its tools and skills; every change saved at once, through `save`. */
 function CodeAgentPage({
   name,
   fields,
@@ -81,6 +82,7 @@ function CodeAgentPage({
   const catalog = useApi<ApiAgents>("/agents").data;
   const definition = definitionOf(fields);
   const models = choicesOf(fields.model) ?? [definition.model];
+  const levels = choicesOf(fields.thinkingLevel) ?? [definition.thinkingLevel];
   const toolOptions = choicesOf(fields.tools?.items) ?? definition.tools;
   const tools = override.tools ?? definition.tools;
   const skillOptions = choicesOf(fields.skills?.items) ?? definition.skills;
@@ -100,7 +102,7 @@ function CodeAgentPage({
       }
       actions={
         changed ? (
-          <Button size="sm" variant="secondary" disabled={saving} onClick={() => save({})} title="Drop every change made here: the definition's prompt, model, tools and skills">
+          <Button size="sm" variant="secondary" disabled={saving} onClick={() => save({})} title="Drop every change made here: the definition's prompt, model, thinking level, tools and skills">
             Use default
           </Button>
         ) : undefined
@@ -121,6 +123,16 @@ function CodeAgentPage({
                   disabled={saving}
                   options={models.map((model) => ({ value: model, label: model === definition.model ? `${model} (default)` : model }))}
                   onChange={(model) => save({ ...override, model })}
+                />
+              </SettingsRow>
+              <SettingsRow label="Thinking" description="How much the model thinks before each answer, least to most. Applies from its next run." htmlFor="settings-thinking">
+                <SelectControl
+                  id="settings-thinking"
+                  label="Thinking"
+                  value={override.thinkingLevel ?? definition.thinkingLevel}
+                  disabled={saving}
+                  options={levels.map((level) => ({ value: level, label: level === definition.thinkingLevel ? `${level} (default)` : level }))}
+                  onChange={(thinkingLevel) => save({ ...override, thinkingLevel })}
                 />
               </SettingsRow>
               <SettingsRow label="System prompt" description="What the agent is told before every conversation. Applies from its next run." stacked htmlFor="settings-system-prompt">
@@ -199,6 +211,7 @@ function CodeAgentsSettings() {
     const kept: Override = {
       ...(next.systemPrompt !== undefined && next.systemPrompt !== definition.systemPrompt && { systemPrompt: next.systemPrompt }),
       ...(next.model !== undefined && next.model !== definition.model && { model: next.model }),
+      ...(next.thinkingLevel !== undefined && next.thinkingLevel !== definition.thinkingLevel && { thinkingLevel: next.thinkingLevel }),
       ...(next.tools !== undefined && !sameSet(next.tools, definition.tools) && { tools: next.tools }),
       ...(next.skills !== undefined && !sameSet(next.skills, definition.skills) && { skills: next.skills }),
     };
@@ -286,6 +299,6 @@ export default defineSettings({
   order: 0,
   entry: "agents",
   requires: ["settings"],
-  keywords: ["agents", "system prompt", "prompt", "model", "tools", "skills", "override", "use default"],
+  keywords: ["agents", "system prompt", "prompt", "model", "thinking", "reasoning", "tools", "skills", "override", "use default"],
   component: CodeAgentsSettings,
 });

@@ -57,7 +57,18 @@ import {
   type Tx,
 } from "@earendil-works/pi-durable";
 import type { AppContext, Logger } from "@pikit/core";
-import { type AgentDefinition, type AgentSkill, type ConversationOrigin, type ConversationRef, SKILL_TOOL, skillsProblem, type TurnConfig } from "@pikit/contracts";
+import {
+  type AgentDefinition,
+  type AgentSkill,
+  type ConversationOrigin,
+  type ConversationRef,
+  isThinkingLevel,
+  SKILL_TOOL,
+  skillsProblem,
+  THINKING_LEVELS,
+  type ThinkingLevel,
+  type TurnConfig,
+} from "@pikit/contracts";
 
 /** A tool the durable runtime runs: pi-durable's (`defineTool`). */
 export type DurableTool = ToolRegistration;
@@ -170,6 +181,8 @@ export function extensionName(agent: string): string {
 /** One turn's configuration, resolved. */
 export interface Turn {
   model: { provider: string; modelId: string };
+  /** Absent: pi-durable's default (`off`). */
+  thinkingLevel: ThinkingLevel | undefined;
   systemPrompt: string | undefined;
   tools: DurableTool[];
   /** The agent's named extensions, as provided, in order. */
@@ -248,7 +261,8 @@ export class AgentConfigs {
 
   /**
    * The static fields of `agent` with `prepare`'s changes over them. Throws when a model, a tool, an
-   * extension or a skill name cannot be resolved, or when two tools share a name.
+   * extension or a skill name cannot be resolved, when two tools share a name, or when the thinking
+   * level is not one of `THINKING_LEVELS`.
    */
   resolve(agent: AgentDefinition, changes: Partial<Record<keyof TurnConfig, unknown>> = {}): Turn {
     const tools = ((changes.tools as TurnConfig["tools"] | undefined) ?? agent.tools ?? []).map((entry) => this.toolOf(agent.name, entry));
@@ -263,6 +277,10 @@ export class AgentConfigs {
     if (model === undefined || models.getModel(model.provider, model.modelId) === undefined) {
       throw new Error(`agent "${agent.name}": model "${name}" is not provided by any model.provider`);
     }
+    const thinkingLevel = (changes.thinkingLevel as unknown) ?? agent.thinkingLevel;
+    if (thinkingLevel !== undefined && !isThinkingLevel(thinkingLevel)) {
+      throw new Error(`agent "${agent.name}": thinkingLevel ${JSON.stringify(thinkingLevel)} is not one of ${THINKING_LEVELS.join(", ")}`);
+    }
     const extensions = ((changes.extensions as TurnConfig["extensions"] | undefined) ?? agent.extensions ?? []).map((entry) => this.extensionOf(agent.name, entry));
     const given = (changes.skills as TurnConfig["skills"] | undefined) ?? agent.skills ?? [];
     // Names first, as given (one name twice is the agent's mistake), then each name's skill.
@@ -271,7 +289,7 @@ export class AgentConfigs {
     const skills = given.map((entry) => this.skillOf(agent.name, entry));
     const problem = skillsProblem(skills, names);
     if (problem !== undefined) throw new Error(`agent "${agent.name}": ${problem}`);
-    return { model, systemPrompt: (changes.systemPrompt as string | undefined) ?? agent.systemPrompt, tools, extensions, skills };
+    return { model, thinkingLevel, systemPrompt: (changes.systemPrompt as string | undefined) ?? agent.systemPrompt, tools, extensions, skills };
   }
 
   /**
@@ -339,12 +357,14 @@ export class AgentConfigs {
     const same =
       current.model?.provider === turn.model.provider &&
       current.model?.modelId === turn.model.modelId &&
+      current.thinkingLevel === turn.thinkingLevel &&
       current.instructions === turn.systemPrompt &&
       JSON.stringify(current.extensions) === JSON.stringify(extensions) &&
       JSON.stringify(current.tools) === JSON.stringify(names);
     if (same) return conversation;
     const change: AgentChange = {
       model: turn.model,
+      thinkingLevel: turn.thinkingLevel ?? null,
       instructions: turn.systemPrompt ?? null,
       // Stored by name: the objects only name them.
       extensions: extensions.map((name) => defineExtension({ name })),

@@ -53,7 +53,12 @@ function records() {
   return {
     async worker(options: { agents?: AgentDefinition[]; logger?: Logger } = {}) {
       const requests: ModelRequest[] = [];
-      const onRequest = (request: ModelRequest) => void requests.push(structuredClone(request));
+      /** Each request's thinking level, as the provider was asked (`reasoning`; absent for `off`). */
+      const reasoning: (string | undefined)[] = [];
+      const onRequest = (request: ModelRequest, options?: { reasoning?: string }) => {
+        requests.push(structuredClone(request));
+        reasoning.push(options?.reasoning);
+      };
       const w = await openWorker(file.path, {
         agents: options.agents ?? [release],
         tools: { deploy },
@@ -66,7 +71,7 @@ function records() {
         await w.dispatch(requestId, prompt, conversation);
         return w.result(requestId);
       };
-      return { ...w, requests, ask };
+      return { ...w, requests, reasoning, ask };
     },
   };
 }
@@ -165,6 +170,44 @@ describe("prepare", () => {
     expect(sent(w.requests.at(-1))).toEqual({ systemPrompt: expect.stringContaining("testing prompt"), tools: ["advance"] });
     expect(errors.some((error) => error.includes("prepare exploded"))).toBe(true);
     expect(errors.some((error) => error.includes('names the tool \\"missing\\"'))).toBe(true);
+  });
+
+  test("the agent's thinking level goes with every model request; prepare changes it, and returning nothing gives the static one back", async () => {
+    const thinking = defineAgent({
+      ...release,
+      name: "thinking",
+      thinkingLevel: "high",
+      prepare: (state) => (state.phase === "deploying" ? { thinkingLevel: "low" } : state.phase === "quiet" ? { thinkingLevel: "off" } : {}),
+    });
+    const w = await records().worker({ agents: [thinking] });
+    const conversation = await w.conversation();
+
+    await w.ask(conversation, "r1", 'call: advance {"phase":"deploying"}');
+    await w.ask(conversation, "r2", 'call: advance {"phase":"quiet"}');
+    await w.ask(conversation, "r3", 'call: advance {"phase":"testing"}');
+
+    // r1: high, then low after the update; r2: low, then off (no reasoning sent); r3: off, then high again.
+    expect(w.reasoning).toEqual(["high", "low", "low", undefined, undefined, "high"]);
+  });
+
+  test("an agent without a thinking level sends none (pi-durable's off)", async () => {
+    const w = await records().worker({ agents: [defineAgent({ name: "plain", model: "faux/scripted" })] });
+    await w.ask(await w.conversation(), "r1", "hello");
+    expect(w.reasoning).toEqual([undefined]);
+  });
+
+  test("a prepare that returns a thinking level Pi does not have gives the static definition, logged", async () => {
+    const errors: string[] = [];
+    const quiet = () => {};
+    const logger: Logger = { debug: quiet, info: quiet, warn: quiet, error: (message, fields) => void errors.push(`${message} ${JSON.stringify(fields)}`) };
+    const odd = defineAgent({ ...release, name: "odd", thinkingLevel: "medium", prepare: (state) => (state.phase === "deploying" ? { thinkingLevel: "ultra" as never } : {}) });
+    const w = await records().worker({ agents: [odd], logger });
+    const conversation = await w.conversation();
+
+    await w.ask(conversation, "r1", 'call: advance {"phase":"deploying"}');
+
+    expect(w.reasoning).toEqual(["medium", "medium"]);
+    expect(errors.some((error) => error.includes('thinkingLevel \\"ultra\\" is not one of'))).toBe(true);
   });
 
   test("an agent whose static model is not provided cannot run: the dispatch fails", async () => {

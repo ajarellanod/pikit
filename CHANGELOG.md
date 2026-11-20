@@ -314,6 +314,11 @@ line names its area.
 
 ### Contracts
 
+- `AgentDefinition.thinkingLevel` (and `TurnConfig`'s, so `prepare` may change it): how much its model thinks
+  before each answer, one of Pi's levels (`THINKING_LEVELS`, `isThinkingLevel`), checked by `defineAgent`.
+  The adapter writes it to the conversation's `pi.agent`, so it goes with every model request of its runs
+  (compaction's included); absent, `off` as before. runtime-pi's live overrides take it too: the
+  dashboard's agent page has a **Thinking** select (General).
 - `agent.observe`: a `TranscriptEntry` that placed a request's input names that request and its sender
   (`requestId`, `sender`), in pages and in `entries` events; no other entry does (the suite checks it).
   runtime-pi places every input as a `pikit.input` entry carrying its request id (requests, queued and

@@ -173,8 +173,11 @@ Durable Object, the object's root conversation first).
 
 ### `agent.definition` (keyed, provided by the project)
 
-One `AgentDefinition` per agent name: `{ name, model: "provider/modelId", steward?, systemPrompt?,
-tools?, extensions?, skills?, state?, prepare?(state, ctx) }`, checked by `defineAgent`. `steward: true` marks
+One `AgentDefinition` per agent name: `{ name, model: "provider/modelId", thinkingLevel?, steward?, systemPrompt?,
+tools?, extensions?, skills?, state?, prepare?(state, ctx) }`, checked by `defineAgent`. `thinkingLevel` is one
+of Pi's levels (`THINKING_LEVELS`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; absent, `off`), sent
+with each of its runs' model requests; each model's API maps it to what it has, and a model that does not reason
+ignores it. `steward: true` marks
 the project's main agent, the one its operators may ask to change it (SPEC §6): at most one per App
 (the runtime refuses to start with two: `stewardProblem`, which the `agent.runtime` suite checks),
 and only it may name `pikit-self` (extension-pikit-self
@@ -186,7 +189,7 @@ the Agent Skills format Pi's coding agent reads): the runtime lists each one's n
 location in a system prompt section and gives the agent the tool `skill` (`SKILL_TOOL`), which loads
 one's instructions; an agent with skills may not have a tool of its own named `skill`
 (`skillsProblem`). `prepare` is pure and synchronous: from the conversation's state it returns the
-fields that change for this run (`skills` among them). The project provides agents (`src/extensions/agents.ts`); runtime-pi refuses to
+fields that change for this run (`thinkingLevel` and `skills` among them). The project provides agents (`src/extensions/agents.ts`); runtime-pi refuses to
 start when an agent names a model, tool, extension or skill nothing provides.
 
 ### `agent.directory` ([agent-directory.ts](../packages/contracts/src/agent-directory.ts), optional)
