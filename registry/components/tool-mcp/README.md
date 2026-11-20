@@ -10,9 +10,9 @@ you want from it; each becomes the agent tool `<server>_<tool>`. Pi's own MCP cl
 - **Uses, if installed:** `secrets`, for a server that needs a bearer token (`secrets-env`,
   `secrets-workers`). A server with a `secret` and no `secrets` provider stops the start.
   `mcp.auth`, for a server with `auth: "oauth"` (tool-mcp-oauth, which keeps and refreshes its login:
-  `pikit tool-mcp-oauth login <server>`). Such a server with no usable login does not stop the start:
-  its tools fail their calls with "log in again" until someone does, and a login for another URL is
-  refused.
+  `pikit tool-mcp-oauth login <server>`). A start never reaches such a server, nor reads its login:
+  its tools' first call does (below). With no usable login its tools fail their calls with "log in
+  again" until someone does, and a login for another URL is refused.
   `storage.kv`, to keep each server's tool listing: a start then reaches no server (below).
 - **Hooks** (`component.json`): `doctor` (`doctor.ts`), its step of `pikit doctor`; `beforeDeploy`
   (`deploy.ts`), which `pikit up` runs before it builds and which writes `seed.ts` (below).
@@ -82,6 +82,14 @@ defineAgent({ name: "research", model: "openrouter/z-ai/glm-5.3-flash", tools: [
     last `pikit up`, an empty seed), each server is reached (`initialize`, `tools/list`), and the listing is kept. A server that cannot be
     reached, refuses the token, or lacks a tool named here **stops the app** (P5), naming the tools
     it has: the model could get the tool's description from nowhere.
+  - **Except an OAuth server** (`auth: "oauth"`): with no kept listing and no seed, a start does not
+    reach it, since reaching it reads its login (on Cloudflare a call to tool-mcp-oauth's owner
+    object at every object's start, whether a tool is used or not). Its tools keep a placeholder
+    description until their first call, which connects: reads the login, lists the tools, describes
+    them and keeps the listing. With no usable login that call fails with "log in again: `pikit
+    tool-mcp-oauth login <server>`", and the warning "no usable OAuth login" is logged once per app
+    (again only after a connection succeeded). One that cannot be reached, or lacks a named tool,
+    fails its calls instead of stopping the app.
 - **Each connection lists the tools again**: the first call after a start from the kept listing,
   and a call after the server forgot the session. The tools and the kept listing follow what the
   server says now (Pi reads description and parameters at each model call). A named tool the server
@@ -154,7 +162,9 @@ speaking Streamable HTTP: no test reaches the network or needs a real token. It 
 provided under the right keys, their description, parameters and replay filled at start, calls and
 their results, a reported failure, a tool the server lacks and a server that cannot be reached
 stopping the start, a forgotten session reconnected, the token read from `secrets` (and missing, or
-without `secrets`), config headers, cancellation, stop, and a real run where the model sees what the
+without `secrets`), an OAuth server (a stand-in `mcp.auth`) whose start reads no login and whose
+first call reads it and describes the tools, one not logged in failing its calls and warned once,
+config headers, cancellation, stop, and a real run where the model sees what the
 server described and a reported failure is recorded as a failed call. With `storage.kv` (in memory):
 the listing kept at start, a start from it with no request, a server down that fails its calls but
 not the start, the tools and the listing refreshed on each connection, and a tool the server no

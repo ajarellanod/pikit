@@ -14,7 +14,8 @@
  *   listing holds (name, title, description, inputSchema, annotations): never a token nor a header.
  * - **OAuth servers are not reached** (`auth: "oauth"`): their login is the deployed app's only. The
  *   seed keeps what it held for such a server (same URL, every named tool), and holds nothing new for
- *   it: a start then reaches the server, or fails only its tools while it is not logged in.
+ *   it: its tools' first call then reaches the server (a start never does), and fails while it is not
+ *   logged in.
  * - **No churn.** It holds no time, and `write` leaves the file alone when its text is the same: a
  *   deploy changes `seed.ts` only when a server's tools changed. Commit it, so that a build without
  *   the CLI (Workers Builds, a "Deploy to Cloudflare" button, `docker build`) bundles it too.

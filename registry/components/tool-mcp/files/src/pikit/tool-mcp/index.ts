@@ -24,11 +24,14 @@
  *     Cloudflare makes no MCP request. The first connection keeps its listing in `storage.kv`.
  *   - with neither, start reaches each server (`initialize`,
  *     `tools/list`), and one that cannot be reached, or lacks a named tool, stops the app (P5): the
- *     model would get a tool with no description or parameters. One exception: a server that logs in
- *     with OAuth (`auth: "oauth"`) and has no usable login is logged as a warning, not a stop. Its
- *     tools keep their placeholder description and fail their calls with "log in again" until
- *     someone does; the first call after the login describes them. A login is the operator's to
- *     make, and an App that would not start without it could not be logged in to on Cloudflare.
+ *     model would get a tool with no description or parameters.
+ *   - except a server that logs in with OAuth (`auth: "oauth"`): a start never reaches it, since
+ *     reaching it reads its login (on Cloudflare a call to tool-mcp-oauth's owner object, at every
+ *     object's start). Its tools keep their placeholder description until their first call, which
+ *     connects: reads the login, lists the tools, describes them and keeps the listing. With no usable
+ *     login that call fails with "log in again", and a warning is logged once per App (again only
+ *     after a connection succeeded). A login is the operator's to make, and an App that would not
+ *     start without it could not be logged in to on Cloudflare.
  * - **Replay**: `"unsafe"`, unless the server marks the tool read-only
  *   (`annotations.readOnlyHint`), then `"safe"`: a run resumed after a crash calls it again.
  * - **Credentials never in config.** `secret` names a secret, read through `secrets` at each request,
@@ -149,8 +152,15 @@ export default defineComponent({
         auth: bearer,
         tools: [],
         started: false,
+        warned: false,
         // Each connection lists the tools: they and the kept listing follow what the server says now.
-        connection: connectionTo(name, settings, () => server.auth, (listed) => refreshed(server, listed, cache, pikit.logger)),
+        connection: connectionTo(
+          name,
+          settings,
+          () => server.auth,
+          (listed) => refreshed(server, listed, cache, pikit.logger),
+          (error) => loginMissing(server, error, pikit.logger),
+        ),
       };
       for (const remote of settings.tools) {
         const agentName = mcpToolName(name, remote);
@@ -195,6 +205,8 @@ interface ServerEntry {
   tools: { remote: string; mcp: McpTool }[];
   /** Whether start is over: from then on a listing that lacks a named tool is logged (start throws instead). */
   started: boolean;
+  /** Whether "no usable OAuth login" was logged since its last connection: it is logged once. */
+  warned: boolean;
 }
 
 /** What `storage.kv` keeps of a server's `tools/list`: the named tools only, as the server described them. */
@@ -250,11 +262,19 @@ function oauthOf(server: ServerEntry, auth: (AuthProvider & { url: string }) | u
 /** Whether `error` says the server has no usable OAuth login (someone must log in again). */
 export const needsLogin = (error: unknown): boolean => error instanceof McpOAuthAuthorizationRequiredError;
 
+/** Logs, once until a connection succeeds again, that `server` has no usable OAuth login. */
+function loginMissing(server: ServerEntry, error: unknown, logger: Logger): void {
+  if (server.warned) return;
+  server.warned = true;
+  logger.warn(`tool-mcp: the MCP server "${server.name}" has no usable OAuth login: its tools fail their calls until it is logged in`, { server: server.name, error: messageOf(error) });
+}
+
 /**
  * Describes each tool of `server` at start, from the first listing for its URL that holds every named
  * tool, with no request: its kept listing in `storage.kv` (refreshed on each connection), else the
- * seed bundled at deploy (`seed.ts`). Else from the server (`initialize`, `tools/list`). Throws when
- * the server must be reached and cannot be, or lacks a named tool.
+ * seed bundled at deploy (`seed.ts`). Else from the server (`initialize`, `tools/list`), unless it
+ * logs in with OAuth: its first call connects and describes its tools. Throws when the server must be
+ * reached and cannot be, or lacks a named tool.
  */
 async function describe(server: ServerEntry, cache: KeyValueStore | undefined, ctx: AppContext): Promise<void> {
   const known = complete(server, await read(cache, server, ctx.logger)) ?? complete(server, Object.hasOwn(seed, server.name) ? seed[server.name] : undefined);
@@ -262,6 +282,8 @@ async function describe(server: ServerEntry, cache: KeyValueStore | undefined, c
     for (const { remote, mcp } of server.tools) describeTool(mcp, known[remote] as KeptTool);
     return;
   }
+  // Reaching it would read its login (a call to tool-mcp-oauth's owner) at every start: its first use does.
+  if (server.oauth) return;
   // A seed that holds other servers but not this one's listing was written before its URL or tools
   // changed: say so, since a build without `pikit up` bundled it. An empty seed (no deploy yet) is quiet.
   if (Object.keys(seed).length > 0) {
@@ -273,11 +295,6 @@ async function describe(server: ServerEntry, cache: KeyValueStore | undefined, c
   try {
     listed = await server.connection.list(ctx.abortSignal);
   } catch (error) {
-    // Not logged in is not down: its tools fail their calls until someone logs in (the operator's to do).
-    if (server.oauth && needsLogin(error)) {
-      ctx.logger.warn(`tool-mcp: the MCP server "${server.name}" has no usable OAuth login: its tools fail their calls until it is logged in`, { server: server.name, error: messageOf(error) });
-      return;
-    }
     throw new Error(`tool-mcp: the MCP server "${server.name}" could not list its tools: ${messageOf(error)}`);
   }
   // The connection described the tools it found, and kept the listing when it was complete.
@@ -291,6 +308,7 @@ async function describe(server: ServerEntry, cache: KeyValueStore | undefined, c
  * does not stop the app over it: its calls fail instead). Never throws.
  */
 async function refreshed(server: ServerEntry, listed: Tool[], cache: KeyValueStore | undefined, logger: Logger): Promise<void> {
+  server.warned = false;
   const found: Record<string, KeptTool> = {};
   for (const { remote, mcp } of server.tools) {
     const tool = listed.find((candidate) => candidate.name === remote);
@@ -377,13 +395,15 @@ interface Session {
 
 /**
  * One server's client, connected on first use and again when its session is gone. Each connection
- * lists the server's tools and hands them to `listed` before it is used.
+ * lists the server's tools and hands them to `listed` before it is used. A call failed for want of a
+ * usable OAuth login is told to `loginRequired` first.
  */
 function connectionTo(
   server: string,
   settings: ServerConfig,
   auth: () => AuthProvider | undefined,
   listed: (tools: Tool[]) => Promise<void>,
+  loginRequired: (error: unknown) => void,
 ): Connection {
   /** The session in use, or being opened. */
   let current: Promise<Session> | undefined;
@@ -432,7 +452,10 @@ function connectionTo(
         } catch (error) {
           if (signal?.aborted === true) throw error;
           // Its message says how to log in again.
-          if (needsLogin(error)) throw new Error(messageOf(error));
+          if (needsLogin(error)) {
+            loginRequired(error);
+            throw new Error(messageOf(error));
+          }
           throw new Error(`tool-mcp: the MCP server "${server}" could not be reached: ${messageOf(error)}`);
         }
         if (!session.tools.some((listedTool) => listedTool.name === tool)) {
@@ -448,7 +471,10 @@ function connectionTo(
           }
           if (signal?.aborted === true) throw error;
           // A refresh refused after a 401: its message says how to log in again.
-          if (needsLogin(error)) throw new Error(messageOf(error));
+          if (needsLogin(error)) {
+            loginRequired(error);
+            throw new Error(messageOf(error));
+          }
           throw new Error(`tool-mcp: the MCP server "${server}" failed the call: ${messageOf(error)}`);
         }
       }
