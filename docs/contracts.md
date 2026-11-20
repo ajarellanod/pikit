@@ -121,12 +121,14 @@ interface AgentRuntime {
   `admitInbound` gives the message's actor (`{ channel, id: actor.id }`), admin-api the operator
   (`{ channel: "dashboard", id }`), tool-delegate's tasks the delegating agent (`{ channel: "delegate",
   id }`). The runtime keeps it with the message, durably, and gives it to the run that takes the
-  message (`RUN_REQUESTS`, below); it is not in the result nor in `agent.submissions`.
+  message (`RUN_REQUESTS`, below) and to a reader of the transcript (`agent.observe`'s
+  `TranscriptEntry.sender`, with the entry's `requestId`); it is not in the result nor in
+  `agent.submissions`.
 - `parts` ([Parts](#parts)) are what the message brings to the answer of the run that takes it: what the
   person must see with that answer that the producer, not the run, has (a delegated task's question,
   which its report carries to the delegating conversation). Each must be a part (`partProblem`: a
   kind and a fallback, JSON), or the message is refused and nothing is admitted. The runtime keeps them
-  with the message, durably (runtime-pi: in its `pikit.input` entry, with the sender), so the run's
+  with the message, durably (runtime-pi: in its `pikit.input` entry, with the request id and the sender), so the run's
   result has them once whichever worker ends it, and a reconciliation after a crash logs them as a live
   settlement would; a duplicate brings none. Whoever builds the request bounds them, as images.
 - `dispatch` resolves once the message is durable in the runtime (a channel's acknowledgement point),
@@ -869,6 +871,14 @@ live view: the answer's text and the tools' names, nothing else). `conversations
 `conversation(id)`, `transcript(id, page)` (newest
 first), `watch(id)`, `usage(id)`. It runs in the App that runs the runtime: on Cloudflare it sees only that
 object's conversations.
+
+A `TranscriptEntry` is `{ id, kind, messages }`, and, on every entry that placed a request's input,
+`requestId` (that request's `AgentRequest.requestId`) and `sender` (its `AgentRequest.sender`, when it
+had one), in the transcript and in `entries` events alike; no other entry (an answer, a tool's result,
+bookkeeping) has either, and a `sender` never comes without a `requestId`. A reader attributes a message
+by them, never by its text: the dashboard marks an operator's follow-up (`isDashboardRequest`) and a
+scheduled message (`scheduler:`) in another channel's conversation. The suite checks both, live and
+paged: a provider that drops them, puts them on other entries or invents a sender fails it.
 
 `watch(id)` is the conversation live, as state: an async iterable of `ObservedEvent`s, until `ctx` is
 cancelled or the runtime closes (`break` releases it; an unknown id rejects; it throws when the

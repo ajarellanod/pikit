@@ -90,8 +90,8 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   declare `offerTools` ("Offered tools" below), then a commit looks the request id up
   (`duplicate` if pi-durable has it) and, in the same commit, applies `prepare` (with those offers) and records the
   admission's time (`pikit.admissions`, below); then
-  `submit({ type: "input", requestId })`, its content the prompt, then the request's images (pi-ai's
-  `ImageContent`) when it has some. The status the creating commit published (`queued` in the
+  `submit({ type: "input", requestId, entry })`, its content the prompt, then the request's images (pi-ai's
+  `ImageContent`) when it has some, its entry a `pikit.input` one ("Request ids, senders and parts" below). The status the creating commit published (`queued` in the
   inbox, or `placed`) gives `queued` or `started`. An input is a **follow-up** unless the request
   steers (`whenBusy: "steer"`). Follow-ups are placed all at once (`followUpMode: "all"`): the
   messages queued while a run goes start the next run together. Its `agent.started` names the first
@@ -111,7 +111,7 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   `done` → `agent.settled` `completed` with the answer's text; `unanswered`/`aborted` → `agent.settled`
   `aborted`; any other reason (`model_error`, `no_model`, `faulted`, `orphaned`, `reset`) →
   `agent.failed` with `{ code: reason, message: detail }`. `messages` are the model messages from the
-  first input's `pi.user` entry to the answer (system entries excluded), and, when a tool ended the run
+  first input's entry (`pikit.input`) to the answer (system entries excluded), and, when a tool ended the run
   (`control.terminate`), the results of the calls that answer made, written after it; `parts` are
   those its inputs' `pikit.input` entries carry (`AgentRequest.parts`), in the order it took them,
   then those its successful tool results carry (`withParts`, `parts.ts`: a tool's `details` under
@@ -183,13 +183,17 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 - **Contexts.** `toChord` re-attaches a pikit context's signal for Chord. Tasks run in the
   Harness's context (the app's values); a dispatching caller's values reach the run's events, not its
   tools.
-- **Senders and parts.** A request with a `sender` or `parts` (each checked, `checkedParts`: one that
-  is no part refuses the request) is submitted as an input entry of kind `pikit.input` whose data is
-  `{ sender?, parts? }` (pi-durable's `InputEntry`, #10407): in the submission's own commit, carried by a
-  queued input's `pi.inbox` item, kept in the transcript. `RUN_REQUESTS` reads the run's inputs
+- **Request ids, senders and parts.** Every request is submitted as an input entry of kind
+  `pikit.input` whose data is `{ requestId, sender?, parts? }` (`inputData`; pi-durable's `InputEntry`,
+  #10407; its parts each checked, `checkedParts`: one that is no part refuses the request), and so is
+  every input a delegation submits (a task's, `delegate:<id>`, and its steers'): in the submission's own
+  commit, carried by a queued or steering input's `pi.inbox` item, kept in the transcript.
+  `agent.observe` gives an entry's request id and sender as `TranscriptEntry.requestId` and `sender`
+  (`observe.ts`), in pages and in `entries` events. `RUN_REQUESTS` reads the run's inputs
   (`pi.live.run.inputs`) when asked, each one's request id from its submission and its sender from its
   entry: steers that joined the run included, and the same after a reopened Harness resumes it. An
-  input entry is `pi.user` or `pikit.input` wherever the runtime finds a run's inputs (`result.ts`).
+  input entry is `pikit.input`, or `pi.user` for an input submitted without an entry (none of the
+  runtime's), wherever the runtime finds a run's inputs (`result.ts`).
 - **Delegation** (`delegation.ts`). `AGENT_DELEGATION`, in every tool's context: `run` creates a child
   conversation owned by the tool call's task (pi-durable's example 22), applies another agent's
   definition to it (`AgentConfigs.apply`), submits the task with its sender and waits; `start` gives
@@ -240,7 +244,7 @@ pi-durable is the only record of what became of each message; `agent.submissions
   `pikit.admissions`), on a redelivery of a settled request (`duplicate`), in `recover`, and for
   `settled`.
 - **Reconciled runs are grouped exactly.** An answered run's inputs share its answer entry. Any other
-  placed run's inputs share the commit of their `pi.user` entries (`storage.entry`'s `commitSeq`):
+  placed run's inputs share the commit of their input entries (`storage.entry`'s `commitSeq`):
   pi-durable places a run's inputs in the one commit that starts it, and settles exactly those when
   it ends (pi-facts.test.ts). So a batch is never split, two runs (even adjacent ones that failed the
   same way) are never merged, and a run has the inputs, hence the key, it had live: one appended

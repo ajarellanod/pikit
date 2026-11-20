@@ -174,8 +174,8 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   back into its own context values.
 - **Partly solved in 1.2.0** ([#10407](https://github.com/earendil-works/pi/issues/10407)): an input
   takes `entry: { kind, data }` (`InputEntry`), placed with the input in its commit and carried by a
-  queued input. pikit places a request's sender there (kind `pikit.input`) and reads it back for
-  `RUN_REQUESTS`. Still open: hooks and sections read only documents, not entries, so the runtime
+  queued input. pikit places every request's id and sender there (kind `pikit.input`) and reads them
+  back for `RUN_REQUESTS` and `agent.observe`'s transcript entries. Still open: hooks and sections read only documents, not entries, so the runtime
   reads the run's input entries for them; and values that are not a message's (a trace id) still have
   no place.
 - **Partly solved in 1.4.0** too: `HarnessOptions.telemetry` stores opaque trace carriers on
@@ -300,7 +300,7 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   it must rebuild:
   - `done` inputs are grouped exactly by their shared `answer`, and ordered by the answer entry's
     `commitSeq` (an extra read per run);
-  - `unanswered` inputs are grouped by the `commitSeq` of their `pi.user` entries (one read each);
+  - `unanswered` inputs are grouped by the `commitSeq` of their input entries (one read each);
   - a cross-conversation "answers in the order they ended" feed needs a second store the host keeps
     and reconciles.
 - **pikit meanwhile, and why this is not sent.** pi-durable is the source of truth for state; pikit
@@ -308,7 +308,7 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   or the first input of an unanswered run), bounded by `pikit.admissions`, and rebuilt by one
   per-conversation reconciliation used at start, on recover and on redelivery. Grouping is exact
   without any new field: a run's inputs are placed by one boundary in one commit (`applyBoundary`,
-  `inbox.ts`) and settled together (`endRun`, `live.ts`), so they share their `pi.user` entries'
+  `inbox.ts`) and settled together (`endRun`, `live.ts`), so they share their input entries'
   `commitSeq` (`Storage.entry`), pinned by pikit's pi-facts test. Steers, which join a run in a
   later commit, are pikit's own submissions and are marked at admission. What is left of this
   proposal is convenience (one read less per run, a cross-conversation feed); not worth a request

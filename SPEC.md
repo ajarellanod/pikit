@@ -495,7 +495,8 @@ captures identity before normalization/routing, so in-place mutation cannot turn
 
 The admin API reads the composition through `APP_DESCRIPTION` (K13), the runtime through
 `agent.observe` (`packages/contracts/src/observe.ts`: conversations with their agent, busy state and
-cost, a transcript, one conversation live as state, usage; runtime-pi provides it from pi-durable's records), and
+cost, a transcript whose message entries name their request and its sender, one conversation live as
+state, usage; runtime-pi provides it from pi-durable's records), and
 asks `admin.auth` (`packages/contracts/src/admin.ts`; `admin-auth-token`, a bearer token from
 `secrets`, on both targets) before every answer. Its routes and the UI's files are prefix routes
 (`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves; every

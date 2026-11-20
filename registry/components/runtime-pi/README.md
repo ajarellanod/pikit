@@ -7,7 +7,8 @@ it into the app.
   conversation of a new key, or of a reset), and `agent.submissions` (what became of each message,
   and the `answers` feed channels deliver from: "Nothing admitted goes unanswered" below), and
   `agent.observe` (what an operator sees, read-only from pi-durable's records: conversations, a
-  transcript, live events, usage; `createObserver` in the adapter's `observe.ts`). Also
+  transcript whose message entries name their request and its sender, live events, usage;
+  `createObserver` in the adapter's `observe.ts`). Also
   `model.complete` (a text from one of the models the agents run on, once: admin-api titles
   conversations with it) and slash commands (`agent.command`): the operator's `compact` ("/compact"
   below) and the chat's users' `stop`, `status`, `tasks` and `cancel` ("Team commands" below).
@@ -380,7 +381,9 @@ delegating agent) is kept with it and given to the run that takes it: `await
 context.value(RUN_REQUESTS)?.list(context)` lists the run's requests, each with its sender, in a tool,
 a section or a hook, after a restart too. `agent.dispatched` carries it too (`sender`, as the request
 gave it, a duplicate's included; absent when it had none), so a listener knows whose activity it is (a
-channel's user, or the dashboard's operator for a follow-up). A conversation's owner
+channel's user, or the dashboard's operator for a follow-up). The transcript keeps both: each message
+is placed as a `pikit.input` entry with its request id and sender, which `agent.observe` gives as the
+entry's `requestId` and `sender` (a dashboard tells an operator's message from the user's by them). A conversation's owner
 (`ConversationRef.owner`) is `conversations.registry`'s: the runtime records none, and its events and
 runs carry none, whatever ref a caller gave; read it from the registry.
 

@@ -39,7 +39,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | `GET /admin/api/conversations?limit&cursor&state&q` | a page of the directory's conversations, the most recently active first: key, agent, busy, last activity, cost, `current` (whether its key points to it now; else `currentId`, the one it does), `title`, `state` (for everyone) and `hidden` (for this operator); `state` is the bucket listed: `listed` (default), `hidden`, `archived` or `deleted`; `q` (at most 200 characters) only those whose title or key holds it, any case |
 | `POST /admin/api/conversations` | `{ agent, text, attachments?, webSearch?, requestId? }`: a conversation of the dashboard's own → `201 { conversationId, key, requestId, admission }` |
 | `GET /admin/api/conversations/:id` | one conversation |
-| `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first, a page at a time |
+| `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first, a page at a time; a message's entry names its request and its sender (`requestId`, `sender`) |
 | `GET /admin/api/conversations/:id/events` | its live state as server-sent events: whole first, then its changes, and the entries the transcript gains |
 | `POST /admin/api/conversations/:id/messages` | `{ text, attachments?, webSearch?, requestId? }`: the operator's follow-up → `202 { requestId, admission }` |
 | `POST /admin/api/conversations/:id/abort` | stops its run → `200` |
@@ -106,6 +106,10 @@ curl -N -H "Authorization: Bearer $PIKIT_ADMIN_TOKEN" http://localhost:3000/admi
 - **The agent knows.** The message it reads starts with a line saying it comes from the operator in
   the dashboard, and, in another channel's conversation, that the user does not see it or its answer,
   and, when the operator asked for it, to search the web (`operatorPrompt`).
+- **The dashboard shows it.** Its transcript entry names its request (`ApiTranscriptEntry.requestId`,
+  `dashboard:…`) and its operator (`sender`, `{ channel: "dashboard", id }`): in another channel's
+  conversation the dashboard says above it "You, from the dashboard" (another operator's: their id),
+  and "Scheduled" above a scheduled message (`scheduler:…`), never by reading the text.
 - **Abort and reset** stay on every conversation.
 - Each action is logged with the operator's id and the conversation's key, never the message's text
   (a message's number of images and its web search, when it has them).

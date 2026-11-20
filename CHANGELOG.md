@@ -30,6 +30,11 @@ line names its area.
   answer is stuck or was given up within a day.
 - A conversation shows a quiet note where an answer of it was given up or is stuck (`Not delivered:
   <why>`), with a link to Delivery (on a server, where Delivery is read).
+- In another channel's conversation, a muted line above a message says when it is not the
+  conversation's person: "You, from the dashboard" (another operator's: their id) above an operator's
+  follow-up, "Scheduled" above a scheduled one. Read from the request its transcript entry names, never
+  from its text (`views/conversations/from.ts`; the shared `ConversationView` and `UserBubble` take a
+  `from`).
 
 ### Components
 
@@ -309,6 +314,11 @@ line names its area.
 
 ### Contracts
 
+- `agent.observe`: a `TranscriptEntry` that placed a request's input names that request and its sender
+  (`requestId`, `sender`), in pages and in `entries` events; no other entry does (the suite checks it).
+  runtime-pi places every input as a `pikit.input` entry carrying its request id (requests, queued and
+  steering ones, delegated tasks and their steers): no input of the runtime's is `pi.user` any more.
+  admin-api's `ApiTranscriptEntry` carries both.
 - Projects' vocabulary (features/projects.md): `Principal`, `Author` and `Change` (`change.ts`, with
   `changeLogCases`); the capabilities `projects` (`createProjectsConformance`), `space.files`,
   `principals` and `document.convert`. `Project.coreTokens` says the store's budget of core
