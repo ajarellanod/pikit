@@ -38,6 +38,10 @@ line names its area.
 
 ### Components
 
+- channel-web: a scheduled prompt's run in a web chat (tool-schedule, a routine: `scheduler:` requests)
+  is read after the run before it, and its answer once. Its messages took the previous run's positions
+  in the transcript (read among them, above the answer that scheduled it), and answer delivery, which
+  knew only `web:` and `dashboard:` requests, wrote its answer a second time.
 - **One conversation directory** (features/completed/conversation-directory.md): every view lists the
   same conversations with one title and the same "delete". The contract `conversations.directory`
   (`@pikit/contracts`, experimental, with its suite) and the `conversation.audience` pipeline (who
