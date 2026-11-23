@@ -9,7 +9,8 @@ analyst has Python and Google's APIs, and no other agent has either, not even th
 (`execution-remote/gondolin.test.ts`) and in workerd. **Built** (2026-11-05): several sandbox hosts,
 an agent routed to each ([below](#several-sandbox-hosts-built-2026-11-05)), an image and a root disk
 per machine ([below](#images-per-machine-built-2026-11-05)), and idle workspaces saved to a bucket
-([workspace snapshots](workspace-snapshots.md)).
+([workspace snapshots](workspace-snapshots.md)). **Built** (2026-11-23): read-only reference mounts
+per machine ([below](#read-only-reference-mounts-built-2026-11-23)).
 
 **Needed by:** nothing required. Builds on [sandboxed execution](sandboxed-execution.md)
 (`execution-gondolin`, `execution-remote`, `execution-serve`) and runs on every target they run on,
@@ -299,10 +300,43 @@ protocol, unchanged, so each is one more entry of execution-remote's `hosts`:
   mutation-checked), `app.test.ts` (two real hosts, files on the right disk), the workerd lane (two
   agents of one Durable Object on two real hosts, two processes and tokens, found again by a reset).
 
+## Read-only reference mounts (built 2026-11-23)
+Files every agent of a machine reads and none changes (skills' `SKILL.md` and scripts, a team's
+reference documents) could only go in the VM image, where the file tools (`read`) cannot reach them:
+they serve `/workspace` and `/tmp/pikit` from the host, without a VM. execution-gondolin's machines
+(the base, each profile, field by field: a profile's map replaces the base's whole) gain
+**`readOnlyMounts`**, a guest path to a host directory (relative to the server's working directory,
+or absolute; default none):
+
+```ts
+"execution-gondolin": {
+  readOnlyMounts: { "/opt/team/skills": "reference/skills" },
+  agents: { developer: { readOnlyMounts: { "/opt/team/skills": "reference/skills", "/opt/dev/docs": "/srv/dev-docs" } } },
+}
+```
+
+- **The VM** mounts each with Gondolin's `ReadonlyProvider` over a `RealFSProvider`: read, never
+  changed. Over a path of the image, it hides the image's files there.
+- **The file tools** read, list and find there from the host (no VM); every change (write, edit, a
+  directory made or removed, a rename from or to it, also through a link from `/workspace`) is
+  `permission_denied`, naming the path read-only. Links are resolved in the guest's namespace, as
+  before; one leading outside every mount is refused.
+- **Checked at start**, naming the machine: a guest path absolute and normalized, never `/` or `/etc`,
+  never over `/workspace`, `/tmp/pikit` or another read-only mount, never in `/data`, `/proc`,
+  `/sys`, `/dev` or `/run`; a host directory that exists, is not the working directory nor holds it,
+  and does not overlap `root`.
+- **Behind execution-serve** they are the sandbox host's, like every field of a machine; execution-remote
+  and execution-serve pass paths and errors through unchanged (no change to either, nor to the
+  protocol). Snapshots and retention never touch them.
+- **Tests**: execution-gondolin's fake-guest cases (config, profiles, every read and every change,
+  links, `vfsMounts`), real-VM cases in its `gondolin.test.ts` and execution-remote's (through the
+  wire). The component's README, "Read-only mounts", has the details.
+
 ## Open questions
 - ~~Several sandbox hosts.~~ Built: [Several sandbox hosts](#several-sandbox-hosts-built-2026-11-05),
   with [images per machine](#images-per-machine-built-2026-11-05) and
   [workspace snapshots](workspace-snapshots.md).
 - A health check per sandbox host (a dashboard row per host), when one is needed.
 - Editing profiles from the dashboard.
-- Files shared between agents (a read-only reference mount).
+- ~~Files shared between agents (a read-only reference mount).~~ Built:
+  [Read-only reference mounts](#read-only-reference-mounts-built-2026-11-23).

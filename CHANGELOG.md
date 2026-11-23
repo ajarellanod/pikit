@@ -38,6 +38,17 @@ line names its area.
 
 ### Components
 
+- execution-gondolin: read-only reference mounts ([features/agent-sandboxes.md](features/agent-sandboxes.md),
+  "Read-only reference mounts"). `readOnlyMounts` (the base's or a profile's, a profile's map replacing
+  the base's whole; default none) maps a guest path to a host directory (relative to the working
+  directory, or absolute): `{ "/opt/team/skills": "reference/skills" }`. The VM mounts it read-only
+  (Gondolin's `ReadonlyProvider`), and the file tools read, list and find there without a VM, refusing
+  every change (`permission_denied`, also through a link from `/workspace`): skills and reference
+  documents an agent must `read` no longer have to go in the image, where `read` could not reach them.
+  Checked at start: a guest path never `/`, `/etc`, over `/workspace`, `/tmp/pikit` or another one, nor
+  in `/data`, `/proc`, `/sys`, `/dev`, `/run`; a host directory that exists, apart from the working
+  directory and `root`. Behind execution-serve they are the sandbox host's; nothing changes in
+  execution-remote or execution-serve.
 - channel-web: a scheduled prompt's run in a web chat (tool-schedule, a routine: `scheduler:` requests)
   is read after the run before it, and its answer once. Its messages took the previous run's positions
   in the transcript (read among them, above the answer that scheduled it), and answer delivery, which

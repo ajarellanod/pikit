@@ -129,7 +129,8 @@ rebuilt at its next `resolve`, its files untouched.
   sandbox's next command: a directory made and removed in it clears Gondolin's listing, and the guest
   kernel drops its cached entries (a few milliseconds, only after a change). Without it, `git add -A`
   right after the `write` tool could miss the new file, or commit an old size of an edited one.
-- **Confined.** A file tool reaches `/workspace` and `/tmp/pikit` only. A path, or a symbolic link the
+- **Confined.** A file tool reaches `/workspace` and `/tmp/pikit` only, and the machine's read-only
+  mounts, if any ("Read-only mounts" below: read, never changed). A path, or a symbolic link the
   guest made, that leads elsewhere is refused (`permission_denied`): links are resolved as the guest
   resolves them (an absolute target is a guest path), so `ln -s / root` or a guessed host path gives
   the file tools nothing. In the guest, the kernel resolves links in the guest's own filesystem, and
@@ -427,8 +428,8 @@ agents to it (execution-serve's README, "A sandbox host"):
 
 Each agent may get its own machine: `agents` maps an agent's name (`ConversationRef.agent`, in the
 agent grammar `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 100 characters; any other key is refused at
-start) to a profile of `packages`, `allowedHosts`, `secrets`, `memory`, `cpus`, `workspace`, `image`
-and `rootfsSize`. The 100-character
+start) to a profile of `packages`, `allowedHosts`, `secrets`, `memory`, `cpus`, `workspace`, `image`,
+`rootfsSize` and `readOnlyMounts`. The 100-character
 limit is this component's own: `defineAgent` in `@pikit/contracts` has none, so an agent with a
 longer name cannot have a profile (it gets the base, and past 128 characters `resolve` refuses it,
 above). A secret's name is a variable name, never
@@ -437,7 +438,8 @@ above). A secret's name is a variable name, never
 - **Field by field.** A field the profile sets replaces the base's (its `allowedHosts` are not added to
   the base's); a field it leaves out is the base's. What the configuration shows is what the agent gets.
   Its reachable hosts are its `allowedHosts` plus its own secrets' hosts; its packages, its `packages`
-  plus `git` with `proposals`. `root`, `idleSeconds`, `maxVms`, `queueSeconds` and `retentionDays`
+  plus `git` with `proposals`; its read-only mounts, its `readOnlyMounts` map whole (`{}` for none),
+  never merged with the base's. `root`, `idleSeconds`, `maxVms`, `queueSeconds` and `retentionDays`
   are global only (a profile with one is refused).
 - **The base for anyone else.** An agent `agents` does not name (a misspelled key too) gets the base:
   with the default base, no secret and no network. It fails closed. `execution`'s own sandbox
@@ -448,6 +450,51 @@ above). A secret's name is a variable name, never
   `agent.directory` without a dependency cycle (agents-live uses every `agent.tool`, and tool-bash uses
   `execution.shell`, this component's). So the warning says the profile may be a live agent's: a
   profile for one is warned of, and still works.
+
+## Read-only mounts
+
+Files every agent of a machine reads and none changes: skills' instructions and scripts, a team's
+reference documents. `readOnlyMounts` (the base's, or an agent's profile's) maps a guest path to a host
+directory, relative to the server's working directory (as `root`) or absolute:
+
+```ts
+"execution-gondolin": {
+  readOnlyMounts: { "/opt/team/skills": "reference/skills" },   // every agent's
+  agents: {
+    developer: { readOnlyMounts: { "/opt/team/skills": "reference/skills", "/opt/dev/docs": "/srv/dev-docs" } },
+    support: { readOnlyMounts: {} },                              // none
+  },
+}
+```
+
+- **In the VM**: Gondolin's `ReadonlyProvider` over a `RealFSProvider` at the guest path: `cat`,
+  `ls`, `grep` and running a script there work; every change fails (`Read-only file system`). The
+  guest sees the host directory live: what the operator changes there, the next read sees.
+- **For the file tools** (`read`, `ls`, `find`, `grep`...): read from the host directory, without a
+  VM, as `/workspace` is. Every change there (`write`, `edit`, a directory made or removed, a rename
+  from or to it) is refused, `permission_denied`: `/opt/team/skills/x is read-only: /opt/team/skills is
+  a read-only mount of reference files; it can be read, never changed`. The host directory is writable
+  by the server, so this check is what keeps it read-only for the tools, as `ReadonlyProvider` does
+  for the guest. Errors name guest paths only.
+- **Links** are resolved as everywhere ("Confined" above): in the guest's namespace. A link from
+  `/workspace` into a read-only mount reads there and changes nothing through it (the link itself is
+  `/workspace`'s: renamed or removed, never its target). A link in the host directory is read as a
+  guest path: one to a host path or above the directory leads outside and is refused, by the file
+  tools and by Gondolin alike; one to `/workspace/x` leads there.
+- **Over a path of the image**, a mount hides the image's files there (`/etc/apk` would hide Alpine's
+  keys and repositories, and `apk add` would fail): mount at a path of your own, `/opt/<name>`.
+- **Checked at start**, for the base and each profile; one error names the machine. A guest path must
+  be absolute and normalized (letters, digits, `.`, `_`, `-` in each part), never `/` nor `/etc`
+  (written at each boot), never overlap `/workspace`, `/tmp/pikit` or another read-only mount
+  (`/tmp` holds `/tmp/pikit`: refused), and never be in `/data` (Gondolin's own VFS), `/proc`, `/sys`,
+  `/dev` or `/run` (the launcher's status files). A host directory must exist (a link to one is
+  fine), never be the working directory or hold it (its `.env`, `.pikit/`), nor overlap `root` (every
+  sandbox's files).
+- **Behind execution-serve** the mounts are the sandbox host's (its config, its directories), like
+  every other field of a machine: the clients change nothing, and execution-remote's file API reaches
+  them (a change answered `permission_denied` over the wire).
+- Not a snapshot's: `snapshots` and `retentionDays` save and delete only `/workspace` and
+  `/tmp/pikit`.
 
 ## Network and secrets (SPEC C7)
 
@@ -503,13 +550,14 @@ the rewrite at its next boot.
   //                         //   { packages: ["chromium"] }, built here at start, once ("The image")
   // rootfsSize: "4G",       // absent by default (the image's): each VM's root disk at least this
   workspace: "chat",         // default: a sandbox per chat and agent; "agent": one per agent, every chat
+  readOnlyMounts: {},        // default: none. { "/opt/team/skills": "reference/skills" }: guest path to host directory, read-only
   agents: {},                // default: a machine per agent, each field replacing the base's
   // retentionDays: 30,      // absent by default (kept forever): delete a chat's sandboxes unused this many days
   // snapshots: { idleMinutes: 10, maxBytes: 10e9, maxUnpackedBytes: 4294967296, maxEntries: 1000000, namespace: "workspace-snapshots" }, // absent by default: idle chat sandboxes to storage.blob
 }
 ```
 
-`allowedHosts`, `secrets`, `memory`, `cpus`, `packages`, `image`, `rootfsSize` and `workspace` are the base machine. A team where the
+`allowedHosts`, `secrets`, `memory`, `cpus`, `packages`, `image`, `rootfsSize`, `workspace` and `readOnlyMounts` are the base machine. A team where the
 developer has `gh` and a GitHub token, the analyst Python and Google's APIs, and no other agent either:
 
 ```ts
@@ -563,8 +611,14 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 - **`execution` is a sandbox too** (`default`): a tool called outside a conversation (a test, a
   command of the operator) gets a VM of its own, never the host's shell.
 - **Files from the host, guest paths everywhere**: no VM for a file tool, and one namespace for the
-  tools and the shell. Paths outside the two mounts are refused for the file tools (a command sees the
-  whole VM): serving them would need the VM up.
+  tools and the shell. Paths outside the sandbox's mounts (its two, and its machine's read-only ones)
+  are refused for the file tools (a command sees the whole VM): serving them would need the VM up. So
+  files an agent must `read` from outside its workspace (skills, reference documents) go in a
+  read-only mount, not in the image.
+- **Read-only mounts, not shared writable ones** (2026-11-23): files every agent of a machine reads
+  (skills, references) are the operator's, mounted read-only, so no agent changes what another reads
+  and the sandboxes stay apart; what agents must share and change goes through git, the delegation's
+  answer or `workspace: "agent"`. A profile's map replaces the base's whole, as every field.
 - **Evict the idlest, then queue**: a burst of conversations never fails while some VM is idle; when
   none is, the wait is bounded and the error says what to change.
 - **Secret hosts are reachable** without repeating them in `allowedHosts`: a secret whose host is
@@ -631,6 +685,16 @@ run no command. A container's QEMU is checked only when the app starts in it (st
   it; the sandbox cache bounded (idle ones dropped and rebuilt with their files, one with a VM kept);
 - confinement: absolute paths, `..`, links to host paths, to `/etc`, up and out, loops; writes and
   renames through them refused; a link removed, not its target; no host path in errors;
+- read-only mounts: bad guest paths (`/`, not normalized, over `/workspace`, `/tmp/pikit`, another
+  one, `/etc`, `/run`, `/data`...) and host directories (missing, a file, the working directory or
+  one holding it, `root` or in it) refusing the start naming the machine; a profile's map replacing the
+  base's whole, `default` and an agent with none on the base's, in each VM's spec; the file tools
+  reading, listing and finding there without a VM, every change (write, append, truncate, a directory
+  made or removed, a rename from, in or to it) `permission_denied` with the host's files unchanged;
+  links from `/workspace` read through and never written through, links there leading out refused,
+  one there into `/workspace` leading there; Gondolin's `ReadonlyProvider` at each (`vfsMounts`).
+  Mutation-checked: without the write check, without `ReadonlyProvider`, without the overlap check or
+  the spec's mounts, a case fails;
 - `/tmp/pikit` and spill on the host, in `.execution-gondolin-tmp`, emptied at the next start while a
   `tmp` beside it stays; a `root` that is the working directory, holds it, or is `/` refused at start;
 - boot at the first command with the right mounts and spec; output per stream across chunk
@@ -682,7 +746,9 @@ run no command. A container's QEMU is checked only when the app starts in it (st
 whole `execution` conformance suite with a real shell (pi-durable's cases too: argv, streams,
 timeouts, symbolic links), a chat's shell seeing none of another's files nor the host's, the
 network closed (403), a secret's placeholder in the guest, a timeout killing what the command started,
-and an idle VM closed while its files stay for the next one, and for a reset of the chat. And, where
+and an idle VM closed while its files stay for the next one, and for a reset of the chat; a read-only
+mount read by the guest and the file tools and changed by neither (also through a guest's link from
+`/workspace`), and one over `/etc/apk` hiding the image's files there. And, where
 `mke2fs`, `lz4` and `cpio` are on `PATH` too (skipped, saying so, elsewhere), an agent's
 `image: { packages: ["ffmpeg"] }` built at start: its VM runs `ffmpeg`, has the 2G root disk asked
 for and `jq` from `packages` over the image (a checkpoint of it), the base agent has no ffmpeg, and
