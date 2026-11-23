@@ -6,14 +6,16 @@
  * agent find it again, two conversations' sandboxes see nothing of each
  * other, the host's files are out of reach, and each agent boots its own machine (features/
  * agent-sandboxes.md): the developer's profile holds a secret placeholder, an agent with no profile
- * gets the base (no secret, no network), and the two never share a VM or a file.
+ * gets the base (no secret, no network), and the two never share a VM or a file. A read-only mount of
+ * the host's (`readOnlyMounts`) is read through the remote file API and in the guest, and changed by
+ * neither (`permission_denied` over the wire, no host path in it).
  *
  * Skipped, saying so, when QEMU is missing (execution-gondolin's own rule). A repository test, not
  * copied with either component: it imports other components' files (SPEC P4).
  */
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, type Handle, silentLogger } from "@pikit/core";
@@ -44,19 +46,25 @@ if (problem !== undefined) {
   test.skip(`execution-remote over execution-gondolin: skipped, ${problem}`, () => {});
 } else {
   let root: string;
+  /** The host's reference files, read-only in every sandbox at /opt/reference. */
+  let reference: string;
   let host: App;
   let client: App;
   let workspace: WorkspaceProvider;
 
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), "pikit-remote-gondolin-"));
+    reference = join(root, "reference");
+    mkdirSync(reference);
+    writeFileSync(join(reference, "SKILL.md"), "# Skill\n");
     let url: URL | undefined;
     host = await defineApp({
       components: [secretsOf({ PIKIT_SANDBOX_TOKEN: TOKEN, GH_TOKEN }), executionGondolin, executionServe, createServerBun({ onListening: (listening) => void (url = listening) })],
       config: {
         "server-bun": { port: 0, hostname: "127.0.0.1" },
         "execution-gondolin": {
-          root,
+          root: join(root, "gondolin"),
+          readOnlyMounts: { "/opt/reference": reference },
           maxVms: 2,
           idleSeconds: 30,
           agents: { developer: { secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com"] }] } },
@@ -138,6 +146,25 @@ if (problem !== undefined) {
 
     expect((await run(developer, "echo developer > mine.txt")).exitCode).toBe(0);
     expect((await run(assistant, "cat /workspace/mine.txt 2>/dev/null || echo absent")).out).toBe("absent\n");
+  }, 300_000);
+
+  test("a read-only mount of the host: read through the remote file API and in the guest, changed by neither", async () => {
+    const { env } = await workspace.resolve(conversation("dave"), ctx);
+    expect(await env.readTextFile("/opt/reference/SKILL.md", ctx)).toEqual({ ok: true, value: "# Skill\n" });
+    const listed = await env.listDir("/opt/reference", ctx);
+    expect(listed.ok && listed.value.map((entry) => entry.path)).toEqual(["/opt/reference/SKILL.md"]);
+
+    const written = await env.writeFile("/opt/reference/SKILL.md", "changed", ctx);
+    expect(written.ok).toBe(false);
+    expect(!written.ok && written.error.code).toBe("permission_denied");
+    expect(!written.ok && written.error.message).toContain("/opt/reference is a read-only mount");
+    expect(!written.ok && `${written.error.message} ${written.error.path}`).not.toContain(root);
+    const removed = await env.remove("/opt/reference/SKILL.md", undefined, ctx);
+    expect(!removed.ok && removed.error.code).toBe("permission_denied");
+
+    const guest = await run(env, "cat /opt/reference/SKILL.md; touch /opt/reference/new 2>/dev/null && echo wrote || echo not-written");
+    expect(guest).toEqual({ exitCode: 0, out: "# Skill\nnot-written\n" });
+    expect(readFileSync(join(reference, "SKILL.md"), "utf8")).toBe("# Skill\n");
   }, 300_000);
 }
 

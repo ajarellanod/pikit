@@ -6,12 +6,12 @@
  * It runs pi-durable's `ExecutionEnv` conformance with a real shell on one VM (each case in a
  * directory of its own under `/workspace`), then what only a real VM shows: a conversation's shell
  * sees its own files and none of the host's, the network is closed but for allowed hosts, a secret
- * is a placeholder in the guest, a timeout kills what the command started, and a VM closed when idle
- * leaves its files for the next one.
+ * is a placeholder in the guest, a timeout kills what the command started, a VM closed when idle
+ * leaves its files for the next one, and a read-only mount is read and never changed.
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type ComponentDefinition, defineApp, defineComponent, type Logger } from "@pikit/core";
@@ -168,6 +168,38 @@ if (problem !== undefined) {
     // A reset of the chat (/new: a new conversationId under the same key) is the same sandbox: its shell finds the file.
     const reset = (await running.workspace.resolve({ key: "it:idle", agent: "it", conversationId: "after-new" }, running.app.context())).env;
     expect((await sh(reset, "cat made.txt")).output).toBe("kept\n");
+  }, BOOT_MS);
+
+  test("a read-only mount: the guest and the file tools read the host's reference files and change nothing there; over a path of the image it hides the image's files", async () => {
+    const skills = temporaryDir();
+    writeFileSync(join(skills, "SKILL.md"), "# Skill\n");
+    const shadow = temporaryDir();
+    writeFileSync(join(shadow, "only.txt"), "");
+    const running = await start({ readOnlyMounts: { "/opt/team/skills": skills, "/etc/apk": shadow } });
+    const env = await running.env("ro");
+
+    const seen = await sh(
+      env,
+      [
+        "cat /opt/team/skills/SKILL.md",
+        "touch /opt/team/skills/new 2>/dev/null && echo wrote || echo not-written",
+        "rm /opt/team/skills/SKILL.md 2>/dev/null && echo removed || echo kept",
+        "mkdir /opt/team/skills/d 2>/dev/null && echo made || echo not-made",
+        "ln -s /opt/team/skills /workspace/skills && cat /workspace/skills/SKILL.md",
+        "{ echo x > /workspace/skills/through.md; } 2>/dev/null && echo through || echo not-through",
+        "ls /etc/apk",
+      ].join("; "),
+    );
+
+    expect(seen.output).toBe("# Skill\nnot-written\nkept\nnot-made\n# Skill\nnot-through\nonly.txt\n");
+    expect(readdirSync(skills)).toEqual(["SKILL.md"]);
+    expect(readdirSync(shadow)).toEqual(["only.txt"]);
+    // The file tools: the same files, through the guest's link too; a change refused.
+    expect(await env.readTextFile("skills/SKILL.md", ctx)).toEqual({ ok: true, value: "# Skill\n" });
+    expect(await env.readTextFile("/opt/team/skills/SKILL.md", ctx)).toEqual({ ok: true, value: "# Skill\n" });
+    const write = await env.writeFile("/opt/team/skills/SKILL.md", "changed", ctx);
+    expect(!write.ok && write.error.code).toBe("permission_denied");
+    expect(readFileSync(join(skills, "SKILL.md"), "utf8")).toBe("# Skill\n");
   }, BOOT_MS);
 
   if (builderMissing.length > 0) {
