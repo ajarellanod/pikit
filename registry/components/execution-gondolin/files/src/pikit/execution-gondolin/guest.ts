@@ -33,6 +33,11 @@ export interface GuestSpec {
   label: string;
   /** Guest path to host directory: the guest reads and writes the host's files there (Gondolin's `RealFSProvider`). */
   mounts: Readonly<Record<string, string>>;
+  /**
+   * Guest path to host directory, read-only (Gondolin's `ReadonlyProvider` over `RealFSProvider`): the
+   * machine's reference files. Never over `mounts`; over a path of the image, it hides the image's there.
+   */
+  readOnlyMounts: Readonly<Record<string, string>>;
   /** The hosts the guest may reach over HTTP and HTTPS: none when empty. */
   allowedHosts: readonly string[];
   /** The secrets set at boot. One not set then is left out until the next boot. */

@@ -7,10 +7,10 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createHttpHooks, type SecretManager } from "@earendil-works/gondolin";
+import { join, relative } from "node:path";
+import { createHttpHooks, ReadonlyProvider, RealFSProvider, type SecretManager } from "@earendil-works/gondolin";
 import type { ConversationRef } from "@pikit/contracts";
 import { type App, type Clock, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger, systemClock } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
@@ -21,7 +21,7 @@ import { createWorkspaceConformance } from "@pikit/pi-adapter/testing";
 import { doctor } from "./doctor.ts";
 import { FakeLauncher } from "./fake-guest.test-support.ts";
 import { SandboxCache } from "./cache.ts";
-import { archProblem, GondolinGuest, gitConfig, imageFile, proposalsHook, staleImages } from "./gondolin.ts";
+import { archProblem, GondolinGuest, gitConfig, imageFile, proposalsHook, staleImages, vfsMounts } from "./gondolin.ts";
 import { BUILD_PREFIX, buildConfig, buildName, staleBuilds } from "./image.ts";
 import { type GuestSpec, PROPOSALS_HOST, PROPOSALS_URL } from "./guest.ts";
 import { createExecutionGondolin, holdsWorkingDirectory, IMAGE_DIR, KEEP_SANDBOXES, PROFILE_WARNING, TMP_DIR, USED_DIR } from "./index.ts";
@@ -440,6 +440,7 @@ test("the VM boots at the first command, once, with the conversation's directori
   expect(guest?.spec).toEqual({
     label: label("7"),
     mounts: { "/workspace": join(s.root, dir("7")), "/tmp/pikit": join(s.root, TMP_DIR, dir("7")) },
+    readOnlyMounts: {},
     allowedHosts: [],
     secrets: [],
     memory: "512M",
@@ -1174,6 +1175,243 @@ test("what the file tools change on the host, the next command sees: its directo
   await run(env, "ls");
   expect(guest?.syncs[1]).toEqual(["/workspace", "/workspace/project", "/workspace/project/docs"]);
   await s.app.stop();
+});
+
+// Read-only mounts (`readOnlyMounts`): reference files every VM of a machine sees, and the file tools read, never change.
+
+/** A host directory of reference files: `SKILL.md`, `scripts/run.sh`, `docs/a.md`. */
+function referenceDir(): string {
+  const ref = temporaryDir();
+  writeFileSync(join(ref, "SKILL.md"), "# Skill\nline 2\n");
+  mkdirSync(join(ref, "scripts"));
+  writeFileSync(join(ref, "scripts", "run.sh"), "echo run\n");
+  mkdirSync(join(ref, "docs"));
+  writeFileSync(join(ref, "docs", "a.md"), "a");
+  return ref;
+}
+
+/** Every file and link under `dir` with its content (or target): what a refused change must leave as it was. */
+function contents(dir: string, prefix = ""): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of readdirSync(join(dir, prefix))) {
+    const path = join(dir, prefix, name);
+    const info = lstatSync(path);
+    if (info.isDirectory()) Object.assign(out, { [join(prefix, name)]: "dir" }, contents(dir, join(prefix, name)));
+    else out[join(prefix, name)] = info.isSymbolicLink() ? `-> ${readlinkSync(path)}` : readFileSync(path, "utf8");
+  }
+  return out;
+}
+
+/** Why `started(config)` refused to start: the component's own message. */
+const refusal = (config: Record<string, unknown>, root: string) =>
+  started(config, { root }).then(
+    async (s) => {
+      await s.app.stop();
+      return "started";
+    },
+    (error: unknown) => String(((error as Error).cause as Error | undefined)?.message ?? (error as Error).message),
+  );
+
+test("read-only mounts: guest paths absolute and normalized, apart from the sandbox's own and the guest's; host directories that exist, apart from the working directory and root; refused at start naming the machine", async () => {
+  const ref = referenceDir();
+  const root = join(temporaryDir(), "gondolin");
+  // Refused by the schema (a guest path's shape) or at start (what it overlaps, the host directory).
+  for (const guest of ["opt/skills", "/", "/opt/", "/opt//x", "/opt/../etc/x", "/opt/./x", "/opt/a b", "/opt/a,b", "/workspace", "/workspace/ref", "/tmp", "/tmp/pikit/ref", "/etc", "/run/x", "/data", "/proc", "/dev/ref", "/sys"]) {
+    expect({ guest, refused: await started({ readOnlyMounts: { [guest]: ref } }, { root }).then((s) => (s.app.stop(), false), () => true) }).toEqual({ guest, refused: true });
+  }
+  expect(await refusal({ readOnlyMounts: { "/opt/a": ref, "/opt/a/b": ref } }, root)).toContain('"/opt/a" (from');
+  expect(await refusal({ readOnlyMounts: { "/workspace/ref": ref } }, root)).toBe(
+    `execution-gondolin: the read-only mounts of the base machine cannot be used: "/workspace/ref" (from ${JSON.stringify(ref)}): the guest path overlaps /workspace (it is, holds or is inside it)`,
+  );
+  expect(await refusal({ readOnlyMounts: { "/run/ref": ref } }, root)).toContain("/run is the guest's own");
+  writeFileSync(join(ref, "file.txt"), "");
+  mkdirSync(join(root, "chats"), { recursive: true });
+  const parent = join(root, "..");
+  for (const host of [join(ref, "missing"), join(ref, "file.txt"), process.cwd(), "/", ".", root, parent, join(root, "chats")]) {
+    expect({ host, refused: await started({ readOnlyMounts: { "/opt/ref": host } }, { root }).then((s) => (s.app.stop(), false), () => true) }).toEqual({ host, refused: true });
+  }
+  // A profile's too, naming its agent.
+  expect(await refusal({ agents: { developer: { readOnlyMounts: { "/opt/ref": join(ref, "missing") } } } }, root)).toBe(
+    `execution-gondolin: the read-only mounts of agent "developer" cannot be used: "/opt/ref" (from ${JSON.stringify(join(ref, "missing"))}): the host directory is not there (or not a directory)`,
+  );
+  expect(await refusal({ readOnlyMounts: { "/opt/ref": process.cwd() } }, root)).toContain("the host directory is the working directory, holds it, or is /");
+  expect(await refusal({ readOnlyMounts: { "/opt/ref": join(root, "chats") } }, root)).toContain("the host directory overlaps root");
+  await expect(started({ agents: { developer: { readOnlyMounts: { "/tmp/pikit": ref } } } }, { root })).rejects.toThrow();
+  // Accepted: a directory of /etc, another of /tmp, a relative host directory (to the working directory), a link to a directory.
+  const link = join(temporaryDir(), "link");
+  symlinkSync(ref, link);
+  const s = await started({ readOnlyMounts: { "/etc/team": ref, "/tmp/ref": relative(process.cwd(), ref), "/opt/Team_1.x": link } }, { root });
+  const env = await s.env("1");
+  expect(await env.readTextFile("/tmp/ref/docs/a.md", ctx)).toEqual({ ok: true, value: "a" });
+  await run(env, "true");
+  expect(await env.readTextFile("/opt/Team_1.x/SKILL.md", ctx)).toEqual({ ok: true, value: "# Skill\nline 2\n" });
+  expect(s.launcher.guests[0]?.spec.readOnlyMounts).toEqual({ "/etc/team": ref, "/tmp/ref": ref, "/opt/Team_1.x": link });
+  await s.app.stop();
+});
+
+test("read-only mounts: a profile's replace the base's whole, field by field; an agent with none, and default, get the base's; each VM's spec carries its machine's", async () => {
+  const team = referenceDir();
+  const dev = referenceDir();
+  writeFileSync(join(dev, "DEV.md"), "developer's");
+  const s = await started({ readOnlyMounts: { "/opt/team": team }, agents: { developer: { readOnlyMounts: { "/opt/dev": dev } }, analyst: { readOnlyMounts: {} }, ops: { cpus: 1 } } });
+  const specOf = async (agent: string) => {
+    const { env } = await s.workspace.resolve(ref("1", agent), s.app.context());
+    await run(env, "true");
+    return s.launcher.guests.at(-1)?.spec as GuestSpec;
+  };
+  const envOf = async (agent: string) => (await s.workspace.resolve(ref("1", agent), s.app.context())).env;
+
+  expect((await specOf("developer")).readOnlyMounts).toEqual({ "/opt/dev": dev });
+  expect((await specOf("analyst")).readOnlyMounts).toEqual({});
+  expect((await specOf("ops")).readOnlyMounts).toEqual({ "/opt/team": team });
+  expect((await specOf("support")).readOnlyMounts).toEqual({ "/opt/team": team });
+  await run(s.execution, "true");
+  expect(s.launcher.guests.at(-1)?.spec.readOnlyMounts).toEqual({ "/opt/team": team });
+  // The sandbox's own two stay as they were.
+  expect(Object.keys(s.launcher.guests.at(-1)?.spec.mounts ?? {})).toEqual(["/workspace", "/tmp/pikit"]);
+
+  // The file tools see the same: the developer its own, not the base's; the analyst none.
+  const developer = await envOf("developer");
+  expect(await developer.readTextFile("/opt/dev/DEV.md", ctx)).toEqual({ ok: true, value: "developer's" });
+  const outside = await developer.readTextFile("/opt/team/SKILL.md", ctx);
+  expect(!outside.ok && outside.error.code).toBe("permission_denied");
+  expect(!outside.ok && outside.error.message).toBe(
+    "/opt/team/SKILL.md is outside this sandbox's files: the file tools reach only /opt/dev (read-only), /tmp/pikit and /workspace; a command (bash) sees the whole VM",
+  );
+  expect(await (await envOf("support")).readTextFile("/opt/team/SKILL.md", ctx)).toEqual({ ok: true, value: "# Skill\nline 2\n" });
+  const none = await (await envOf("analyst")).readTextFile("/opt/team/SKILL.md", ctx);
+  expect(!none.ok && none.error.message).toContain("the file tools reach only /tmp/pikit and /workspace;");
+  await s.app.stop();
+});
+
+test("read-only mounts: the file tools read, list and find there without a VM; every change is refused (permission_denied, naming the path read-only) and the host's files stay as they were", async () => {
+  const team = referenceDir();
+  const s = await started({ readOnlyMounts: { "/opt/team": team } });
+  const env = await s.env("1");
+  const before = contents(team);
+  await env.writeFile("mine.txt", "mine", ctx);
+
+  // Reading.
+  expect(await env.readTextFile("/opt/team/SKILL.md", ctx)).toEqual({ ok: true, value: "# Skill\nline 2\n" });
+  expect(await env.readTextLines("/opt/team/SKILL.md", { maxLines: 1 }, ctx)).toEqual({ ok: true, value: ["# Skill"] });
+  const bytes = await env.readBinaryFile("/opt/team/docs/a.md", ctx);
+  expect(bytes.ok && new TextDecoder().decode(bytes.value)).toBe("a");
+  const reader = await env.openBinaryReader("/opt/team/SKILL.md", undefined, ctx);
+  expect(reader.ok && (await reader.value.info(ctx))).toMatchObject({ ok: true, value: { path: "/opt/team/SKILL.md", kind: "file" } });
+  if (reader.ok) await reader.value.close(ctx);
+  const lines = await env.openTextLineReader("/opt/team/SKILL.md", ctx);
+  expect(lines.ok && (await lines.value.readLine(ctx))).toEqual({ ok: true, value: { text: "# Skill", terminated: true } });
+  if (lines.ok) await lines.value.close(ctx);
+  expect(await env.fileInfo("/opt/team/scripts", ctx)).toMatchObject({ ok: true, value: { kind: "directory", path: "/opt/team/scripts", name: "scripts" } });
+  expect(await env.exists("/opt/team/scripts/run.sh", ctx)).toEqual({ ok: true, value: true });
+  expect(await env.exists("/opt/team/missing", ctx)).toEqual({ ok: true, value: false });
+  const listed = await env.listDir("/opt/team", ctx);
+  expect(listed.ok && listed.value.map((entry) => entry.path).sort()).toEqual(["/opt/team/SKILL.md", "/opt/team/docs", "/opt/team/scripts"]);
+  const pages = await env.openDirReader("/opt/team/docs", ctx);
+  expect(pages.ok && (await pages.value.next(10, ctx))).toMatchObject({ ok: true, value: { entries: [{ path: "/opt/team/docs/a.md" }] } });
+  if (pages.ok) await pages.value.close(ctx);
+  expect(await env.canonicalPath("/opt/team/docs/../SKILL.md", ctx)).toEqual({ ok: true, value: "/opt/team/SKILL.md" });
+  // From a working directory there, relative paths too.
+  expect(await env.readTextFile("../opt/team/docs/a.md", ctx)).toEqual({ ok: true, value: "a" });
+
+  // Every change, of a file or directory there (one that exists or not), refused.
+  const changes: [string, () => Promise<{ ok: boolean; error?: { code: string; message: string; path?: string } }>][] = [
+    ["write a file", () => env.writeFile("/opt/team/SKILL.md", "changed", ctx)],
+    ["write a new file", () => env.writeFile("/opt/team/new.md", "new", ctx)],
+    ["write in a new directory", () => env.writeFile("/opt/team/new/deep.md", "new", ctx)],
+    ["append", () => env.appendFile("/opt/team/SKILL.md", "more", ctx)],
+    ["truncate", () => env.truncateFile("/opt/team/SKILL.md", 0, ctx)],
+    ["make a directory", () => env.createDir("/opt/team/made", undefined, ctx)],
+    ["make one that exists, recursively", () => env.createDir("/opt/team/docs", { recursive: true }, ctx)],
+    ["make the mount itself", () => env.createDir("/opt/team", { recursive: true }, ctx)],
+    ["remove a file", () => env.remove("/opt/team/SKILL.md", undefined, ctx)],
+    ["remove a directory", () => env.remove("/opt/team/docs", { recursive: true, force: true }, ctx)],
+    ["remove the mount", () => env.remove("/opt/team", { recursive: true, force: true }, ctx)],
+    ["remove what is not there", () => env.remove("/opt/team/missing", { force: true }, ctx)],
+    ["rename inside", () => env.renameFile("/opt/team/SKILL.md", "/opt/team/OTHER.md", ctx)],
+    ["rename out", () => env.renameFile("/opt/team/SKILL.md", "/workspace/taken.md", ctx)],
+    ["rename in", () => env.renameFile("/workspace/mine.txt", "/opt/team/mine.txt", ctx)],
+    ["rename in, over a file", () => env.renameFile("/workspace/mine.txt", "/opt/team/SKILL.md", ctx)],
+  ];
+  for (const [what, change] of changes) {
+    const done = await change();
+    expect({ what, code: done.ok ? "ok" : done.error?.code }).toEqual({ what, code: "permission_denied" });
+    expect({ what, message: done.error?.message }).toEqual({ what, message: expect.stringMatching(/^\/opt\/team\S* is read-only: \/opt\/team is a read-only mount of reference files; it can be read, never changed/) });
+    expect(`${done.error?.message} ${done.error?.path}`).not.toContain(team);
+  }
+  expect(contents(team)).toEqual(before);
+  expect(await env.readTextFile("mine.txt", ctx)).toEqual({ ok: true, value: "mine" });
+  // Read through the file tools only: no VM booted, and nothing to sync.
+  expect(s.launcher.guests).toHaveLength(0);
+  await run(env, "true");
+  expect(s.launcher.guests[0]?.syncs).toEqual([["/workspace", "/workspace/mine.txt"]]);
+  await s.app.stop();
+});
+
+test("read-only mounts and links: resolved in the guest's namespace; a link from /workspace reads there and writes nothing; a link there leading out is refused", async () => {
+  const team = referenceDir();
+  const s = await started({ readOnlyMounts: { "/opt/team": team } });
+  const env = await s.env("1");
+  const host = join(s.root, dir("1"));
+  writeFileSync(join(s.root, "state.db"), "every conversation");
+  // In /workspace, as the guest makes them: absolute (a guest path) and relative.
+  symlinkSync("/opt/team", join(host, "team"));
+  symlinkSync("../opt/team/SKILL.md", join(host, "skill.md"));
+  // In the reference directory, as the operator left them: inside it, into /workspace, to a host path, and up and out.
+  symlinkSync("docs/a.md", join(team, "a-link.md"));
+  symlinkSync("/workspace/notes.md", join(team, "notes.md"));
+  symlinkSync(join(s.root, "state.db"), join(team, "host.db"));
+  symlinkSync("../../..", join(team, "up"));
+  const before = contents(team);
+  const code = (result: { ok: boolean; error?: { code: string } }) => (result.ok ? "ok" : result.error?.code);
+
+  expect(await env.readTextFile("team/SKILL.md", ctx)).toEqual({ ok: true, value: "# Skill\nline 2\n" });
+  expect(await env.readTextFile("skill.md", ctx)).toEqual({ ok: true, value: "# Skill\nline 2\n" });
+  expect(await env.canonicalPath("skill.md", ctx)).toEqual({ ok: true, value: "/opt/team/SKILL.md" });
+  expect(await env.readTextFile("/opt/team/a-link.md", ctx)).toEqual({ ok: true, value: "a" });
+  // Writing through a link into the mount is refused, saying where the link leads.
+  const through = await env.writeFile("team/new.md", "x", ctx);
+  expect(code(through)).toBe("permission_denied");
+  expect(!through.ok && through.error.message).toStartWith("/workspace/team/new.md is read-only (a symbolic link leads to /opt/team/new.md): /opt/team is a read-only mount");
+  expect(code(await env.writeFile("skill.md", "x", ctx))).toBe("permission_denied");
+  expect(code(await env.appendFile("skill.md", "x", ctx))).toBe("permission_denied");
+  expect(code(await env.createDir("team/made", { recursive: true }, ctx))).toBe("permission_denied");
+  expect(code(await env.remove("team/docs", { recursive: true }, ctx))).toBe("permission_denied");
+  expect(code(await env.renameFile("mine.md", "team/mine.md", ctx))).toBe("permission_denied");
+  // A link there to a host path, or up and out of it, leads outside: refused, as any other.
+  expect(code(await env.readTextFile("/opt/team/host.db", ctx))).toBe("permission_denied");
+  expect(code(await env.readTextFile("/opt/team/up/state.db", ctx))).toBe("permission_denied");
+  // A link there into /workspace leads to /workspace, as in the guest: written there, the link itself unchanged.
+  expect(code(await env.writeFile("/opt/team/notes.md", "noted", ctx))).toBe("ok");
+  expect(readFileSync(join(host, "notes.md"), "utf8")).toBe("noted");
+  expect(code(await env.remove("/opt/team/notes.md", undefined, ctx))).toBe("permission_denied");
+  // The links in /workspace are /workspace's own: renamed and removed, never what they point to.
+  expect(code(await env.renameFile("team", "team-2", ctx))).toBe("ok");
+  expect(code(await env.remove("team-2", undefined, ctx))).toBe("ok");
+  expect(code(await env.remove("skill.md", undefined, ctx))).toBe("ok");
+  expect(contents(team)).toEqual(before);
+  await s.app.stop();
+});
+
+test("read-only mounts in the VM: Gondolin's ReadonlyProvider over a RealFSProvider at each, the sandbox's own two writable", async () => {
+  const team = referenceDir();
+  const mounts = vfsMounts({ mounts: { "/workspace": "/host/ws", "/tmp/pikit": "/host/tmp" }, readOnlyMounts: { "/opt/team": team } });
+  expect(Object.keys(mounts).sort()).toEqual(["/opt/team", "/tmp/pikit", "/workspace"]);
+  expect(mounts["/workspace"]).toBeInstanceOf(RealFSProvider);
+  expect(mounts["/tmp/pikit"]).toBeInstanceOf(RealFSProvider);
+  expect(mounts["/workspace"]?.readonly).toBe(false);
+  const provider = mounts["/opt/team"];
+  expect(provider).toBeInstanceOf(ReadonlyProvider);
+  expect(provider?.readonly).toBe(true);
+  // It reads the host directory and refuses every change.
+  expect(provider?.readdirSync("/").sort()).toEqual(["SKILL.md", "docs", "scripts"]);
+  // EROFS (30): its message names the number on Bun (Node's getSystemErrorName wants it negative).
+  await expect(provider?.open("/SKILL.md", "w") as Promise<unknown>).rejects.toMatchObject({ errno: 30, syscall: "open" });
+  await expect(provider?.mkdir("/made") as Promise<unknown>).rejects.toMatchObject({ errno: 30, syscall: "mkdir" });
+  await expect(provider?.unlink("/SKILL.md") as Promise<unknown>).rejects.toMatchObject({ errno: 30, syscall: "unlink" });
+  expect(readFileSync(join(team, "SKILL.md"), "utf8")).toBe("# Skill\nline 2\n");
+  // None: the two as before.
+  expect(Object.keys(vfsMounts({ mounts: { "/workspace": "/host/ws", "/tmp/pikit": "/host/tmp" }, readOnlyMounts: {} }))).toEqual(["/workspace", "/tmp/pikit"]);
 });
 
 // Retention (`retentionDays`): a chat's sandboxes go once nothing worked in them for that many days.

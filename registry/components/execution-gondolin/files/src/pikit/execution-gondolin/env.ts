@@ -6,7 +6,9 @@
  * directory behind its mount (refusing one that leads outside), and pi-durable's own `NodeExecutionEnv`
  * does the work there, so readers, decoding and error codes are Pi's; the host paths in its results and
  * errors are written back as guest paths. Temporary files and spilled output go to `/tmp/pikit`, a
- * second mount, so the tools and the shell see them alike.
+ * second mount, so the tools and the shell see them alike. The machine's read-only mounts
+ * (`readOnlyMounts`) are read and listed the same way; every method that changes files refuses a path
+ * that ends in one (`changing`, `Mounts.toHost`'s `write`).
  *
  * `exec` runs a command in the sandbox's VM (`pool.ts` boots it on the first one): the output streams
  * to `onOutput` raw chunk by raw chunk, decoded per stream, all of it (`window` is not used: nothing is
@@ -159,29 +161,42 @@ class GondolinExecutionEnv implements ExecutionEnv {
     }
   }
 
-  /** `onHost` for a method that changes files: what it changed is noted (`changed`), done or not. */
+  /**
+   * `onHost` for a method that changes files: a path in a read-only mount is refused, and what it
+   * changed is noted (`changed`), done or not.
+   */
   private async changing<T>(path: string, follow: boolean, context: Context, work: (host: string, guest: string) => Promise<Result<T, FileError>>): Promise<Result<T, FileError>> {
-    return await this.onHost(path, follow, context, async (host, guest) => {
-      try {
-        return await work(host, guest);
-      } finally {
-        this.changed(guest, host);
-      }
-    });
+    return await this.onHost(
+      path,
+      follow,
+      context,
+      async (host, guest) => {
+        try {
+          return await work(host, guest);
+        } finally {
+          this.changed(guest, host);
+        }
+      },
+      true,
+    );
   }
 
-  /** `work` on the host path of `path` (links followed as the guest follows them; the last one only with `follow`). */
+  /**
+   * `work` on the host path of `path` (links followed as the guest follows them; the last one only with
+   * `follow`); with `write`, never in a read-only mount.
+   */
   private async onHost<T>(
     path: string,
     follow: boolean,
     context: Context,
     work: (host: string, guest: string) => Promise<Result<T, FileError>>,
+    write = false,
   ): Promise<Result<T, FileError>> {
     const guest = this.guestPath(path);
     if (context.abortSignal?.aborted === true) return abortedFile(guest);
     this.sandbox.active++;
     try {
-      const host = await this.sandbox.mounts.toHost(guest, follow);
+      const host = await this.sandbox.mounts.toHost(guest, follow, write);
       if (!host.ok) return host;
       return this.guestResult(await work(host.value, guest));
     } finally {

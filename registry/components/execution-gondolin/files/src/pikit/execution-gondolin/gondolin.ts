@@ -2,7 +2,8 @@
  * The real `GuestLauncher`: a Gondolin micro-VM (QEMU, Alpine Linux) per boot.
  *
  * - **Files**: each mount is Gondolin's `RealFSProvider` over a host directory, which refuses the
- *   guest's links that lead outside it.
+ *   guest's links that lead outside it; a read-only one (`readOnlyMounts`) is wrapped in its
+ *   `ReadonlyProvider`, which refuses every change (`EROFS`).
  * - **Image**: the machine's (`spec.image`, prepared at start by `image.ts`: one the operator built, or
  *   one built on the host), else Gondolin's; with `packages`, a checkpoint of it with those Alpine
  *   packages added (`imageWith`): made once by a VM whose only reachable host is the Alpine mirror,
@@ -40,6 +41,7 @@ import {
   hasGuestAssets,
   loadAssetManifest,
   loadGuestAssets,
+  ReadonlyProvider,
   RealFSProvider,
   type SecretManager,
   VM,
@@ -175,6 +177,14 @@ export function staleImages(names: readonly string[], buildIds: readonly string[
 /** Gondolin's default image's build id when it is on this machine (nothing is downloaded), else `undefined`. */
 function defaultBuildId(): string | undefined {
   return hasGuestAssets() ? loadAssetManifest(getAssetDirectory())?.buildId : undefined;
+}
+
+/** Gondolin's VFS mounts for `spec`: each a `RealFSProvider` over its host directory, the read-only ones wrapped in a `ReadonlyProvider`. */
+export function vfsMounts(spec: Pick<GuestSpec, "mounts" | "readOnlyMounts">): Record<string, RealFSProvider | ReadonlyProvider> {
+  return {
+    ...Object.fromEntries(Object.entries(spec.mounts).map(([guest, host]) => [guest, new RealFSProvider(host)])),
+    ...Object.fromEntries(Object.entries(spec.readOnlyMounts).map(([guest, host]) => [guest, new ReadonlyProvider(new RealFSProvider(host))])),
+  };
 }
 
 /** Gondolin's options for `spec`'s image and root disk: its asset directory, and `rootfs.size`. */
@@ -334,7 +344,7 @@ export const gondolinLauncher: GuestLauncher = {
     const options: VMOptions = {
       httpHooks,
       env,
-      vfs: { mounts: Object.fromEntries(Object.entries(spec.mounts).map(([guest, host]) => [guest, new RealFSProvider(host)])) },
+      vfs: { mounts: vfsMounts(spec) },
       memory: spec.memory,
       cpus: spec.cpus,
       sessionLabel: spec.label,

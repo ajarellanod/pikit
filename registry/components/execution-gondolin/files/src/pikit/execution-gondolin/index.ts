@@ -26,8 +26,14 @@
  *   An image build's VM (below) is not one of them.
  *   What the VM wrote outside `/workspace` and `/tmp/pikit` goes with it.
  * - runs on its agent's machine: the profile in `agents` whose key is `ConversationRef.agent`, each
- *   field it sets replacing the base's (`packages`, `allowedHosts`, `secrets`, `memory`, `cpus`), else
- *   the base (an agent not named, and `default`, always).
+ *   field it sets replacing the base's (`packages`, `allowedHosts`, `secrets`, `memory`, `cpus`,
+ *   `readOnlyMounts`...), else the base (an agent not named, and `default`, always).
+ * - sees its machine's `readOnlyMounts`: host directories (relative to the working directory, or
+ *   absolute) at guest paths of their own, read-only in the VM (Gondolin's `ReadonlyProvider`) and for
+ *   the file tools (`paths.ts`), which read them without a VM and refuse every change there. Checked
+ *   at start (`readOnlyProblems`): a guest path that is `/`, overlaps the sandbox's two mounts, another
+ *   read-only one or what the guest's boot needs, or a host directory that is missing, holds the
+ *   working directory, or overlaps `root`, refuses the start.
  * - reaches only its machine's `allowedHosts` (and its secrets' hosts) over HTTP(S); nothing else
  *   leaves the VM. A secret is read through the `secrets` capability at each boot and command; the
  *   guest holds a placeholder in `$NAME`, which the host replaces in requests to that secret's hosts
@@ -61,8 +67,8 @@
 
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { lstat, mkdir, rm } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { lstat, mkdir, rm, stat } from "node:fs/promises";
+import { join, posix, relative, resolve, sep } from "node:path";
 import { type ConversationRef, originOf } from "@pikit/contracts";
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
@@ -106,6 +112,13 @@ const imageSetting = () =>
   Type.Union([Type.String({ minLength: 1 }), Type.Object({ packages: packageList({ minItems: 1 }) }, { additionalProperties: false })]);
 /** The least size of each VM's root disk, grown at boot (`"4G"`). */
 const diskSize = () => Type.String({ pattern: "^[0-9]+[MG]$" });
+/**
+ * A machine's read-only mounts: guest path (absolute; letters, digits, `.`, `_` and `-` in each part)
+ * to host directory (relative to the server's working directory, or absolute). The rest is checked at
+ * start (`readOnlyProblems`).
+ */
+const readOnlyMountMap = (options = {}) =>
+  Type.Record(Type.String(), Type.String({ minLength: 1 }), { propertyNames: { pattern: "^(/[A-Za-z0-9._-]+)+$", maxLength: 256 }, ...options });
 
 /**
  * An agent's machine: each field it sets replaces the base's (its `allowedHosts` are not added to the
@@ -122,6 +135,7 @@ const Profile = Type.Object(
     workspace: Type.Optional(workspaceMode()),
     image: Type.Optional(imageSetting()),
     rootfsSize: Type.Optional(diskSize()),
+    readOnlyMounts: Type.Optional(readOnlyMountMap()),
   },
   { additionalProperties: false },
 );
@@ -169,8 +183,15 @@ const Config = Type.Object({
   /** The least size of each VM's root disk (`"4G"`), grown at boot: room for what commands write outside `/workspace`. Absent: the image's own. */
   rootfsSize: Type.Optional(diskSize()),
   /**
+   * Reference files every VM of the machine sees read-only: guest path to host directory (relative to
+   * the server's working directory, or absolute), `{ "/opt/team/skills": "skills" }`. The file tools
+   * read them too (no VM), and refuse every change there. A mount over a path of the image hides the
+   * image's files there. Default: none.
+   */
+  readOnlyMounts: readOnlyMountMap({ default: {} }),
+  /**
    * A machine per agent, by agent name (`ConversationRef.agent`, exactly): its `packages`,
-   * `allowedHosts`, `secrets`, `memory`, `cpus`, `workspace`, `image` and `rootfsSize`, each replacing the base's. An agent not named here
+   * `allowedHosts`, `secrets`, `memory`, `cpus`, `workspace`, `image`, `rootfsSize` and `readOnlyMounts`, each replacing the base's. An agent not named here
    * (a misspelled key too) gets the base.
    */
   agents: Type.Record(Type.String(), Profile, { default: {}, propertyNames: { pattern: AGENT_NAME, maxLength: 100 } }),
@@ -264,6 +285,47 @@ export function holdsWorkingDirectory(root: string, cwd = process.cwd()): boolea
   );
 }
 
+/** Guest paths a read-only mount may not be in (nor hold): the guest's own, which its boot and commands need (Gondolin's VFS at `/data`, the status files in `/run`). */
+const GUEST_OWN = ["/data", "/proc", "/sys", "/dev", "/run"];
+
+/** Whether guest or host path `a` is `b`, holds it, or is inside it (`sep` the separator). */
+function overlaps(a: string, b: string, separator = "/"): boolean {
+  const under = (x: string, y: string) => x === y || x.startsWith(y.endsWith(separator) ? y : y + separator);
+  return under(a, b) || under(b, a);
+}
+
+/**
+ * Why a machine's read-only mounts (`mounts`: guest path to host directory) cannot be used, each
+ * problem a sentence, or none. A guest path must be normalized, never `/`, never overlap `/workspace`,
+ * `/tmp/pikit` or another read-only mount, never be `/etc` (its `gitconfig` is written at each boot)
+ * or in one of `GUEST_OWN`. A host directory (resolved against `cwd`) must exist, never hold the
+ * working directory (its `.env`, `.pikit/`), and never overlap `root` (every sandbox's files).
+ */
+export async function readOnlyProblems(mounts: Readonly<Record<string, string>>, root: string, cwd = process.cwd()): Promise<string[]> {
+  const problems: string[] = [];
+  const guests = Object.keys(mounts);
+  for (const [guest, given] of Object.entries(mounts)) {
+    const at = `${JSON.stringify(guest)} (from ${JSON.stringify(given)})`;
+    if (guest === "/" || posix.normalize(guest) !== guest) problems.push(`${at}: the guest path must be absolute and normalized, not /`);
+    else if (guest === "/etc") problems.push(`${at}: the guest's /etc is needed at every boot (its gitconfig): mount in a directory of it, or elsewhere (/opt)`);
+    else {
+      const taken = [WORKSPACE, TMP, ...guests.filter((other) => other !== guest)].find((other) => overlaps(guest, other));
+      if (taken !== undefined) problems.push(`${at}: the guest path overlaps ${taken} (it is, holds or is inside it)`);
+      const own = GUEST_OWN.find((dir) => guest === dir || guest.startsWith(`${dir}/`));
+      if (own !== undefined) problems.push(`${at}: ${own} is the guest's own (what its boot and commands need)`);
+    }
+    const host = resolve(cwd, given);
+    const isDir = await stat(host).then(
+      (info) => info.isDirectory(),
+      () => false,
+    );
+    if (!isDir) problems.push(`${at}: the host directory is not there (or not a directory)`);
+    else if (holdsWorkingDirectory(host, cwd)) problems.push(`${at}: the host directory is the working directory, holds it, or is / (its .env and .pikit/ would be in every VM)`);
+    else if ([host, real(host)].some((dir) => [root, real(root)].some((r) => overlaps(dir, r, sep)))) problems.push(`${at}: the host directory overlaps root (every sandbox's files)`);
+  }
+  return problems;
+}
+
 /** The component over `launcher`: `gondolinLauncher` (QEMU) for real, a fake in the tests. */
 export function createExecutionGondolin(launcher: GuestLauncher) {
   return defineComponent({
@@ -317,6 +379,8 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
       function sandbox(name: string, path: string, label: string, profile: Profile | undefined): Sandbox {
         const workspace = join(root, path);
         const tmp = join(root, TMP_DIR, path);
+        // Field by field: the profile's map whole, else the base's; host directories as start checked them.
+        const readOnly = Object.fromEntries(Object.entries(profile?.readOnlyMounts ?? config.readOnlyMounts).map(([guest, host]) => [guest, resolve(host)]));
         // Field by field: the profile's when set, else the base's. Its hosts: its own plus its own secrets'.
         const own: Secret[] = profile?.secrets ?? config.secrets;
         const allowedHosts = [...new Set([...(profile?.allowedHosts ?? config.allowedHosts), ...own.flatMap((secret) => secret.hosts)])];
@@ -326,6 +390,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           return {
             label,
             mounts: { [WORKSPACE]: workspace, [TMP]: tmp },
+            readOnlyMounts: readOnly,
             allowedHosts,
             secrets: own.flatMap((secret) => {
               const value = values[secret.name];
@@ -346,6 +411,7 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           mounts: new Mounts([
             { guest: WORKSPACE, host: workspace },
             { guest: TMP, host: tmp },
+            ...Object.entries(readOnly).map(([guest, host]) => ({ guest, host, readOnly: true })),
           ]),
           workspace,
           tmp,
@@ -471,6 +537,11 @@ export function createExecutionGondolin(launcher: GuestLauncher) {
           background = ctx.derive(() => BACKGROUND_CONTEXT);
           if (holdsWorkingDirectory(root)) {
             throw new Error(`execution-gondolin: root ${JSON.stringify(config.root)} is the working directory, holds it, or is /: give the sandboxes a directory of their own (the default is .pikit/gondolin)`);
+          }
+          // Every machine's read-only mounts: one that cannot be used safely refuses the start, naming its machine.
+          for (const [whose, mounts] of [[BASE, config.readOnlyMounts] as const, ...Object.entries(config.agents).flatMap(([name, profile]) => (profile.readOnlyMounts === undefined ? [] : [[agentMachine(name), profile.readOnlyMounts] as const]))]) {
+            const problems = await readOnlyProblems(mounts, root);
+            if (problems.length > 0) throw new Error(`execution-gondolin: the read-only mounts of ${whose} cannot be used: ${problems.join("; ")}`);
           }
           const problem = launcher.check();
           if (problem !== undefined) throw new Error(`execution-gondolin: ${problem}`);

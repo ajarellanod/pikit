@@ -1,14 +1,18 @@
 /**
  * A sandbox's files as the guest names them, served from the host. The guest sees each host directory
- * at a mount (`/workspace`, `/tmp/pikit`); the file tools work on the host directories directly, so a
- * conversation that never runs a command never boots a VM.
+ * at a mount (`/workspace`, `/tmp/pikit`, and the machine's read-only ones, `readOnlyMounts`); the file
+ * tools work on the host directories directly, so a conversation that never runs a command never boots
+ * a VM.
  *
  * `toHost` maps a guest path to its host path the way the guest's own kernel would walk it: each
  * symbolic link on the way is read and resolved in the guest's namespace (an absolute target is a
  * guest path, `/workspace/a`, never a host one), so a link the guest made means what it means in the
  * guest. A path, or a link, that leads outside the mounts is refused (`permission_denied`): the host
  * never follows a guest's link to its own `/etc` or to `.pikit/`. The host path it returns has no
- * symbolic link left in the part that exists, so the host's own calls on it stay inside.
+ * symbolic link left in the part that exists, so the host's own calls on it stay inside. For a change
+ * (`write`), a path that ends in a read-only mount, also through a link from a writable one, is refused
+ * (`permission_denied`): the host directory is writable by the server, so this check is what keeps it
+ * read-only for the file tools, as Gondolin's `ReadonlyProvider` does for the guest.
  *
  * Checked when called, used right after: a process the guest left running could swap a directory for
  * a link in between. Gondolin's own `RealFSProvider`, which serves the guest the same directories,
@@ -28,6 +32,8 @@ export interface Mount {
   guest: string;
   /** Absolute host directory. It may not exist yet; links in it (macOS's `/var`) are the host's own. */
   host: string;
+  /** Read and listed, never changed (a reference mount). */
+  readOnly?: boolean;
 }
 
 export class Mounts {
@@ -38,9 +44,10 @@ export class Mounts {
     this.list = [...mounts].sort((a, b) => b.guest.length - a.guest.length);
   }
 
-  /** The guest paths, for messages. */
-  get guestPaths(): string[] {
-    return this.list.map((mount) => mount.guest).sort();
+  /** The guest paths, for messages: `/opt/skills (read-only), /tmp/pikit and /workspace`. */
+  get guestPaths(): string {
+    const paths = [...this.list].sort((a, b) => (a.guest < b.guest ? -1 : 1)).map((mount) => (mount.readOnly ? `${mount.guest} (read-only)` : mount.guest));
+    return paths.length < 2 ? paths.join("") : `${paths.slice(0, -1).join(", ")} and ${paths.at(-1)}`;
   }
 
   /** The mount holding guest path `path` (absolute, normalized), or `undefined`. */
@@ -56,9 +63,10 @@ export class Mounts {
   /**
    * The host path of guest path `path` (absolute), its links resolved as the guest resolves them;
    * with `follow` false, a link as the last part is the link itself (`lstat`, `unlink`, `rename`).
-   * The part that does not exist yet is joined as it is: creating it makes real directories.
+   * The part that does not exist yet is joined as it is: creating it makes real directories. With
+   * `write` (a change), a path that ends in a read-only mount is refused.
    */
-  async toHost(path: string, follow: boolean): Promise<Result<string, FileError>> {
+  async toHost(path: string, follow: boolean, write = false): Promise<Result<string, FileError>> {
     let pending = posix.normalize(path);
     let links = 0;
     walk: for (;;) {
@@ -77,7 +85,7 @@ export class Mounts {
         } catch (error) {
           const code = (error as { code?: string }).code;
           // Missing (or under a file): nothing below can be a link; the host's call reports what it finds.
-          if (code === "ENOENT" || code === "ENOTDIR") return ok(join(next, ...parts.slice(index + 1)));
+          if (code === "ENOENT" || code === "ENOTDIR") return this.reached(mount, path, pending, join(next, ...parts.slice(index + 1)), write);
           return err(new FileError(code === "EACCES" || code === "EPERM" ? "permission_denied" : "unknown", this.hideHost(String((error as Error).message)), path));
         }
         if (target !== undefined) {
@@ -89,8 +97,21 @@ export class Mounts {
         host = next;
         guest = posix.join(guest, part);
       }
-      return ok(host);
+      return this.reached(mount, path, pending, host, write);
     }
+  }
+
+  /** `host`, where `path` (`resolved` once its links are followed) is in `mount`: refused for a change when the mount is read-only. */
+  private reached(mount: Mount, path: string, resolved: string, host: string, write: boolean): Result<string, FileError> {
+    if (!write || mount.readOnly !== true) return ok(host);
+    const via = resolved === posix.normalize(path) ? "" : ` (a symbolic link leads to ${resolved})`;
+    return err(
+      new FileError(
+        "permission_denied",
+        `${path} is read-only${via}: ${mount.guest} is a read-only mount of reference files; it can be read, never changed (by the file tools or a command)`,
+        path,
+      ),
+    );
   }
 
   /** Each mount's host directory as given and as `realpath` names it (`/var/...`, `/private/var/...`), longest first. */
@@ -125,7 +146,7 @@ export class Mounts {
     const via = resolved === posix.normalize(path) ? "" : ` (a symbolic link leads to ${resolved})`;
     return new FileError(
       "permission_denied",
-      `${path} is outside this sandbox's files${via}: the file tools reach only ${this.guestPaths.join(" and ")}; a command (bash) sees the whole VM`,
+      `${path} is outside this sandbox's files${via}: the file tools reach only ${this.guestPaths}; a command (bash) sees the whole VM`,
       path,
     );
   }
