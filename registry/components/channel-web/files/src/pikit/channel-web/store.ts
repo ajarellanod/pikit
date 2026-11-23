@@ -16,8 +16,10 @@
  *   - `answer`: a run's answer as answer delivery wrote it (`addAnswer`), only for a run with no `run`
  *     row (its end not heard, a crash); deleted when its `run` rows come.
  *   Entries are in turns: a user's message opens one (`turn`, its position `0`); a run's messages are
- *   in the turn of the newest user message it answered (positions `1…`), whenever it ends. Read newest
- *   first (`turn`, `pos`, `id`). A message's images' bytes are read only by `image`, one at a time; a
+ *   in the turn of the newest user message it answered, whenever it ends, after whatever that turn holds
+ *   already (positions `1…` after the message alone). A run that answered no stored message (a scheduled
+ *   prompt's: `scheduler:` requests) is in the newest turn in the transcript, after the run before it,
+ *   never among its messages. Read newest first (`turn`, `pos`, `id`). A message's images' bytes are read only by `image`, one at a time; a
  *   page of entries holds at most `PAGE_JSON_MAX` characters of stored JSON (at least one entry).
  *   On Cloudflare, in the conversation's object. A key's entries are its current runtime conversation's:
  *   they go when the key is reset ("Delete for everyone", an operator's reset: `startOver`), so a key
@@ -99,6 +101,8 @@ export interface ChatStore {
   addRun(key: string, run: string, requestIds: readonly string[], messages: readonly { id: string; message: unknown; at: number }[]): Promise<number>;
   /** Stores the answer of the run `run` as delivery wrote it, unless the run's messages are stored: whether it did. */
   addAnswer(key: string, run: string, id: string, message: unknown, at: number): Promise<boolean>;
+  /** The runtime conversations `key`'s stored messages went to (one: a reset clears them), for delivery to name a piece's run. */
+  conversationsOf(key: string): Promise<string[]>;
   /** The transcript, newest first, held messages left out, at most `PAGE_JSON_MAX` of JSON. Throws `invalid_cursor`. */
   entries(key: string, page: { limit: number; cursor?: string }): Promise<Paged<EntryRow>>;
   /** Image `index` of the user's message `id` in `key`, or `undefined`. */
@@ -203,7 +207,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
   /** The request that started each runtime conversation's run going (`runStarted`). */
   const starters = new Map<string, string>();
 
-  /** The turn of a run that took `requestIds`: the newest of them stored, else the newest turn of `key`. */
+  /** The turn of a run that took `requestIds`: the newest of them stored, else the newest turn of `key` in the transcript (never a held message's). */
   const turnOf = async (tx: Pick<SqlDatabase, "query">, key: string, requestIds: readonly string[]): Promise<number> => {
     const ids = requestIds.slice(0, 500);
     const [answered] =
@@ -211,8 +215,18 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
         ? []
         : await tx.query<{ turn: number | null }>(`SELECT MAX(turn) AS turn FROM ${ENTRIES} WHERE key = ? AND kind = 'user' AND id IN (${ids.map(() => "?").join(", ")})`, [key, ...ids]);
     if (answered?.turn !== null && answered?.turn !== undefined) return Number(answered.turn);
-    const [newest] = await tx.query<{ turn: number | null }>(`SELECT MAX(turn) AS turn FROM ${ENTRIES} WHERE key = ?`, [key]);
+    // A message held behind this run is read after it: its turn is not the run's.
+    const [newest] = await tx.query<{ turn: number | null }>(`SELECT MAX(turn) AS turn FROM ${ENTRIES} WHERE key = ? AND held = 0`, [key]);
     return Number(newest?.turn ?? 0);
+  };
+
+  /**
+   * The first position of the run `run` in `turn`: after everything there that is not its own (the message it
+   * answered, an earlier run's messages), so two runs of one turn are never interleaved.
+   */
+  const firstPos = async (tx: Pick<SqlDatabase, "query">, key: string, turn: number, run: string): Promise<number> => {
+    const [last] = await tx.query<{ pos: number | null }>(`SELECT MAX(pos) AS pos FROM ${ENTRIES} WHERE key = ? AND turn = ? AND (run IS NULL OR run <> ?)`, [key, turn, run]);
+    return Number(last?.pos ?? 0) + 1;
   };
 
   return {
@@ -288,12 +302,13 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       const database = await db();
       return database.transaction(async (tx) => {
         const turn = await turnOf(tx, key, requestIds);
+        const first = await firstPos(tx, key, turn, run);
         let stored = 0;
         for (const [index, { id, message, at }] of messages.entries()) {
           const json = JSON.stringify(message);
           const { changes } = await tx.run(
             `INSERT INTO ${ENTRIES} (key, id, kind, turn, pos, run, message, at, held, size) VALUES (?, ?, 'run', ?, ?, ?, ?, ?, 0, ?) ON CONFLICT (key, id) DO NOTHING`,
-            [key, id, turn, index + 1, run, json, Math.floor(at), json.length],
+            [key, id, turn, first + index, run, json, Math.floor(at), json.length],
           );
           stored += changes;
         }
@@ -310,11 +325,16 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
         const turn = await turnOf(tx, key, [run]);
         const json = JSON.stringify(message);
         const { changes } = await tx.run(
-          `INSERT INTO ${ENTRIES} (key, id, kind, turn, pos, run, message, at, held, size) VALUES (?, ?, 'answer', ?, 1, ?, ?, ?, 0, ?) ON CONFLICT (key, id) DO NOTHING`,
-          [key, id, turn, run, json, Math.floor(at), json.length],
+          `INSERT INTO ${ENTRIES} (key, id, kind, turn, pos, run, message, at, held, size) VALUES (?, ?, 'answer', ?, ?, ?, ?, ?, 0, ?) ON CONFLICT (key, id) DO NOTHING`,
+          [key, id, turn, await firstPos(tx, key, turn, run), run, json, Math.floor(at), json.length],
         );
         return changes > 0;
       });
+    },
+
+    async conversationsOf(key) {
+      const rows = await (await db()).query<{ conversation: string }>(`SELECT DISTINCT conversation FROM ${ENTRIES} WHERE key = ? AND kind = 'user' AND conversation IS NOT NULL`, [key]);
+      return rows.map((row) => row.conversation);
     },
 
     async entries(key, { limit, cursor }) {

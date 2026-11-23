@@ -298,7 +298,9 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
 - **History.** A run that answered one of the user's messages is stored whole when it ends
   (`agent.settled`, `agent.failed`): `AgentResult.messages` (the assistant's, with thinking and tool
   calls, and the tools' results; never the runtime's user or system messages), in the turn of the
-  newest user message it answered. An aborted or failed run keeps what it wrote. Its end heard twice
+  newest user message it answered, after what that turn holds. A run that answered none (a scheduled
+  prompt's, `scheduler:` requests) is read after the run before it, and before a message sent while
+  it went. An aborted or failed run keeps what it wrote. Its end heard twice
   (a restart re-announces it) stores it once. The transcript (`GET .../transcript`, newest first,
   paged, at most 1 MiB of stored JSON a page) is the user's messages (`{ type: "image", url, mimeType }`
   for each image: `GET .../messages/:messageId/images/:n`, the owner only, its type, `nosniff`, cached
@@ -353,7 +355,8 @@ email (`&email=`), which the page shows read-only and signs in with once the pas
 - **Answers also take the channels' path**: `startAnswerDelivery` (with `outbound.queue` when
   installed) writes a completed run's answer into the channel's table only for a run none of whose
   messages are stored (its end never heard here: after waiting a second for it), at least once, stored
-  once, delivered after a restart or an eviction; the run's messages, stored later, replace it.
+  once, delivered after a restart or an eviction; the run's messages, stored later, replace it. A
+  piece's run is named by the conversation's id, whatever request started it (`runOfPiece`).
 - **One title, the directory's.** A conversation's title is the same in the chat and the dashboard:
   its first message as the user wrote it (`title(first)`, given by the conversation's App when it is
   admitted; the directory cleans it: its first line, no label, quotes or end punctuation, a capital
@@ -460,7 +463,8 @@ under an https `PIKIT_PUBLIC_URL`).
   user's own key read, written and stopped; another's or one never made `404`; its first title given), history (a run's messages stored once with the message it answered, the runtime's user
   message never, a failed run's kept, pages), a lost run end (its state read, its answer delivered,
   replaced when heard late), a run that ends before its admission returns (a quick model: not busy, its
-  message answered), an operator's follow-up and its run never shown, the live value in admin-api's
+  message answered), an operator's follow-up and its run never shown, a scheduled prompt's run (read
+  after the run before it, its answer once, heard or not), the live value in admin-api's
   shapes with its `entries` the transcript's (same id, same messages), a message held behind a
   run, the policy as a live setting on history and live events, the agents users may pick (allowed,
   refused, denied by routing, taken away; the one Routing suggests in `/me`, a dry run), the search, stop, duplicates, request ids, images and body

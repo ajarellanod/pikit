@@ -40,9 +40,16 @@ export function answerText(answer: Pick<RunSettlement, "kind" | "text">): string
   return answer.kind === "completed" && (answer.text ?? "").trim() !== "" ? answer.text : undefined;
 }
 
-/** The run a piece's key names (`answerKey(conversation, requestId)#<index>`): the request that started it. */
-export function runOfPiece(pieceKey: string): string | undefined {
-  return /^.*?:((?:web|dashboard):.+)#[0-9]+$/s.exec(pieceKey)?.[1];
+/**
+ * The run a piece's key names (`answerKey(conversation, requestId)#<index>`): the request that started it,
+ * whatever made it (a user's message, a scheduled prompt), by the runtime conversation's id when it is one of
+ * `conversations` (the key's: `ChatStore.conversationsOf`). The pattern alone (a key with no message stored) knows
+ * only the requests named in it. A run named wrongly is never found stored, and its answer is written a second time.
+ */
+export function runOfPiece(pieceKey: string, conversations: readonly string[] = []): string | undefined {
+  const answer = pieceKey.replace(/#[0-9]+$/, "");
+  for (const id of conversations) if (answer.length > id.length + 1 && answer.startsWith(`${id}:`)) return answer.slice(id.length + 1);
+  return /^.*?:((?:web|dashboard|scheduler):.+)#[0-9]+$/s.exec(pieceKey)?.[1];
 }
 
 export interface TransportOptions {
@@ -59,7 +66,7 @@ export function createTransport({ store, now, heard }: TransportOptions): Channe
     // One answer, one message: the table takes any length.
     split: (text) => [text],
     async send(piece) {
-      const run = runOfPiece(piece.key) ?? piece.key;
+      const run = runOfPiece(piece.key, await store.conversationsOf(piece.conversationKey)) ?? piece.key;
       await heard(piece.conversationKey, run);
       const at = now();
       const message = { role: "assistant", content: [{ type: "text", text: piece.text }], timestamp: at, stopReason: "stop" };

@@ -26,6 +26,7 @@ import {
 import type { ExecutionEnv } from "@pikit/pi-adapter";
 import { chatIdFor, keyOf, parseKey, projectOfSpace } from "./chat.ts";
 import { type TestDirectory, testDirectory } from "./directory.test-support.ts";
+import { runOfPiece } from "./delivery.ts";
 import { runEntryId } from "./entries.ts";
 import channelWeb, { createChannelWeb, NAME, usersPagePath } from "./index.ts";
 import { avatarHosts, cspOf } from "./assets.ts";
@@ -591,6 +592,47 @@ test("an operator's follow-up (dashboard:) in a user's conversation and its run 
   expect(entries.length).toBe(2);
   expect(JSON.stringify(entries)).not.toContain("operator");
   expect(JSON.stringify(view.seen)).not.toMatch(/operator|bash/);
+});
+
+// Found in production (neural-agents): a scheduled check's answer was read twice, above the answer that scheduled it.
+test("SCHEDULED: a scheduled prompt's run (a scheduler: request, no message of the user's) is read after the run before it, never among its messages; its answer once, heard or not; a message sent meanwhile after it", async () => {
+  const c = await chat();
+  const calls = (toolCallId: string, toolName: string, timestamp: number) => [
+    { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: {} }], stopReason: "toolUse", timestamp },
+    { role: "toolResult", toolCallId, toolName, content: [{ type: "text", text: "ok" }], isError: false, timestamp: timestamp + 1 },
+  ];
+  const { id, requestId } = await start(c, "ana", "write a note, check it in 10 minutes");
+  const key = `web:ana:${id}`;
+  await c.runtime.start(key, [requestId]);
+  await c.runtime.end(key, [requestId], { text: "Scheduled.", messages: [prompt, ...calls("a1", "write", 10), ...calls("a2", "schedule", 12), answerOf("Scheduled.", 14)] });
+  const first = ["user: write a note, check it in 10 minutes (answered)", "assistant: (write)", "toolResult: write", "assistant: (schedule)", "toolResult: schedule", "assistant: Scheduled."];
+  await eventually(async () => ((await linesNow(c, "ana", id)).length === first.length ? true : undefined), "the run that scheduled");
+
+  // The tick (scheduler-admit's request id), its end heard: after the first run, and delivery writes nothing more.
+  const tick = "scheduler:tool-schedule:c1:a2:1700000000000";
+  await c.runtime.start(key, [tick]);
+  const meanwhile = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "did it run?" }))).json()) as { requestId: string; admission: string };
+  expect(meanwhile.admission).toBe("queued");
+  await c.runtime.end(key, [tick], { text: "Still there.", messages: [{ role: "user", content: "the scheduled prompt", timestamp: 99 }, ...calls("b1", "bash", 100), answerOf("Still there.", 102)] });
+  const checked = [...first, "assistant: (bash)", "toolResult: bash", "assistant: Still there.", "user: did it run? (pending)"];
+  await eventually(async () => ((await linesNow(c, "ana", id)).length === checked.length ? true : undefined), "the scheduled run");
+  await Bun.sleep(1_200);
+  expect(await linesNow(c, "ana", id)).toEqual(checked);
+  await c.runtime.end(key, [meanwhile.requestId], { text: "Yes." });
+  await eventually(async () => ((await linesNow(c, "ana", id)).length === checked.length + 1 ? true : undefined), "the answer to the message sent meanwhile");
+
+  // A second tick whose end is not heard: delivery writes its answer, last and once; heard late, the run's messages take its place.
+  const later = "scheduler:tool-schedule:c1:a2:1700000600000";
+  await c.runtime.end(key, [later], { text: "Still there, again.", quiet: true });
+  const answered = [...checked.slice(0, -1), "user: did it run? (answered)", "assistant: Yes.", "assistant: Still there, again."];
+  await eventually(async () => ((await linesNow(c, "ana", id)).length === answered.length ? true : undefined), "the delivered answer");
+  expect(await linesNow(c, "ana", id)).toEqual(answered);
+  const conversation = c.runtime.pointers.get(key)!;
+  const written = [{ role: "user", content: "the scheduled prompt", timestamp: 199 }, ...calls("b2", "bash", 200), answerOf("Still there, again.", 202)];
+  await c.runtime.events!.emit("agent.settled", { conversation, requestId: later, requestIds: [later], kind: "completed", text: "Still there, again.", messages: written as never[] });
+  expect(await linesNow(c, "ana", id)).toEqual([...answered.slice(0, -1), "assistant: (bash)", "toolResult: bash", "assistant: Still there, again."]);
+  // A piece's run is named by the conversation's id, whatever started it; by the pattern only without one.
+  expect([runOfPiece("c:1:other:x#0", ["c:1"]), runOfPiece("c1:scheduler:job:5#12"), runOfPiece("c1:other:x#0")]).toEqual(["other:x", "scheduler:job:5", undefined]);
 });
 
 test("LIVE: the live value whole first, then its ops; the user's run cut by the policy (no thinking, tools by name); its entries the transcript's, same id, same messages: nothing swapped when the run ends; the client leaving releases the watch", async () => {
